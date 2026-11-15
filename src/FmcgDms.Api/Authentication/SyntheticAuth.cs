@@ -9,19 +9,25 @@ namespace FmcgDms.Api.Authentication;
 public static class SyntheticAuth
 {
     public const string TenantClaim = "tenant_id";
+
     public static void Configure(WebApplicationBuilder builder)
     {
-        var cfg = builder.Configuration;
-        bool enabled = cfg.GetValue<bool>("SyntheticAuth:Enabled");
-        if (enabled && !builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("IntegrationTest"))
-            throw new InvalidOperationException("Synthetic auth forbidden outside dev/integration test.");
-        string? key = cfg["SyntheticAuth:SigningKey"];
-        if (enabled && (string.IsNullOrWhiteSpace(key) || Encoding.UTF8.GetByteCount(key) < 32))
-            throw new InvalidOperationException("Synthetic signing key must be a secret of 32+ bytes.");
-
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
+            .AddJwtBearer();
+
+        // Configure on options resolution, not while WebApplicationFactory still
+        // builds its test configuration. This also checks the ACTUAL host environment.
+        builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<IConfiguration, IHostEnvironment>((options, cfg, host) =>
             {
+                bool enabled = cfg.GetValue<bool>("SyntheticAuth:Enabled");
+                if (enabled && !host.IsDevelopment() && !host.IsEnvironment("IntegrationTest"))
+                    throw new InvalidOperationException("Synthetic auth forbidden outside dev/integration test.");
+
+                string? key = cfg["SyntheticAuth:SigningKey"];
+                if (enabled && (string.IsNullOrWhiteSpace(key) || Encoding.UTF8.GetByteCount(key) < 32))
+                    throw new InvalidOperationException("Synthetic signing key must be a secret of 32+ bytes.");
+
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
@@ -37,6 +43,17 @@ public static class SyntheticAuth
                         Encoding.UTF8.GetBytes(enabled ? key! : new string('X', 64))),
                     ClockSkew = TimeSpan.FromSeconds(5)
                 };
+                if (!enabled)
+                {
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnMessageReceived = context =>
+                        {
+                            context.Fail("Synthetic auth disabled.");
+                            return Task.CompletedTask;
+                        }
+                    };
+                }
             });
         builder.Services.AddAuthorization();
     }
