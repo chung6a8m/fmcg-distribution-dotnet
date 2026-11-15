@@ -33,7 +33,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        if (!SqlServer.Contains("localdb", StringComparison.OrdinalIgnoreCase))
+        if (!SqlServer.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("APP-00A tests only permit disposable SQL Server LocalDB.");
         await CreateDatabaseAsync(TenantADb);
         await CreateDatabaseAsync(TenantBDb);
