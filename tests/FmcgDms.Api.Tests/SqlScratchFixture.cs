@@ -31,7 +31,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
         Encrypt = false, TrustServerCertificate = true
     }.ConnectionString;
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         if (!SqlServer.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("APP-00A tests only permit disposable SQL Server LocalDB.");
@@ -57,7 +57,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
         await scratch.ExecuteAsync("INSERT INTO dbo.App00ScratchMarker(Nonce) VALUES(@nonce)", new { nonce = Nonce });
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         // Never DROP an existing DB without checking both generated name and exact nonce.
         foreach (string name in new[] { TenantADb, TenantBDb })

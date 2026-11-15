@@ -36,8 +36,8 @@ public sealed class App00aTests(SqlScratchFixture fixture)
     {
         using var factory = fixture.CreateFactory();
         using var client = factory.CreateClient();
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/diagnostics/tenant")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/diagnostics/tenant", TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Fact]
@@ -47,8 +47,8 @@ public sealed class App00aTests(SqlScratchFixture fixture)
         using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
         using var b = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-b");
         a.DefaultRequestHeaders.Add("X-Tenant-Id", "tenant-b");
-        var aInfo = await a.GetFromJsonAsync<TenantDto>("/api/diagnostics/tenant");
-        var bInfo = await b.GetFromJsonAsync<TenantDto>("/api/diagnostics/tenant");
+        var aInfo = await a.GetFromJsonAsync<TenantDto>("/api/diagnostics/tenant", TestContext.Current.CancellationToken);
+        var bInfo = await b.GetFromJsonAsync<TenantDto>("/api/diagnostics/tenant", TestContext.Current.CancellationToken);
         Assert.NotNull(aInfo);
         Assert.NotNull(bInfo);
         Assert.Equal("tenant-a", aInfo.tenantId);
@@ -64,10 +64,10 @@ public sealed class App00aTests(SqlScratchFixture fixture)
         using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
         using var b = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-b");
         string marker = "isolation-" + Guid.NewGuid().ToString("N");
-        var post = await a.PostAsJsonAsync("/api/diagnostics/items", new { description = marker });
+        var post = await a.PostAsJsonAsync("/api/diagnostics/items", new { description = marker }, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Created, post.StatusCode);
-        var aa = await a.GetFromJsonAsync<ItemDto[]>("/api/diagnostics/items");
-        var bb = await b.GetFromJsonAsync<ItemDto[]>("/api/diagnostics/items");
+        var aa = await a.GetFromJsonAsync<ItemDto[]>("/api/diagnostics/items", TestContext.Current.CancellationToken);
+        var bb = await b.GetFromJsonAsync<ItemDto[]>("/api/diagnostics/items", TestContext.Current.CancellationToken);
         Assert.Contains(aa!, x => x.description == marker);
         Assert.DoesNotContain(bb!, x => x.description == marker);
     }
@@ -77,9 +77,9 @@ public sealed class App00aTests(SqlScratchFixture fixture)
     {
         using var factory = fixture.CreateFactory(tenantAOverride: fixture.TenantBConnectionString);
         using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
-        Assert.Equal(HttpStatusCode.Forbidden, (await a.GetAsync("/api/diagnostics/tenant")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await a.GetAsync("/api/diagnostics/tenant", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,
-            (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "must-not-write" })).StatusCode);
+            (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "must-not-write" }, TestContext.Current.CancellationToken)).StatusCode);
         using var dbB = new SqlConnection(fixture.TenantBConnectionString);
         Assert.Equal(0, dbB.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.DiagnosticItem WHERE Description='must-not-write'"));
@@ -98,9 +98,9 @@ public sealed class App00aTests(SqlScratchFixture fixture)
             using var factory = fixture.CreateFactory(tenantAOverride: unsafeTarget);
             using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
             Assert.Equal(HttpStatusCode.Forbidden,
-                (await a.GetAsync("/api/diagnostics/tenant")).StatusCode);
+                (await a.GetAsync("/api/diagnostics/tenant", TestContext.Current.CancellationToken)).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden,
-                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "never-write" })).StatusCode);
+                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "never-write" }, TestContext.Current.CancellationToken)).StatusCode);
         }
 
         using var scratch = new SqlConnection(fixture.TenantAConnectionString);
@@ -112,7 +112,7 @@ public sealed class App00aTests(SqlScratchFixture fixture)
     public async Task Synthetic_diagnostics_reject_invalid_scratch_ownership_marker()
     {
         await using var scratch = new SqlConnection(fixture.TenantAConnectionString);
-        await scratch.OpenAsync();
+        await scratch.OpenAsync(TestContext.Current.CancellationToken);
         await scratch.ExecuteAsync(
             "UPDATE dbo.App00ScratchMarker SET Nonce=@Nonce", new { Nonce = Guid.NewGuid().ToString("N") });
         try
@@ -120,9 +120,9 @@ public sealed class App00aTests(SqlScratchFixture fixture)
             using var factory = fixture.CreateFactory();
             using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
             Assert.Equal(HttpStatusCode.Forbidden,
-                (await a.GetAsync("/api/diagnostics/tenant")).StatusCode);
+                (await a.GetAsync("/api/diagnostics/tenant", TestContext.Current.CancellationToken)).StatusCode);
             Assert.Equal(HttpStatusCode.Forbidden,
-                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "invalid-marker" })).StatusCode);
+                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "invalid-marker" }, TestContext.Current.CancellationToken)).StatusCode);
             Assert.Equal(0, await scratch.ExecuteScalarAsync<int>(
                 "SELECT COUNT(*) FROM dbo.DiagnosticItem WHERE Description='invalid-marker'"));
         }
@@ -140,7 +140,7 @@ public sealed class App00aTests(SqlScratchFixture fixture)
         using var factory = fixture.CreateFactory();
         using var unknown = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-unknown");
         Assert.Equal(HttpStatusCode.Forbidden,
-            (await unknown.GetAsync("/api/diagnostics/items")).StatusCode);
+            (await unknown.GetAsync("/api/diagnostics/items", TestContext.Current.CancellationToken)).StatusCode);
 
         using var forged = factory.CreateClient();
         string jwt = SqlScratchFixture.IssueSyntheticToken("tenant-a");
@@ -151,7 +151,7 @@ public sealed class App00aTests(SqlScratchFixture fixture)
         forged.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", invalidJwt);
         Assert.Equal(HttpStatusCode.Unauthorized,
-            (await forged.GetAsync("/api/diagnostics/items")).StatusCode);
+            (await forged.GetAsync("/api/diagnostics/items", TestContext.Current.CancellationToken)).StatusCode);
     }
 
     private sealed record TenantDto(string tenantId, string databaseName);
