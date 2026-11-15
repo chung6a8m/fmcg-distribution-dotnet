@@ -19,7 +19,8 @@ Branches B and C may be stacked against A and B during development. **Merge sequ
 - SqlClient stays on supported `6.1.x` patch line for this round rather than jumping to major 7, to minimize database transport risk.
 - xUnit v3 uses its native Microsoft Testing Platform v2 integration; preserve LocalDB A/B isolation assertions, negative tests and test evidence; do not silently run zero tests.
 - Frontend package versions must be exact and `web/package-lock.json` committed. Tailwind v4 is a new CSS dependency, not a v3 migration. Retain online-first behavior and user-confirmed service-worker updates.
-- GitHub Actions use current Node24-compatible major releases (checkout v7, setup-dotnet v6, setup-node v7, upload-artifact v7); upgrade is part of PR A rather than retaining deprecated Node20 action runtimes.\n- Dependabot proposes weekly grouped patch updates; manual review and CI are still required. Never auto-merge dependency PRs.
+- GitHub Actions use current Node24-compatible major releases (checkout v7, setup-dotnet v6, setup-node v7, upload-artifact v7); upgrade is part of PR A rather than retaining deprecated Node20 action runtimes.
+- Dependabot proposes weekly grouped patch updates; manual review and CI are still required. Never auto-merge dependency PRs.
 
 ## Verification / evidence
 
