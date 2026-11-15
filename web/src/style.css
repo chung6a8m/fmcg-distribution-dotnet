@@ -1,9 +1,16 @@
-:root { font: 14px/1.45 system-ui, sans-serif; color: #1f2937; background: #f8fafc; }
-* { box-sizing: border-box; }
-main { max-width: 760px; margin: 3rem auto; padding: 0 1rem; }
-h1 { font-size: 1.6rem; }
-h2 { font-size: 1.1rem; }
-.muted { color: #64748b; }
-.panel { padding: 1.2rem 1.4rem; margin: 1rem 0; background: #fff; border: 1px solid #cbd5e1; border-radius: .6rem; }
-button { font: inherit; color: #fff; background: #0f766e; border: 0; border-radius: .4rem; padding: .55rem .9rem; cursor: pointer; }
-button:focus-visible { outline: 3px solid #0f766e; outline-offset: 3px; }
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Segoe UI", system-ui, sans-serif;
+  --color-brand-600: #0f766e;
+}
+
+@layer base {
+  :root {
+    font: 14px/1.45 var(--font-sans);
+    color: #1f2937;
+    background: #f8fafc;
+  }
+
+  body { min-width: 320px; }
+}
