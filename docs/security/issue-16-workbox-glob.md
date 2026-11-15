@@ -25,14 +25,14 @@ Audit and install ran on **Node 24.22.2 / npm 11.19.1** in [GitHub Actions run #
 
 Before: the Moderate advisories were reported against `glob`, `minimatch` and their parent `workbox-build` / `vite-plugin-pwa` entries. After: remaining Low entries are `@rollup/plugin-node-resolve`, `deepmerge`, `workbox-build` and `vite-plugin-pwa` (npm's transitive propagation, not four independent shipped vulnerabilities).
 
-**Residual Low disposition:** remains an upstream build-tool finding. It is *not* declared a clean full-tree audit, accepted production risk, or a reason to enable offline business writes. Reassess with a compatible upstream Workbox/PWA release or by **2026-12-16**; escalate any Moderate-or-higher regression immediately. CI now fails for any shipped-dependency audit finding (Low or higher) or any full-tree finding at Moderate or higher. The remaining Low build-only findings are visible and nonblocking for this nonproduction foundation.
+**Residual Low disposition:** remains an upstream build-tool finding. It is *not* declared a clean full-tree audit, accepted production risk, or a reason to enable offline business writes. Reassess with a compatible upstream Workbox/PWA release or by **2026-12-16**; escalate any Moderate-or-higher regression immediately. CI now fails for findings in the npm **non-dev dependency tree** (Low or higher) or the **full npm dependency tree** (Moderate or higher). The `--omit=dev` scan is based on npm package classification, **not** a scan of every byte shipped in the PWA: Workbox packages are marked `dev: true`, but some of their runtime code is bundled into the generated service worker. The full-tree gate covers these packages at Moderate or higher; Low findings remain visible and explicitly dispositioned. The remaining Low build-only findings are visible and nonblocking for this nonproduction foundation.
 
 ## Reproducibility and behavior checks
 
 - `npm install --package-lock-only --ignore-scripts --no-audit --no-fund` and then `npm ci --no-audit --no-fund` **PASS** on Node 24.
 - `npm ls glob workbox-build vite-plugin-pwa --all`: `workbox-build@7.4.1 → glob@14.0.6 overridden`; no other `glob` resolution in the committed npm lock.
 - The original **4/4** frontend health API contract tests **PASS**; TypeScript/Vite PWA build **PASS**.
-- Generated `dist/sw.js` and `dist/manifest.webmanifest` exist; `sw.js` contains the `SKIP_WAITING` explicit-update handler. The generated PWA artifact contract is now tested in CI.
+- The PWA artifact tests check the generated `dist/sw.js` for the `SKIP_WAITING` explicit-update handler, assert that the Workbox precache manifest includes `index.html` and every emitted JavaScript/CSS file in `dist/assets/`, and validate the generated `dist/manifest.webmanifest`. These checks run after the Vite build in CI.
 - **Not performed:** real-browser update-prompt confirmation at 100%/125%. This remains a separate manual acceptance in [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13). Generated artifact smoke tests must not be presented as a substitute.
 
 ## Decision and follow-up
