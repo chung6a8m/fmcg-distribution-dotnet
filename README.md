@@ -17,7 +17,7 @@ Requires .NET 10 SDK, Node 22+, PowerShell and SQL Server 2019+ LocalDB. Do not 
 
 ```powershell
 sqllocaldb start MSSQLLocalDB
-.\\scripts\\Run-App00A.ps1   # checked-in business tree + clean working tree, model validator,
+.\scripts\Run-App00A.ps1   # checked-in business tree + clean working tree, model validator,
                            # .NET restore/build/LocalDB tests and npm test/build
 ```
 
