@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/FmcgDms.Api/FmcgDms.Api.csproj" />
+  <Project Path="tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj" />
+</Solution>
