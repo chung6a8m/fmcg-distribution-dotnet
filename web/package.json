@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "test": "node --experimental-strip-types --test tests/health.test.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
-  "dependencies": {"react": "19.2.0", "react-dom": "19.2.0"},
+  "dependencies": {
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
   "devDependencies": {
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
