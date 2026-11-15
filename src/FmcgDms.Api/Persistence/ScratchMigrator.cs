@@ -21,7 +21,7 @@ public static class ScratchMigrator
         string expectedDatabase = $"Fmcg_App00_{expectedNonce}_{(tenantId == "tenant-a" ? "A" : "B")}";
         if (!string.Equals(cb.InitialCatalog, expectedDatabase, StringComparison.Ordinal))
             throw new InvalidOperationException("Scratch database name does not match nonce and tenant.");
-        if (!cb.DataSource.Contains("localdb", StringComparison.OrdinalIgnoreCase))
+        if (!cb.DataSource.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("APP-00A supports LocalDB scratch only.");
 
         using var conn = new SqlConnection(connectionString);
