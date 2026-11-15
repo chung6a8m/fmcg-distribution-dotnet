@@ -71,6 +71,21 @@ jobs:
       - name: Build online-first React PWA
         working-directory: web
         run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Browser/PWA E2E regression (100% only; 125% Owner exception)
+        working-directory: web
+        run: npm run test:e2e
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00b-playwright-evidence
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web
         run: npm run test:pwa-build

@@ -9,13 +9,15 @@
     "test": "node --experimental-strip-types --test tests/health.test.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:dependencies": "node --test tests/dependencies.test.mjs",
-    "test:pwa-build": "node --test tests/pwa-build.test.mjs"
+    "test:pwa-build": "node --test tests/pwa-build.test.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "@tailwindcss/vite": "4.3.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
