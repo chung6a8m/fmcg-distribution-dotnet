@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Dapper;
 using FmcgDms.Api.Authentication;
 using Microsoft.Data.SqlClient;
 
@@ -20,8 +21,25 @@ public sealed class TenantConnections(IConfiguration config)
 
     public async Task<SqlConnection> OpenAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
+        string tenantId = SyntheticAuth.GetTenantId(principal);
         var connection = new SqlConnection(Resolve(principal));
-        try { await connection.OpenAsync(ct); return connection; }
-        catch { await connection.DisposeAsync(); throw; }
+        try
+        {
+            await connection.OpenAsync(ct);
+            // Enforce the signed principal to DB binding inside the shared connection factory,
+            // not only in individual endpoints which future handlers might forget.
+            string? boundTenant = await connection.QuerySingleOrDefaultAsync<string>(
+                new CommandDefinition(
+                    "SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1",
+                    cancellationToken: ct));
+            if (!string.Equals(boundTenant, tenantId, StringComparison.Ordinal))
+                throw new UnauthorizedAccessException("Tenant is not bound to this database.");
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
     }
 }
