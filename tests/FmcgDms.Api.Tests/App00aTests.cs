@@ -86,6 +86,55 @@ public sealed class App00aTests(SqlScratchFixture fixture)
     }
 
     [Fact]
+    public async Task Synthetic_diagnostics_reject_non_scratch_and_non_LocalDB_targets()
+    {
+        // In both cases the signed tenant identity is valid, but the configured target is not.
+        string otherInstance = new SqlConnectionStringBuilder(fixture.TenantAConnectionString)
+        {
+            DataSource = "not-a-localdb-server"
+        }.ConnectionString;
+        foreach (string unsafeTarget in new[] { fixture.ConnectionString("master"), otherInstance })
+        {
+            using var factory = fixture.CreateFactory(tenantAOverride: unsafeTarget);
+            using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
+            Assert.Equal(HttpStatusCode.Forbidden,
+                (await a.GetAsync("/api/diagnostics/tenant")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden,
+                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "never-write" })).StatusCode);
+        }
+
+        using var scratch = new SqlConnection(fixture.TenantAConnectionString);
+        Assert.Equal(0, scratch.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.DiagnosticItem WHERE Description='never-write'"));
+    }
+
+    [Fact]
+    public async Task Synthetic_diagnostics_reject_invalid_scratch_ownership_marker()
+    {
+        await using var scratch = new SqlConnection(fixture.TenantAConnectionString);
+        await scratch.OpenAsync();
+        await scratch.ExecuteAsync(
+            "UPDATE dbo.App00ScratchMarker SET Nonce=@Nonce", new { Nonce = Guid.NewGuid().ToString("N") });
+        try
+        {
+            using var factory = fixture.CreateFactory();
+            using var a = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a");
+            Assert.Equal(HttpStatusCode.Forbidden,
+                (await a.GetAsync("/api/diagnostics/tenant")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden,
+                (await a.PostAsJsonAsync("/api/diagnostics/items", new { description = "invalid-marker" })).StatusCode);
+            Assert.Equal(0, await scratch.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM dbo.DiagnosticItem WHERE Description='invalid-marker'"));
+        }
+        finally
+        {
+            // Restore the fixture's ownership marker even if an assertion fails.
+            await scratch.ExecuteAsync(
+                "UPDATE dbo.App00ScratchMarker SET Nonce=@Nonce", new { Nonce = fixture.Nonce });
+        }
+    }
+
+    [Fact]
     public async Task Unknown_tenant_and_invalid_signature_cannot_read_diagnostics()
     {
         using var factory = fixture.CreateFactory();
