@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status:** APP-00A implementation in progress, CI/review required. Owner approved APP-00 and APP-01A..E on 2026-11-15 for **synthetic nonproduction only**.
+**Status:** APP-00A foundation merged with CI review; APP-00B dependency modernization underway in separately reviewed PRs (nonproduction/synthetic only). Owner approved APP-00 and APP-01A..E on 2026-11-15 for **synthetic nonproduction only**.
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -11,9 +11,9 @@ The `business/` snapshot is complete and read-only. Verify its exact tree agains
 - Two SQL Server LocalDB scratch databases, signed **synthetic-only** JWT dev/test tenant identity, negative cross-tenant routing tests, migration guard.
 - No actual A/B/AR/COGS business API yet. That belongs to APP-01A..E.
 
-## Windows local checks
+## APP-00B — toolchain alignment\n\nBefore APP-01A, complete the [three-PR APP-00B plan](docs/roadmap/app-00b-dependency-modernization.md): pinned .NET SDK 10.0.404, NuGet security/patch baseline, xUnit v3/Microsoft Testing Platform, Tailwind CSS v4 and reproducible npm lockfile. No changes are authorized in immutable `business/` or `business.lock.json`.\n\n## Windows local checks
 
-Requires .NET 10 SDK, Node 22+, PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
+Requires .NET 10 SDK 10.0.404, Node 24 LTS, PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
 
 ```powershell
 sqllocaldb start MSSQLLocalDB
