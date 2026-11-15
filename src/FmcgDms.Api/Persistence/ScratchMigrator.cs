@@ -18,6 +18,9 @@ public static class ScratchMigrator
         var cb = new SqlConnectionStringBuilder(connectionString);
         if (!System.Text.RegularExpressions.Regex.IsMatch(cb.InitialCatalog, @"\AFmcg_App00_[a-f0-9]{32}_[AB]\z"))
             throw new InvalidOperationException("Refusing to migrate non-scratch database.");
+        string expectedDatabase = $"Fmcg_App00_{expectedNonce}_{(tenantId == "tenant-a" ? "A" : "B")}";
+        if (!string.Equals(cb.InitialCatalog, expectedDatabase, StringComparison.Ordinal))
+            throw new InvalidOperationException("Scratch database name does not match nonce and tenant.");
         if (!cb.DataSource.Contains("localdb", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("APP-00A supports LocalDB scratch only.");
 
