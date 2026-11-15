@@ -5,6 +5,7 @@ Business source: [read-only Business Baseline](../../business/README.md), [oracl
 | Increment | Scope chính | Exit condition |
 |---|---|---|
 | APP-00A | SQL Server database-per-tenant skeleton, .NET 10 API, Dapper, FluentMigrator, React PWA Online-first, test harness/CI | Migrations fresh/repeat, two actual LocalDB tenants, negative cross-tenant, guard, build + CI PASS on HEAD |
+| APP-00B | Toolchain modernization: SDK/NuGet/CI, xUnit v3 + MTP, Tailwind v4 + frontend lockfile | Three separately reviewed PRs; app tests + tenant isolation + frontend/PWA regressions green on final HEAD; [APP-00B plan](app-00b-dependency-modernization.md) |
 | APP-01A | Single integrated source/command ledger, Tenant/Auth boundary, Customer/ShipTo, SKU/Location, Trip, A order/line, B quota/grant | Same command replay; changed payload CONFLICT; tenant A/B access denied; A confirm no AR/COGS |
 | APP-01B | T0→T1→T2: A40/B30 manifest/rights and stock transfer; B31 price15 offered verified cash465 | No overlapping A/B rights; B31 `REJECTED_QUOTA / B_QUOTA_INSUFFICIENT` with zero effect/receipt |
 | APP-01C | T3 B20 cash200/AR_B100/COGS200; T4 A25/AR_A375/COGS250 | Atomic source/ledger, fault rollback and no double consume |
@@ -12,4 +13,4 @@ Business source: [read-only Business Baseline](../../business/README.md), [oracl
 | APP-01E | 2-client races, retry/rollback, source reconciliation, integrated regression | Evidence TestRunId/actual/diff, reviewed CI HEAD; AC-11 full remains NOT_VERIFIED without C→P, lost ACK/restart |
 
 Use `SYNTHETIC_UNITLESS` and `invoiceEligible=false`. No production B, offline business writes, EV/P0 or tenant go-live.
-Keep each increment in its own PR, resolve findings and rerun CI before merge.
+APP-00B is a prerequisite to APP-01A implementation; do not treat toolchain PASS as business/EV/P0 acceptance. Keep each increment in its own PR, resolve findings and rerun CI before merge.
