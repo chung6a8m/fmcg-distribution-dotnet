@@ -23,7 +23,7 @@ dotnet restore FmcgDms.slnx
 dotnet build FmcgDms.slnx -c Release
 dotnet test FmcgDms.slnx -c Release --logger trx
 cd web
-npm install
+npm ci
 npm run build
 ```
 
