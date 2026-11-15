@@ -85,6 +85,26 @@ public sealed class App00aTests(SqlScratchFixture fixture)
             "SELECT COUNT(*) FROM dbo.DiagnosticItem WHERE Description='must-not-write'"));
     }
 
+    [Fact]
+    public async Task Unknown_tenant_and_invalid_signature_cannot_read_diagnostics()
+    {
+        using var factory = fixture.CreateFactory();
+        using var unknown = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-unknown");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await unknown.GetAsync("/api/diagnostics/items")).StatusCode);
+
+        using var forged = factory.CreateClient();
+        string jwt = SqlScratchFixture.IssueSyntheticToken("tenant-a");
+        int signatureStart = jwt.LastIndexOf('.') + 1;
+        string invalidJwt = jwt[..signatureStart] +
+            (jwt[signatureStart] == 'A' ? 'B' : 'A') +
+            jwt[(signatureStart + 1)..];
+        forged.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", invalidJwt);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await forged.GetAsync("/api/diagnostics/items")).StatusCode);
+    }
+
     private sealed record TenantDto(string tenantId, string databaseName);
     private sealed record ItemDto(Guid id, string description);
 }
