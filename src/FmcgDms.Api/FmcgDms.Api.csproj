@@ -3,6 +3,7 @@
     <PackageReference Include="Dapper" />
     <PackageReference Include="FluentMigrator.Runner.SqlServer" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
 </Project>
