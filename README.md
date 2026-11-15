@@ -17,15 +17,11 @@ Requires .NET 10 SDK, Node 22+, PowerShell and SQL Server 2019+ LocalDB. Do not 
 
 ```powershell
 sqllocaldb start MSSQLLocalDB
-python tools/validate_business.py
-git rev-parse HEAD:business
-dotnet restore FmcgDms.slnx
-dotnet build FmcgDms.slnx -c Release
-dotnet test FmcgDms.slnx -c Release --logger trx
-cd web
-npm ci
-npm run build
+.\\scripts\\Run-App00A.ps1   # checked-in business tree + clean working tree, model validator,
+                           # .NET restore/build/LocalDB tests and npm test/build
 ```
+
+The local verification refuses staged, unstaged or untracked files inside `business/`; commit-free local checks cannot accidentally accept a modified baseline. CI runs the frontend health contract regression tests, including the HTTP 200 SPA fallback case. PWA updates use a visible user-confirmed prompt (`registerSW`/`onNeedRefresh`); to exercise the update interaction manually, serve a production build, leave its tab open, rebuild/redeploy changed frontend assets and revisit the tab.
 
 To run only the public liveness probe: `dotnet run --project src/FmcgDms.Api --urls http://localhost:5116` then `GET /health/live`. Synthetic-authenticated diagnostic endpoints are **not enabled by default** and **not production auth**. No secrets are committed; synthetic JWT test keys are only in the integration test project.
 
