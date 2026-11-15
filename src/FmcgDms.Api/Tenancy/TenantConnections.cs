@@ -1,17 +1,22 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Dapper;
 using FmcgDms.Api.Authentication;
 using Microsoft.Data.SqlClient;
 
 namespace FmcgDms.Api.Tenancy;
 
-/// <summary>Server-side tenant catalog. No client-selected DB or connection string.</summary>
-public sealed class TenantConnections(IConfiguration config)
+/// <summary>Server-side catalog for APP-00A synthetic diagnostics only; not production tenant access.</summary>
+public sealed class TenantConnections(IConfiguration config, IHostEnvironment host)
 {
-    public string Resolve(ClaimsPrincipal principal)
+    private static readonly Regex ScratchDatabaseName = new(
+        @"\AFmcg_App00_(?<nonce>[a-f0-9]{32})_(?<slot>[AB])\z",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private string Resolve(ClaimsPrincipal principal)
     {
         string tenantId = SyntheticAuth.GetTenantId(principal);
-        if (!System.Text.RegularExpressions.Regex.IsMatch(tenantId, @"\A[a-zA-Z0-9_-]{1,64}\z"))
+        if (!Regex.IsMatch(tenantId, @"\A[a-zA-Z0-9_-]{1,64}\z"))
             throw new UnauthorizedAccessException("Invalid tenant identity.");
         string? connectionString = config[$"TenantDatabases:{tenantId}"];
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -19,15 +24,41 @@ public sealed class TenantConnections(IConfiguration config)
         return connectionString;
     }
 
-    public async Task<SqlConnection> OpenAsync(ClaimsPrincipal principal, CancellationToken ct)
+    /// <summary>
+    /// Fail closed unless the signed synthetic tenant maps to its own, marked LocalDB scratch.
+    /// Production APP-01 tenant connections must use a separate real-authenticated path.
+    /// </summary>
+    public async Task<SqlConnection> OpenSyntheticScratchAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
+        if ((!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest"))
+            || !config.GetValue<bool>("SyntheticAuth:Enabled"))
+            throw new UnauthorizedAccessException("Synthetic diagnostics are disabled.");
+
         string tenantId = SyntheticAuth.GetTenantId(principal);
-        var connection = new SqlConnection(Resolve(principal));
+        if (tenantId is not ("tenant-a" or "tenant-b"))
+            throw new UnauthorizedAccessException("Only synthetic test tenants are allowed.");
+
+        var target = new SqlConnectionStringBuilder(Resolve(principal));
+        var name = ScratchDatabaseName.Match(target.InitialCatalog);
+        string expectedSlot = tenantId == "tenant-a" ? "A" : "B";
+        if (!target.DataSource.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(target.AttachDBFilename)
+            || !name.Success
+            || !string.Equals(name.Groups["slot"].Value, expectedSlot, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Synthetic diagnostics require a LocalDB scratch database.");
+
+        string expectedNonce = name.Groups["nonce"].Value;
+        var connection = new SqlConnection(target.ConnectionString);
         try
         {
             await connection.OpenAsync(ct);
-            // Enforce the signed principal to DB binding inside the shared connection factory,
-            // not only in individual endpoints which future handlers might forget.
+            string? markerNonce = await connection.ExecuteScalarAsync<string?>(
+                new CommandDefinition(
+                    "IF OBJECT_ID(N'dbo.App00ScratchMarker', N'U') IS NOT NULL SELECT TOP(1) Nonce FROM dbo.App00ScratchMarker",
+                    cancellationToken: ct));
+            if (!string.Equals(markerNonce, expectedNonce, StringComparison.Ordinal))
+                throw new UnauthorizedAccessException("Scratch ownership marker mismatch.");
+
             string? boundTenant = await connection.QuerySingleOrDefaultAsync<string>(
                 new CommandDefinition(
                     "SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1",
