@@ -43,10 +43,19 @@ jobs:
       - name: Two-tenant scratch integration tests
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test FmcgDms.slnx -c Release --no-build --logger trx
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 9 -- --report-trx --coverage --coverage-output-format cobertura
+      - name: Verify MTP test evidence exists
+        shell: pwsh
+        run: |
+          $results = Get-ChildItem -Path TestResults -Recurse -File -ErrorAction Stop
+          if (-not ($results | Where-Object { $_.Extension -eq '.trx' })) { throw 'Expected MTP TRX evidence is missing.' }
+          if (-not ($results | Where-Object { $_.Name -like '*.cobertura.xml' })) { throw 'Expected Cobertura coverage evidence is missing.' }
       - name: Install web dependencies
         working-directory: web
         run: npm ci --no-audit --no-fund
+      - name: Verify Tailwind CSS v4 integration
+        working-directory: web
+        run: npm ls tailwindcss @tailwindcss/vite --depth=0
       - name: Frontend health contract regression tests
         working-directory: web
         run: npm run test
@@ -58,5 +67,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: app00a-test-evidence
-          path: '**/TestResults/**/*.trx'
+          path: '**/TestResults/**/*'
           if-no-files-found: warn
