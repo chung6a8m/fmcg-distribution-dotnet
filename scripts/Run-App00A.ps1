@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location web
 try {
-    & npm install --no-audit --no-fund
+    & npm ci --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & npm run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
