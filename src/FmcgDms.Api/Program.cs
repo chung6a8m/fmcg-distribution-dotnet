@@ -29,7 +29,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     var diag = app.MapGroup("/api/diagnostics").RequireAuthorization();
     diag.MapGet("/tenant", async (ClaimsPrincipal principal, TenantConnections db, CancellationToken ct) =>
     {
-        await using var conn = await db.OpenAsync(principal, ct);
+        await using var conn = await db.OpenSyntheticScratchAsync(principal, ct);
         var result = await conn.QuerySingleAsync<TenantDbInfo>(
             "SELECT DB_NAME() AS DatabaseName, TenantId AS BoundTenantId FROM dbo.AppTenantBinding WHERE Slot=1");
         string tenantId = SyntheticAuth.GetTenantId(principal);
@@ -40,7 +40,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     {
         if (string.IsNullOrWhiteSpace(input.Description) || input.Description.Length > 120)
             return Results.BadRequest(new { error = "DESCRIPTION_INVALID" });
-        await using var conn = await db.OpenAsync(principal, ct);
+        await using var conn = await db.OpenSyntheticScratchAsync(principal, ct);
         if (await conn.ExecuteScalarAsync<string>("SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1")
             != SyntheticAuth.GetTenantId(principal)) return Results.Forbid();
         var id = Guid.NewGuid();
@@ -51,7 +51,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     });
     diag.MapGet("/items", async (ClaimsPrincipal principal, TenantConnections db, CancellationToken ct) =>
     {
-        await using var conn = await db.OpenAsync(principal, ct);
+        await using var conn = await db.OpenSyntheticScratchAsync(principal, ct);
         if (await conn.ExecuteScalarAsync<string>("SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1")
             != SyntheticAuth.GetTenantId(principal)) return Results.Forbid();
         var rows = await conn.QueryAsync<DiagnosticItem>(
