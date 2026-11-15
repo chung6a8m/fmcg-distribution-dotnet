@@ -42,6 +42,17 @@ jobs:
       - name: Install web dependencies
         working-directory: web
         run: npm install --no-audit --no-fund
+      - name: Capture deterministic dependency lock (temporary)
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes('web/package-lock.json')
+          $encoded = [Convert]::ToBase64String($bytes)
+          $chunkSize = 4096
+          for ($i = 0; $i -lt $encoded.Length; $i += $chunkSize) {
+            $count = [Math]::Min($chunkSize, $encoded.Length - $i)
+            $part = $encoded.Substring($i, $count)
+            Write-Host ("NPMLOCKPART:{0:D4}:{1}" -f [int]($i / $chunkSize), $part)
+          }
       - name: Build online-first React PWA
         working-directory: web
         run: npm run build
