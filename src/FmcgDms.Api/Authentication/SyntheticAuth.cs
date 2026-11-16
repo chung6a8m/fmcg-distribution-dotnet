@@ -43,9 +43,24 @@ public static class SyntheticAuth
                         Encoding.UTF8.GetBytes(enabled ? key! : new string('X', 64))),
                     ClockSkew = TimeSpan.FromSeconds(5)
                 };
-                if (!enabled)
-                {
-                    options.Events = new JwtBearerEvents
+                options.Events = enabled
+                    ? new JwtBearerEvents
+                    {
+                        OnTokenValidated = context =>
+                        {
+                            var principal = context.Principal;
+                            string? actor = principal?.FindFirst("actor_id")?.Value;
+                            string? subject = principal?.FindFirst("sub")?.Value;
+                            string? tenant = principal?.FindFirst(TenantClaim)?.Value;
+                            if (string.IsNullOrWhiteSpace(actor) || actor.Length > 128
+                                || actor.Any(char.IsControl)
+                                || !string.Equals(actor, subject, StringComparison.Ordinal)
+                                || string.IsNullOrWhiteSpace(tenant))
+                                context.Fail("Bound synthetic actor and tenant required.");
+                            return Task.CompletedTask;
+                        }
+                    }
+                    : new JwtBearerEvents
                     {
                         OnMessageReceived = context =>
                         {
@@ -53,9 +68,16 @@ public static class SyntheticAuth
                             return Task.CompletedTask;
                         }
                     };
-                }
             });
-        builder.Services.AddAuthorization();
+        builder.Services.AddAuthorization(options =>
+        {
+            options.AddPolicy("SyntheticWarehouse", p => p.RequireAuthenticatedUser()
+                .RequireClaim("synthetic_role", "warehouse"));
+            options.AddPolicy("SyntheticSales", p => p.RequireAuthenticatedUser()
+                .RequireClaim("synthetic_role", "sales"));
+            options.AddPolicy("SyntheticAudit", p => p.RequireAuthenticatedUser()
+                .RequireClaim("synthetic_role", "auditor"));
+        });
     }
 
     public static string GetTenantId(ClaimsPrincipal principal) =>
