@@ -162,6 +162,7 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Guid manifest = AddManifest(db, A, trip, warehouse, vehicle);
         Guid aRight = AddRight(db, A, trip, warehouse, sku, "A", 40m);
         Guid bRight = AddRight(db, A, trip, warehouse, sku, "B", 30m);
+        Guid unusedBRight = AddRight(db, A, trip, warehouse, sku, "B", 5m);
         AddManifestLine(db, A, manifest, trip, warehouse, vehicle, 1, sku, aRight, "A", 40m);
         AddManifestLine(db, A, manifest, trip, warehouse, vehicle, 2, sku, bRight, "B", 30m);
 
@@ -171,11 +172,11 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Error(db, LineInsert, LineArgs(A, manifest, trip, warehouse, vehicle,
             3, sku, aRight, "A", 40m), 2627, 2601); // Right cannot load twice.
         Error(db, LineInsert, LineArgs(A, manifest, trip, warehouse, vehicle,
-            3, sku, bRight, "A", 30m), 547); // Cannot relabel B as A.
+            3, sku, unusedBRight, "A", 5m), 547); // Cannot relabel B as A.
         Error(db, LineInsert, LineArgs(A, manifest, trip, warehouse, vehicle,
-            3, otherSku, bRight, "B", 30m), 547);
+            3, otherSku, unusedBRight, "B", 5m), 547);
         Error(db, LineInsert, LineArgs(A, manifest, otherTrip, warehouse, vehicle,
-            3, sku, bRight, "B", 30m), 547);
+            3, sku, unusedBRight, "B", 5m), 547);
         Error(db, LineInsert, LineArgs(A, manifest, trip, otherWarehouse, vehicle,
             3, sku, bRight, "B", 30m), 547);
         Error(db, LineInsert, LineArgs(B, manifest, trip, warehouse, vehicle,
