@@ -461,6 +461,20 @@ public sealed class App01c3APartialDeliveryTests(SqlScratchFixture fixture)
                     AND l.Id=e.BusinessSourceLineId
                 WHERE l.TenantId=@Tenant AND l.BusinessSourceId=@Source
                 """,new { Tenant=tenant, Source=posted.Outcome.SourceId }));
+            // Independent audit-as-of reconstructs all four A source legs,
+            // due-dated AR and B20 effects, not just an HTTP success code.
+            using var auditor=SqlScratchFixture.WithTenant(
+                factory.CreateClient(),tenant,roles:["auditor"]);
+            string asOf=Uri.EscapeDataString(
+                DateTimeOffset.UtcNow.AddSeconds(5).ToString("O"));
+            var audit=await auditor.GetFromJsonAsync<App01aAuditSnapshot>(
+                "/api/synthetic/app01a/audit/as-of?asOf="+asOf,
+                TestContext.Current.CancellationToken);
+            Assert.NotNull(audit);
+            Assert.Empty(audit.ReconciliationIssues);
+            Assert.Single(audit.Sources,x=>x.SourceKind=="A_DELIVERY"
+                && x.Id==posted.Outcome.SourceId);
+
         }
     }
 
