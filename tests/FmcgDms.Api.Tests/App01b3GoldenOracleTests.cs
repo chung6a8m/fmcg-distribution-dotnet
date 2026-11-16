@@ -146,7 +146,14 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
                 INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNumber,SkuId,
                     BaseQuantity,UomCode,UomToBaseFactor,UnitPrice)
                     VALUES(@OrderLine,@Tenant,@Order,1,@Sku,40,N'EA',1,15);
-                INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
+                INSERT dbo.AOrderTermsApproval(TenantId,AOrderId,TripId,CustomerId,
+                    TermsDays,Decision,PolicyVersion,ProposedBy,CheckedBy,
+                    EvidenceRef,ApprovedAtUtc,EffectiveFromUtc,EffectiveUntilUtc)
+                VALUES(@Tenant,@Order,@Trip,@Customer,7,N'APPROVED',N'C3-SYNTHETIC-v1',
+                    N'synthetic-sales-maker',N'synthetic-finance-checker',N'A-terms-fixture',
+                    DATEADD(minute,-1,SYSUTCDATETIME()),
+                    DATEADD(day,-1,SYSUTCDATETIME()),DATEADD(day,7,SYSUTCDATETIME()));
+            INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
                     VALUES(@Tenant,@Warehouse,@Sku,100);
                 INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,
                     SnapshotCode,BaseQuantity,CostAmount)
