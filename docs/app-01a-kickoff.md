@@ -1,6 +1,6 @@
-# APP-01A — Integrated model kickoff (AUTHORIZED / APP-01A.1 IN_PROGRESS)
+# APP-01A — Integrated model kickoff (AUTHORIZED / APP-01A.1 SCHEMA_VERIFIED)
 
-**Sequencing:** APP-00A is merged and APP-00B/C browser/PWA Owner acceptance OWN-APP00B-13-03 is complete (Issue #13 closed). APP-01A.1 schema implementation is in progress; APP-01A as a whole is **NOT_VERIFIED** and remains synthetic/nonproduction only.
+**Sequencing:** APP-00A is merged and APP-00B/C browser/PWA Owner acceptance OWN-APP00B-13-03 is complete (Issue #13 closed). APP-01A.1 schema and LocalDB negative tests are implemented in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21); APP-01A as a whole is **NOT_VERIFIED** and remains synthetic/nonproduction only.
 
 Define one transaction/source model per tenant DB: Customer, ShipToSnapshot, SKU, StockLocation, Trip, AOrder/AOrderLine, AReservation, BQuota, BCreditGrant, Command, SourceLine and ledger postings. Add deterministic payload hash/version and `(tenantId,producerId,commandId)` idempotency; same payload replay returns durable outcome, altered payload yields CONFLICT without effect.
 

@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status (2026-11-16):** APP-00A foundation and APP-00B toolchain/browser/PWA acceptance complete; Issue #13 closed under OWN-APP00B-13-03. APP-01A.1 integrated schema is being implemented in a separate PR, **not yet accepted/merged**. APP-01A command behavior and the business AC-03 flow are not implemented. Owner authorization remains **synthetic nonproduction only**.
+**Status (2026-11-16):** APP-00A foundation and APP-00B toolchain/browser/PWA acceptance complete; Issue #13 closed under OWN-APP00B-13-03. APP-01A.1 integrated schema and physical two-tenant LocalDB checks are implemented in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21). **APP-01A overall remains NOT_VERIFIED**: command behavior, aggregate stock invariants and business AC-03 flow are not implemented. Owner authorization remains **synthetic nonproduction only**.
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -15,7 +15,7 @@ The `business/` snapshot is complete and read-only. Verify its exact tree agains
 
 APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner decision](docs/decisions/owner-app00b-13-03-browser-acceptance.md), [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13)). Tooling: .NET SDK 10.0.404, xUnit v3/MTP v2, Tailwind CSS v4, locked Node 26 LTS frontend. Historical Node 24 decisions are superseded for current runs. The APP-00B prerequisite no longer blocks APP-01A. `business/` and `business.lock.json` remain immutable.
 
-## APP-01A.1 — Integrated schema (implementation PR; pending review)
+## APP-01A.1 — Integrated schema (schema-only increment)
 
 - Adds an integrated, **per-tenant** Customer/ShipTo/Sku/StockLocation/Trip, A order/line, source/command/effect ledger, shared A/B StockRight, AReservation, BQuota and BCreditGrant schema.
 - Foreign keys bind every root entity to `AppTenantBinding`; composite FKs enforce Customer+ShipTo identity and same-tenant source/rights; SQL checks and unique keys protect per-row amounts and duplicate source/effect identities.

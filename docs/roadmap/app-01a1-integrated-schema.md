@@ -1,6 +1,6 @@
 # APP-01A.1 — Integrated schema / physical LocalDB contract
 
-**Status:** implementation PR in progress, unmerged; Owner-authorized **synthetic/nonproduction only**. Related: [APP-01A issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2), [roadmap](app-00-app-01.md), [Owner technology decisions](../decisions/owner-app-2026-11-15.md).
+**Status:** schema implemented and physical LocalDB guards verified in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21); APP-01A overall **NOT_VERIFIED** pending APP-01A.2/.3. Owner-authorized **synthetic/nonproduction only**. Related: [APP-01A issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2), [roadmap](app-00-app-01.md), [Owner technology decisions](../decisions/owner-app-2026-11-15.md).
 
 ## Goal and precise boundary
 
@@ -29,7 +29,7 @@ No `ConfirmAOrder`/`ReserveAStock`/B grant command, payload hash canonicalizer, 
 3. Wrong Customer/ShipTo triple fails for AOrder and BCreditGrant; valid order/line/grant paths persist, grant over-consumption fails.
 4. Same source-line duplicate StockRight fails; AReservation cannot reference a B right and BQuota cannot reference an A right; right over-consumption fails.
 5. Duplicate (`TenantId`, `ProducerId`, `CommandId`) and duplicate ledger effect key fail; zero-value effect fails; no implicit AR/COGS posting.
-6. Verify immutable Business Baseline, .NET build, >=14 xUnit/LocalDB tests (9 foundation + 5 schema), browser/PWA regression, npm audits, PR final-HEAD CI artifacts. **APP-01A.1 stays pending until reviewed CI is green.**
+6. Verify immutable Business Baseline, .NET build, >=14 xUnit/LocalDB tests (9 foundation + 5 schema), browser/PWA regression, npm audits, PR final-HEAD CI artifacts. **PR #21 merge requires independent review and green final-HEAD CI; this schema increment does not complete APP-01A acceptance.**
 
 ## Follow-on scope
 
