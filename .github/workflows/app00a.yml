@@ -49,7 +49,7 @@ jobs:
       - name: Two-tenant LocalDB APP-01A + APP-01B.2 manifest/B31 matrix
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 58 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 60 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.2 TestRunId and PR head
         if: always()
         shell: pwsh
