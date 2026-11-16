@@ -70,6 +70,8 @@ public sealed class App01c2BPostingService(TenantConnections connections)
     {
         public decimal OnHandBaseQuantity { get; set; }
         public decimal OnHandCostAmount { get; set; }
+        public decimal SourceBaseQuantity { get; set; }
+        public decimal SourceCostAmount { get; set; }
     }
 
     private sealed class VerifiedCash
@@ -331,14 +333,43 @@ public sealed class App01c2BPostingService(TenantConnections connections)
             return BusinessCommandOutcome.Rejected("B_QUOTA_INSUFFICIENT");
 
         var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql("""
-            SELECT OnHandBaseQuantity,OnHandCostAmount
-            FROM dbo.PhysicalStockBalance WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+            SELECT b.OnHandBaseQuantity,b.OnHandCostAmount,
+                o.BaseQuantity + COALESCE(loaded.Qty,0) - COALESCE(issued.Qty,0)
+                    AS SourceBaseQuantity,
+                o.CostAmount + COALESCE(loaded.Cost,0) - COALESCE(issued.Cost,0)
+                    AS SourceCostAmount
+            FROM dbo.PhysicalStockBalance b WITH (UPDLOCK,HOLDLOCK)
+            JOIN dbo.PhysicalStockOpening o WITH (HOLDLOCK)
+                ON o.TenantId=b.TenantId AND o.StockLocationId=b.StockLocationId
+                AND o.SkuId=b.SkuId
+            OUTER APPLY (
+                SELECT SUM(mv.BaseQuantity) AS Qty,SUM(mv.CostAmount) AS Cost
+                FROM dbo.PhysicalStockMovement mv WITH (HOLDLOCK)
+                JOIN dbo.TripManifestLine l WITH (HOLDLOCK)
+                    ON l.TenantId=mv.TenantId AND l.Id=mv.TripManifestLineId
+                WHERE mv.TenantId=b.TenantId AND l.VehicleLocationId=b.StockLocationId
+                    AND l.SkuId=b.SkuId
+            ) loaded
+            OUTER APPLY (
+                SELECT SUM(i.BaseQuantity) AS Qty,SUM(i.CostAmount) AS Cost
+                FROM dbo.DeliveryStockIssue i WITH (HOLDLOCK)
+                JOIN dbo.TripManifestLine l WITH (HOLDLOCK)
+                    ON l.TenantId=i.TenantId AND l.Id=i.TripManifestLineId
+                WHERE i.TenantId=b.TenantId AND l.VehicleLocationId=b.StockLocationId
+                    AND i.SkuId=b.SkuId
+            ) issued
+            WHERE b.TenantId=@Tenant AND b.StockLocationId=@Vehicle AND b.SkuId=@Sku
             """, new { Tenant = tenant, Vehicle = trip.VehicleLocationId,
                 Sku = request.SkuId }, tx, ct));
         if (vehicle is null || vehicle.OnHandBaseQuantity < request.BaseQuantity
             || vehicle.OnHandCostAmount < 0)
             return BusinessCommandOutcome.Rejected("VEHICLE_STOCK_INSUFFICIENT");
+        // A positive balance alone is not proof of stock. Reconcile the
+        // mutable vehicle counter with immutable T0, loads and posted issues.
+        // Both quantity and four-decimal custody cost must match exactly.
+        if (vehicle.OnHandBaseQuantity != vehicle.SourceBaseQuantity
+            || vehicle.OnHandCostAmount != vehicle.SourceCostAmount)
+            return BusinessCommandOutcome.Rejected("VEHICLE_STOCK_SOURCE_DRIFT");
         decimal cost = request.BaseQuantity == vehicle.OnHandBaseQuantity
             ? vehicle.OnHandCostAmount
             : decimal.Round(vehicle.OnHandCostAmount / vehicle.OnHandBaseQuantity
@@ -361,7 +392,7 @@ public sealed class App01c2BPostingService(TenantConnections connections)
             || witness.VerifiedAtUtc is null
             || witness.VerifiedAtUtc.Value > DateTime.UtcNow
             || string.IsNullOrWhiteSpace(witness.VerifiedBy)
-            || string.Equals(witness.VerifiedBy, actor, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(witness.VerifiedBy?.Trim(), actor, StringComparison.OrdinalIgnoreCase))
             return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_NOT_VERIFIED");
         bool evidenceUsed = await db.ExecuteScalarAsync<bool>(Sql("""
             SELECT CAST(CASE WHEN EXISTS (
