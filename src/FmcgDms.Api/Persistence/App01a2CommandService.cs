@@ -459,7 +459,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                     WHERE TenantId=@Tenant AND AOrderId=@Order ORDER BY LineNumber
                     """, new { Tenant = tenant, Order = order.Id }, tx, token))).AsList();
                 if (lines.Count == 0) return BusinessCommandOutcome.Rejected("ORDER_EMPTY");
-                if (lines.Any(l => l.UnitPrice is not { } price || !ValidAmount(price)))
+                if (lines.Any(l => !l.UnitPrice.HasValue || !ValidAmount(l.UnitPrice.Value)))
                     return BusinessCommandOutcome.Rejected("ORDER_PRICE_INCOMPLETE");
 
                 foreach (var line in lines)
