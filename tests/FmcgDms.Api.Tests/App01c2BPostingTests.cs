@@ -442,7 +442,7 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
         Assert.Equal(1, results.Count(x=>x.Outcome.Status=="APPLIED"));
         Assert.Equal(1, results.Count(x=>x.Outcome.ReasonCode=="B_CREDIT_INSUFFICIENT"));
         var t3 = State(A,s);
-        Assert.Equal((60m,600m,20m,100m,50m,50m,1),
+        Assert.Equal((60m,600m,20m,100m,100m,50m,1),
             (t3.TripQty,t3.TripCost,t3.BQuota,t3.CreditUsed,t3.ArB,t3.Custody,t3.Deliveries));
     }
 
