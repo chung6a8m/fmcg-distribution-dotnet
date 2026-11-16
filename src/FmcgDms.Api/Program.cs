@@ -11,6 +11,7 @@ SyntheticAuth.Configure(builder);
 builder.Services.AddSingleton<TenantConnections>();
 builder.Services.AddScoped<App01a2CommandService>();
 builder.Services.AddScoped<App01b2CommandService>();
+builder.Services.AddScoped<App01c2BPostingService>();
 builder.Services.AddScoped<App01a3AuditService>();
 
 var app = builder.Build();
