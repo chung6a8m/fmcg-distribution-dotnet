@@ -206,6 +206,13 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Guid exactSourceLine = AddSourceLine(db, A, source, 1, sku, 40m, 400m);
         Guid otherLineNumber = AddSourceLine(db, A, source, 2, sku, 40m, 400m);
         Guid wrongKindSource = AddSource(db, A, trip, "STOCK_ALLOC");
+        Guid foreignTrip = AddTrip(db, A, vehicle);
+        Guid wrongTripSource = AddSource(db, A, foreignTrip, "MANIFEST_LOAD");
+
+        Error(db, """
+            UPDATE dbo.TripManifest SET Status=N'LOADED',LoadedAtUtc=SYSUTCDATETIME(),
+                LoadBusinessSourceId=@source WHERE Id=@manifest
+            """, new { source = wrongTripSource, manifest }, 547);
 
         Error(db, """
             UPDATE dbo.TripManifest SET Status=N'LOADED',LoadedAtUtc=SYSUTCDATETIME(),
@@ -254,6 +261,20 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
             id = Guid.NewGuid(), tenant = A, manifestLine,
             sourceLine = exactSourceLine, qty = 40m, cost = 400m
         }, 2627, 2601);
+
+        // Once posted, neither movement nor its loaded evidence may be rewritten.
+        Error(db, """
+            UPDATE dbo.PhysicalStockMovement SET RecordedAtUtc=SYSUTCDATETIME()
+            WHERE TenantId=@tenant AND TripManifestLineId=@manifestLine
+            """, new { tenant = A, manifestLine }, 51042);
+        Error(db, """
+            UPDATE dbo.TripManifestLine SET PlannedBaseQuantity=41
+            WHERE Id=@manifestLine
+            """, new { manifestLine }, 51044);
+        Error(db, """
+            UPDATE dbo.TripManifest SET ManifestNumber=@name WHERE Id=@manifest
+            """, new { name = Code(), manifest }, 51043);
+
         Assert.Equal((40m, 400m), db.QuerySingle<(decimal, decimal)>("""
             SELECT m.BaseQuantity, m.CostAmount
             FROM dbo.PhysicalStockMovement m
