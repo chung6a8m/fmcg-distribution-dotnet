@@ -10,7 +10,12 @@ namespace FmcgDms.Api.Tests;
 /// APP-01C.1 physical LocalDB schema contract only: direct SQL rows exercise
 /// FK/uniqueness/immutability. This does NOT prove transactional T3/T4 posting.
 /// </summary>
-[Collection("SqlScratch")]
+// Dedicated two-tenant nonce databases: direct schema probes must not pollute
+// APP-01A/APP-01B business audit/oracle fixtures.
+[CollectionDefinition("App01c1Scratch", DisableParallelization = true)]
+public sealed class App01c1ScratchCollection : ICollectionFixture<SqlScratchFixture> { }
+
+[Collection("App01c1Scratch")]
 public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
 {
     private const string A = "tenant-a";
@@ -106,9 +111,10 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             DELETE dbo.AConfirmedLineSnapshot
             WHERE TenantId=@tenant AND AOrderLineId=@line
             """, new { tenant = A, line = s.OrderLine }, 51061);
+        Guid otherConfirmLine = NewLine(db, A, s.ConfirmSource, s.Sku, 40m, null, 2);
         Reject(db, InsertSnapshotSql, new {
             tenant = A, line = Guid.NewGuid(), s.Order, s.Trip, s.Customer, s.Sku,
-            source = s.ConfirmSource, sourceLine = s.ConfirmLine,
+            source = s.ConfirmSource, sourceLine = otherConfirmLine,
             qty = 40m, price = 15m, terms = 7
         }, 547); // Cannot attach a snapshot to a nonexistent A order line.
         // Changes to a mutable pre-existing order-line row never rewrite the
@@ -145,6 +151,10 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         }, 547);
         Reject(db, """
             UPDATE dbo.DeliveryStockIssue SET CostAmount=199 WHERE Id=@id
+            """, new { id = stockIssue }, 547); // Exact cost FK fails before AFTER trigger.
+        Reject(db, """
+            UPDATE dbo.DeliveryStockIssue SET RecordedAtUtc=DATEADD(second,1,RecordedAtUtc)
+            WHERE Id=@id
             """, new { id = stockIssue }, 51063);
         Reject(db, """
             UPDATE dbo.SaleDelivery SET PayableAmount=301 WHERE Id=@id
@@ -192,6 +202,10 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
     {
         using var db = Open(A);
         var s = SeedLoadedTrip(db, A);
+        Guid blockedSource = NewSource(db, A, s.Trip, s.Customer, "A_DELIVERY");
+        Guid blockedLine = NewLine(db, A, blockedSource, s.Sku, 25m, 375m);
+        Reject(db, InsertSaleSql, MakeSale(A, s, "A", Guid.NewGuid(),
+            blockedSource, blockedLine, 25m, 375m, 250m), 547);
         InsertConfirmSnapshot(db, A, s);
         var a = InsertSale(db, A, s, "A", 25m, 375m, 250m);
         InsertStockIssue(db, A, a);
