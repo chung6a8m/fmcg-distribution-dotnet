@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01E.1 harness + APP-01D/C.4/B.3 regressions
+      - name: Two-tenant LocalDB APP-01E.2 races + E.1/D/C.4/B.3 regressions
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -63,7 +63,9 @@ jobs:
           APP01D_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01E1_TEST_RUN_ID: app01e1-${{ github.run_id }}-${{ github.run_attempt }}
           APP01E1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 106 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01E2_TEST_RUN_ID: app01e2-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01E2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 124 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -144,6 +146,18 @@ jobs:
             "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
             Set-Content -Path TestResults/APP-01E1-TestRunId.txt -Encoding utf8
           Write-Host "APP-01E.1 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01E.2 TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01e2-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          @("TestRunId=$id", "SourceHeadSha=$sourceHead", "WorkflowSha=$env:GITHUB_SHA",
+            "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
+            Set-Content -Path TestResults/APP-01E2-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01E.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -503,6 +517,100 @@ jobs:
               Write-Host "APP-01E.1 $name verified on SQL: $id"
             }
           }
+      - name: Fail closed on APP-01E.2 cross-command race SQL reconciliation
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem tests -Recurse -File -Filter '*-race.json' |
+            Where-Object { $_.FullName -like '*TestResults*APP-01E2*' })
+          if ($reports.Count -ne 16) { throw "Expected 16 E.2 SQL race reports, got $($reports.Count)" }
+          $cases = @('rights-pool','manifest-vs-b20','a25-vs-b20','a25-vs-unload',
+                     'b20-vs-unload','cashier-accept-vs-unload',
+                     'cashier-accept-vs-accept','cashier-offer-vs-accept')
+          $fields = @('WarehouseQty','WarehouseCost','VehicleQty','VehicleCost',
+                     'PoolAllocated','AGranted','BGranted','AConsumed','BConsumed',
+                     'BReleased','ArA','ArB','Cogs','Custody','Fund','ReceiptApplied',
+                     'ARows','BRows','Offers','Acceptances','Unloads','ManifestsLoaded','InvoiceEligible')
+          $id = "app01e2-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $total = 0
+          foreach ($tenant in @('tenant-a','tenant-b')) {
+            foreach ($case in $cases) {
+              $name = "$tenant-$case-race.json"
+              $found = @($reports | Where-Object { $_.Name -ceq $name })
+              if ($found.Count -ne 1) { throw "Missing/duplicate E.2 report $name" }
+              $r = Get-Content $found[0].FullName -Raw | ConvertFrom-Json
+              if ($r.Schema -cne 'APP01E2_RACE_V1' -or $r.Status -cne 'PASS' -or
+                  $r.TenantId -cne $tenant -or $r.Scenario -cne $case -or
+                  $r.TestRunId -cne $id -or $r.SourceHeadSha -cne $sourceHead -or
+                  $r.WorkflowSha -cne $env:GITHUB_SHA -or $r.Sql.Tenant -cne $tenant -or
+                  $r.ObservedSqlWaiters -lt 2 -or $r.ExpectedCells -ne 23 -or
+                  $r.MatchedCells -ne 23 -or @($r.Cells).Count -ne 23 -or
+                  $r.Sql.LedgerSha256 -cnotmatch '^[A-F0-9]{64}$') {
+                throw "E.2 provenance / SQL wait witness invalid: $name"
+              }
+              if ($r.Sql.Database -cnotmatch '^Fmcg_App00_[a-f0-9]{32}_[AB]$' -or
+                  ($tenant -eq 'tenant-a' -and !$r.Sql.Database.EndsWith('_A')) -or
+                  ($tenant -eq 'tenant-b' -and !$r.Sql.Database.EndsWith('_B'))) {
+                throw "E.2 wrong LocalDB ownership: $name"
+              }
+              foreach ($side in @('Left','Right')) {
+                $cmd = $r.$side
+                $a = $cmd.Audit
+                $o = $cmd.Outcome
+                if ($cmd.ProducerId -cne 'app01e2-races' -or
+                    $cmd.CommandId -cnotmatch '^[a-f0-9]{32}$' -or
+                    $cmd.SourceNumber -cnotmatch '^[a-f0-9]{32}$' -or
+                    $cmd.Http -ne 200 -or $o.Replayed -or
+                    $o.Status -cne $a.Status -or $o.OutcomeCode -cne $a.OutcomeCode -or
+                    $o.ReasonCode -cne $a.ReasonCode -or
+                    $cmd.Actor -cne $a.CommandActor) {
+                  throw "E.2 HTTP/SQL command mismatch $name $side"
+                }
+                if ($o.Status -ceq 'APPLIED') {
+                  if (!$o.SourceId -or $o.SourceId -cne $a.SourceId -or
+                      $a.SourceKind -cne $cmd.SourceKind -or
+                      $a.SourceNumber -cne $cmd.SourceNumber -or
+                      $a.SourceActor -cne $cmd.Actor -or !$a.SourceTrip -or
+                      $a.Lines -le 0 -or $a.Effects -lt 0) {
+                    throw "E.2 applied source/ledger mismatch $name $side"
+                  }
+                } elseif ($o.Status -ceq 'REJECTED' -and $o.OutcomeCode -ceq 'REJECTED') {
+                  if ($o.SourceId -or $a.SourceId -or $a.Lines -ne 0 -or
+                      $a.Effects -ne 0) { throw "E.2 rejected command posted $name $side" }
+                } else { throw "E.2 invalid terminal command status $name $side" }
+              }
+              if (!$r.Replay.StateUnchanged -or
+                  $r.Replay.BeforeLedgerSha256 -cne $r.Sql.LedgerSha256 -or
+                  $r.Replay.AfterLedgerSha256 -cne $r.Sql.LedgerSha256) {
+                throw "E.2 replay altered lineage or physical state: $name"
+              }
+              foreach ($side in @('Left','Right')) {
+                $original = $r.$side.Outcome
+                $replay = $r.Replay.$side
+                if ($replay.Http -ne 200 -or !$replay.Outcome.Replayed -or
+                    $replay.Outcome.Status -cne $original.Status -or
+                    $replay.Outcome.OutcomeCode -cne $original.OutcomeCode -or
+                    $replay.Outcome.ReasonCode -cne $original.ReasonCode -or
+                    $replay.Outcome.SourceId -cne $original.SourceId) {
+                  throw "E.2 replay outcome mismatch: $name $side"
+                }
+              }
+              foreach ($field in $fields) {
+                $matches = @($r.Cells | Where-Object { $_.Field -ceq $field })
+                if ($matches.Count -ne 1) { throw "E.2 missing or duplicate field $name $field" }
+                $cell = $matches[0]
+                if (!$cell.Match -or $cell.Diff -ne 0 -or
+                    $cell.Actual -ne $cell.Expected -or
+                    $cell.Actual -ne $r.Sql.Numbers.$field) {
+                  throw "E.2 SQL actual/diff mismatch $name $field"
+                }
+                $total++
+              }
+              Write-Host "APP-01E.2 $name 23/23, SQL waiters $($r.ObservedSqlWaiters)"
+            }
+          }
+          if ($total -ne 368) { throw "Expected 368 physical E.2 SQL cells, got $total" }
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |
