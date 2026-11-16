@@ -513,7 +513,9 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                 || line.Remaining < 0
                 || line.Remaining > line.GrantedBaseQuantity - line.ConsumedBaseQuantity
                     - line.ReleasedBaseQuantity
-                || line.RightStatus != "HELD" || line.ReleasedBaseQuantity != 0
+                || line.ReleasedBaseQuantity != 0
+                || (line.Remaining > 0 && line.RightStatus != "HELD")
+                || (line.Remaining == 0 && line.RightStatus != "CONSUMED")
                 || line.GrantedBaseQuantity != line.LoadedBaseQuantity)
                 return BusinessCommandOutcome.Rejected("REMAINDER_RIGHT_SOURCE_DRIFT");
         }
@@ -535,7 +537,15 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                 || warehouse.OnHandBaseQuantity != warehouse.SourceBaseQuantity
                 || warehouse.OnHandCostAmount != warehouse.SourceCostAmount)
                 return BusinessCommandOutcome.Rejected("PHYSICAL_SOURCE_DRIFT");
-            if (qty <= 0 || qty != vehicle.OnHandBaseQuantity
+            // Another SKU in the same manifest can have been sold out.
+            // It still must reconcile to zero; it contributes no return line.
+            if (qty == 0)
+            {
+                if (vehicle.OnHandBaseQuantity != 0 || vehicle.OnHandCostAmount != 0)
+                    return BusinessCommandOutcome.Rejected("VEHICLE_REMAINDER_MISMATCH");
+                continue;
+            }
+            if (qty < 0 || qty != vehicle.OnHandBaseQuantity
                 || vehicle.OnHandCostAmount < 0 || vehicle.OnHandCostAmount > MaximumAmount
                 || warehouse.OnHandBaseQuantity + qty > MaximumQuantity
                 || warehouse.OnHandCostAmount + vehicle.OnHandCostAmount > MaximumAmount)
