@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status:** APP-00A foundation merged with CI review; APP-00B dependencies merged; APP-00B/C browser/PWA acceptance pending Issue #13 (nonproduction/synthetic only). Owner approved APP-00 and APP-01A..E on 2026-11-15 for **synthetic nonproduction only**.
+**Status (2026-11-16):** APP-00A foundation and APP-00B toolchain/browser/PWA acceptance complete; Issue #13 closed under OWN-APP00B-13-03. APP-01A.1 integrated schema and physical two-tenant LocalDB checks are implemented in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21). **APP-01A overall remains NOT_VERIFIED**: command behavior, aggregate stock invariants and business AC-03 flow are not implemented. Owner authorization remains **synthetic nonproduction only**.
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -13,7 +13,14 @@ The `business/` snapshot is complete and read-only. Verify its exact tree agains
 
 ## APP-00B — toolchain alignment
 
-APP-00B dependencies are merged. Before APP-01A, complete browser/PWA acceptance under the [three-PR APP-00B plan](docs/roadmap/app-00b-dependency-modernization.md): pinned .NET SDK 10.0.404, NuGet security/patch baseline, xUnit v3/Microsoft Testing Platform, Tailwind CSS v4 and reproducible npm lockfile. No changes are authorized in immutable `business/` or `business.lock.json`.
+APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner decision](docs/decisions/owner-app00b-13-03-browser-acceptance.md), [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13)). Tooling: .NET SDK 10.0.404, xUnit v3/MTP v2, Tailwind CSS v4, locked Node 26 LTS frontend. Historical Node 24 decisions are superseded for current runs. The APP-00B prerequisite no longer blocks APP-01A. `business/` and `business.lock.json` remain immutable.
+
+## APP-01A.1 — Integrated schema (schema-only increment)
+
+- Adds an integrated, **per-tenant** Customer/ShipTo/Sku/StockLocation/Trip, A order/line, source/command/effect ledger, shared A/B StockRight, AReservation, BQuota and BCreditGrant schema.
+- Foreign keys bind every root entity to `AppTenantBinding`; composite FKs enforce Customer+ShipTo identity and same-tenant source/rights; SQL checks and unique keys protect per-row amounts and duplicate source/effect identities.
+- Introduces 5 SQL Server LocalDB integration tests for two database migrations/replay, isolation/invalid tenant writes, Customer/ShipTo mismatch, A/B right kind/source uniqueness, and command/ledger duplicate protection.
+- **Schema only:** Dapper command transactions, deterministic canonical payload replay outcomes, aggregate stock availability/overlap checks, AR/COGS and real business APIs are **not implemented** in this PR. Those belong to APP-01A.2/.3 and APP-01B–E. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
 
 ## Windows local checks
 
@@ -39,4 +46,4 @@ To run only the public liveness probe: `dotnet run --project src/FmcgDms.Api --u
 
 From `web/` on Node 26 LTS, run `npm ci --no-audit --no-fund`, `npm run build`, `npx playwright install chromium`, then `npm run test:e2e`. The browser suite starts a production `vite preview` and checks API live/fallback states, **100%** layout at desktop and narrow CSS viewport, and real service-worker V1→V2 behavior (the V2 release is synthesized from the built PWA in a temporary directory, served under the same origin; no tracked source files are rewritten). CI uploads `app00b-playwright-evidence` with reports, screenshots and traces.
 
-**Owner exception OWN-APP00B-13-02:** 125% zoom/display scale is outside APP-00B/C acceptance and not deferred in the roadmap. At below-320px CSS viewports, layout may overflow. This does not remove the 100%/PWA evidence or Owner acceptance gate in [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13); APP-01A remains blocked. No EV/P0 or tenant go-live authorization.
+**Owner exception OWN-APP00B-13-02:** 125% zoom/display scale is outside APP-00B/C acceptance and not deferred in the roadmap. At below-320px CSS viewports, layout may overflow. The 100% Edge/PWA evidence was **accepted** under OWN-APP00B-13-03 and [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is closed; APP-01A implementation is unblocked, but its own business exit criteria are still pending. No EV/P0 or tenant go-live authorization.
