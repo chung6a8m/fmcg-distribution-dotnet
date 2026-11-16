@@ -16,15 +16,15 @@ App01c1PostingSchema.cs adds seven source-bound tables and immutable posting evi
 
 | Table | Source and physical constraints |
 |---|---|
-| **AConfirmedLineSnapshot** | A confirmed price and N-day terms; immutable; exact AOrderLine, tenant/Trip/Customer/SKU/qty and A_CONFIRM source line |
-| **SaleDelivery** | One committed A delivery or B sale+delivery per source line; loaded manifest, A/B right, Customer/ShipTo, Trip, SKU, source qty/payable, immutable |
+| **AConfirmedLineSnapshot** | Confirmed price, base quantity and N-day terms; immutable; exact AOrderLine quantity, tenant/Trip/Customer/SKU and A_CONFIRM source line |
+| **SaleDelivery** | One A delivery or B sale+delivery per source line; loaded manifest, A/B right, **AReservation order-line ownership**, Customer/ShipTo, Trip/BusinessDate, SKU, source qty/payable, immutable |
 | **DeliveryStockIssue** | One outward physical stock issue per delivery/source line; exact qty/cost/SKU through composite FK, append-only |
 | **ReceivableOpenItem** | Gross payable plus applied amount, derived outstanding = original − applied; source and A due date immutable |
 | **CashReceipt** | B-only verified physical CASH with immutable evidence; receipt received/applied counters with bounded checks |
 | **ReceiptAllocation** | Verified receipt allocated to Customer AR item; same-customer composite FKs, immutable and unique receipt–item pair |
-| **BGrantConsumption** | B-only matching Trip/Customer/grant consumption per sale, append-only; A cannot consume B grant |
+| **BGrantConsumption** | B-only matching Trip/Customer/**ShipTo** for both delivery and grant; append-only, unique grant–delivery pair; A cannot consume B grant |
 
-Composite FKs and alternate keys reject wrong tenant/Trip/Customer/SKU, wrong A/B right, wrong source kind, mismatched source quantity/amount, and a draft/un-loaded manifest source line. Posted-delivery ledger effects cannot be rewritten through TR_LedgerEffect_PostedDeliveryImmutable. Existing APP-01B transfer, rights, hash, SQL oracle and physical opening remain untouched.
+Composite FKs and alternate keys reject wrong tenant/Trip/Customer/SKU, wrong A/B right, wrong source kind, mismatched source quantity/amount, and a draft/un-loaded manifest source line. Posted-delivery ledger effects cannot be rewritten through TR_LedgerEffect_PostedDeliveryImmutable. Source rows referenced by a posted delivery or frozen A confirmation also reject metadata/line updates and deletes (including columns outside FK keys). Existing APP-01B transfer, rights, hash, SQL oracle and physical opening remain untouched.
 
 **Boundary:** SQL FKs and CHECK constraints alone cannot guarantee SUM(delivered quantity) ≤ loaded/available right, SUM(consumed credit) ≤ grant, SUM(allocations) ≤ verified receipt or physical/COGS reconciliation across multiple records. C.2/C.3 must check these aggregates under deterministic locks in the same explicit Serializable transaction. Schema tests are not posting correctness.
 
@@ -50,7 +50,7 @@ Read all 13 fields directly from SQL balances/openings, stock rights, source/eff
 
 ## APP-01C.1 verification gate
 
-App01c1PostingSchemaTests contributes **eight** LocalDB schema tests for two tenant migration/replay, A Confirm snapshot immutability, A/B source-anchored delivery, exact stock issue uniqueness/cost, receipt/AR bounded counters, B grant relationship, posted ledger immutability and negative cross-tenant writes. The tests insert synthetic SQL rows directly; **they do not execute T3/T4 commands**.
+App01c1PostingSchemaTests contributes **eight** LocalDB schema tests for two tenant migration/replay, A Confirm snapshot quantity/immutability, A/B source-anchored delivery and reserved-right ownership, Trip business date, exact stock issue uniqueness/cost, receipt/AR bounded counters, B grant ShipTo relationship, immutable posted source metadata/ledger and negative cross-tenant writes. The tests insert synthetic SQL rows directly; **they do not execute T3/T4 commands**.
 
 - On Windows with SQL Server LocalDB, .NET SDK 10.0.404, Node 26 LTS: run dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 72 -- --report-trx --coverage --coverage-output-format cobertura.
 - Preserve independent APP-01B.3 39/39 tenant-A and tenant-B SQL actual/diff reports, immutable Business Baseline validation, TRX/Cobertura, Playwright/PWA at 100%. The 125% Owner exception stays NOT_TESTED.

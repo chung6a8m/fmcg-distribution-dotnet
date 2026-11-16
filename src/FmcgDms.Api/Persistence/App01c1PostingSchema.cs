@@ -22,6 +22,12 @@ public sealed class App01c1PostingSchema : Migration
                 UNIQUE (TenantId, Id, TripId, CustomerId);
             ALTER TABLE dbo.AOrderLine ADD CONSTRAINT UQ_AOrderLine_DeliveryScope
                 UNIQUE (TenantId, Id, AOrderId, SkuId);
+            ALTER TABLE dbo.AOrderLine ADD CONSTRAINT UQ_AOrderLine_ConfirmQuantity
+                UNIQUE (TenantId, Id, AOrderId, SkuId, BaseQuantity);
+            ALTER TABLE dbo.AReservation ADD CONSTRAINT UQ_AReservation_DeliveryRight
+                UNIQUE (TenantId, StockRightId, AOrderLineId);
+            ALTER TABLE dbo.Trip ADD CONSTRAINT UQ_Trip_DeliveryDate
+                UNIQUE (TenantId, Id, BusinessDate);
             ALTER TABLE dbo.BusinessSource ADD CONSTRAINT UQ_BusinessSource_PostScope
                 UNIQUE (TenantId, Id, TripId, CustomerId, SourceKind);
             ALTER TABLE dbo.BusinessSourceLine ADD CONSTRAINT UQ_BusinessSourceLine_PostScope
@@ -31,7 +37,7 @@ public sealed class App01c1PostingSchema : Migration
             ALTER TABLE dbo.TripManifestLine ADD CONSTRAINT UQ_TripManifestLine_PostScope
                 UNIQUE (TenantId, Id, TripId, SkuId, StockRightId, RightKind, LoadSourceLineId);
             ALTER TABLE dbo.BCreditGrant ADD CONSTRAINT UQ_BCreditGrant_ConsumeScope
-                UNIQUE (TenantId, Id, TripId, CustomerId, PoolCode, CurrencyUnit);
+                UNIQUE (TenantId, Id, TripId, CustomerId, ShipToSnapshotId, PoolCode, CurrencyUnit);
 
             -- Price and N-day terms must be frozen by ConfirmAOrder in C.3.
             -- Existing synthetic confirmations are NOT silently backfilled.
@@ -61,8 +67,9 @@ public sealed class App01c1PostingSchema : Migration
                     (TenantId, AOrderId, TripId, CustomerId)
                     REFERENCES dbo.AOrder (TenantId, Id, TripId, CustomerId),
                 CONSTRAINT FK_AConfirmedLineSnapshot_Line FOREIGN KEY
-                    (TenantId, AOrderLineId, AOrderId, SkuId)
-                    REFERENCES dbo.AOrderLine (TenantId, Id, AOrderId, SkuId),
+                    (TenantId, AOrderLineId, AOrderId, SkuId, ConfirmedBaseQuantity)
+                    REFERENCES dbo.AOrderLine
+                        (TenantId, Id, AOrderId, SkuId, BaseQuantity),
                 CONSTRAINT FK_AConfirmedLineSnapshot_Source FOREIGN KEY
                     (TenantId, ConfirmBusinessSourceId, TripId, CustomerId, ConfirmSourceKind)
                     REFERENCES dbo.BusinessSource (TenantId, Id, TripId, CustomerId, SourceKind),
@@ -115,10 +122,13 @@ public sealed class App01c1PostingSchema : Migration
                 CONSTRAINT UQ_SaleDelivery_Receipt UNIQUE
                     (TenantId, Id, TripId, CustomerId, BusinessSourceLineId, RightKind),
                 CONSTRAINT UQ_SaleDelivery_BConsume UNIQUE
-                    (TenantId, Id, TripId, CustomerId, RightKind),
+                    (TenantId, Id, TripId, CustomerId, ShipToSnapshotId, RightKind),
                 CONSTRAINT FK_SaleDelivery_CustomerShipTo FOREIGN KEY
                     (TenantId, CustomerId, ShipToSnapshotId)
                     REFERENCES dbo.ShipToSnapshot (TenantId, CustomerId, Id),
+                CONSTRAINT FK_SaleDelivery_TripBusinessDate FOREIGN KEY
+                    (TenantId, TripId, BusinessDate)
+                    REFERENCES dbo.Trip (TenantId, Id, BusinessDate),
                 CONSTRAINT FK_SaleDelivery_LoadedManifestLine FOREIGN KEY
                     (TenantId, TripManifestLineId, TripId, SkuId, StockRightId,
                      RightKind, LoadSourceLineId)
@@ -145,6 +155,12 @@ public sealed class App01c1PostingSchema : Migration
                     (TenantId, AOrderLineId, AOrderId, SkuId)
                     REFERENCES dbo.AConfirmedLineSnapshot
                         (TenantId, AOrderLineId, AOrderId, SkuId),
+                -- A delivery may consume only the right reserved for its exact
+                -- order line. B deliveries have NULL AOrderLineId and bypass.
+                CONSTRAINT FK_SaleDelivery_ExactAReservation FOREIGN KEY
+                    (TenantId, StockRightId, AOrderLineId)
+                    REFERENCES dbo.AReservation
+                        (TenantId, StockRightId, AOrderLineId),
                 CONSTRAINT CK_SaleDelivery_Mode CHECK (
                     (RightKind='A' AND BusinessSourceKind=N'A_DELIVERY'
                      AND AOrderId IS NOT NULL AND AOrderLineId IS NOT NULL)
@@ -157,6 +173,10 @@ public sealed class App01c1PostingSchema : Migration
             );
             CREATE INDEX IX_SaleDelivery_Trip_Right
                 ON dbo.SaleDelivery (TenantId, TripId, StockRightId, BusinessDate);
+            CREATE INDEX IX_SaleDelivery_PostSource
+                ON dbo.SaleDelivery (TenantId, BusinessSourceId);
+            CREATE INDEX IX_AConfirmedLineSnapshot_PostSource
+                ON dbo.AConfirmedLineSnapshot (TenantId, ConfirmBusinessSourceId);
 
             -- Append-only outward stock issue: it inherits exact quantity/cost,
             -- SKU and source from the posted delivery. Load movements remain
@@ -279,6 +299,7 @@ public sealed class App01c1PostingSchema : Migration
                 BCreditGrantId uniqueidentifier NOT NULL,
                 TripId uniqueidentifier NOT NULL,
                 CustomerId uniqueidentifier NOT NULL,
+                ShipToSnapshotId uniqueidentifier NOT NULL,
                 RightKind char(1) NOT NULL CONSTRAINT DF_BGrantConsumption_Kind DEFAULT ('B'),
                 PoolCode nvarchar(48) NOT NULL CONSTRAINT DF_BGrantConsumption_Pool DEFAULT (N'B'),
                 CurrencyUnit nvarchar(32) NOT NULL
@@ -292,13 +313,13 @@ public sealed class App01c1PostingSchema : Migration
                 CONSTRAINT UQ_BGrantConsumption_GrantDelivery UNIQUE
                     (TenantId, BCreditGrantId, SaleDeliveryId),
                 CONSTRAINT FK_BGrantConsumption_BDelivery FOREIGN KEY
-                    (TenantId, SaleDeliveryId, TripId, CustomerId, RightKind)
+                    (TenantId, SaleDeliveryId, TripId, CustomerId, ShipToSnapshotId, RightKind)
                     REFERENCES dbo.SaleDelivery
-                        (TenantId, Id, TripId, CustomerId, RightKind),
+                        (TenantId, Id, TripId, CustomerId, ShipToSnapshotId, RightKind),
                 CONSTRAINT FK_BGrantConsumption_Grant FOREIGN KEY
-                    (TenantId, BCreditGrantId, TripId, CustomerId, PoolCode, CurrencyUnit)
+                    (TenantId, BCreditGrantId, TripId, CustomerId, ShipToSnapshotId, PoolCode, CurrencyUnit)
                     REFERENCES dbo.BCreditGrant
-                        (TenantId, Id, TripId, CustomerId, PoolCode, CurrencyUnit),
+                        (TenantId, Id, TripId, CustomerId, ShipToSnapshotId, PoolCode, CurrencyUnit),
                 CONSTRAINT CK_BGrantConsumption_Amount CHECK (
                     RightKind='B' AND PoolCode=N'B'
                     AND CurrencyUnit=N'SYNTHETIC_UNITLESS'
@@ -380,6 +401,42 @@ public sealed class App01c1PostingSchema : Migration
             END;
             """);
         Execute.Sql("""
+            -- An applied posting/confirmation must not lose its original
+            -- source identity through edits to non-FK provenance columns.
+            CREATE TRIGGER dbo.TR_BusinessSourceLine_PostEvidenceImmutable
+            ON dbo.BusinessSourceLine AFTER UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    WHERE EXISTS (SELECT 1 FROM dbo.SaleDelivery s
+                                  WHERE s.TenantId=d.TenantId
+                                    AND s.BusinessSourceLineId=d.Id)
+                       OR EXISTS (SELECT 1 FROM dbo.AConfirmedLineSnapshot a
+                                  WHERE a.TenantId=d.TenantId
+                                    AND a.ConfirmSourceLineId=d.Id)
+                )
+                    THROW 51069, 'APP01C1 posted source line is immutable', 1;
+            END;
+            """);
+        Execute.Sql("""
+            CREATE TRIGGER dbo.TR_BusinessSource_PostEvidenceImmutable
+            ON dbo.BusinessSource AFTER UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    WHERE EXISTS (SELECT 1 FROM dbo.SaleDelivery s
+                                  WHERE s.TenantId=d.TenantId
+                                    AND s.BusinessSourceId=d.Id)
+                       OR EXISTS (SELECT 1 FROM dbo.AConfirmedLineSnapshot a
+                                  WHERE a.TenantId=d.TenantId
+                                    AND a.ConfirmBusinessSourceId=d.Id)
+                )
+                    THROW 51070, 'APP01C1 posted source metadata is immutable', 1;
+            END;
+            """);
+        Execute.Sql("""
             CREATE TRIGGER dbo.TR_LedgerEffect_PostedDeliveryImmutable
             ON dbo.LedgerEffect AFTER UPDATE, DELETE AS
             BEGIN
@@ -400,6 +457,8 @@ public sealed class App01c1PostingSchema : Migration
     {
         Execute.Sql("""
             DROP TRIGGER IF EXISTS dbo.TR_LedgerEffect_PostedDeliveryImmutable;
+            DROP TRIGGER IF EXISTS dbo.TR_BusinessSource_PostEvidenceImmutable;
+            DROP TRIGGER IF EXISTS dbo.TR_BusinessSourceLine_PostEvidenceImmutable;
             DROP TRIGGER IF EXISTS dbo.TR_ReceivableOpenItem_SourceImmutable;
             DROP TRIGGER IF EXISTS dbo.TR_CashReceipt_VerifiedImmutable;
             DROP TRIGGER IF EXISTS dbo.TR_BGrantConsumption_Immutable;
@@ -415,6 +474,9 @@ public sealed class App01c1PostingSchema : Migration
             DROP TABLE dbo.SaleDelivery;
             DROP TABLE dbo.AConfirmedLineSnapshot;
             ALTER TABLE dbo.BCreditGrant DROP CONSTRAINT UQ_BCreditGrant_ConsumeScope;
+            ALTER TABLE dbo.Trip DROP CONSTRAINT UQ_Trip_DeliveryDate;
+            ALTER TABLE dbo.AReservation DROP CONSTRAINT UQ_AReservation_DeliveryRight;
+            ALTER TABLE dbo.AOrderLine DROP CONSTRAINT UQ_AOrderLine_ConfirmQuantity;
             ALTER TABLE dbo.TripManifestLine DROP CONSTRAINT UQ_TripManifestLine_PostScope;
             ALTER TABLE dbo.BusinessSourceLine DROP CONSTRAINT UQ_BusinessSourceLine_ConfirmScope;
             ALTER TABLE dbo.BusinessSourceLine DROP CONSTRAINT UQ_BusinessSourceLine_PostScope;

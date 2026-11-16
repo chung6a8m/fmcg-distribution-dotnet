@@ -65,13 +65,15 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
                     SELECT COUNT(*) FROM sys.tables
                     WHERE schema_id=SCHEMA_ID(N'dbo') AND name=@name
                     """, new { name }));
-            Assert.Equal(8, db.ExecuteScalar<int>("""
+            Assert.Equal(10, db.ExecuteScalar<int>("""
                 SELECT COUNT(*) FROM sys.triggers WHERE name IN
                     (N'TR_AConfirmedLineSnapshot_Immutable',N'TR_SaleDelivery_Immutable',
                      N'TR_DeliveryStockIssue_Immutable',N'TR_ReceiptAllocation_Immutable',
                      N'TR_BGrantConsumption_Immutable',N'TR_CashReceipt_VerifiedImmutable',
                      N'TR_ReceivableOpenItem_SourceImmutable',
-                     N'TR_LedgerEffect_PostedDeliveryImmutable')
+                     N'TR_LedgerEffect_PostedDeliveryImmutable',
+                     N'TR_BusinessSource_PostEvidenceImmutable',
+                     N'TR_BusinessSourceLine_PostEvidenceImmutable')
                 """));
             Assert.Equal(1, db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM dbo.VersionInfo WHERE Version=202611160005"));
@@ -97,7 +99,15 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
     {
         using var db = Open(A);
         var s = SeedLoadedTrip(db, A);
+        Guid wrongQtyLine = NewLine(db, A, s.ConfirmSource, s.Sku, 39m, null, 2);
+        Reject(db, InsertSnapshotSql, new {
+            tenant = A, line = s.OrderLine, s.Order, s.Trip, s.Customer, s.Sku,
+            source = s.ConfirmSource, sourceLine = wrongQtyLine,
+            qty = 39m, price = 15m, terms = 7
+        }, 547); // Source qty matches but order-line confirmed qty does not.
         InsertConfirmSnapshot(db, A, s);
+        Reject(db, "UPDATE dbo.BusinessSource SET ActorId=N'forged' WHERE Id=@source",
+            new { source = s.ConfirmSource }, 51070);
         Assert.Equal((15m, 7), db.QuerySingle<(decimal, int)>("""
             SELECT UnitPriceSnapshot,TermsDaysSnapshot
             FROM dbo.AConfirmedLineSnapshot
@@ -111,7 +121,7 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             DELETE dbo.AConfirmedLineSnapshot
             WHERE TenantId=@tenant AND AOrderLineId=@line
             """, new { tenant = A, line = s.OrderLine }, 51061);
-        Guid otherConfirmLine = NewLine(db, A, s.ConfirmSource, s.Sku, 40m, null, 2);
+        Guid otherConfirmLine = NewLine(db, A, s.ConfirmSource, s.Sku, 40m, null, 3);
         Reject(db, InsertSnapshotSql, new {
             tenant = A, line = Guid.NewGuid(), s.Order, s.Trip, s.Customer, s.Sku,
             source = s.ConfirmSource, sourceLine = otherConfirmLine,
@@ -170,6 +180,10 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             new { id = effectId }, 51068);
         Reject(db, "DELETE dbo.LedgerEffect WHERE Id=@id",
             new { id = effectId }, 51068);
+        Reject(db, "UPDATE dbo.BusinessSourceLine SET LineNumber=99 WHERE Id=@id",
+            new { id = b.SourceLine }, 51069);
+        Reject(db, "UPDATE dbo.BusinessSource SET ActorId=N'forged' WHERE Id=@id",
+            new { id = b.Input.Source }, 51070);
     }
 
     [Fact]
@@ -189,6 +203,11 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, InsertSaleSql, input with { Tenant = B }, 547);
         Reject(db, InsertSaleSql, input with { Qty = 21m }, 547);
         Reject(db, InsertSaleSql, input with { Payable = 301m }, 547);
+        string wrongBusinessDateSql = InsertSaleSql.Replace(
+            "(SELECT BusinessDate FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip)",
+            "DATEADD(day,1,(SELECT BusinessDate FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip))",
+            StringComparison.Ordinal);
+        Reject(db, wrongBusinessDateSql, input, 547);
 
         Assert.Equal(0, db.ExecuteScalar<int>("""
             SELECT COUNT(*) FROM dbo.SaleDelivery WHERE TenantId=@tenant AND TripId=@trip
@@ -207,6 +226,35 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, InsertSaleSql, MakeSale(A, s, "A", Guid.NewGuid(),
             blockedSource, blockedLine, 25m, 375m, 250m), 547);
         InsertConfirmSnapshot(db, A, s);
+        // An unrelated A order line can have the same tenant, trip, customer
+        // and SKU, but it does NOT own this manifest's reserved A stock right.
+        Guid foreignOrder = Guid.NewGuid(), foreignLine = Guid.NewGuid();
+        db.Execute("""
+            INSERT dbo.AOrder(Id,TenantId,OrderNumber,CustomerId,ShipToSnapshotId,
+                TripId,BusinessDate,Status,ConfirmedAtUtc)
+            VALUES(@foreignOrder,@tenant,@code,@customer,@shipTo,@trip,
+                   (SELECT BusinessDate FROM dbo.Trip WHERE Id=@trip),N'CONFIRMED',SYSUTCDATETIME());
+            INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNumber,SkuId,
+                BaseQuantity,UomCode,UomToBaseFactor,UnitPrice)
+            VALUES(@foreignLine,@tenant,@foreignOrder,1,@sku,40,N'EA',1,15);
+            """, new {
+                foreignOrder, foreignLine, tenant = A, code = Code(),
+                customer = s.Customer, shipTo = s.ShipTo, trip = s.Trip, sku = s.Sku
+            });
+        Guid foreignConfirm = NewSource(db, A, s.Trip, s.Customer, "A_CONFIRM");
+        Guid foreignConfirmLine = NewLine(db, A, foreignConfirm, s.Sku, 40m, null);
+        db.Execute(InsertSnapshotSql, new {
+            tenant = A, line = foreignLine, order = foreignOrder,
+            s.Trip, s.Customer, s.Sku, source = foreignConfirm,
+            sourceLine = foreignConfirmLine, qty = 40m, price = 15m, terms = 7
+        });
+        Guid foreignSaleSource = NewSource(db, A, s.Trip, s.Customer, "A_DELIVERY");
+        Guid foreignSaleLine = NewLine(db, A, foreignSaleSource, s.Sku, 25m, 375m);
+        var foreignInput = MakeSale(A, s, "A", Guid.NewGuid(),
+            foreignSaleSource, foreignSaleLine, 25m, 375m, 250m);
+        Reject(db, InsertSaleSql, foreignInput with {
+            Order = foreignOrder, OrderLine = foreignLine
+        }, 547);
         var a = InsertSale(db, A, s, "A", 25m, 375m, 250m);
         InsertStockIssue(db, A, a);
         var ar = Guid.NewGuid();
@@ -308,14 +356,24 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Guid consumption = Guid.NewGuid();
         db.Execute(InsertGrantUseSql, new {
             id = consumption, tenant = A, delivery = b.Id, grant,
-            s.Trip, s.Customer, amount = 100m
+            s.Trip, s.Customer, shipTo = s.ShipTo, amount = 100m
         });
         Reject(db, InsertGrantUseSql, new {
             id = Guid.NewGuid(), tenant = A, delivery = b.Id, grant,
-            s.Trip, s.Customer, amount = 100m
+            s.Trip, s.Customer, shipTo = s.ShipTo, amount = 100m
         }, 2627, 2601);
         Reject(db, "UPDATE dbo.BGrantConsumption SET ConsumedAmount=99 WHERE Id=@id",
             new { id = consumption }, 51065);
+        Guid siblingShipTo = Guid.NewGuid();
+        db.Execute("""
+            INSERT dbo.ShipToSnapshot(Id,TenantId,CustomerId,DisplayName,Address)
+            VALUES(@shipTo,@tenant,@customer,N'sibling shipto',N'other branch');
+            """, new { shipTo = siblingShipTo, tenant = A, customer = s.Customer });
+        Guid siblingGrant = NewGrant(db, A, s, s.Customer, siblingShipTo, 100m);
+        Reject(db, InsertGrantUseSql, new {
+            id = Guid.NewGuid(), tenant = A, delivery = b.Id, grant = siblingGrant,
+            s.Trip, s.Customer, shipTo = s.ShipTo, amount = 1m
+        }, 547); // Same trip/customer, but credit belongs to another ShipTo.
         Guid otherCustomer = Guid.NewGuid(), otherShipTo = Guid.NewGuid();
         db.Execute("""
             INSERT dbo.Customer(Id,TenantId,Code,Name) VALUES
@@ -328,11 +386,11 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         var otherSale = InsertSale(db, A, s, "B", 5m, 75m, 50m);
         Reject(db, InsertGrantUseSql, new {
             id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
-            grant = otherGrant, s.Trip, s.Customer, amount = 1m
+            grant = otherGrant, s.Trip, s.Customer, shipTo = s.ShipTo, amount = 1m
         }, 547);
         Reject(db, InsertGrantUseSql, new {
             id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
-            grant, s.Trip, s.Customer, amount = -1m
+            grant, s.Trip, s.Customer, shipTo = s.ShipTo, amount = -1m
         }, 547);
     }
 
@@ -510,7 +568,8 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         VALUES(@Id,@Tenant,@Trip,@Customer,@ShipTo,
                @ManifestLine,@LoadLine,@Right,@Kind,@Sku,
                @Order,@OrderLine,@Source,@SourceKind,@SourceLine,
-               @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',CONVERT(date,SYSUTCDATETIME()))
+               @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',
+            (SELECT BusinessDate FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip))
         """;
 
     private static SaleInput MakeSale(string tenant, Scene s, string kind, Guid id,
@@ -589,7 +648,7 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
 
     private const string InsertGrantUseSql = """
         INSERT dbo.BGrantConsumption(Id,TenantId,SaleDeliveryId,BCreditGrantId,
-            TripId,CustomerId,ConsumedAmount)
-        VALUES(@id,@tenant,@delivery,@grant,@Trip,@Customer,@amount)
+            TripId,CustomerId,ShipToSnapshotId,ConsumedAmount)
+        VALUES(@id,@tenant,@delivery,@grant,@Trip,@Customer,@shipTo,@amount)
         """;
 }
