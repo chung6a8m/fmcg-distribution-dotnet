@@ -249,6 +249,20 @@ public sealed class App01b1PhysicalStock : Migration
             END;
             """);
         Execute.Sql("""
+            CREATE TRIGGER dbo.TR_TripManifestLine_InsertOnlyDraft
+            ON dbo.TripManifestLine AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN dbo.TripManifest h
+                        ON h.TenantId=i.TenantId AND h.Id=i.TripManifestId
+                    WHERE h.Status <> N'DRAFT')
+                    THROW 51045, 'APP01B1 cannot append lines to a loaded manifest', 1;
+            END;
+            """);
+        Execute.Sql("""
             CREATE TRIGGER dbo.TR_TripManifestLine_ImmutableLoaded
             ON dbo.TripManifestLine AFTER UPDATE, DELETE
             AS
@@ -264,6 +278,7 @@ public sealed class App01b1PhysicalStock : Migration
     {
         Execute.Sql("""
             DROP TRIGGER IF EXISTS dbo.TR_TripManifestLine_ImmutableLoaded;
+            DROP TRIGGER IF EXISTS dbo.TR_TripManifestLine_InsertOnlyDraft;
             DROP TRIGGER IF EXISTS dbo.TR_TripManifest_ImmutableLoaded;
             DROP TRIGGER IF EXISTS dbo.TR_PhysicalStockMovement_Immutable;
             DROP TRIGGER IF EXISTS dbo.TR_PhysicalStockOpening_Immutable;
