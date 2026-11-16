@@ -63,7 +63,7 @@ jobs:
           APP01D_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01E1_TEST_RUN_ID: app01e1-${{ github.run_id }}-${{ github.run_attempt }}
           APP01E1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 105 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 106 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
