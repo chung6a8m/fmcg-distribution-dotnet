@@ -53,6 +53,27 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         public int Effects { get; set; }
     }
 
+    // Serializable properties: System.Text.Json does not include ValueTuple fields
+    // by default. Include source-only and zero-effect lineage in the digest.
+    private sealed class LineageDigestRow
+    {
+        public Guid SourceId { get; set; }
+        public Guid CommandId { get; set; }
+        public string Kind { get; set; } = "";
+        public string Number { get; set; } = "";
+        public string Actor { get; set; } = "";
+        public Guid? LineId { get; set; }
+        public int? LineNumber { get; set; }
+        public Guid? EffectId { get; set; }
+        public string? EffectKey { get; set; }
+        public string? LedgerKind { get; set; }
+        public decimal? Quantity { get; set; }
+        public decimal? Amount { get; set; }
+    }
+
+    private static string LedgerDigest(IEnumerable<LineageDigestRow> rows) =>
+        Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(rows)));
+
     private sealed class SqlNumbers
     {
         public decimal WarehouseQty { get; set; }
@@ -495,21 +516,23 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
             """, p) ?? "NONE";
         string tripStatus = db.QuerySingle<string>(
             "SELECT Status FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip", p);
-        var ledger = db.Query<(Guid SourceId, string Kind, string Number, Guid EffectId,
-            string EffectKey, string LedgerKind, decimal Quantity, decimal Amount)>("""
-            SELECT src.Id AS SourceId,src.SourceKind AS Kind,src.SourceNumber AS Number,
-                e.Id AS EffectId,e.EffectKey,e.LedgerKind,e.QuantityDelta AS Quantity,
-                e.AmountDelta AS Amount
+        var lineage = db.Query<LineageDigestRow>("""
+            SELECT src.Id AS SourceId,src.BusinessCommandId AS CommandId,
+                src.SourceKind AS Kind,src.SourceNumber AS Number,
+                src.ActorId AS Actor,l.Id AS LineId,l.LineNumber,
+                e.Id AS EffectId,e.EffectKey,e.LedgerKind,
+                e.QuantityDelta AS Quantity,e.AmountDelta AS Amount
             FROM dbo.BusinessSource src
-            JOIN dbo.BusinessSourceLine l ON l.TenantId=src.TenantId
+            LEFT JOIN dbo.BusinessSourceLine l ON l.TenantId=src.TenantId
                 AND l.BusinessSourceId=src.Id
-            JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId
+            LEFT JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId
                 AND e.BusinessSourceLineId=l.Id
             WHERE src.TenantId=@Tenant AND src.TripId=@Trip
-            ORDER BY src.SourceKind,src.SourceNumber,l.LineNumber,e.EffectKey,e.Id
+            ORDER BY src.SourceKind,src.SourceNumber,src.Id,
+                l.LineNumber,l.Id,e.EffectKey,e.Id
             """, p).ToArray();
         return new SqlSnapshot(name, tenant, manifest, tripStatus, nums,
-            Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(ledger))));
+            LedgerDigest(lineage));
     }
 
     private static SortedDictionary<string, decimal> Expected(string scenario,
@@ -682,7 +705,8 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
 
     private static void WriteEvidence(string tenant, string scenario,
         RacePair pair, SqlSnapshot sql, Request left, Request right,
-        SqlAudit a, SqlAudit b, SortedDictionary<string, decimal> expected)
+        SqlAudit a, SqlAudit b, SortedDictionary<string, decimal> expected,
+        Reply replayLeft, Reply replayRight, SqlSnapshot afterReplay)
     {
         var actual = sql.Numbers.Cells();
         var cells = expected.Select(kv => new Cell(kv.Key, kv.Value, actual[kv.Key])).ToArray();
@@ -695,6 +719,17 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
             WorkflowSha = Environment.GetEnvironmentVariable("GITHUB_SHA"),
             TenantId = tenant, Scenario = scenario,
             Sql = sql, ObservedSqlWaiters = pair.ObservedSqlWaiters,
+            Replay = new
+            {
+                Left = new { Http = (int)replayLeft.HttpStatus, replayLeft.Outcome },
+                Right = new { Http = (int)replayRight.HttpStatus, replayRight.Outcome },
+                BeforeLedgerSha256 = sql.LedgerSha256,
+                AfterLedgerSha256 = afterReplay.LedgerSha256,
+                StateUnchanged = sql.LedgerSha256 == afterReplay.LedgerSha256
+                    && sql.Numbers.Cells().SequenceEqual(afterReplay.Numbers.Cells())
+                    && sql.TripStatus == afterReplay.TripStatus
+                    && sql.ManifestStatus == afterReplay.ManifestStatus
+            },
             Left = new { left.Payload.ProducerId, left.Payload.CommandId,
                 left.Payload.SourceNumber, left.SourceKind, left.Actor,
                 Http = (int)pair.Left.HttpStatus, pair.Left.Outcome, Audit = a },
@@ -710,6 +745,33 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         File.WriteAllText(Path.Combine(directory, $"{tenant}-{scenario}-race.json"),
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }),
             new UTF8Encoding(false));
+    }
+
+    [Fact]
+    public void Ledger_digest_changes_when_source_or_effect_changes_without_row_count_change()
+    {
+        var row = new LineageDigestRow
+        {
+            SourceId = Guid.NewGuid(), CommandId = Guid.NewGuid(),
+            Kind = "CASH_HANDOVER_OFFER", Number = "E2-OFFER", Actor = SalesActor,
+            LineId = Guid.NewGuid(), LineNumber = 1
+        };
+        string original = LedgerDigest([row]);
+        row.Number = "E2-OFFER-ALTERED";
+        Assert.NotEqual(original, LedgerDigest([row]));
+        row.Number = "E2-OFFER";
+        Assert.Equal(original, LedgerDigest([row]));
+
+        // Adding an effect to an OFFER and mutating its amount must both
+        // change the digest even if the number of source rows is unchanged.
+        row.EffectId = Guid.NewGuid();
+        row.EffectKey = "FUND-IN";
+        row.LedgerKind = "FUND";
+        row.Amount = 200m;
+        Assert.NotEqual(original, LedgerDigest([row]));
+        string withEffect = LedgerDigest([row]);
+        row.Amount = 199m;
+        Assert.NotEqual(withEffect, LedgerDigest([row]));
     }
 
     [Fact]
@@ -878,6 +940,6 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         Assert.Equal(actual.ManifestStatus, afterReplay.ManifestStatus);
 
         WriteEvidence(tenant, scenario, pair, actual,
-            left, right, leftAudit, rightAudit, expected);
+            left, right, leftAudit, rightAudit, expected, replayA, replayB, afterReplay);
     }
 }
