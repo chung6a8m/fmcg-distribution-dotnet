@@ -46,23 +46,52 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01A + APP-01B.2 manifest/B31 matrix
+      - name: Two-tenant LocalDB APP-01A + APP-01B.3 SQL oracle and manifest matrix
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 62 -- --report-trx --coverage --coverage-output-format cobertura
-      - name: Record reproducible APP-01B.2 TestRunId and PR head
+          APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01B3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 64 -- --report-trx --coverage --coverage-output-format cobertura
+      - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force TestResults | Out-Null
-          $id = "app01b2-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $id = "app01b3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           # A pull_request workflow runs on a synthetic merge commit; record
           # the actual reviewed source HEAD separately from GitHub's merge SHA.
           $sourceHead = '${{ github.event.pull_request.head.sha }}'
           if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
-            Set-Content -Path TestResults/APP-01B2-TestRunId.txt -Encoding utf8
-          Write-Host "APP-01B.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+            Set-Content -Path TestResults/APP-01B3-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01B.3 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Fail closed on APP-01B.3 SQL oracle actual/diff
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem tests -Recurse -File -Filter '*-oracle.json' |
+            Where-Object { $_.FullName -like '*TestResults*APP-01B3*' })
+          if ($reports.Count -ne 2) { throw "Expected 2 APP-01B.3 tenant SQL oracle reports; found $($reports.Count)" }
+          $expectedNames = @('tenant-a-oracle.json','tenant-b-oracle.json')
+          $id = "app01b3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $hash = (Get-FileHash business/reference-data/expected-results/golden-oracles.json -Algorithm SHA256).Hash
+          foreach ($name in $expectedNames) {
+            $found = @($reports | Where-Object { $_.Name -eq $name })
+            if ($found.Count -ne 1) { throw "Missing or duplicated oracle report $name" }
+            $report = Get-Content $found[0].FullName -Raw | ConvertFrom-Json
+            if ($report.Status -ne 'PASS' -or $report.ExpectedCells -ne 39 -or
+                $report.CheckedCells -ne 39 -or $report.MatchedCells -ne 39 -or
+                @($report.Cells).Count -ne 39 -or @($report.Steps).Count -ne 3 -or
+                @($report.Cells | Where-Object { -not $_.Match }).Count -ne 0) {
+              throw "Oracle $name did not match 39/39; status=$($report.Status), matched=$($report.MatchedCells)"
+            }
+            if ($report.TestRunId -ne $id -or $report.SourceHeadSha -ne $sourceHead -or
+                $report.WorkflowSha -ne $env:GITHUB_SHA -or $report.OracleSha256 -ne $hash) {
+              throw "Oracle $name lacks correct run, source SHA or immutable baseline provenance"
+            }
+            Write-Host "APP-01B.3 $name : 39/39 persisted SQL cells PASS ($id)"
+          }
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |
