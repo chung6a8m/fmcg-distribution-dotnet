@@ -1092,6 +1092,12 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(200m, receipt);
         Assert.Equal(200m, allocated);
         Assert.Equal(200m, money);
+        // Independent pool-capacity check outside the locked 91 oracle cells:
+        // unused B rights must free physical allocation capacity at T6.
+        Assert.Equal(unloaded ? 60m : 70m, db.ExecuteScalar<decimal>("""
+            SELECT AllocatedBaseQuantity FROM dbo.StockPool
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+            """, args));
 
         var sourceKinds = db.Query<(string SourceKind, int Total)>("""
             SELECT SourceKind,COUNT(*) AS Total FROM dbo.BusinessSource
@@ -1396,6 +1402,10 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             WHERE TenantId=@Tenant AND TripId=@Trip AND SkuId=@Sku AND RightKind='B'
             """, args);
         Assert.Equal((30m, 0m, 30m, "RELEASED"), bRight);
+        Assert.Equal(40m, dbCheck.ExecuteScalar<decimal>("""
+            SELECT AllocatedBaseQuantity FROM dbo.StockPool
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+            """, args));
         Assert.Equal((100m, 1000m), dbCheck.QuerySingle<(decimal Qty, decimal Cost)>("""
             SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
             WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
@@ -1468,6 +1478,10 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                 AND SkuId=@Sku AND RightKind='B'
             """, args);
         Assert.Equal((30m, 20m, 10m, "RELEASED"), bRight);
+        Assert.Equal(60m, verify.ExecuteScalar<decimal>("""
+            SELECT AllocatedBaseQuantity FROM dbo.StockPool
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+            """, args));
         Assert.Equal((80m, 800m), verify.QuerySingle<(decimal Qty, decimal Cost)>("""
             SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
             WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
