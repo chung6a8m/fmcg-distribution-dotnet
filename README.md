@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status (2026-11-16):** APP-00A foundation and APP-00B toolchain/browser/PWA acceptance complete; Issue #13 closed under OWN-APP00B-13-03. APP-01A.1 integrated schema and physical two-tenant LocalDB checks are implemented in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21). **APP-01A overall remains NOT_VERIFIED**: command behavior, aggregate stock invariants and business AC-03 flow are not implemented. Owner authorization remains **synthetic nonproduction only**.
+**Status (2026-11-16):** APP-00A/APP-00B complete, APP-01A.1 schema [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21) and APP-01A.2 commands [PR #22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22) merged/CI verified. APP-01A.3 approval, as-of audit and two-tenant concurrency/security are implemented in **draft [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23), CI and independent review pending**. **APP-01A overall NOT_VERIFIED** and full AC-03 business flow not implemented. Owner authorization remains **synthetic nonproduction only**.
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -20,14 +20,20 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Adds an integrated, **per-tenant** Customer/ShipTo/Sku/StockLocation/Trip, A order/line, source/command/effect ledger, shared A/B StockRight, AReservation, BQuota and BCreditGrant schema.
 - Foreign keys bind every root entity to `AppTenantBinding`; composite FKs enforce Customer+ShipTo identity and same-tenant source/rights; SQL checks and unique keys protect per-row amounts and duplicate source/effect identities.
 - Introduces 5 SQL Server LocalDB integration tests for two database migrations/replay, isolation/invalid tenant writes, Customer/ShipTo mismatch, A/B right kind/source uniqueness, and command/ledger duplicate protection.
-- **Schema only:** Dapper command transactions, deterministic canonical payload replay outcomes, aggregate stock availability/overlap checks, AR/COGS and real business APIs are **not implemented** in this PR. Those belong to APP-01A.2/.3 and APP-01B–E. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
+- **APP-01A.1 scope was schema-only**; Dapper command transactions and aggregate allocation were subsequently implemented in APP-01A.2. Real AR/COGS and delivery remain APP-01B–E. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
 
 ## APP-01A.2 — Transactional A/B rights (synthetic only)
 
 - Explicit Dapper SERIALIZABLE transactions implement `ReserveAStock`, `ConfirmAOrder`, `GrantBQuota` and `GrantBCredit` in one common source/command ledger.
 - Shared warehouse/SKU `StockPool` prevents A+B allocations beyond eligible synthetic opening stock; `BCreditPool` requires explicitly seeded synthetic credit capacity. No implicit stock or real credit approval, physical stock movement, delivery or AR/COGS.
 - SHA-256 canonical payload v1 and `(tenant, producer, command)` idempotency. Same payload replays the persisted outcome; changed payload returns 409 CONFLICT with zero new effects.
-- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 audit/policy/verification remain outstanding; APP-01A is NOT_VERIFIED.
+- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 is in draft PR #23, pending CI/review; APP-01A overall is NOT_VERIFIED.
+
+## APP-01A.3 — Audit, approval and two-tenant verification (draft PR #23)
+
+- Adds synthetic AP-01 credit-policy evidence with maker/checker separation, versioned scope, expiry, explicit cap and source-linked approval ID. No approval, ambiguous approval or missing policy is fail-closed; **real credit policies and thresholds are still UNSET**.
+- Synthetic JWT is actor-bound and command routes have Warehouse/Sales permission separation. Read-only auditor endpoint `GET /api/synthetic/app01a/audit/as-of?asOf=<UTC>` provides logical as-of actor/source/effect/pending, approval lineage and A/B rights/effects reconciliation; **not temporal SQL history, production audit or accounting**.
+- Adds >=12 physical LocalDB verification cases for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Requires reviewed final-HEAD CI and TestRunId before APP-01A acceptance. See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
 
 ## Windows local checks
 
