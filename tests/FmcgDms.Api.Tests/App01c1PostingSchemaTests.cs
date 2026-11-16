@@ -72,12 +72,16 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
                 "SELECT COUNT(*) FROM dbo.VersionInfo WHERE Version=202611160005"));
             Assert.Equal(1, db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM sys.foreign_keys WHERE name=N'FK_SaleDelivery_LoadedManifestLine'"));
-            Assert.Equal(0, db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SaleDelivery"));
-            Assert.Equal(0, db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.CashReceipt"));
+            int postedBefore = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.SaleDelivery");
+            int receiptsBefore = db.ExecuteScalar<int>("SELECT COUNT(*) FROM dbo.CashReceipt");
             ScratchMigrator.Migrate(connection, tenant, fixture.Nonce);
             ScratchMigrator.Migrate(connection, tenant, fixture.Nonce);
             Assert.Equal(1, db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM dbo.VersionInfo WHERE Version=202611160005"));
+            Assert.Equal(postedBefore, db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.SaleDelivery"));
+            Assert.Equal(receiptsBefore, db.ExecuteScalar<int>(
+                "SELECT COUNT(*) FROM dbo.CashReceipt"));
             Assert.Equal(tenant, db.ExecuteScalar<string>(
                 "SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1"));
         }
@@ -133,10 +137,11 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             sourceLine = b.SourceLine, manifestLine = b.Input.ManifestLine, s.Sku,
             qty = 20m, cost = 200m
         }, 2627, 2601);
+        var second = InsertSale(db, A, s, "B", 5m, 75m, 50m);
         Reject(db, InsertIssueSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = b.Id,
-            sourceLine = b.SourceLine, manifestLine = b.Input.ManifestLine, s.Sku,
-            qty = 20m, cost = 201m
+            id = Guid.NewGuid(), tenant = A, delivery = second.Id,
+            sourceLine = second.SourceLine, manifestLine = second.Input.ManifestLine, s.Sku,
+            qty = 5m, cost = 51m
         }, 547);
         Reject(db, """
             UPDATE dbo.DeliveryStockIssue SET CostAmount=199 WHERE Id=@id
@@ -199,13 +204,14 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Assert.Equal(375m, db.ExecuteScalar<decimal>(
             "SELECT OutstandingAmount FROM dbo.ReceivableOpenItem WHERE Id=@id",
             new { id = ar }));
+        var nextA = InsertSale(db, A, s, "A", 5m, 75m, 50m);
         Reject(db, InsertOpenItemSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = a.Id, s.Customer,
-            sourceLine = a.SourceLine, kind = "A", amount = 375m, due = (DateTime?)null
+            id = Guid.NewGuid(), tenant = A, delivery = nextA.Id, s.Customer,
+            sourceLine = nextA.SourceLine, kind = "A", amount = 75m, due = (DateTime?)null
         }, 547);
         Reject(db, InsertOpenItemSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = a.Id, s.Customer,
-            sourceLine = a.SourceLine, kind = "B", amount = 375m, due
+            id = Guid.NewGuid(), tenant = A, delivery = nextA.Id, s.Customer,
+            sourceLine = nextA.SourceLine, kind = "B", amount = 75m, due
         }, 547);
         var source = NewSource(db, A, s.Trip, s.Customer, "A_DELIVERY");
         var sourceLine = NewLine(db, A, source, s.Sku, 25m, 375m);
@@ -259,13 +265,22 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             new { receipt }, 51066);
         Reject(db, "DELETE dbo.ReceiptAllocation WHERE Id=@allocation",
             new { allocation }, 51064);
+        var foreign = SeedLoadedTrip(db, A);
+        var otherSale = InsertSale(db, A, foreign, "B", 1m, 15m, 10m);
+        Guid otherAr = Guid.NewGuid();
+        db.Execute(InsertOpenItemSql, new {
+            id = otherAr, tenant = A, delivery = otherSale.Id, foreign.Customer,
+            sourceLine = otherSale.SourceLine, kind = "B", amount = 15m,
+            due = (DateTime?)null
+        });
         Reject(db, InsertAllocationSql, new {
-            id = Guid.NewGuid(), tenant = A, receipt, ar,
-            Customer = Guid.NewGuid(), amount = 1m
+            id = Guid.NewGuid(), tenant = A, receipt, ar = otherAr,
+            foreign.Customer, amount = 1m
         }, 547);
         Reject(db, InsertReceiptSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = b.Id, s.Trip, s.Customer,
-            sourceLine = b.SourceLine, amount = -1m, evidence = "synthetic-verified-cash"
+            id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
+            foreign.Trip, foreign.Customer, sourceLine = otherSale.SourceLine,
+            amount = -1m, evidence = "synthetic-verified-cash"
         }, 547);
     }
 
@@ -296,12 +311,13 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             """, new { customer = otherCustomer, shipTo = otherShipTo,
                 tenant = A, code = Code() });
         Guid otherGrant = NewGrant(db, A, s, otherCustomer, otherShipTo, 100m);
+        var otherSale = InsertSale(db, A, s, "B", 5m, 75m, 50m);
         Reject(db, InsertGrantUseSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = b.Id,
+            id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
             grant = otherGrant, s.Trip, s.Customer, amount = 1m
         }, 547);
         Reject(db, InsertGrantUseSql, new {
-            id = Guid.NewGuid(), tenant = A, delivery = b.Id,
+            id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
             grant, s.Trip, s.Customer, amount = -1m
         }, 547);
     }
