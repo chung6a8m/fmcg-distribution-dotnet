@@ -101,6 +101,9 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Guid vehicle = AddLocation(db, A, "VEHICLE");
         Guid otherVehicle = AddLocation(db, A, "VEHICLE");
         Guid trip = AddTrip(db, A, vehicle);
+        Guid roleTestTrip = AddTrip(db, A, vehicle);
+        Guid vehicleTestTrip = AddTrip(db, A, vehicle);
+        Guid tenantTestTrip = AddTrip(db, A, vehicle);
         Guid valid = AddManifest(db, A, trip, warehouse, vehicle);
 
         Assert.Equal("DRAFT", db.ExecuteScalar<string>(
@@ -118,7 +121,7 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
             VALUES(@id,@tenant,@number,@trip,@warehouse,@vehicle)
             """, new
         {
-            id = Guid.NewGuid(), tenant = A, number = Code(), trip,
+            id = Guid.NewGuid(), tenant = A, number = Code(), trip = roleTestTrip,
             warehouse = otherVehicle, vehicle
         }, 547); // A VEHICLE cannot be used as a WAREHOUSE.
 
@@ -128,7 +131,7 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
             VALUES(@id,@tenant,@number,@trip,@warehouse,@vehicle)
             """, new
         {
-            id = Guid.NewGuid(), tenant = A, number = Code(), trip,
+            id = Guid.NewGuid(), tenant = A, number = Code(), trip = vehicleTestTrip,
             warehouse, vehicle = otherVehicle
         }, 547); // Must be the Trip's configured vehicle.
 
@@ -138,7 +141,7 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
             VALUES(@id,@tenant,@number,@trip,@warehouse,@vehicle)
             """, new
         {
-            id = Guid.NewGuid(), tenant = B, number = Code(), trip,
+            id = Guid.NewGuid(), tenant = B, number = Code(), trip = tenantTestTrip,
             warehouse, vehicle
         }, 547); // Cross-tenant root cannot be inserted in tenant A DB.
 
