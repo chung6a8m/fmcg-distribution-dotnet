@@ -258,8 +258,16 @@ public sealed class App01c3APartialDeliveryTests(SqlScratchFixture fixture)
                  JOIN dbo.BusinessSource src ON src.Id=l.BusinessSourceId AND src.TenantId=l.TenantId
                  WHERE e.TenantId=@Tenant AND src.TripId=@Trip AND src.SourceKind=N'B_SALE_DELIVERY'
                      AND e.LedgerKind=N'CUSTODY') Custody,
+                -- A different Trip can now have T5 accepted cash on the
+                -- same synthetic tenant. Never assert its fund balance as
+                -- part of this Trip's T4 (the original source was unscoped).
                 (SELECT COALESCE(SUM(e.AmountDelta),0) FROM dbo.LedgerEffect e
-                 WHERE e.TenantId=@Tenant AND e.LedgerKind=N'FUND') Fund,
+                 JOIN dbo.BusinessSourceLine l ON l.TenantId=e.TenantId
+                     AND l.Id=e.BusinessSourceLineId
+                 JOIN dbo.BusinessSource src ON src.TenantId=l.TenantId
+                     AND src.Id=l.BusinessSourceId
+                 WHERE e.TenantId=@Tenant AND src.TripId=@Trip
+                     AND e.LedgerKind=N'FUND') Fund,
                 (SELECT COUNT(*) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND TripId=@Trip) Deliveries,
                 (SELECT COUNT(*) FROM dbo.DeliveryStockIssue i
                  JOIN dbo.SaleDelivery d ON d.Id=i.SaleDeliveryId AND d.TenantId=i.TenantId
