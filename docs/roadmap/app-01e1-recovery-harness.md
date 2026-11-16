@@ -8,7 +8,7 @@ Canonical application base: APP-01D [PR #32](https://github.com/chung6a8m/fmcg-d
 
 | Increment | Primary deliverable | Exit gate |
 |---|---|---|
-| **APP-01E.1** | Recovery protocol, two-client admission barrier, test-only pre-COMMIT SQL fault and post-response ACK suppression, persisted SQL actual/diff + CI evidence | 6 parameterized LocalDB smoke cases (3 scenarios × two physical tenants), existing regressions, independent HEAD review and CI |
+| **APP-01E.1** | Recovery protocol, two-client admission barrier, test-only pre-COMMIT SQL fault and post-response ACK suppression, persisted SQL actual/diff + CI evidence | 6 parameterized LocalDB smoke cases (3 scenarios × two physical tenants) plus one fail-closed DDL guard-negative case, existing regressions, independent HEAD review and CI |
 | **APP-01E.2** | Cross-command two-client races over A/B rights, manifest, B20, A25, cashier and unload | Each interleaving linearizes to valid outcome, no double posting/oversell, full per-source reconciliation |
 | **APP-01E.3** | Per-command fault-point rollback/retry matrix spanning every source/physical/financial transaction | No partially committed source or ledger/physical/monetary state; precise retry and conflict semantics |
 | **APP-01E.4** | Command result lookup/recovery protocol and client/server restart; HTTP timeout/lost ACK behavior | Durable outcome recovery without duplicate business writes after process restart, with access control and unknown-state handling |
@@ -45,7 +45,7 @@ All test cases use signed synthetic `warehouse` JWTs and `GrantBQuota` as the **
 | `precommit-rollback` | `FAULT_PRECOMMIT_ROLLED_BACK`; `RETRY_SAME_IDENTITY` | before trigger drop: **0 command/source/line/effect/right, 0 allocated**; after retry: **1 each, allocated 30**, fresh `Replayed=false` |
 | `lost-ack-smoke` | `POSTCOMMIT_ACK_SUPPRESSED`; `SAME_IDENTITY_REPLAY` | SQL already has **1 command/source/line/effect/right, allocated 30** before replay; after replay identical source ID, counts and ledger digest, `Replayed=true` |
 
-Evidence cardinality is **2 tenants × (1+2+2) stages × 6 SQL numeric cells = 60 cells**. The six E.1 test invocations and their **60 probe cells are separate** from AC-03's **91×2** business oracle; the existing oracle must continue to run unchanged. SQL collection is *not* independent APP-01E.5 cross-transaction reconciliation.
+Evidence cardinality is **2 tenants × (1+2+2) stages × 6 SQL numeric cells = 60 cells**. The six two-tenant smoke invocations (plus one DDL safety-negative test) and their **60 probe cells are separate** from AC-03's **91×2** business oracle; the existing oracle must continue to run unchanged. SQL collection is *not* independent APP-01E.5 cross-transaction reconciliation.
 
 ### Failure matrix for handoff
 
