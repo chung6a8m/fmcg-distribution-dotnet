@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01D 91-cell T0-T6 + APP-01C.4/B.3 regressions
+      - name: Two-tenant LocalDB APP-01E.1 harness + APP-01D/C.4/B.3 regressions
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -61,7 +61,9 @@ jobs:
           APP01C4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01D_TEST_RUN_ID: app01d-${{ github.run_id }}-${{ github.run_attempt }}
           APP01D_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 99 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01E1_TEST_RUN_ID: app01e1-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01E1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 106 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -130,6 +132,18 @@ jobs:
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
             Set-Content -Path TestResults/APP-01D-TestRunId.txt -Encoding utf8
           Write-Host "APP-01D TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01E.1 TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01e1-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          @("TestRunId=$id", "SourceHeadSha=$sourceHead", "WorkflowSha=$env:GITHUB_SHA",
+            "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
+            Set-Content -Path TestResults/APP-01E1-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01E.1 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -385,6 +399,109 @@ jobs:
               throw "APP-01D $name missing source-bound cashier/unload ledger envelope"
             }
             Write-Host "APP-01D $name : 91/91 persisted SQL cells PASS ($id; $sourceHead)"
+          }
+      - name: Fail closed on APP-01E.1 physical SQL recovery evidence
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem tests -Recurse -File -Filter '*-harness.json' |
+            Where-Object { $_.FullName -like '*TestResults*APP-01E1*' })
+          if ($reports.Count -ne 6) { throw "Expected 6 E.1 reports; found $($reports.Count)" }
+          $id = "app01e1-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $cases = @{
+            'two-client-gate' = @('AFTER_BOTH_HTTP_CLIENTS')
+            'precommit-rollback' = @('FAULT_PRECOMMIT_ROLLED_BACK','RETRY_SAME_IDENTITY')
+            'lost-ack-smoke' = @('POSTCOMMIT_ACK_SUPPRESSED','SAME_IDENTITY_REPLAY')
+          }
+          $fields = @('BusinessCommand','BusinessSource','BusinessSourceLine',
+                      'LedgerEffect','StockRight','StockPoolAllocated')
+          foreach ($tenant in @('tenant-a','tenant-b')) {
+            foreach ($case in @('two-client-gate','precommit-rollback','lost-ack-smoke')) {
+              $name = "$tenant-$case-harness.json"
+              $found = @($reports | Where-Object { $_.Name -ceq $name })
+              if ($found.Count -ne 1) { throw "Missing or duplicate E.1 report $name" }
+              $report = Get-Content $found[0].FullName -Raw | ConvertFrom-Json
+              if ($report.Schema -cne 'APP01E1_HARNESS_V1' -or $report.Status -cne 'PASS' -or
+                  $report.TenantId -cne $tenant -or $report.Scenario -cne $case -or
+                  $report.TestRunId -cne $id -or $report.SourceHeadSha -cne $sourceHead -or
+                  $report.WorkflowSha -cne $env:GITHUB_SHA) {
+                throw "E.1 provenance/schema mismatch $name"
+              }
+              if ($report.Database -cnotmatch '^Fmcg_App00_[a-f0-9]{32}_[AB]$' -or
+                  (($tenant -eq 'tenant-a') -and !$report.Database.EndsWith('_A')) -or
+                  (($tenant -eq 'tenant-b') -and !$report.Database.EndsWith('_B'))) {
+                throw "E.1 unsafe DB identity $name"
+              }
+              $stages = @($report.Stages)
+              $expectedStages = @($cases[$case])
+              if ($stages.Count -ne $expectedStages.Count) { throw "Wrong E.1 stages $name" }
+              for ($i=0; $i -lt $expectedStages.Count; $i++) {
+                $stage = $stages[$i]
+                $rollback = $stage.Stage -ceq 'FAULT_PRECOMMIT_ROLLED_BACK'
+                if ($stage.Stage -cne $expectedStages[$i] -or $stage.ExpectedCells -ne 6 -or
+                    $stage.MatchedCells -ne 6 -or @($stage.Cells).Count -ne 6 -or
+                    $stage.Sql.Database -cne $report.Database -or
+                    $stage.Sql.TenantId -cne $tenant -or
+                    $stage.Sql.ProducerId -cne 'app01e1-harness' -or
+                    $stage.Sql.CommandId -cnotmatch '^[a-f0-9]{32}$' -or
+                    $stage.Sql.LedgerSha256 -cnotmatch '^[0-9A-F]{64}$') {
+                  throw "Incomplete SQL stage $name index $i"
+                }
+                if ($rollback) {
+                  if ($stage.Sql.Status -or $stage.Sql.SourceId -or
+                      $stage.Sql.SourceKind -or $stage.Sql.SourceNumber -or
+                      $stage.Sql.SourceActorId -or $stage.Sql.SourceTripId -or
+                      $null -ne $stage.Sql.SourceLineQuantity -or
+                      $stage.Sql.BQuotaRows -ne 0 -or
+                      $stage.Sql.RightKind -or $stage.Sql.RightStatus -or
+                      $null -ne $stage.Sql.RightGranted -or
+                      $null -ne $stage.Sql.RightConsumed -or
+                      $null -ne $stage.Sql.RightReleased -or
+                      $stage.Sql.EffectKey -or $stage.Sql.LedgerKind -or
+                      $null -ne $stage.Sql.EffectQuantity -or
+                      $null -ne $stage.Sql.EffectAmount) {
+                    throw "Rollback left source/right/ledger details $name"
+                  }
+                } else {
+                  if ($stage.Sql.Status -cne 'APPLIED' -or
+                      $stage.Sql.OutcomeCode -cne 'B_QUOTA_GRANTED' -or
+                      !$stage.Sql.SourceId -or
+                      $stage.Sql.SourceKind -cne 'STOCK_ALLOC' -or
+                      $stage.Sql.SourceNumber -cnotmatch '^[a-f0-9]{32}$' -or
+                      $stage.Sql.SourceActorId -cne 'e1-warehouse-actor' -or
+                      !$stage.Sql.SourceTripId -or
+                      $stage.Sql.SourceLineQuantity -ne 30 -or
+                      $stage.Sql.BQuotaRows -ne 1 -or
+                      $stage.Sql.RightKind -cne 'B' -or
+                      $stage.Sql.RightStatus -cne 'HELD' -or
+                      $stage.Sql.RightGranted -ne 30 -or
+                      $stage.Sql.RightConsumed -ne 0 -or
+                      $stage.Sql.RightReleased -ne 0 -or
+                      $stage.Sql.EffectKey -cne 'RIGHT-ALLOCATED' -or
+                      $stage.Sql.LedgerKind -cne 'RIGHT_B' -or
+                      $stage.Sql.EffectQuantity -ne 30 -or
+                      $stage.Sql.EffectAmount -ne 0) {
+                    throw "Incorrect committed SQL source/right/ledger semantics $name"
+                  }
+                }
+                foreach ($field in $fields) {
+                  $match = @($stage.Cells | Where-Object { $_.Field -ceq $field })
+                  if ($match.Count -ne 1) { throw "Missing or duplicate SQL cell $field in $name" }
+                  $expected = if ($rollback) { 0 } elseif ($field -eq 'StockPoolAllocated') { 30 } else { 1 }
+                  $cell = $match[0]
+                  if ($cell.Expected -ne $expected -or $cell.Actual -ne $expected -or
+                      $cell.Diff -ne 0 -or !$cell.Match) {
+                    throw "E.1 actual/diff mismatch $name stage $i field $field"
+                  }
+                }
+              }
+              if ($case -eq 'lost-ack-smoke' -and
+                  $stages[0].Sql.LedgerSha256 -cne $stages[1].Sql.LedgerSha256) {
+                throw "Lost ACK replay changed persisted ledger fingerprint $name"
+              }
+              Write-Host "APP-01E.1 $name verified on SQL: $id"
+            }
           }
       - name: Verify MTP test evidence exists
         shell: pwsh

@@ -1,6 +1,6 @@
 # APP-01D — T5 cashier acceptance and T6 vehicle unload / remainder return
 
-**State: IMPLEMENTED / PR_REVIEW_AND_SQL_CI_PENDING.** Synthetic, nonproduction, `SYNTHETIC_UNITLESS`, `invoiceEligible=false`. Business Baseline and `business.lock.json` remain immutable. This PR does **not** authorize production cash, legal invoicing, accounting, EV/P0 or tenant go-live.
+**State: MERGED / SYNTHETIC_VERIFIED on [PR #32](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/32).** Independently reviewed source HEAD `d32cd507`, [Actions #43878243524 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43878243524) SUCCESS: 99/99 tests, 91/91 SQL cells per tenant, `app01d-43878243524-2`. The review fixed partial-B-load release-only and B allocation pool conservation; full evidence on PR. ** Synthetic, nonproduction, `SYNTHETIC_UNITLESS`, `invoiceEligible=false`. Business Baseline and `business.lock.json` remain immutable. This PR does **not** authorize production cash, legal invoicing, accounting, EV/P0 or tenant go-live.
 
 ## Contract and SQL source of truth
 
@@ -38,3 +38,7 @@ Only locked oracle values may be used for comparator expected cells. **Do not** 
 ### Scope restrictions
 
 These are **synthetic fleet remainder** movements, **not** customer return requests, quarantine/QA, credits/refunds, period-locked cost adjustments or EV-05. APP-01E will cover stronger two-client races, lost ACK/restart, cross-module retry/rollback and reconciliation. Legacy/production writer cutover, seller/channel, B real/offline grant and tax/accounting remain NOT_VERIFIED / NOT_AUTHORIZED. Owner's 125% browser scale exception remains ACCEPTED / NOT_TESTED.
+
+## E.1 handoff
+
+APP-01D is bounded and verified for T0–T6 synthetic state only. [APP-01E.1](app-01e1-recovery-harness.md) adds two-client admission and test-only pre-/post-COMMIT recovery probes. This does not retroactively verify production lost ACK, process restart or full AC-11.
