@@ -49,7 +49,7 @@ jobs:
       - name: Two-tenant scratch and APP-01A.1/.2 integration tests
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 24 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 25 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |

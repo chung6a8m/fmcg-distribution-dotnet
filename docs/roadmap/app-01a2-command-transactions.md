@@ -15,7 +15,7 @@ Both tables belong to a single independently bound tenant database. Existing `Ap
 
 `POST /api/synthetic/app01a/commands/{reserve-a-stock|confirm-a-order|grant-b-quota|grant-b-credit}` requires validated signed synthetic JWT with server-resolved tenant and actor. Routes are **not registered** unless `SyntheticAuth:Enabled` is set in `Development` or `IntegrationTest`; `TenantConnections.OpenSyntheticScratchAsync` again checks LocalDB, instance, exact nonce marker, slot and tenant binding. Request cannot set tenant, actor or connection string.
 
-All requests carry `ProducerId`, `CommandId`, `SourceNumber`. Other request properties:
+All requests carry `ProducerId`, `CommandId`, `SourceNumber`. All four commands require a `PREPARED` Trip with an **active `VEHICLE` StockLocation**; a warehouse or inactive location in `VehicleLocationId` yields durable `TRIP_NOT_PREPARED` without effects. Other request properties:
 
 | Command | Payload | Successful outcome / invariant |
 |---|---|---|
@@ -37,6 +37,6 @@ All requests carry `ProducerId`, `CommandId`, `SourceNumber`. Other request prop
 
 ## Verification contract and known limits
 
-Physical Windows LocalDB tests cover migration replay in both nonce-owned DBs; A reserve→B quota→A confirm; no AR/COGS; source reuse, shared stock bounds, invalid cross-tenant resources, customer/ShipTo/pool, credit cap; successful and rejected idempotent replay/changed payload conflict; concurrent two-client stock and retransmit; injected SQL-trigger rollback. Require **>=24 xUnit tests** (14 prior + 10 APP-01A.2), .NET build and PR-head CI artifacts, unchanged Business Baseline and frontend/Playwright checks.
+Physical Windows LocalDB tests cover migration replay in both nonce-owned DBs; A reserve→B quota→A confirm; no AR/COGS; source reuse, shared stock bounds, invalid cross-tenant resources, customer/ShipTo/pool, credit cap; successful and rejected idempotent replay/changed payload conflict; concurrent two-client stock and retransmit; inactive/wrong-kind Trip vehicle rejection across all commands; injected SQL-trigger rollback. Require **>=25 xUnit tests** (14 prior + 10 APP-01A.2), .NET build and PR-head CI artifacts, unchanged Business Baseline and frontend/Playwright checks.
 
 **Remaining for APP-01A.3:** independent repeatable multi-client race/rollback matrix, approval/policy gates, stable query-asOf audit (actor/source/effects/pending), HTTP authorization matrix and final TestRunId/source reconciliation. **Remaining for APP-01B..E:** manifest/stock custody transfer, sale/receipts, physical stock/COGS and all 91 AC-03 checks. No EV/P0, invoice/legal channel, offline write, production import or tenant go-live authorization.

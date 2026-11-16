@@ -288,6 +288,67 @@ public sealed class App01a2CommandTests(SqlScratchFixture fixture)
                 TestContext.Current.CancellationToken)).StatusCode);
     }
 
+
+    [Fact]
+    public async Task All_commands_require_prepared_trip_with_active_vehicle_location()
+    {
+        var s = Seed(A);
+        using var db = Open(fixture, A);
+        using var factory = fixture.CreateFactory();
+        using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+
+        async Task AssertTripRejectedForAllCommands()
+        {
+            Assert.Equal("TRIP_NOT_PREPARED",
+                (await Send(client, "reserve-a-stock", Reserve(s))).Outcome.ReasonCode);
+            Assert.Equal("TRIP_NOT_PREPARED",
+                (await Send(client, "confirm-a-order", Confirm(s))).Outcome.ReasonCode);
+            Assert.Equal("TRIP_NOT_PREPARED",
+                (await Send(client, "grant-b-quota", Quota(s))).Outcome.ReasonCode);
+            Assert.Equal("TRIP_NOT_PREPARED",
+                (await Send(client, "grant-b-credit", Credit(s, 10))).Outcome.ReasonCode);
+        }
+
+        // The Trip FK alone permits a WAREHOUSE or disabled location as its vehicle.
+        db.Execute("UPDATE dbo.StockLocation SET Kind=N'WAREHOUSE' WHERE TenantId=@Tenant AND Id=@Vehicle",
+            new { Tenant = A, s.Vehicle });
+        await AssertTripRejectedForAllCommands();
+        db.Execute("UPDATE dbo.StockLocation SET Kind=N'VEHICLE', IsActive=0 WHERE TenantId=@Tenant AND Id=@Vehicle",
+            new { Tenant = A, s.Vehicle });
+        await AssertTripRejectedForAllCommands();
+
+        Assert.Equal(0, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.BusinessSource WHERE TenantId=@Tenant AND TripId=@Trip",
+            new { Tenant = A, s.Trip }));
+        Assert.Equal(0m, db.ExecuteScalar<decimal>(
+            "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku",
+            new { Tenant = A, s.Warehouse, s.Sku }));
+
+        db.Execute("UPDATE dbo.StockLocation SET IsActive=1 WHERE TenantId=@Tenant AND Id=@Vehicle",
+            new { Tenant = A, s.Vehicle });
+        Assert.Equal("APPLIED", (await Send(client, "reserve-a-stock", Reserve(s))).Outcome.Status);
+
+        // Confirm also validates the vehicle even after the A order is fully reserved.
+        db.Execute("UPDATE dbo.StockLocation SET Kind=N'WAREHOUSE' WHERE TenantId=@Tenant AND Id=@Vehicle",
+            new { Tenant = A, s.Vehicle });
+        Assert.Equal("TRIP_NOT_PREPARED",
+            (await Send(client, "confirm-a-order", Confirm(s))).Outcome.ReasonCode);
+        Assert.Equal("DRAFT", db.ExecuteScalar<string>(
+            "SELECT Status FROM dbo.AOrder WHERE TenantId=@Tenant AND Id=@Order",
+            new { Tenant = A, s.Order }));
+
+        db.Execute("UPDATE dbo.StockLocation SET Kind=N'VEHICLE' WHERE TenantId=@Tenant AND Id=@Vehicle",
+            new { Tenant = A, s.Vehicle });
+        Assert.Equal("A_ORDER_CONFIRMED",
+            (await Send(client, "confirm-a-order", Confirm(s))).Outcome.OutcomeCode);
+        Assert.Equal(40m, db.ExecuteScalar<decimal>(
+            "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku",
+            new { Tenant = A, s.Warehouse, s.Sku }));
+        Assert.Equal(0, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.BCreditGrant WHERE TenantId=@Tenant AND TripId=@Trip",
+            new { Tenant = A, s.Trip }));
+    }
+
     [Fact]
     public async Task Concurrent_A_and_B_commands_cannot_exceed_one_physical_pool()
     {

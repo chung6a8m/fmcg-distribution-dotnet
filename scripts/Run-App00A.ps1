@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & dotnet build FmcgDms.slnx --configuration Release --no-restore
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& dotnet test --solution FmcgDms.slnx --configuration Release --no-build --minimum-expected-tests 24 -- --report-trx --coverage --coverage-output-format cobertura
+& dotnet test --solution FmcgDms.slnx --configuration Release --no-build --minimum-expected-tests 25 -- --report-trx --coverage --coverage-output-format cobertura
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location web
 try {

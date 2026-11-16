@@ -64,6 +64,8 @@ public sealed class App01a2CommandService(TenantConnections connections)
     {
         public string Status { get; set; } = "";
         public Guid? VehicleLocationId { get; set; }
+        public string VehicleKind { get; set; } = "";
+        public bool VehicleActive { get; set; }
     }
 
     private sealed class StockLocationSku
@@ -210,9 +212,17 @@ public sealed class App01a2CommandService(TenantConnections connections)
     private static Task<Trip?> FindTrip(SqlConnection db, SqlTransaction tx,
         string tenant, Guid tripId, CancellationToken ct) =>
         db.QuerySingleOrDefaultAsync<Trip>(Sql("""
-            SELECT Status,VehicleLocationId FROM dbo.Trip WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND Id=@TripId
+            SELECT t.Status,t.VehicleLocationId,
+                v.Kind AS VehicleKind,v.IsActive AS VehicleActive
+            FROM dbo.Trip t WITH (UPDLOCK,HOLDLOCK)
+            LEFT JOIN dbo.StockLocation v WITH (HOLDLOCK)
+                ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
+            WHERE t.TenantId=@Tenant AND t.Id=@TripId
             """, new { Tenant = tenant, TripId = tripId }, tx, ct));
+
+    private static bool IsPreparedTrip(Trip? trip) =>
+        trip is { Status: "PREPARED", VehicleLocationId: not null,
+            VehicleKind: "VEHICLE", VehicleActive: true };
 
     private static async Task<string?> AllocateStock(SqlConnection db, SqlTransaction tx,
         string tenant, Guid locationId, Guid skuId, decimal quantity, CancellationToken ct)
@@ -317,7 +327,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (order.Status != "DRAFT") return BusinessCommandOutcome.Rejected("ORDER_NOT_DRAFT");
                 if (!order.TripId.HasValue) return BusinessCommandOutcome.Rejected("ORDER_TRIP_REQUIRED");
                 var trip = await FindTrip(db, tx, tenant, order.TripId.Value, token);
-                if (trip?.Status != "PREPARED" || !trip.VehicleLocationId.HasValue)
+                if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
 
                 var line = await db.QuerySingleOrDefaultAsync<OrderLine>(Sql("""
@@ -388,7 +398,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (order.Status != "DRAFT") return BusinessCommandOutcome.Rejected("ORDER_NOT_DRAFT");
                 if (!order.TripId.HasValue) return BusinessCommandOutcome.Rejected("ORDER_TRIP_REQUIRED");
                 var trip = await FindTrip(db, tx, tenant, order.TripId.Value, token);
-                if (trip?.Status != "PREPARED" || !trip.VehicleLocationId.HasValue)
+                if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
 
                 var lines = (await db.QueryAsync<OrderLine>(Sql("""
@@ -449,7 +459,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (await SourceUsed(db, tx, tenant, StockSourceKind, request.SourceNumber, token))
                     return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
                 var trip = await FindTrip(db, tx, tenant, request.TripId, token);
-                if (trip?.Status != "PREPARED" || !trip.VehicleLocationId.HasValue)
+                if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
                 string? stockError = await AllocateStock(db, tx, tenant, request.StockLocationId,
                     request.SkuId, request.BaseQuantity, token);
@@ -502,7 +512,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (await SourceUsed(db, tx, tenant, CreditSourceKind, request.SourceNumber, token))
                     return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
                 var trip = await FindTrip(db, tx, tenant, request.TripId, token);
-                if (trip?.Status != "PREPARED" || !trip.VehicleLocationId.HasValue)
+                if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
                 int matched = await db.ExecuteScalarAsync<int>(Sql("""
                     SELECT COUNT(*) FROM dbo.Customer c
