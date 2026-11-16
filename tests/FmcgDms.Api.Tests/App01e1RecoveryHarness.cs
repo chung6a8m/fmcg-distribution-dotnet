@@ -77,7 +77,7 @@ internal sealed class AfterServerAckLossHandler(string targetPath) : DelegatingH
 /// commits, so previous in-transaction stock/source/right work must roll back.
 /// Never part of migrations, production API or application DI.
 /// </summary>
-internal sealed class PreCommitLedgerFault(string connectionString) : IAsyncDisposable
+internal sealed class PreCommitLedgerFault(string connectionString, string tenant) : IAsyncDisposable
 {
     private const string Trigger = "APP01E1_ThrowOnLedgerInsert";
 
@@ -88,8 +88,7 @@ internal sealed class PreCommitLedgerFault(string connectionString) : IAsyncDisp
             || !Regex.IsMatch(sourceNumber, @"\A[a-f0-9]{32}\z", RegexOptions.CultureInvariant))
             throw new ArgumentException("Unsafe test-only SQL fault identity.");
 
-        await using var db = new SqlConnection(connectionString);
-        await db.OpenAsync();
+        await using var db = await OpenGuardedScratchAsync(connectionString, tenant);
         await db.ExecuteAsync($"""
             CREATE TRIGGER dbo.{Trigger} ON dbo.LedgerEffect AFTER INSERT
             AS
@@ -108,12 +107,46 @@ internal sealed class PreCommitLedgerFault(string connectionString) : IAsyncDisp
                     THROW 51061, 'APP01E1_INJECT_PRECOMMIT', 1;
             END
             """);
-        return new PreCommitLedgerFault(connectionString);
+        return new PreCommitLedgerFault(connectionString, tenant);
+    }
+
+    private static async Task<SqlConnection> OpenGuardedScratchAsync(
+        string connectionString, string tenant)
+    {
+        var builder = new SqlConnectionStringBuilder(connectionString);
+        var match = Regex.Match(builder.InitialCatalog,
+            @"\AFmcg_App00_([a-f0-9]{32})_([AB])\z", RegexOptions.CultureInvariant);
+        if (!builder.DataSource.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase)
+            || !builder.IntegratedSecurity || !match.Success
+            || (tenant == "tenant-a" && match.Groups[2].Value != "A")
+            || (tenant == "tenant-b" && match.Groups[2].Value != "B"))
+            throw new InvalidOperationException(
+                "APP01E1 SQL fault requires a correctly named tenant LocalDB scratch target.");
+
+        var db = new SqlConnection(builder.ConnectionString);
+        try
+        {
+            await db.OpenAsync();
+            string? marker = await db.QuerySingleOrDefaultAsync<string>(
+                "SELECT TOP(1) Nonce FROM dbo.App00ScratchMarker");
+            string? binding = await db.QuerySingleOrDefaultAsync<string>(
+                "SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1");
+            if (!string.Equals(marker, match.Groups[1].Value, StringComparison.Ordinal)
+                || !string.Equals(binding, tenant, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "APP01E1 SQL fault database nonce/tenant ownership is invalid.");
+            return db;
+        }
+        catch
+        {
+            await db.DisposeAsync();
+            throw;
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await using var db = new SqlConnection(connectionString);
+        await using var db = await OpenGuardedScratchAsync(connectionString, tenant);
         await db.ExecuteAsync($"DROP TRIGGER IF EXISTS dbo.{Trigger}");
     }
 }
