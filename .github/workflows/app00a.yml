@@ -469,78 +469,7 @@ jobs:
                       $stage.Sql.OutcomeCode -cne 'B_QUOTA_GRANTED' -or
                       !$stage.Sql.SourceId -or
                       $stage.Sql.SourceKind -cne 'STOCK_ALLOC' -or
-                      $stage.Sql.SourceNumber -cnotmatch '^[a-f0-9]{32}
-                foreach ($field in $fields) {
-                  $match = @($stage.Cells | Where-Object { $_.Field -ceq $field })
-                  if ($match.Count -ne 1) { throw "Missing or duplicate SQL cell $field in $name" }
-                  $expected = if ($rollback) { 0 } elseif ($field -eq 'StockPoolAllocated') { 30 } else { 1 }
-                  $cell = $match[0]
-                  if ($cell.Expected -ne $expected -or $cell.Actual -ne $expected -or
-                      $cell.Diff -ne 0 -or !$cell.Match) {
-                    throw "E.1 actual/diff mismatch $name stage $i field $field"
-                  }
-                }
-              }
-              if ($case -eq 'lost-ack-smoke' -and
-                  $stages[0].Sql.LedgerSha256 -cne $stages[1].Sql.LedgerSha256) {
-                throw "Lost ACK replay changed persisted ledger fingerprint $name"
-              }
-              Write-Host "APP-01E.1 $name verified on SQL: $id"
-            }
-          }
-      - name: Verify MTP test evidence exists
-        shell: pwsh
-        run: |
-          $results = Get-ChildItem -Path TestResults -Recurse -File -ErrorAction Stop
-          if (-not ($results | Where-Object { $_.Extension -eq '.trx' })) { throw 'Expected MTP TRX evidence is missing.' }
-          if (-not ($results | Where-Object { $_.Name -like '*.cobertura.xml' })) { throw 'Expected Cobertura coverage evidence is missing.' }
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci --no-audit --no-fund
-      - name: Audit npm non-dev dependency tree (all severities)
-        working-directory: web
-        run: npm audit --omit=dev --audit-level=low
-      - name: Audit full npm dependency tree (block moderate and above)
-        working-directory: web
-        run: npm audit --audit-level=moderate
-      - name: Verify Workbox glob is patched and build-time-only
-        working-directory: web
-        run: npm run test:dependencies
-      - name: Verify Tailwind CSS v4 integration
-        working-directory: web
-        run: npm ls tailwindcss @tailwindcss/vite --depth=0
-      - name: Frontend health contract regression tests
-        working-directory: web
-        run: npm run test
-      - name: Build online-first React PWA
-        working-directory: web
-        run: npm run build
-      - name: Install Playwright Chromium
-        working-directory: web
-        run: npx playwright install chromium
-      - name: Browser/PWA E2E regression (100% only; 125% Owner exception)
-        working-directory: web
-        run: npm run test:e2e
-      - name: Upload browser test evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: app00b-playwright-evidence
-          path: |
-            web/playwright-report/
-            web/test-results/
-          if-no-files-found: warn
-      - name: Verify generated PWA artifacts and user-confirmed update hook
-        working-directory: web
-        run: npm run test:pwa-build
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: app00a-test-evidence
-          path: '**/TestResults/**/*'
-          if-no-files-found: warn
- -or
+                      $stage.Sql.SourceNumber -cnotmatch '^[a-f0-9]{32}$' -or
                       $stage.Sql.SourceActorId -cne 'e1-warehouse-actor' -or
                       !$stage.Sql.SourceTripId -or
                       $stage.Sql.SourceLineQuantity -ne 30 -or
