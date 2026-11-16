@@ -98,6 +98,32 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         ? new HarnessStage(label, actual, 1, 1, 1, 1, 1, 30m)
         : new HarnessStage(label, actual, 0, 0, 0, 0, 0, 0m);
 
+    [Fact]
+    public async Task Sql_trigger_fault_guard_refuses_master_nonlocaldb_and_cross_tenant_targets()
+    {
+        string source = Key();
+        var master = new SqlConnectionStringBuilder(Connection("tenant-a"))
+        {
+            InitialCatalog = "master"
+        };
+        var notLocalDb = new SqlConnectionStringBuilder(Connection("tenant-a"))
+        {
+            DataSource = "localhost"
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            _ = await PreCommitLedgerFault.ArmAsync(master.ConnectionString, "tenant-a", source);
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            _ = await PreCommitLedgerFault.ArmAsync(notLocalDb.ConnectionString, "tenant-a", source);
+        });
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            _ = await PreCommitLedgerFault.ArmAsync(Connection("tenant-a"), "tenant-b", source);
+        });
+    }
+
     /// <summary>
     /// The barrier is at the HTTP admission boundary (not a SQL schedule oracle).
     /// Same canonical key, actor and payload must produce one persisted source.
