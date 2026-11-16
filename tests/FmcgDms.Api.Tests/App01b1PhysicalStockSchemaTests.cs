@@ -37,12 +37,13 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
 
             Assert.Equal(1, db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM dbo.VersionInfo WHERE Version=202611160004"));
-            Assert.Equal(4, db.ExecuteScalar<int>("""
+            Assert.Equal(5, db.ExecuteScalar<int>("""
                 SELECT COUNT(*) FROM sys.triggers
                 WHERE name IN (N'TR_PhysicalStockOpening_Immutable',
                     N'TR_PhysicalStockMovement_Immutable',
                     N'TR_TripManifest_ImmutableLoaded',
-                    N'TR_TripManifestLine_ImmutableLoaded')
+                    N'TR_TripManifestLine_ImmutableLoaded',
+                    N'TR_TripManifestLine_InsertOnlyDraft')
                 """));
             Assert.Equal(1, db.ExecuteScalar<int>("""
                 SELECT COUNT(*) FROM sys.foreign_keys
@@ -104,9 +105,12 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
 
         Assert.Equal("DRAFT", db.ExecuteScalar<string>(
             "SELECT Status FROM dbo.TripManifest WHERE Id=@valid", new { valid }));
-        Assert.Equal(0, db.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM dbo.PhysicalStockMovement WHERE TenantId=@tenant",
-            new { tenant = A }));
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.PhysicalStockMovement m
+            JOIN dbo.TripManifestLine l ON l.TenantId=m.TenantId
+                AND l.Id=m.TripManifestLineId
+            WHERE l.TenantId=@tenant AND l.TripManifestId=@valid
+            """, new { tenant = A, valid }));
 
         Error(db, """
             INSERT dbo.TripManifest(Id,TenantId,ManifestNumber,TripId,
@@ -182,9 +186,12 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Error(db, LineInsert, LineArgs(B, manifest, trip, warehouse, vehicle,
             3, sku, unusedBRight, "B", 5m), 547);
 
-        Assert.Equal(0, db.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM dbo.PhysicalStockMovement WHERE TenantId=@tenant",
-            new { tenant = A }));
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.PhysicalStockMovement m
+            JOIN dbo.TripManifestLine l ON l.TenantId=m.TenantId
+                AND l.Id=m.TripManifestLineId
+            WHERE l.TenantId=@tenant AND l.TripManifestId=@manifest
+            """, new { tenant = A, manifest }));
         Assert.Equal(0, db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE LedgerKind IN (N'AR',N'COGS')",
             new { tenant = A }));
@@ -223,6 +230,10 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
             UPDATE dbo.TripManifest SET Status=N'LOADED',LoadedAtUtc=SYSUTCDATETIME(),
                 LoadBusinessSourceId=@source WHERE Id=@manifest
             """, new { source, manifest });
+
+        Guid extraRight = AddRight(db, A, trip, warehouse, sku, "B", 10m);
+        Error(db, LineInsert, LineArgs(A, manifest, trip, warehouse, vehicle,
+            2, sku, extraRight, "B", 10m), 51045); // LOADED header is closed to inserts.
 
         Error(db, LoadLineSql, new
         {
