@@ -47,7 +47,7 @@ Migration `202611160004` adds `PhysicalStockOpening` (immutable T0), `PhysicalSt
 
 - `POST /api/synthetic/app01b/commands/load-manifest` (warehouse role) loads every pre-staged A/B right in one explicit Serializable SQL transaction; debits warehouse and credits vehicle for exact decimal quantities and carried cost, persists immutable source lines/movements and balanced nonfinancial custody ledger effects. Rights and StockPool remain allocation entitlements, not sales/COGS.
 - `POST /api/synthetic/app01b/commands/preflight-b-sale` (sales role) is deliberately non-posting: B31 at price15 with synthetic offer465 returns durable `REJECTED / REJECTED_QUOTA / B_QUOTA_INSUFFICIENT`; even an eligible B offer remains `B_SALE_NOT_IMPLEMENTED` until APP-01C. No receipt/cash/AR/invoice/COGS effects.
-- Reuses APP-01A canonical command identities, hash/replay/conflict, JWT tenant boundary and nonce-owned LocalDB. Adds nine real LocalDB tests (58-test CI floor) for paired transfer, B31 no-effect, contention, rollback, residual decimal cost and two tenants. [APP-01B.2 contract](docs/roadmap/app-01b2-manifest-commands.md). **Final-HEAD CI and independent review still required; 39/39 T0–T2 remains NOT_RUN.**
+- Reuses APP-01A canonical command identities, hash/replay/conflict, JWT tenant boundary and nonce-owned LocalDB. Adds eleven real LocalDB tests (60-test CI floor) for paired transfer, B31 no-effect, contention, rollback, residual decimal cost and two tenants. [APP-01B.2 contract](docs/roadmap/app-01b2-manifest-commands.md). **Final-HEAD CI and independent review still required; 39/39 T0–T2 remains NOT_RUN.**
 
 ## Windows local checks
 
