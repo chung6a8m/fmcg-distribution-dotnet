@@ -636,6 +636,17 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                     """, new { Tenant = tenant, Right = line.StockRightId,
                         Qty = entry.BReleased }, tx, ct)) != 1)
                     throw new InvalidOperationException("B release lost its right lock.");
+                // Rights are reserved against the APP-01A stock allocation pool.
+                // A terminal release must also free that capacity atomically;
+                // otherwise the next legitimate Trip is incorrectly blocked.
+                if (await db.ExecuteAsync(Sql("""
+                    UPDATE dbo.StockPool
+                    SET AllocatedBaseQuantity=AllocatedBaseQuantity-@Qty
+                    WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+                        AND AllocatedBaseQuantity>=@Qty;
+                    """, new { Tenant = tenant, Warehouse = manifest.WarehouseLocationId,
+                        Sku = line.SkuId, Qty = entry.BReleased }, tx, ct)) != 1)
+                    throw new InvalidOperationException("B release allocation pool drift under lock.");
                 await AddEffect(db, tx, tenant, sourceLine, "RIGHT-B-RELEASE",
                     "RIGHT_B_RELEASED", -entry.BReleased, 0m,
                     line.SkuId, null, ct);
