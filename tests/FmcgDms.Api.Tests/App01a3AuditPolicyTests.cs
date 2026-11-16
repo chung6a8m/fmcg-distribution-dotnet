@@ -301,7 +301,17 @@ public sealed partial class App01a2CommandTests
             && x.GrantedBaseQuantity == 30m);
         Assert.DoesNotContain(report.Effects,
             x => x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
-        Assert.Empty(report.ReconciliationIssues);
+        Assert.True(report.ReconciliationIssues.Count == 0,
+            "Audit issues: " + string.Join("; ", report.ReconciliationIssues)
+            + " | Rights: " + string.Join("; ", report.StockRights.Select(r =>
+            {
+                var line = report.SourceLines.SingleOrDefault(l => l.Id == r.BusinessSourceLineId);
+                var ledger = report.Effects.Where(e => e.BusinessSourceLineId == r.BusinessSourceLineId);
+                return $"kind='{r.RightKind}',qty={r.GrantedBaseQuantity},loc={r.StockLocationId},sku={r.SkuId},"
+                    + $"lineSku={line?.SkuId},lineQty={line?.BaseQuantity},effects="
+                    + string.Join(",", ledger.Select(e =>
+                        $"{e.LedgerKind}/{e.QuantityDelta}/{e.StockLocationId}/{e.SkuId}"));
+            })));
     }
 
     [Fact]
