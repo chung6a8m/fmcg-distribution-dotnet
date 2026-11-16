@@ -102,7 +102,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     private SqlConnection Open(string tenant) =>
         new(tenant == TenantA ? fixture.TenantAConnectionString : fixture.TenantBConnectionString);
 
-    private static Oracle ReadOracle()
+    private static Oracle ReadOracle(int checkpoints = 5)
     {
         byte[] bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden-oracles.json"));
         using var json = JsonDocument.Parse(bytes);
@@ -115,12 +115,13 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(new[] { "step", "mainQty", "tripQty", "soldQty", "mainCost",
             "tripCost", "cogs", "aHold", "bQuota", "arA", "arB", "custody", "fund" }, columns);
         var rows = ac03.GetProperty("steps").EnumerateArray()
-            .Take(5).Select(row => row.EnumerateArray().Select(cell => cell.Clone()).ToArray())
+            .Take(checkpoints).Select(row => row.EnumerateArray().Select(cell => cell.Clone()).ToArray())
             .ToArray();
-        Assert.Equal(5, rows.Length);
+        Assert.Equal(checkpoints, rows.Length);
         Assert.All(rows, row => Assert.Equal(13, row.Length));
-        Assert.Equal(new[] { "T0", "T1_LOAD", "T2_REJECT", "T3_B20", "T4_A25" },
-            rows.Select(row => row[0].GetString()).ToArray());
+        Assert.Equal(new[] { "T0", "T1_LOAD", "T2_REJECT", "T3_B20", "T4_A25",
+            "T5_HANDOVER", "T6_RETURN" }.Take(checkpoints),
+            rows.Select(row => row[0].GetString()));
         return new Oracle(columns, rows, Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
@@ -381,6 +382,12 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             """, args);
         string step = db.QuerySingle<string>("""
             SELECT CASE
+                WHEN EXISTS (SELECT 1 FROM dbo.TripUnload u
+                    WHERE u.TenantId=@Tenant AND u.TripId=@Trip)
+                    THEN N'T6_RETURN'
+                WHEN EXISTS (SELECT 1 FROM dbo.CashHandoverAcceptance a
+                    WHERE a.TenantId=@Tenant AND a.TripId=@Trip)
+                    THEN N'T5_HANDOVER'
                 WHEN EXISTS (SELECT 1 FROM dbo.SaleDelivery d
                     WHERE d.TenantId=@Tenant AND d.TripId=@Trip
                         AND d.RightKind='A' AND d.BusinessSourceKind=N'A_DELIVERY')
@@ -828,26 +835,30 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     }
 
     private async Task WriteEvidence(string tenant, Oracle oracle,
-        IReadOnlyList<Observation> reads, string? failure)
+        IReadOnlyList<Observation> reads, string? failure,
+        int checkpoints = 5)
     {
         var cells = reads.SelectMany(r => Compare(oracle, r.Row,
             r.Snapshot.Step, r.Snapshot.Values)).ToArray();
-        bool passed = failure is null && reads.Count == 5
-            && cells.Length == 65 && cells.All(c => c.Match);
-        string directory = Path.Combine(AppContext.BaseDirectory, "TestResults", "APP-01C4");
+        int expectedCells = checkpoints * 13;
+        bool passed = failure is null && reads.Count == checkpoints
+            && cells.Length == expectedCells && cells.All(c => c.Match);
+        string directory = Path.Combine(AppContext.BaseDirectory, "TestResults", checkpoints == 7 ? "APP-01D" : "APP-01C4");
         Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, tenant + "-oracle.json");
         var report = new {
-            Schema = "APP01C4_SQL_ORACLE_V1",
+            Schema = checkpoints == 7 ? "APP01D_SQL_ORACLE_V1" : "APP01C4_SQL_ORACLE_V1",
             TenantId = tenant,
             Database = tenant == TenantA ? fixture.TenantADb : fixture.TenantBDb,
             Environment = "LocalDB / synthetic / invoiceEligible=false",
-            TestRunId = Environment.GetEnvironmentVariable("APP01C4_TEST_RUN_ID") ?? "LOCAL_UNTRACKED",
-            SourceHeadSha = Environment.GetEnvironmentVariable("APP01C4_SOURCE_HEAD_SHA"),
+            TestRunId = Environment.GetEnvironmentVariable(
+                checkpoints == 7 ? "APP01D_TEST_RUN_ID" : "APP01C4_TEST_RUN_ID") ?? "LOCAL_UNTRACKED",
+            SourceHeadSha = Environment.GetEnvironmentVariable(
+                checkpoints == 7 ? "APP01D_SOURCE_HEAD_SHA" : "APP01C4_SOURCE_HEAD_SHA"),
             WorkflowSha = Environment.GetEnvironmentVariable("GITHUB_SHA"),
             Baseline = "business/reference-data/expected-results/golden-oracles.json#AC-03",
             OracleSha256 = oracle.Sha256,
-            ExpectedCells = 65, CheckedCells = cells.Length,
+            ExpectedCells = expectedCells, CheckedCells = cells.Length,
             MatchedCells = cells.Count(c => c.Match),
             Status = passed ? "PASS" : "FAIL_OR_INCOMPLETE",
             Steps = reads.Select(r => new { r.Row, r.Snapshot.Step,
