@@ -13,6 +13,7 @@ builder.Services.AddScoped<App01a2CommandService>();
 builder.Services.AddScoped<App01b2CommandService>();
 builder.Services.AddScoped<App01c2BPostingService>();
 builder.Services.AddScoped<App01c3APostingService>();
+builder.Services.AddScoped<App01dCashierUnloadService>();
 builder.Services.AddScoped<App01a3AuditService>();
 
 var app = builder.Build();
@@ -117,6 +118,27 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App01c3APostingService service, CancellationToken ct) =>
         ToCommandHttp(await service.PostAPartialDeliveryAsync(user, input, ct)))
         .RequireAuthorization("SyntheticSales");
+
+    // APP-01D: synthetic nonproduction cashier acceptance and physical
+    // unload. Cash offer does not post fund/custody; accept requires a
+    // separately seeded cashier count witness.
+    var closeoutCommands = app.MapGroup("/api/synthetic/app01d/commands")
+        .RequireAuthorization();
+    closeoutCommands.MapPost("/offer-cash-handover", async (
+        OfferCashHandoverCommand input, ClaimsPrincipal user,
+        App01dCashierUnloadService service, CancellationToken ct) =>
+        ToCommandHttp(await service.OfferCashHandoverAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
+    closeoutCommands.MapPost("/accept-cash-handover", async (
+        AcceptCashHandoverCommand input, ClaimsPrincipal user,
+        App01dCashierUnloadService service, CancellationToken ct) =>
+        ToCommandHttp(await service.AcceptCashHandoverAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticCashier");
+    closeoutCommands.MapPost("/unload-trip-remainder", async (
+        UnloadTripRemainderCommand input, ClaimsPrincipal user,
+        App01dCashierUnloadService service, CancellationToken ct) =>
+        ToCommandHttp(await service.UnloadTripRemainderAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
 
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
     // target tenant/database by query string, header or body.
