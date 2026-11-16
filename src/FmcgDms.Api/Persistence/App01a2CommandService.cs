@@ -87,6 +87,14 @@ public sealed class App01a2CommandService(TenantConnections connections)
         public decimal GrantedAmount { get; set; }
     }
 
+    private sealed class CheckedCreditApproval
+    {
+        public Guid Id { get; set; }
+        public decimal ApprovedLimit { get; set; }
+        public string ProposedBy { get; set; } = "";
+        public string CheckedBy { get; set; } = "";
+    }
+
     private async Task<BusinessCommandOutcome> ExecuteAsync(
         ClaimsPrincipal principal, IApp01aCommand request, string kind,
         (string Key, string Value)[] fields,
@@ -100,10 +108,17 @@ public sealed class App01a2CommandService(TenantConnections connections)
             || !ValidKey(request.SourceNumber, 80))
             return BusinessCommandOutcome.Rejected("INVALID_COMMAND_IDENTITY");
 
+        // Even when called without HTTP endpoint policies, business operations
+        // require a signed, role-scoped synthetic actor. Never infer roles from
+        // tenant identity, warehouse assignment, headers or request payload.
+        string requiredRole = kind == "CONFIRM_A_ORDER" ? "sales" : "warehouse";
+        if (!principal.HasClaim("synthetic_role", requiredRole))
+            throw new UnauthorizedAccessException("Insufficient synthetic role.");
         string tenant = SyntheticAuth.GetTenantId(principal);
         string actor = principal.FindFirst("actor_id")?.Value
             ?? throw new UnauthorizedAccessException("Validated actor identity required.");
-        if (!ValidKey(actor, 128))
+        if (!ValidKey(actor, 128)
+            || !string.Equals(actor, principal.FindFirst("sub")?.Value, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Invalid actor identity.");
 
         byte[] hash = CommandPayloadHash.Compute(
@@ -536,6 +551,32 @@ public sealed class App01a2CommandService(TenantConnections connections)
                         Tenant = tenant, Trip = request.TripId, Customer = request.CustomerId
                     }, tx, token));
                 if (pool is null) return BusinessCommandOutcome.Rejected("CREDIT_POOL_NOT_FOUND");
+
+                // A seeded pool alone is never proof of credit approval. Require
+                // one unexpired, versioned AP-01 decision with a different checker.
+                // Multiple active approvals are ambiguous: fail closed instead of
+                // silently selecting a more permissive limit.
+                var approvals = (await db.QueryAsync<CheckedCreditApproval>(Sql("""
+                    SELECT TOP (2) Id,ApprovedLimit,ProposedBy,CheckedBy
+                    FROM dbo.CreditPolicyApproval WITH (UPDLOCK,HOLDLOCK)
+                    WHERE TenantId=@Tenant AND TripId=@Trip AND CustomerId=@Customer
+                        AND PoolCode=N'B' AND CurrencyUnit=N'SYNTHETIC_UNITLESS'
+                        AND Decision=N'APPROVED'
+                        AND EffectiveFromUtc <= SYSUTCDATETIME()
+                        AND EffectiveUntilUtc > SYSUTCDATETIME()
+                    ORDER BY EffectiveFromUtc DESC,Id
+                    """, new { Tenant = tenant, Trip = request.TripId,
+                        Customer = request.CustomerId }, tx, token))).AsList();
+                if (approvals.Count == 0)
+                    return BusinessCommandOutcome.Rejected("CREDIT_APPROVAL_REQUIRED");
+                if (approvals.Count != 1)
+                    return BusinessCommandOutcome.Rejected("CREDIT_APPROVAL_AMBIGUOUS");
+                var approval = approvals[0];
+                if (string.Equals(approval.ProposedBy, approval.CheckedBy, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(actor, approval.CheckedBy, StringComparison.OrdinalIgnoreCase))
+                    return BusinessCommandOutcome.Rejected("CREDIT_CHECKER_CONFLICT");
+                if (pool.ApprovedLimit > approval.ApprovedLimit)
+                    return BusinessCommandOutcome.Rejected("CREDIT_POLICY_LIMIT_MISMATCH");
                 if (pool.ApprovedLimit - pool.GrantedAmount < request.Amount)
                     return BusinessCommandOutcome.Rejected("CREDIT_LIMIT_INSUFFICIENT");
                 int updated = await db.ExecuteAsync(Sql("""
@@ -557,13 +598,13 @@ public sealed class App01a2CommandService(TenantConnections connections)
                     null, null, request.Amount, token);
                 await db.ExecuteAsync(Sql("""
                     INSERT dbo.BCreditGrant(Id,TenantId,TripId,CustomerId,ShipToSnapshotId,
-                        PoolCode,CurrencyUnit,BusinessSourceLineId,GrantedAmount)
-                    VALUES(@Id,@Tenant,@Trip,@Customer,@ShipTo,N'B',N'SYNTHETIC_UNITLESS',@Line,@Amount)
+                        PoolCode,CurrencyUnit,BusinessSourceLineId,GrantedAmount,ApprovalId)
+                    VALUES(@Id,@Tenant,@Trip,@Customer,@ShipTo,N'B',N'SYNTHETIC_UNITLESS',@Line,@Amount,@Approval)
                     """, new
                     {
                         Id = Guid.NewGuid(), Tenant = tenant, Trip = request.TripId,
                         Customer = request.CustomerId, ShipTo = request.ShipToSnapshotId,
-                        Line = sourceLine, request.Amount
+                        Line = sourceLine, request.Amount, Approval = approval.Id
                     }, tx, token));
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_CREDIT_B",
                     request.CustomerId, null, null, 0, request.Amount, token);
