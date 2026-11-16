@@ -153,7 +153,7 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
                     N'synthetic-sales-maker',N'synthetic-finance-checker',N'A-terms-fixture',
                     DATEADD(minute,-1,SYSUTCDATETIME()),
                     DATEADD(day,-1,SYSUTCDATETIME()),DATEADD(day,7,SYSUTCDATETIME()));
-            INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
+                INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
                     VALUES(@Tenant,@Warehouse,@Sku,100);
                 INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,
                     SnapshotCode,BaseQuantity,CostAmount)
