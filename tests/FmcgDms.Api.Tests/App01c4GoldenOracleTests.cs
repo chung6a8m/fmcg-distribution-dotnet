@@ -861,6 +861,64 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                     AssertNoBusinessEffectsChanged(t2, changedRightsLedger)));
             }
 
+            // Stage T3: 100 synthetic approved credit is granted only after
+            // the T2 capture. A separate, preexisting verified cash witness
+            // authorizes B20, not an untrusted request flag. Then A25 posts
+            // against its frozen Confirm snapshot on the same loaded trip.
+            foreach (var (client, tenant, scene, rejectCommand) in new[] {
+                (a, TenantA, sceneA, rejectA.CommandId),
+                (b, TenantB, sceneB, rejectB.CommandId)
+            })
+            {
+                string otherTenant = tenant == TenantA ? TenantB : TenantA;
+                Scene otherScene = tenant == TenantA ? sceneB : sceneA;
+                string otherReject = tenant == TenantA ? rejectB.CommandId : rejectA.CommandId;
+                Snapshot otherBefore = Capture(otherTenant, otherScene, otherReject);
+
+                await ExpectApplied(client, ACommands + "grant-b-credit",
+                    new GrantBCreditCommand(Producer, Id(), Id(), scene.Trip,
+                        scene.Customer, scene.ShipTo, "B", "SYNTHETIC_UNITLESS", 100m),
+                    "B_CREDIT_GRANTED");
+                var b20 = new PostBSaleDeliveryReceiptCommand(
+                    Producer, Id(), Id(), scene.Trip, scene.Customer, scene.ShipTo,
+                    scene.BManifestLine, scene.Sku, 20m, 15m, 200m,
+                    SeedVerifiedCashWitness(tenant, scene));
+                await ExpectApplied(client, CCommands + "post-b-sale-delivery-receipt",
+                    b20, "B_SALE_DELIVERY_POSTED");
+                Snapshot t3 = Capture(tenant, scene, rejectCommand);
+                observations[tenant].Add(new Observation(3, t3));
+                AssertPostedLineage(tenant, scene, t3, 3);
+                AssertNoBusinessEffectsChanged(otherBefore,
+                    Capture(otherTenant, otherScene, otherReject));
+
+                var bReplay = await Post(client, CCommands + "post-b-sale-delivery-receipt", b20);
+                Assert.Equal("APPLIED", bReplay.Status);
+                Assert.True(bReplay.Replayed);
+                AssertNoBusinessEffectsChanged(t3, Capture(tenant, scene, rejectCommand));
+
+                var a25 = new PostAPartialDeliveryCommand(
+                    Producer, Id(), Id(), scene.Trip, scene.Customer, scene.ShipTo,
+                    scene.Order, scene.OrderLine, scene.AManifestLine, scene.Sku, 25m);
+                await ExpectApplied(client, CCommands + "post-a-partial-delivery",
+                    a25, "A_PARTIAL_DELIVERY_POSTED");
+                Snapshot t4 = Capture(tenant, scene, rejectCommand);
+                observations[tenant].Add(new Observation(4, t4));
+                AssertPostedLineage(tenant, scene, t4, 4);
+                AssertNoBusinessEffectsChanged(otherBefore,
+                    Capture(otherTenant, otherScene, otherReject));
+
+                var aReplay = await Post(client, CCommands + "post-a-partial-delivery", a25);
+                Assert.Equal("APPLIED", aReplay.Status);
+                Assert.True(aReplay.Replayed);
+                AssertNoBusinessEffectsChanged(t4, Capture(tenant, scene, rejectCommand));
+                // A25 must not mutate any B-cash/grant/receipt facts.
+                Assert.Equal(t3.Posting.BSales, t4.Posting.BSales);
+                Assert.Equal(t3.Posting.Receipts, t4.Posting.Receipts);
+                Assert.Equal(t3.Posting.ReceiptReceived, t4.Posting.ReceiptReceived);
+                Assert.Equal(t3.Posting.GrantConsumed, t4.Posting.GrantConsumed);
+                Assert.Equal(t3.Posting.SourceCreditConsumed, t4.Posting.SourceCreditConsumed);
+            }
+
             foreach (string tenant in new[] { TenantA, TenantB })
             {
                 var reads = observations[tenant];
