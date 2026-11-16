@@ -8,7 +8,7 @@ using Xunit;
 namespace FmcgDms.Api.Tests;
 
 [Collection("SqlScratch")]
-public sealed class App01a2CommandTests(SqlScratchFixture fixture)
+public sealed partial class App01a2CommandTests(SqlScratchFixture fixture)
 {
     private const string A = "tenant-a";
     private const string B = "tenant-b";
@@ -49,13 +49,23 @@ public sealed class App01a2CommandTests(SqlScratchFixture fixture)
                 VALUES(@Tenant,@Warehouse,@Sku,@OnHand);
             INSERT dbo.BCreditPool(TenantId,TripId,CustomerId,PoolCode,CurrencyUnit,ApprovedLimit)
                 VALUES(@Tenant,@Trip,@Customer,N'B',N'SYNTHETIC_UNITLESS',@CreditLimit);
+            INSERT dbo.CreditPolicyApproval(Id,TenantId,TripId,CustomerId,PoolCode,
+                CurrencyUnit,CaseNumber,PolicyVersion,ProposedBy,CheckedBy,Decision,
+                Reason,EvidenceRef,ApprovedLimit,EffectiveFromUtc,EffectiveUntilUtc,ReviewedAtUtc)
+            VALUES(@Approval,@Tenant,@Trip,@Customer,N'B',N'SYNTHETIC_UNITLESS',
+                @ApprovalCase,N'SYNTHETIC-POLICY-v1',N'synthetic-actor',
+                N'synthetic-finance-checker',N'APPROVED',N'Fixture evidence only',
+                N'synthetic-case-reviewed',@CreditLimit,
+                DATEADD(day,-1,SYSUTCDATETIME()),
+                DATEADD(day,1,SYSUTCDATETIME()),SYSUTCDATETIME());
             """, new
         {
             Tenant = tenant, s.Customer, s.ShipTo, s.Sku, s.Warehouse, s.Vehicle,
             s.Trip, s.Order, s.OrderLine, OrderQuantity = orderQuantity, OnHand = onHand,
             CreditLimit = creditLimit,
             Code = NewId(), SkuCode = NewId(), WhCode = NewId(), VehicleCode = NewId(),
-            TripCode = NewId(), OrderCode = NewId()
+            TripCode = NewId(), OrderCode = NewId(),
+            Approval = Guid.NewGuid(), ApprovalCase = NewId()
         });
         return s;
     }

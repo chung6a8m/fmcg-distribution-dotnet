@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Dapper;
 using FmcgDms.Api.Authentication;
 using FmcgDms.Api.Persistence;
@@ -8,6 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 SyntheticAuth.Configure(builder);
 builder.Services.AddSingleton<TenantConnections>();
 builder.Services.AddScoped<App01a2CommandService>();
+builder.Services.AddScoped<App01a3AuditService>();
 
 var app = builder.Build();
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
@@ -65,19 +68,51 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     var commands = app.MapGroup("/api/synthetic/app01a/commands").RequireAuthorization();
     commands.MapPost("/reserve-a-stock", async (
         ReserveAStockCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-        ToCommandHttp(await service.ReserveAStockAsync(user, input, ct)));
+        ToCommandHttp(await service.ReserveAStockAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
     commands.MapPost("/confirm-a-order", async (
         ConfirmAOrderCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-        ToCommandHttp(await service.ConfirmAOrderAsync(user, input, ct)));
+        ToCommandHttp(await service.ConfirmAOrderAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
     commands.MapPost("/grant-b-quota", async (
         GrantBQuotaCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-        ToCommandHttp(await service.GrantBQuotaAsync(user, input, ct)));
+        ToCommandHttp(await service.GrantBQuotaAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
     commands.MapPost("/grant-b-credit", async (
         GrantBCreditCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-        ToCommandHttp(await service.GrantBCreditAsync(user, input, ct)));
+        ToCommandHttp(await service.GrantBCreditAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
+
+    // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
+    // target tenant/database by query string, header or body.
+    app.MapGet("/api/synthetic/app01a/audit/as-of", async (
+        HttpContext context, ClaimsPrincipal user, App01a3AuditService audit, CancellationToken ct) =>
+    {
+        var values = context.Request.Query["asOf"];
+        if (values.Count != 1 || !TryParseAuditAsOf(values[0], out var asOf))
+            return Results.BadRequest(new { error = "AS_OF_INVALID" });
+        return Results.Ok(await audit.QueryAsync(user, asOf, ct));
+    }).RequireAuthorization("SyntheticAudit");
 
 }
 app.Run();
+
+// Reject timestamps without an explicit timezone: DateTimeOffset's default parser
+// otherwise interprets an offset-less local wall clock using the server timezone.
+static bool TryParseAuditAsOf(string? text, out DateTimeOffset utc)
+{
+    utc = default;
+    if (string.IsNullOrWhiteSpace(text)
+        || !Regex.IsMatch(text,
+            @"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})\z",
+            RegexOptions.CultureInvariant)
+        || !DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None,
+            out var parsed)
+        || parsed == default || parsed > DateTimeOffset.UtcNow.AddMinutes(1))
+        return false;
+    utc = parsed.ToUniversalTime();
+    return true;
+}
 
 static IResult ToCommandHttp(BusinessCommandOutcome outcome) => outcome.Status switch
 {

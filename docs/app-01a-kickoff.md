@@ -1,6 +1,6 @@
-# APP-01A — Integrated model kickoff (AUTHORIZED / APP-01A.1 SCHEMA_VERIFIED)
+# APP-01A — Integrated model kickoff (AUTHORIZED / APP-01A.2 MERGED / APP-01A.3 PR_PENDING)
 
-**Sequencing:** APP-00A is merged and APP-00B/C browser/PWA Owner acceptance OWN-APP00B-13-03 is complete (Issue #13 closed). APP-01A.1 schema and LocalDB negative tests are implemented in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21); APP-01A as a whole is **NOT_VERIFIED** and remains synthetic/nonproduction only.
+**Sequencing:** APP-00A and APP-00B/C browser/PWA Owner acceptance OWN-APP00B-13-03 are complete (Issue #13 closed). APP-01A.1 [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21) and APP-01A.2 [PR #22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22) are merged/CI verified. APP-01A.3 draft [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23) has CI-verified implementation and still requires independent review before acceptance. APP-01A **NOT_VERIFIED**, synthetic/nonproduction only.
 
 Define one transaction/source model per tenant DB: Customer, ShipToSnapshot, SKU, StockLocation, Trip, AOrder/AOrderLine, AReservation, BQuota, BCreditGrant, Command, SourceLine and ledger postings. Add deterministic payload hash/version and `(tenantId,producerId,commandId)` idempotency; same payload replay returns durable outcome, altered payload yields CONFLICT without effect.
 
@@ -12,6 +12,6 @@ APP-01B–E cover manifest/sale/delivery/cash and 91/91 AC-03 checkpoints, not t
 
 1. **APP-01A.1 — schema + migrations + physical LocalDB negatives:** tables and source/command/effect links, shared A/B rights, FK/unique/CHECK guards, tenant A/B migration replay and RowVersion. See [schema contract](roadmap/app-01a1-integrated-schema.md). No command execution or outcome verification in this increment.
 2. **APP-01A.2 — business commands (implemented / reviewed PR-head CI verified):** explicit Dapper Serializable transactions, A/B shared stock + B credit pools, canonical SHA-256 payload hash v1, durable replay/CONFLICT, and reserve/confirm/quota/grant. See [command contract](roadmap/app-01a2-command-transactions.md).
-3. **APP-01A.3 — behavior hardening:** rollback after partial effects, two-client contention, Customer/ShipTo/pool mismatches, query-asOf audit, 2-tenant HTTP/API authorization, final-HEAD CI evidence.
+3. **APP-01A.3 — behavior hardening (draft PR #23 / CI verified, review pending):** post-effect rollback, four-client contention, AP-01 policy/checker evidence, query-asOf with source/rights reconciliation, 2-tenant role/security matrix and final-HEAD TestRunId. See [APP-01A.3](roadmap/app-01a3-audit-policy-verification.md).
 
 Do not mark original Issue #2 checkboxes as complete from schema constraints alone. In particular, **physical stock availability** and **no A/B overlap across different source lines** require APP-01A.2 atomic allocation logic, not merely a database CHECK.
