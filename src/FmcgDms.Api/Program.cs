@@ -12,6 +12,7 @@ builder.Services.AddSingleton<TenantConnections>();
 builder.Services.AddScoped<App01a2CommandService>();
 builder.Services.AddScoped<App01b2CommandService>();
 builder.Services.AddScoped<App01c2BPostingService>();
+builder.Services.AddScoped<App01c3APostingService>();
 builder.Services.AddScoped<App01a3AuditService>();
 
 var app = builder.Build();
@@ -108,6 +109,13 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         PostBSaleDeliveryReceiptCommand input, ClaimsPrincipal user,
         App01c2BPostingService service, CancellationToken ct) =>
         ToCommandHttp(await service.PostBSaleDeliveryReceiptAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
+    // APP-01C.3: source/ledger atomic A25 with independently approved,
+    // immutable Confirm price/terms; synthetic two-tenant LocalDB only.
+    postingCommands.MapPost("/post-a-partial-delivery", async (
+        PostAPartialDeliveryCommand input, ClaimsPrincipal user,
+        App01c3APostingService service, CancellationToken ct) =>
+        ToCommandHttp(await service.PostAPartialDeliveryAsync(user, input, ct)))
         .RequireAuthorization("SyntheticSales");
 
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a

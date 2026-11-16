@@ -34,6 +34,27 @@ public sealed class App01a3AuditService(TenantConnections connections)
         public decimal CreditUsed { get; set; }
     }
 
+    private sealed class APostingEvidence
+    {
+        public Guid DeliveryId { get; set; }
+        public Guid BusinessSourceLineId { get; set; }
+        public decimal BaseQuantity { get; set; }
+        public decimal PayableAmount { get; set; }
+        public decimal CostAmount { get; set; }
+        public DateTime BusinessDate { get; set; }
+        public decimal ConfirmedBaseQuantity { get; set; }
+        public decimal UnitPriceSnapshot { get; set; }
+        public int TermsDaysSnapshot { get; set; }
+        public decimal? IssuedQuantity { get; set; }
+        public decimal? IssuedCost { get; set; }
+        public decimal? ArOriginal { get; set; }
+        public decimal? ArApplied { get; set; }
+        public decimal? ArOutstanding { get; set; }
+        public DateTime? DueBusinessDate { get; set; }
+        public int Receipts { get; set; }
+        public int BGrantConsumptions { get; set; }
+    }
+
     public async Task<App01aAuditSnapshot> QueryAsync(
         ClaimsPrincipal principal, DateTimeOffset asOf, CancellationToken ct)
     {
@@ -200,6 +221,36 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 WHERE d.TenantId=@Tenant
                     AND s.RecordedAtUtc<=@AsOf AND c.CompletedAtUtc<=@AsOf
                 ORDER BY s.RecordedAtUtc,d.Id;
+
+                -- APP-01C.3: frozen confirmation is the only price/terms
+                -- authority for a posted A partial delivery. All four legs
+                -- must belong to exactly this immutable delivery source.
+                SELECT d.Id AS DeliveryId,d.BusinessSourceLineId,
+                    d.BaseQuantity,d.PayableAmount,d.CostAmount,d.BusinessDate,
+                    snap.ConfirmedBaseQuantity,snap.UnitPriceSnapshot,
+                    snap.TermsDaysSnapshot,
+                    i.BaseQuantity AS IssuedQuantity,i.CostAmount AS IssuedCost,
+                    ar.OriginalAmount AS ArOriginal,ar.AppliedAmount AS ArApplied,
+                    ar.OutstandingAmount AS ArOutstanding,ar.DueBusinessDate,
+                    (SELECT COUNT(*) FROM dbo.CashReceipt r
+                     WHERE r.TenantId=d.TenantId AND r.SaleDeliveryId=d.Id) AS Receipts,
+                    (SELECT COUNT(*) FROM dbo.BGrantConsumption g
+                     WHERE g.TenantId=d.TenantId AND g.SaleDeliveryId=d.Id) AS BGrantConsumptions
+                FROM dbo.SaleDelivery d
+                JOIN dbo.BusinessSource src ON src.TenantId=d.TenantId
+                    AND src.Id=d.BusinessSourceId AND src.SourceKind=N'A_DELIVERY'
+                JOIN dbo.BusinessCommand c ON c.TenantId=src.TenantId
+                    AND c.Id=src.BusinessCommandId AND c.Status=N'APPLIED'
+                JOIN dbo.AConfirmedLineSnapshot snap
+                    ON snap.TenantId=d.TenantId AND snap.AOrderLineId=d.AOrderLineId
+                    AND snap.AOrderId=d.AOrderId AND snap.SkuId=d.SkuId
+                LEFT JOIN dbo.DeliveryStockIssue i ON i.TenantId=d.TenantId
+                    AND i.SaleDeliveryId=d.Id
+                LEFT JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId
+                    AND ar.SaleDeliveryId=d.Id
+                WHERE d.TenantId=@Tenant
+                    AND src.RecordedAtUtc<=@AsOf AND c.CompletedAtUtc<=@AsOf
+                ORDER BY src.RecordedAtUtc,d.Id;
                 """, new { Tenant = tenant, AsOf = asOf.UtcDateTime },
                 tx, cancellationToken: ct));
 
@@ -211,6 +262,7 @@ public sealed class App01a3AuditService(TenantConnections connections)
             var rights = (await multi.ReadAsync<App01aAuditRight>()).AsList();
             var stock = (await multi.ReadAsync<App01aAuditStock>()).AsList();
             var bPostings = (await multi.ReadAsync<BPostingEvidence>()).AsList();
+            var aPostings = (await multi.ReadAsync<APostingEvidence>()).AsList();
 
             // Reconciliation issues are evidence, never silently repaired.
             // Per-line checks prevent offsetting ledger errors from hiding behind a
@@ -299,6 +351,40 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 "RIGHT_B_CONSUMED" or "RIGHT_CREDIT_B_CONSUMED"))
                 if (!bSourceLineIds.Contains(leg.BusinessSourceLineId))
                     issues.Add($"B_CONSUMPTION_WITHOUT_DELIVERY:{leg.Id:N}");
+
+            // As-of A posting ledger is source-reconciled, without interpreting
+            // mutable current on-hand as a historical snapshot. A confirmation
+            // by itself must not generate AR, COGS, receipt, or custody.
+            var aSourceLineIds = aPostings.Select(p => p.BusinessSourceLineId).ToHashSet();
+            foreach (var p in aPostings)
+            {
+                var legs = effects.Where(e => e.BusinessSourceLineId == p.BusinessSourceLineId)
+                    .ToArray();
+                bool Leg(string key, string kind, decimal qty, decimal amount) =>
+                    legs.Count(e => e.EffectKey == key && e.LedgerKind == kind
+                        && e.QuantityDelta == qty && e.AmountDelta == amount) == 1;
+                bool dateValid = p.DueBusinessDate.HasValue
+                    && p.TermsDaysSnapshot is >= 1 and <= 365
+                    && p.BusinessDate.Date.AddDays(p.TermsDaysSnapshot)
+                        == p.DueBusinessDate.Value.Date;
+                if (p.BaseQuantity <= 0 || p.BaseQuantity > p.ConfirmedBaseQuantity
+                    || p.UnitPriceSnapshot <= 0
+                    || p.PayableAmount != p.BaseQuantity * p.UnitPriceSnapshot
+                    || p.IssuedQuantity != p.BaseQuantity || p.IssuedCost != p.CostAmount
+                    || p.ArOriginal != p.PayableAmount || p.ArApplied != 0
+                    || p.ArOutstanding != p.PayableAmount || !dateValid
+                    || p.Receipts != 0 || p.BGrantConsumptions != 0
+                    || !Leg("PHYSICAL-OUT", "PHYSICAL_STOCK",
+                        -p.BaseQuantity, -p.CostAmount)
+                    || !Leg("COGS", "COGS", 0m, p.CostAmount)
+                    || !Leg("AR-GROSS", "AR", 0m, p.PayableAmount)
+                    || !Leg("RIGHT-A-USED", "RIGHT_A_CONSUMED", -p.BaseQuantity, 0m)
+                    || legs.Length != 4)
+                    issues.Add($"A_POSTING_SOURCE_LEDGER_MISMATCH:{p.DeliveryId:N}");
+            }
+            foreach (var leg in effects.Where(e => e.LedgerKind == "RIGHT_A_CONSUMED"))
+                if (!aSourceLineIds.Contains(leg.BusinessSourceLineId))
+                    issues.Add($"A_CONSUMPTION_WITHOUT_DELIVERY:{leg.Id:N}");
 
             await tx.CommitAsync(ct);
             return new App01aAuditSnapshot(tenant, asOf.ToUniversalTime(),

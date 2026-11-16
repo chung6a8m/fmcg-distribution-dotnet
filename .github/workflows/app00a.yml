@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01C.2 B20 + APP-01B.3 SQL oracle regression
+      - name: Two-tenant LocalDB APP-01C.3 A25/B20 + APP-01B.3 SQL oracle regression
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -55,7 +55,9 @@ jobs:
           APP01C1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01C2_TEST_RUN_ID: app01c2-${{ github.run_id }}-${{ github.run_attempt }}
           APP01C2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 82 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01C3_TEST_RUN_ID: app01c3-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01C3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 93 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -91,6 +93,17 @@ jobs:
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
             Set-Content -Path TestResults/APP-01C2-TestRunId.txt -Encoding utf8
           Write-Host "APP-01C.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01C.3 A25 TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01c3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
+            Set-Content -Path TestResults/APP-01C3-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01C.3 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
