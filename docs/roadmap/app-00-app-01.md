@@ -26,6 +26,10 @@ APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP0
 
 **Important:** `SYNTHETIC_VERIFIED` applies to APP-01A's bounded nonproduction slice, **not** 91/91 AC-03, real policy/mode, EV/P0, invoices/accounting or tenant go-live. Stock `StockPool` and `StockRight` remain synthetic opening/entitlement, not physical warehouse/vehicle custody. Preserve 125% Owner display exception as `NOT_TESTED`, not PASS or deferred work.
 
-## Recommended next implementation — APP-01B
+## APP-01B implementation status — physical state first
 
-[APP-01B executable proposal](app-01b-manifest-transfer-proposal.md): start with T0→T1 manifest+atomic stock/cost transfer MAIN100→MAIN30/TRIP70 for A40/B30, then T2 B31 quota rejection with unchanged balances and zero sale/receipt. Require two-tenant LocalDB, idempotency/rollback/concurrency/ledger tests and **39/39 T0–T2 expected-vs-actual fields** from the immutable 91-field AC-03 oracle before accepting APP-01B. The 39/39 target is **NOT_RUN** now; APP-01C..E and remaining 52 fields stay pending.
+- **APP-01B.1: SCHEMA_VERIFIED (PR #25)** — [schema and test contract](app-01b1-physical-stock-schema.md). Migration `202611160004` introduces explicit immutable opening, per-location physical balance, rights-scoped Trip manifest/lines, immutable paired transfer movement and strong tenant/Trip/source FKs. Seven two-tenant LocalDB schema tests; new 49-test CI floor. APP-01A `StockPool` remains an allocation entitlement, not mutable physical stock.
+- **APP-01B.2: NOT_IMPLEMENTED** — Serializable Dapper T1 stock/cost transfer and B31 quota/cash-offer preflight with durable no-effect rejection.
+- **APP-01B.3: NOT_RUN** — oracle comparison **39/39 T0–T2** with actual SQL persistence, rollback/idempotency/concurrency/security/CI evidence.
+
+[APP-01B executable proposal](app-01b-manifest-transfer-proposal.md): T1 expected MAIN100→MAIN30/TRIP70 (A40/B30), T2 B31 rejection leaves stock/cost/cash/AR/COGS unchanged. The 39/39 target and full 91/91 AC-03 are **NOT_VERIFIED**; APP-01C..E remain pending. APP-01B.1 passed independent schema review (including loaded-line immutability regressions) and exact-HEAD CI on PR #25; this does not verify APP-01B's 39/39 oracle.
