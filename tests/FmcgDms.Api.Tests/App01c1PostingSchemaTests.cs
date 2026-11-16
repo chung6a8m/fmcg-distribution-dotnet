@@ -571,8 +571,7 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',
             -- Invalid trip/tenant negatives should reach FK validation (547),
             -- rather than fail earlier with NOT NULL (515) on a missing trip.
-            COALESCE((SELECT BusinessDate FROM dbo.Trip
-                      WHERE TenantId=@Tenant AND Id=@Trip),
+            COALESCE((SELECT BusinessDate FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip),
                      CONVERT(date,SYSUTCDATETIME())))
         """;
 
