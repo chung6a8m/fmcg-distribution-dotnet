@@ -12,6 +12,8 @@
 
 Branches B and C may be stacked against A and B during development. **Merge sequentially A → B → C only after review and verified final HEAD of each PR.** Block APP-01A implementation until all three are reviewed and merged. Do not infer production, EV/P0 or tenant go-live acceptance.
 
+**Runtime supersession (2026-11-16):** Node 24 references above document the accepted APP-00B implementation baseline. A separate Node 26 LTS upgrade supersedes the *current* frontend runtime requirement without rewriting historical APP-00B acceptance or affecting the business baseline. See the Node 26 upgrade PR and the current `README.md`/`AGENTS.md` for active guidance.
+
 ## Version policy
 
 - Runtime family remains `net10.0` LTS; SDK fixed to `10.0.404` with `latestPatch` to avoid unreviewed feature-band changes.

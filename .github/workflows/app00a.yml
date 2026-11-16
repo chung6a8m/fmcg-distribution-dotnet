@@ -24,7 +24,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
       - name: Validate immutable business contract
         shell: pwsh
         run: |
