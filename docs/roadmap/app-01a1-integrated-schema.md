@@ -1,6 +1,6 @@
 # APP-01A.1 — Integrated schema / physical LocalDB contract
 
-**Status:** schema implemented and physical LocalDB guards verified in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21); APP-01A overall **NOT_VERIFIED** pending APP-01A.2/.3. Owner-authorized **synthetic/nonproduction only**. Related: [APP-01A issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2), [roadmap](app-00-app-01.md), [Owner technology decisions](../decisions/owner-app-2026-11-15.md).
+**Status:** schema implemented and physical LocalDB guards verified in [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21); APP-01A overall is now **SYNTHETIC_VERIFIED** after reviewed/merged APP-01A.2/.3 (see [closeout](../closeout/2026-11-16-app-01a.md)); this page documents the **schema-only APP-01A.1 checkpoint**. Owner-authorized **synthetic/nonproduction only**. Related: [APP-01A issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2), [roadmap](app-00-app-01.md), [Owner technology decisions](../decisions/owner-app-2026-11-15.md).
 
 ## Goal and precise boundary
 
@@ -16,7 +16,7 @@ Create the **first integrated application schema** on each nonce-owned SQL Serve
 - `StockRight` is the shared A/B rights namespace, with exactly one mode (`A` or `B`) per row and unique source line; `AReservation` can link only to `A` rights, `BQuota` only to `B` rights. Per-row consumed+released amount may not exceed grant; BCreditGrant has equivalent amount guards.
 - All new data remains in separate physical tenant databases. Existing non-production scratch marker, nonce, instance and ownership guards are unchanged.
 
-## Explicitly **not** guaranteed yet
+## Schema-only boundaries at the time of APP-01A.1 (historical)
 
 Schema checks alone do **not** prevent the *sum of independent* A/B allocations for a (`StockLocationId`, `SkuId`) from exceeding physical stock, nor do they verify a StockRight's Trip, SKU and order-line consistency. APP-01A.2 must serialize allocation across both rights kinds with an explicit Dapper SQL transaction and authoritative stock snapshot; APP-01A.3 must add two-client races/fault rollback tests.
 
@@ -29,8 +29,8 @@ No `ConfirmAOrder`/`ReserveAStock`/B grant command, payload hash canonicalizer, 
 3. Wrong Customer/ShipTo triple fails for AOrder and BCreditGrant; valid order/line/grant paths persist, grant over-consumption fails.
 4. Same source-line duplicate StockRight fails; AReservation cannot reference a B right and BQuota cannot reference an A right; right over-consumption fails.
 5. Duplicate (`TenantId`, `ProducerId`, `CommandId`) and duplicate ledger effect key fail; zero-value effect fails; no implicit AR/COGS posting.
-6. Verify immutable Business Baseline, .NET build, >=14 xUnit/LocalDB tests (9 foundation + 5 schema), browser/PWA regression, npm audits, PR final-HEAD CI artifacts. **PR #21 merge requires independent review and green final-HEAD CI; this schema increment does not complete APP-01A acceptance.**
+6. Verify immutable Business Baseline, .NET build, >=14 xUnit/LocalDB tests (9 foundation + 5 schema), browser/PWA regression, npm audits, PR final-HEAD CI artifacts. **Historical PR gate completed:** independently reviewed, final PR-head CI [#43787314340](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43787314340) passed, and PR #21 merged. APP-01A was completed later by #22/#23.
 
 ## Follow-on scope
 
-APP-01A.2 implements commands and their guarded explicit transactions. APP-01A.3 closes the original Issue #2 acceptance with replay, changed-payload no-effect conflict, concurrent stock/grant races, rollback and audit evidence. APP-01B..E continue the locked golden T0–T6 scenario; this PR cannot claim 91/91 app checkpoints.
+APP-01A.2 **implemented** commands and guarded explicit transactions; APP-01A.3 **implemented and verified** replay/CONFLICT, stock/credit races, rollback and logical audit. Issue #2 is closed; see [closeout](../closeout/2026-11-16-app-01a.md). APP-01B..E continue the locked golden T0–T6 scenario; this PR cannot claim 91/91 app checkpoints.

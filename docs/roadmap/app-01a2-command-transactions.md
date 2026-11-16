@@ -1,6 +1,6 @@
 # APP-01A.2 — Command transactions and shared A/B allocation
 
-**Status: IMPLEMENTED / INDEPENDENT REVIEW FINDING FIXED / CI_VERIFIED.** Synthetic/nonproduction increment of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); see [APP-01A.1 schema](app-01a1-integrated-schema.md). APP-01A as a whole remains **NOT_VERIFIED**. No change to `business/` or `business.lock.json`.
+**Status: IMPLEMENTED / INDEPENDENT REVIEW FINDING FIXED / CI_VERIFIED.** Synthetic/nonproduction increment of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); see [APP-01A.1 schema](app-01a1-integrated-schema.md). APP-01A is now **SYNTHETIC_VERIFIED** after independently reviewed APP-01A.3 merge and main CI; see [closeout](../closeout/2026-11-16-app-01a.md). No change to `business/` or `business.lock.json`.
 
 ## Behavior and allocation authority
 
@@ -44,4 +44,6 @@ All requests carry `ProducerId`, `CommandId`, `SourceNumber`. All four commands 
 
 Physical Windows LocalDB tests cover migration replay in both nonce-owned DBs; A reserve→B quota→A confirm; no AR/COGS; source reuse, shared stock bounds, invalid cross-tenant resources, customer/ShipTo/pool, credit cap; successful and rejected idempotent replay/changed payload conflict; concurrent two-client stock and retransmit; inactive/wrong-kind Trip vehicle rejection across all commands; injected SQL-trigger rollback. Require **>=25 xUnit tests** (14 prior + 10 APP-01A.2), .NET build and PR-head CI artifacts, unchanged Business Baseline and frontend/Playwright checks.
 
-**APP-01A.3 follow-on:** implementation is proposed in [draft PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23) with its [verification contract](app-01a3-audit-policy-verification.md); independent review, final-HEAD CI and TestRunId are still required before claiming APP-01A acceptance. **Remaining for APP-01B..E:** manifest/stock custody transfer, sale/receipts, physical stock/COGS and all 91 AC-03 checks. No EV/P0, invoice/legal channel, offline write, production import or tenant go-live authorization.
+**APP-01A.3 follow-on completed:** [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23) independently reviewed, four findings fixed/resolved, final PR-head CI [#43800609004](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43800609004) 42/42 LocalDB and 5/5 Playwright, TestRunId `app01a3-43800609004-1`; main merge CI [#43801711102](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43801711102) successful. [Closeout](../closeout/2026-11-16-app-01a.md).
+
+**Remaining for APP-01B..E:** manifest/physical custody transfer; sales/delivery/cash/AR/COGS/invoice; 91/91 AC-03 persistence checks and cross-module recovery. APP-01B [proposal](app-01b-manifest-transfer-proposal.md). No EV/P0, real B_ONLINE, offline write, production import or tenant go-live authorization.

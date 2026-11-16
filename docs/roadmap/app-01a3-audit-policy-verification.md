@@ -1,6 +1,6 @@
 # APP-01A.3 — Synthetic behavior hardening, as-of audit, approval and tenant matrix
 
-**State on PR #23: IMPLEMENTED / CI_VERIFIED (code HEAD) / INDEPENDENT_REVIEW_PENDING.** Part of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); APP-01A overall is **NOT_VERIFIED** until an independently reviewed final PR HEAD passes all gates. All work remains synthetic and nonproduction. The immutable Business Baseline and lock are unchanged.
+**State after PR #23 merge (2026-11-16): IMPLEMENTED / INDEPENDENTLY_REVIEWED / SYNTHETIC_VERIFIED.** [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2) is closed; final reviewed PR HEAD `0b5fd0c` and merged `main` `644203c7` passed their CI gates. See [closeout](../closeout/2026-11-16-app-01a.md). All work remains synthetic and nonproduction. The immutable Business Baseline and lock are unchanged.
 
 ## Security/authority boundary
 
@@ -43,15 +43,24 @@ Audit runs one SQL `Serializable` read transaction across all result sets and fi
 
 One run's exact `TestRunId` is the GitHub Actions `app01a3-<run_id>-<attempt>` file uploaded alongside TRX/Cobertura; record the **PR final HEAD SHA**, run link/conclusion, counts, findings and review resolution in PR #23. Run `scripts/Run-App00A.ps1` on Windows/LocalDB, `Verify-Business.ps1` and frontend/Playwright regression. `TestRunId` describes the synthetic test execution, not an EV/P0 or production business TestRun.
 
-## Pre-review CI evidence (superseded by review fixes; new HEAD must pass)
+## Historical pre-review CI evidence (superseded by reviewed final HEAD)
 
 - Source code HEAD: [`cdf62edf2a727d1a72fc2a013e7da9f443279f96`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/cdf62edf2a727d1a72fc2a013e7da9f443279f96).
 - [Windows CI #43796071525](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525): **SUCCESS**, TestRunId `app01a3-43796071525-1`; GitHub Actions temporary merge SHA separately recorded from source HEAD in the TRX artifact.
 - .NET 10 build **0 warnings / 0 errors**, xUnit v3 Microsoft Testing Platform + two physical nonce-owned LocalDBs **38/38 PASS**, 0 failed/skipped. Migration replay and fault-injection passed; TRX/Cobertura uploaded ([artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525/artifacts/14194327518)).
 - Locked Business Baseline verification PASS, Node 26 setup, frontend/online-first PWA build and dependency tests PASS, Playwright Chromium **5/5 PASS** ([artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525/artifacts/14194113273)).
 - npm production audit **0 vulnerabilities**; full build-tree audit retains **4 Low** in the pre-existing `deepmerge` → Rollup/Workbox/PWA dev/build dependency chain; the configured Moderate+ gate PASS. This is **not** a zero-finding full audit and does not authorize production.
-- Independent review on `c9d751f` found three P2 and one P3 and requested regression fixes. The new final PR HEAD must pass **42/42** physical tests and browser gates, with its own TestRunId and completed review threads before merge; the 38/38 run above is historical evidence only.
+- Independent review on `c9d751f` found three P2 and one P3 and requested regression fixes. The 38/38 run above is historical evidence only. **Final reviewed PR HEAD `0b5fd0c` passed 42/42 physical tests and 5/5 browser checks; four threads were resolved before merge.** See the final evidence below.
 
 ## Remaining scope after APP-01A.3
 
 APP-01B..E still own manifest/transfer, actual delivery/sale, receipt, custody, AR/COGS, invoice and 91/91 AC-03 integrated assertions, plus cross-module race/restore/EV checks. Reviewed/green synthetic CI alone must not be interpreted as production admission or policy approval.
+
+## Final independent review, merge and main CI (2026-11-16)
+
+- **Review round 1:** three P2 findings (future-dated checker review; whitespace actor/checker impersonation; aggregate-only right/effect audit blind spot) and one P3 (offset-less asOf parsing). All corrected on PR branch with regression tests; source-line test mutations restored in `finally`.
+- **Review round 2:** final PR HEAD [`0b5fd0c`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/0b5fd0cbe8d8b9288807c231bc87ca3a85e74d50), **NO NEW BLOCKING FINDINGS**, four threads marked resolved. [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23) merged.
+- [PR HEAD CI #43800609004](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43800609004) **SUCCESS**: .NET build 0 warnings/errors; **42/42** physical two-tenant LocalDB xUnit v3 tests, 0 failed/skipped, **5/5** Playwright; Business Baseline, frontend/PWA and configured npm security gates PASS. TestRunId `app01a3-43800609004-1`; [TRX/Cobertura artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43800609004/artifacts/14195939160).
+- **Merged `main`** [`644203c7`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/644203c7c8431736dddcbf5dd0a068ba65977b7f): [push CI #43801711102](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43801711102) **SUCCESS**, Windows LocalDB and frontend gates; [test evidence artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43801711102/artifacts/14196314803), [browser evidence](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43801711102/artifacts/14197075899).
+- npm **production tree audit: 0 findings** on reviewed PR HEAD. Full dev/build tree: **4 Low advisories** in the pre-existing PWA build dependency chain; Moderate+ gate passed, not a zero-advisory claim.
+- The status `SYNTHETIC_VERIFIED` does **not** grant real AP-01 finance policy authorization, SQL temporal audit capability, physical stock custody/AR/COGS, AC-03 91/91, EV/P0 or go-live. Handoff: [APP-01B proposal](app-01b-manifest-transfer-proposal.md).

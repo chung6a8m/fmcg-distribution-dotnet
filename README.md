@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status (2026-11-16):** APP-00A/APP-00B complete, APP-01A.1 schema [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21) and APP-01A.2 commands [PR #22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22) merged/CI verified. APP-01A.3 approval, as-of audit and two-tenant concurrency/security are implemented in **draft [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23), implementation CI verified and independent review pending**. **APP-01A overall NOT_VERIFIED** and full AC-03 business flow not implemented. Owner authorization remains **synthetic nonproduction only**.
+**Status (2026-11-16):** APP-00A/APP-00B/C complete. **APP-01A.1 [#21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21), APP-01A.2 [#22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22), APP-01A.3 [#23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23) MERGED / SYNTHETIC_VERIFIED.** [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2) closed. Independent review round 2 on PR HEAD `0b5fd0c` found no new blocking issues; [CI #43800609004](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43800609004) succeeded (42/42 LocalDB, 5/5 Playwright). Merged `main` HEAD `644203c7` passed [post-merge CI #43801711102](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43801711102). This verifies the **synthetic/nonproduction APP-01A slice only**. Full AC-03 91/91, EV/P0 and production/pilot are **NOT_VERIFIED / NOT_AUTHORIZED**. See [closeout](docs/closeout/2026-11-16-app-01a.md) and [APP-01B handoff proposal](docs/roadmap/app-01b-manifest-transfer-proposal.md).
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -27,13 +27,15 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Explicit Dapper SERIALIZABLE transactions implement `ReserveAStock`, `ConfirmAOrder`, `GrantBQuota` and `GrantBCredit` in one common source/command ledger.
 - Shared warehouse/SKU `StockPool` prevents A+B allocations beyond eligible synthetic opening stock; `BCreditPool` requires explicitly seeded synthetic credit capacity. No implicit stock or real credit approval, physical stock movement, delivery or AR/COGS.
 - SHA-256 canonical payload v1 and `(tenant, producer, command)` idempotency. Same payload replays the persisted outcome; changed payload returns 409 CONFLICT with zero new effects.
-- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 code-head CI verified in draft PR #23, independent review pending; APP-01A overall is NOT_VERIFIED.
+- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 is now reviewed/merged; the *synthetic APP-01A increment* is verified. APP-01B..E and full AC-03 remain unverified.
 
-## APP-01A.3 — Audit, approval and two-tenant verification (draft PR #23)
+## APP-01A.3 — Audit, approval and two-tenant verification (merged PR #23)
+
+**Review closeout:** 3 P2 + 1 P3 findings fixed, all four threads resolved; second review on final PR HEAD `0b5fd0c` found no new blockers. This is synthetic implementation verification only.
 
 - Adds synthetic AP-01 credit-policy evidence with maker/checker separation, versioned scope, expiry, explicit cap and source-linked approval ID. No approval, ambiguous approval or missing policy is fail-closed; **real credit policies and thresholds are still UNSET**.
 - Synthetic JWT is actor-bound and command routes have Warehouse/Sales permission separation. Read-only auditor endpoint `GET /api/synthetic/app01a/audit/as-of?asOf=<UTC>` provides logical as-of actor/source/effect/pending, approval lineage and A/B rights/effects reconciliation; **not temporal SQL history, production audit or accounting**.
-- Adds 17 physical LocalDB verification cases (including review-fix regressions) for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Requires reviewed final-HEAD CI and TestRunId before APP-01A acceptance. See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
+- Adds 17 physical LocalDB verification cases (including review-fix regressions) for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Reviewed final-HEAD CI and TestRunId are recorded in [APP-01A closeout](docs/closeout/2026-11-16-app-01a.md). See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
 
 ## Windows local checks
 
@@ -51,7 +53,7 @@ The local verification refuses staged, unstaged or untracked files inside `busin
 
 To run only the public liveness probe: `dotnet run --project src/FmcgDms.Api --urls http://localhost:5116` then `GET /health/live`. Synthetic-authenticated diagnostic endpoints are **not enabled by default** and **not production auth**. No secrets are committed; synthetic JWT test keys are only in the integration test project.
 
-**Definition of Done APP-00A:** build + test + migrations repeated safely on fresh tenant A/B LocalDB, negative cross-tenant read/write, strict scratch reset guard, PWA build, business validator and PR-head CI PASS. APP-01A should follow in another PR after review.
+**Definition of Done APP-00A:** build + test + migrations repeated safely on fresh tenant A/B LocalDB, negative cross-tenant read/write, strict scratch reset guard, PWA build, business validator and PR-head CI PASS. APP-01A.1/.2/.3 were subsequently implemented and reviewed.
 
 **No production/pilot/EV/P0 authorization** follows from this application foundation.
 
@@ -59,4 +61,4 @@ To run only the public liveness probe: `dotnet run --project src/FmcgDms.Api --u
 
 From `web/` on Node 26 LTS, run `npm ci --no-audit --no-fund`, `npm run build`, `npx playwright install chromium`, then `npm run test:e2e`. The browser suite starts a production `vite preview` and checks API live/fallback states, **100%** layout at desktop and narrow CSS viewport, and real service-worker V1→V2 behavior (the V2 release is synthesized from the built PWA in a temporary directory, served under the same origin; no tracked source files are rewritten). CI uploads `app00b-playwright-evidence` with reports, screenshots and traces.
 
-**Owner exception OWN-APP00B-13-02:** 125% zoom/display scale is outside APP-00B/C acceptance and not deferred in the roadmap. At below-320px CSS viewports, layout may overflow. The 100% Edge/PWA evidence was **accepted** under OWN-APP00B-13-03 and [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is closed; APP-01A implementation is unblocked, but its own business exit criteria are still pending. No EV/P0 or tenant go-live authorization.
+**Owner exception OWN-APP00B-13-02:** 125% zoom/display scale is outside APP-00B/C acceptance and not deferred in the roadmap. At below-320px CSS viewports, layout may overflow. The 100% Edge/PWA evidence was **accepted** under OWN-APP00B-13-03 and [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is closed; APP-01A synthetic exit criteria were subsequently reviewed, verified and closed in Issue #2; the full AC-03 business gates are still pending. No EV/P0 or tenant go-live authorization.
