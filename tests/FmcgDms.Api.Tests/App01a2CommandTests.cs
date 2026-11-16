@@ -320,6 +320,12 @@ public sealed class App01a2CommandTests(SqlScratchFixture fixture)
         Assert.Equal(0, db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.BusinessSource WHERE TenantId=@Tenant AND TripId=@Trip",
             new { Tenant = A, s.Trip }));
+        Assert.Equal(0, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip",
+            new { Tenant = A, s.Trip }));
+        Assert.Equal(0, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.BCreditGrant WHERE TenantId=@Tenant AND TripId=@Trip",
+            new { Tenant = A, s.Trip }));
         Assert.Equal(0m, db.ExecuteScalar<decimal>(
             "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku",
             new { Tenant = A, s.Warehouse, s.Sku }));

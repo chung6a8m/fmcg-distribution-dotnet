@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant scratch and APP-01A.1/.2 integration tests
+      - name: Two-tenant LocalDB APP-01A.1/.2 commands and trip-vehicle regression
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
         run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 25 -- --report-trx --coverage --coverage-output-format cobertura
