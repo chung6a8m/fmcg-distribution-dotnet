@@ -131,6 +131,33 @@ public sealed partial class App01a2CommandTests
     }
 
     [Fact]
+    public async Task Used_approval_policy_evidence_cannot_be_rewritten_or_deleted()
+    {
+        var s = Seed(A);
+        using var factory = fixture.CreateFactory();
+        using var writer = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        Assert.Equal("B_CREDIT_GRANTED",
+            (await Send(writer, "grant-b-credit", Credit(s, 10))).Outcome.OutcomeCode);
+        using var db = Open(fixture, A);
+        Assert.Throws<SqlException>(() => db.Execute("""
+            UPDATE dbo.CreditPolicyApproval SET PolicyVersion=N'rewritten'
+            WHERE TenantId=@Tenant AND TripId=@Trip
+            """, new { Tenant = A, s.Trip }));
+        Assert.Throws<SqlException>(() => db.Execute("""
+            DELETE dbo.CreditPolicyApproval WHERE TenantId=@Tenant AND TripId=@Trip
+            """, new { Tenant = A, s.Trip }));
+        using var auditor = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+            actor: "audit-policy", roles: ["auditor"]);
+        var report = await Audit(auditor, DateTimeOffset.UtcNow.AddSeconds(1));
+        var grant = Assert.Single(report.CreditGrants, g => g.TripId == s.Trip);
+        Assert.Equal("SYNTHETIC-POLICY-v1", grant.PolicyVersion);
+        Assert.Equal(100m, grant.ApprovedLimit);
+        Assert.NotNull(grant.ReviewedAtUtc);
+        Assert.Equal("synthetic-case-reviewed", grant.EvidenceRef);
+        Assert.Empty(report.ReconciliationIssues);
+    }
+
+    [Fact]
     public async Task Multiple_concurrent_credit_approvals_block_grant_instead_of_cherry_picking()
     {
         var s = Seed(A);
