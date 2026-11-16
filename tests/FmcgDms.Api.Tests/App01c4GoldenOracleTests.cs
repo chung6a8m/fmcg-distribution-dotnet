@@ -726,7 +726,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             Assert.Equal(expected.Length, current.Length);
             foreach (var e in expected)
             {
-                var leg = Assert.Single(current.Where(x => x.EffectKey == e.Key));
+                var leg = Assert.Single(current, x => x.EffectKey == e.Key);
                 Assert.Equal(e.Ledger, leg.LedgerKind);
                 Assert.Equal(e.Quantity, leg.QuantityDelta);
                 Assert.Equal(e.Amount, leg.AmountDelta);
