@@ -109,32 +109,48 @@ internal sealed class App01e2SqlContentionGate : IAsyncDisposable
     /// Observes lock manager state in the tenant's *physical* LocalDB. Never
     /// substitute a delay or an HTTP admission counter for SQL contention.
     /// </summary>
+    private sealed class SqlWaitCounts
+    {
+        public int Total { get; set; }
+        public int Application { get; set; }
+    }
+
     public async Task<int> WaitForBothSqlWaitersAsync(CancellationToken ct)
     {
         var clock = Stopwatch.StartNew();
-        int maximum = 0;
+        int maximumTotal = 0, maximumApplication = 0;
         while (clock.Elapsed < TimeSpan.FromSeconds(7))
         {
             ct.ThrowIfCancellationRequested();
             await using var witness = new SqlConnection(_connectionString);
             await witness.OpenAsync(ct);
-            int waiting = await witness.ExecuteScalarAsync<int>(
+            // A distinct second command may first wait on the serializable
+            // BusinessCommand identity key-range, before reaching the shared
+            // trip APPLOCK. Counting only APPLICATION would falsely report
+            // one client even though TWO independent SQL sessions are WAITING.
+            var waits = await witness.QuerySingleAsync<SqlWaitCounts>(
                 new CommandDefinition(
                     """
-                    SELECT COUNT(DISTINCT request_session_id)
+                    SELECT
+                      COUNT(DISTINCT request_session_id) AS Total,
+                      COUNT(DISTINCT CASE WHEN resource_type=N'APPLICATION'
+                        THEN request_session_id END) AS Application
                     FROM sys.dm_tran_locks
                     WHERE resource_database_id=DB_ID()
                       AND request_status=N'WAIT'
                       AND request_session_id<>@@SPID
                       AND resource_type IN ('APPLICATION','KEY','RID','PAGE','OBJECT')
-                      AND (@App=0 OR resource_type=N'APPLICATION')
-                    """, new { App = _application ? 1 : 0 }, cancellationToken: ct));
-            maximum = Math.Max(waiting, maximum);
-            if (waiting >= 2) return waiting;
+                    """, cancellationToken: ct));
+            maximumTotal = Math.Max(waits.Total, maximumTotal);
+            maximumApplication = Math.Max(waits.Application, maximumApplication);
+            if (waits.Total >= 2 && (!_application || waits.Application >= 1))
+                return waits.Total;
             await Task.Delay(TimeSpan.FromMilliseconds(45), ct);
         }
         throw new InvalidOperationException(
-            $"E.2 expected two genuine SQL waiters; observed maximum {maximum}. " +
+            $"E.2 expected two genuine SQL waiters" +
+            (_application ? " (at least one trip application waiter)" : "") +
+            $"; observed maximum total={maximumTotal}, app={maximumApplication}. " +
             "HTTP admission alone is not a database interleaving proof.");
     }
 
