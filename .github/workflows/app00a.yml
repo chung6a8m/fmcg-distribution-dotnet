@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01C.3 A25/B20 + APP-01B.3 SQL oracle regression
+      - name: Two-tenant LocalDB APP-01C.4 65-cell T0-T4 + APP-01B.3 39-cell regression
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -57,7 +57,9 @@ jobs:
           APP01C2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01C3_TEST_RUN_ID: app01c3-${{ github.run_id }}-${{ github.run_attempt }}
           APP01C3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 93 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01C4_TEST_RUN_ID: app01c4-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01C4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 96 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -104,6 +106,17 @@ jobs:
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
             Set-Content -Path TestResults/APP-01C3-TestRunId.txt -Encoding utf8
           Write-Host "APP-01C.3 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01C.4 oracle TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01c4-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
+            Set-Content -Path TestResults/APP-01C4-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01C.4 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -130,6 +143,108 @@ jobs:
               throw "Oracle $name lacks correct run, source SHA or immutable baseline provenance"
             }
             Write-Host "APP-01B.3 $name : 39/39 persisted SQL cells PASS ($id)"
+          }
+      - name: Fail closed on APP-01C.4 independently persisted T0-T4 SQL oracles
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem tests -Recurse -File -Filter '*-oracle.json' |
+            Where-Object { $_.FullName -like '*TestResults*APP-01C4*' })
+          if ($reports.Count -ne 2) { throw "Expected exactly 2 independent APP-01C.4 tenant SQL reports; found $($reports.Count)" }
+          $id = "app01c4-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $hash = (Get-FileHash business/reference-data/expected-results/golden-oracles.json -Algorithm SHA256).Hash
+          $expectedSteps = @('T0','T1_LOAD','T2_REJECT','T3_B20','T4_A25')
+          foreach ($tenant in @('tenant-a','tenant-b')) {
+            $name = "$tenant-oracle.json"
+            $found = @($reports | Where-Object { $_.Name -eq $name })
+            if ($found.Count -ne 1) { throw "Missing or duplicated C.4 SQL report $name" }
+            $r = Get-Content $found[0].FullName -Raw | ConvertFrom-Json
+            if ($r.Schema -ne 'APP01C4_SQL_ORACLE_V1' -or $r.TenantId -ne $tenant -or
+                $r.Status -ne 'PASS' -or $r.Failure -or
+                $r.ExpectedCells -ne 65 -or $r.CheckedCells -ne 65 -or
+                $r.MatchedCells -ne 65 -or @($r.Cells).Count -ne 65 -or
+                @($r.Cells | Where-Object { -not $_.Match }).Count -ne 0 -or
+                @($r.Steps).Count -ne 5) {
+              throw "APP-01C.4 $name failed 65/65 SQL evidence gate"
+            }
+            if ($r.TestRunId -ne $id -or $r.SourceHeadSha -ne $sourceHead -or
+                $r.WorkflowSha -ne $env:GITHUB_SHA -or $r.OracleSha256 -ne $hash) {
+              throw "APP-01C.4 $name missing exact run/source SHA or immutable oracle hash"
+            }
+            if ($r.Database -notmatch '^Fmcg_App00_[a-f0-9]{32}_[AB]
+        shell: pwsh
+        run: |
+          $results = Get-ChildItem -Path TestResults -Recurse -File -ErrorAction Stop
+          if (-not ($results | Where-Object { $_.Extension -eq '.trx' })) { throw 'Expected MTP TRX evidence is missing.' }
+          if (-not ($results | Where-Object { $_.Name -like '*.cobertura.xml' })) { throw 'Expected Cobertura coverage evidence is missing.' }
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Audit npm non-dev dependency tree (all severities)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=low
+      - name: Audit full npm dependency tree (block moderate and above)
+        working-directory: web
+        run: npm audit --audit-level=moderate
+      - name: Verify Workbox glob is patched and build-time-only
+        working-directory: web
+        run: npm run test:dependencies
+      - name: Verify Tailwind CSS v4 integration
+        working-directory: web
+        run: npm ls tailwindcss @tailwindcss/vite --depth=0
+      - name: Frontend health contract regression tests
+        working-directory: web
+        run: npm run test
+      - name: Build online-first React PWA
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Browser/PWA E2E regression (100% only; 125% Owner exception)
+        working-directory: web
+        run: npm run test:e2e
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00b-playwright-evidence
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
+      - name: Verify generated PWA artifacts and user-confirmed update hook
+        working-directory: web
+        run: npm run test:pwa-build
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-test-evidence
+          path: '**/TestResults/**/*'
+          if-no-files-found: warn
+ -or
+                (($tenant -eq 'tenant-a') -and !$r.Database.EndsWith('_A')) -or
+                (($tenant -eq 'tenant-b') -and !$r.Database.EndsWith('_B'))) {
+              throw "APP-01C.4 $name is not backed by its own nonce LocalDB"
+            }
+            for ($i = 0; $i -lt 5; $i++) {
+              $snapshot = $r.Steps[$i]
+              if ($snapshot.Row -ne $i -or $snapshot.Step -cne $expectedSteps[$i] -or
+                  -not $snapshot.Evidence.LedgerDigest -or
+                  -not $snapshot.PostingDigest -or
+                  @($r.Cells | Where-Object { $_.Row -eq $i }).Count -ne 13) {
+                throw "APP-01C.4 $name incomplete checkpoint index $i"
+              }
+            }
+            if ($r.Steps[3].Posting.Sales -ne 1 -or $r.Steps[3].Posting.SourceLinked -ne 1 -or
+                $r.Steps[3].Posting.BEffectRows -ne 7 -or $r.Steps[3].Posting.AEffectRows -ne 0 -or
+                $r.Steps[4].Posting.Sales -ne 2 -or $r.Steps[4].Posting.SourceLinked -ne 2 -or
+                $r.Steps[4].Posting.BEffectRows -ne 7 -or $r.Steps[4].Posting.AEffectRows -ne 4) {
+              throw "APP-01C.4 $name missing SQL posting source/ledger lineage"
+            }
+            Write-Host "APP-01C.4 $name : 65/65 persisted SQL cells PASS ($id; $sourceHead)"
           }
       - name: Verify MTP test evidence exists
         shell: pwsh
