@@ -41,13 +41,13 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 
 Migration `202611160004` adds `PhysicalStockOpening` (immutable T0), `PhysicalStockBalance` (per-location physical quantity/cost), `TripManifest`/`TripManifestLine` (A/B-rights-bound draft/load state) and immutable `PhysicalStockMovement` (one source-linked paired warehouse→vehicle transfer record per line). Stock rights/`StockPool` remain synthetic **allocation** counters, not physical stock. New tests target **49/49 LocalDB minimum** across nonce-owned two tenant databases, with source/Trip/warehouse/vehicle/decimal/immutability negatives. See [APP-01B.1 design and verification](docs/roadmap/app-01b1-physical-stock-schema.md).
 
-**APP-01B.1 is schema-only.** APP-01B.2 now implements the synthetic Dapper T1 load and B31 preflight (PR CI/review pending); APP-01B.3 verifies the immutable 39/39 oracle. This does not imply B sale/receipt, cash/AR/COGS, 39/39 T0–T2 oracle verification or production authority. Keep `business/` and `business.lock.json` immutable.
+**APP-01B.1 is schema-only.** APP-01B.2 now implements the synthetic Dapper T1 load and B31 preflight (PR #26; exact-head CI/review evidence tracked on PR); APP-01B.3 verifies the immutable 39/39 oracle. This does not imply B sale/receipt, cash/AR/COGS, 39/39 T0–T2 oracle verification or production authority. Keep `business/` and `business.lock.json` immutable.
 
-## APP-01B.2 — Manifest load and quota preflight (implementation pending verification)
+## APP-01B.2 — Manifest load and quota preflight (synthetic implementation; PR #26)
 
 - `POST /api/synthetic/app01b/commands/load-manifest` (warehouse role) loads every pre-staged A/B right in one explicit Serializable SQL transaction; debits warehouse and credits vehicle for exact decimal quantities and carried cost, persists immutable source lines/movements and balanced nonfinancial custody ledger effects. Rights and StockPool remain allocation entitlements, not sales/COGS.
 - `POST /api/synthetic/app01b/commands/preflight-b-sale` (sales role) is deliberately non-posting: B31 at price15 with synthetic offer465 returns durable `REJECTED / REJECTED_QUOTA / B_QUOTA_INSUFFICIENT`; even an eligible B offer remains `B_SALE_NOT_IMPLEMENTED` until APP-01C. No receipt/cash/AR/invoice/COGS effects.
-- Reuses APP-01A canonical command identities, hash/replay/conflict, JWT tenant boundary and nonce-owned LocalDB. Adds eleven real LocalDB tests (60-test CI floor) for paired transfer, B31 no-effect, contention, rollback, residual decimal cost and two tenants. [APP-01B.2 contract](docs/roadmap/app-01b2-manifest-commands.md). **Final-HEAD CI and independent review still required; 39/39 T0–T2 remains NOT_RUN.**
+- Reuses APP-01A canonical command identities, hash/replay/conflict, JWT tenant boundary and nonce-owned LocalDB. Adds thirteen real LocalDB tests (62-test CI floor) for paired transfer, B31 no-effect, contention, rollback, residual decimal cost and two tenants. [APP-01B.2 contract](docs/roadmap/app-01b2-manifest-commands.md). **Exact-head CI and independent review evidence is tracked in PR #26; 39/39 T0–T2 remains NOT_RUN.**
 
 ## Windows local checks
 

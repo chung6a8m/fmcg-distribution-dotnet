@@ -1,6 +1,6 @@
 # APP-01B proposal — T0→T2 manifest, custody transfer and quota rejection
 
-**State: APP-01B.1 SCHEMA_VERIFIED; APP-01B.2 IMPLEMENTED / PR CI AND REVIEW PENDING; APP-01B.3 NOT_IMPLEMENTED / 39/39 NOT_RUN (2026-11-16).** Owner authorized the APP-01A..E *synthetic nonproduction* roadmap in [owner decisions](../decisions/owner-app-2026-11-15.md). APP-01A [closeout](../closeout/2026-11-16-app-01a.md) is SYNTHETIC_VERIFIED. This document proposes the next small vertical slice; it is **not** a claim of APP-01B acceptance, 39/39 golden verification or real warehouse custody.
+**State: APP-01B.1 SCHEMA_VERIFIED; APP-01B.2 IMPLEMENTED (PR #26 CI/review evidence); APP-01B.3 NOT_IMPLEMENTED / 39/39 NOT_RUN (2026-11-16).** Owner authorized the APP-01A..E *synthetic nonproduction* roadmap in [owner decisions](../decisions/owner-app-2026-11-15.md). APP-01A [closeout](../closeout/2026-11-16-app-01a.md) is SYNTHETIC_VERIFIED. This document proposes the next small vertical slice; it is **not** a claim of APP-01B acceptance, 39/39 golden verification or real warehouse custody.
 
 ## Business contract and oracle
 
@@ -29,4 +29,4 @@ Sources (immutable): [AC-03 expected steps](../../business/reference-data/expect
 - Verify Business Baseline lock, no production DB, two LocalDB migration replay/tenant cross-read-write negatives, .NET/Playwright/PWA gates, independent review and final-HEAD CI after fixes. Only then mark **APP-01B SYNTHETIC_VERIFIED**.
 - **NOT INCLUDED:** sale/delivery actual posting (APP-01C), AR/COGS/cash/credit consumption or receipt, cashier handover/return (APP-01D), full 91/91 and recovery cross-module matrix (APP-01E), real price/tax/legal invoice, B_ONLINE external mode, offline business writes, EV/P0 or tenant go-live.
 
-**Current increment:** [APP-01B.1 physical schema and LocalDB test contract](app-01b1-physical-stock-schema.md) is SCHEMA_VERIFIED via [PR #25](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/25) with independent review and final-HEAD CI. APP-01B.2 [implements](app-01b2-manifest-commands.md) the synthetic LoadManifest and B31 preflight with physical LocalDB tests; independent review and exact PR-head CI evidence are pending. Defer oracle 39/39 to APP-01B.3.
+**Current increment:** [APP-01B.1 physical schema and LocalDB test contract](app-01b1-physical-stock-schema.md) is SCHEMA_VERIFIED via [PR #25](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/25) with independent review and final-HEAD CI. APP-01B.2 [implements](app-01b2-manifest-commands.md) the synthetic LoadManifest and B31 preflight with physical LocalDB tests; independent review and exact PR-head CI evidence are tracked in PR #26. Defer oracle 39/39 to APP-01B.3.
