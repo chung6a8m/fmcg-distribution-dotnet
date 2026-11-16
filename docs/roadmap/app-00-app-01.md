@@ -8,7 +8,11 @@ Business source: [read-only Business Baseline](../../business/README.md), [oracl
 | APP-00B | Toolchain modernization: SDK/NuGet/CI, xUnit v3 + MTP, Tailwind v4 + frontend lockfile | Three separately reviewed PRs; app tests + tenant isolation + Playwright 100% UI/PWA regressions green on final HEAD; 125% excluded by [Owner exception](../decisions/owner-app00b-13-02-125-scale-exception.md); [APP-00B plan](app-00b-dependency-modernization.md) |
 | APP-01A | Single integrated source/command ledger, Tenant/Auth boundary, Customer/ShipTo, SKU/Location, Trip, A order/line, B quota/grant | Same command replay; changed payload CONFLICT; tenant A/B access denied; A confirm no AR/COGS |
 | APP-01B | T0→T1→T2: A40/B30 manifest/rights and stock transfer; B31 price15 offered verified cash465 | No overlapping A/B rights; B31 `REJECTED_QUOTA / B_QUOTA_INSUFFICIENT` with zero effect/receipt |
-| APP-01C | T3 B20 cash200/AR_B100/COGS200; T4 A25/AR_A375/COGS250 | Atomic source/ledger, fault rollback and no double consume |
+| APP-01C | T3 B20 plus T4 A25 with source-bound operational posting | Atomic stock/rights/receipt/AR/COGS in each command; synthetic-only |
+| APP-01C.1 | [Posting schema + source/ledger contract](app-01c1-posting-schema.md) | Fresh/repeat migration 202611160005, two nonce LocalDB tenant FK/immutable/negative tests; no posting |
+| APP-01C.2 | B20 atomic sale/delivery/verified cash | TRIP50/500, AR_B100, COGS200, custody200, B remaining10; rollback/replay/concurrent no-oversell |
+| APP-01C.3 | A25 partial delivery from Confirm snapshot | TRIP25/250, AR_A375, cumulative COGS450, A held15; no B/cash effects |
+| APP-01C.4 | Independent SQL T0–T4 oracle and closeout | **65/65** per tenant (130 across two), actual/diff, complete lineage, CI exact reviewed HEAD |
 | APP-01D | T5 cashier accept200; T6 unload A15/B10 | OFFER no money posting; custody/fund paired; **7 checkpoints ×13 fields = 91/91** directly from app persistence |
 | APP-01E | 2-client races, retry/rollback, source reconciliation, integrated regression | Evidence TestRunId/actual/diff, reviewed CI HEAD; AC-11 full remains NOT_VERIFIED without C→P, lost ACK/restart |
 
@@ -37,3 +41,14 @@ APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP0
 T0 MAIN 100/1000, TRIP 0/0 and A40/B30 -> T1 MAIN 30/300, TRIP 70/700 -> T2 B31 at 15/cash 465 yields durable `REJECTED_QUOTA / B_QUOTA_INSUFFICIENT` with no new source/ledger/physical/financial effects. The original [APP-01B proposal](app-01b-manifest-transfer-proposal.md) remains the executable boundary.
 
 **Out of scope:** Full AC-03 **91/91** through T3–T6, APP-01C–E, real B/offline, invoices, policy, EV/P0 and go-live are **NOT_VERIFIED / NOT_AUTHORIZED**. The 125% display exception remains Owner-accepted **NOT_TESTED**. Next vertical slice is **APP-01C** (T3 B20 and T4 A25 postings), independently gated.
+
+## APP-01C handoff — four incremental PRs (2026-11-16)
+
+APP-01B is merged as **SYNTHETIC_VERIFIED** for T0–T2 only, [PR #27](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/27) with final two-tenant 39/39. The approved next increment APP-01C is explicitly separated into **four reviewable, sequential PRs**:
+
+1. **APP-01C.1: posting schema, migrations and source/ledger contract.** [Schema spec](app-01c1-posting-schema.md). New physical tables and composite identity/immutable guards only. New test floor 72 (64 prior + 8 C.1); no B20/A25 command or 65/65 claims. Status **IMPLEMENTED / CI_AND_REVIEW_PENDING** until exact-HEAD evidence is attached.
+2. **APP-01C.2: T3 B20 one atomic Dapper transaction** creating sale, delivery, verified cash receipt, receipt allocation, AR_B 100, COGS 200, custody 200, B right −20 and grant credit consumed100. Replay, fault rollback, races and tenant/actor negatives.
+3. **APP-01C.3: T4 A25 one atomic partial-delivery transaction**, freezing A price/terms at confirmation and consuming only A right25 with AR_A375 and COGS250. Credit/receipt/custody of B unchanged; split source and overdelivery negatives.
+4. **APP-01C.4: independent SQL oracle**, all 13 AC-03 fields at T0–T4, exact **65/65 per tenant** with source/ledger fingerprint, two tenant actual/diff and reproducible CI TestRunId.
+
+A review+CI gate applies to every PR and the final changed HEAD, with strict read-only Business Baseline. Even APP-01C.4 success is **not full AC-03 91/91**, B production/offline, invoice, EV/P0, pilot or go-live approval. T5/T6 remain APP-01D and broader cross-module races APP-01E. 125% display remains Owner EXCEPTION_ACCEPTED/NOT_TESTED, excluded rather than postponed.
