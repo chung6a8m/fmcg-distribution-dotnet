@@ -24,6 +24,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     private const string ACommands = "/api/synthetic/app01a/commands/";
     private const string BCommands = "/api/synthetic/app01b/commands/";
     private const string CCommands = "/api/synthetic/app01c/commands/";
+    private const string DCommands = "/api/synthetic/app01d/commands/";
 
     private sealed record Scene(Guid Sku, Guid Warehouse, Guid Vehicle, Guid Trip,
         Guid Order, Guid OrderLine, Guid Manifest, Guid Customer, Guid ShipTo,
@@ -1359,5 +1360,132 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         }
     }
 
+
+    [Fact]
+    public async Task Unload_releases_never_loaded_B_quota_when_manifest_is_partial()
+    {
+        using var factory = fixture.CreateFactory();
+        using var sales = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantA);
+        using var warehouse = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantA,
+            actor: "synthetic-warehouse", roles: ["warehouse"]);
+        var scene = await Prepare(sales, TenantA);
+        using (var db = Open(TenantA))
+            db.Execute("""
+                UPDATE dbo.TripManifestLine SET PlannedBaseQuantity=20
+                WHERE TenantId=@Tenant AND Id=@Line AND RightKind='B'
+                """, new { Tenant = TenantA, Line = scene.BManifestLine });
+
+        await ExpectApplied(sales, BCommands + "load-manifest",
+            new LoadManifestCommand(Producer, Id(), Id(), scene.Manifest), "MANIFEST_LOADED");
+        await ExpectApplied(warehouse, DCommands + "unload-trip-remainder",
+            new UnloadTripRemainderCommand(Producer, Id(), Id(),
+                scene.Trip, scene.Manifest), "TRIP_REMAINDER_UNLOADED");
+
+        using var dbCheck = Open(TenantA);
+        var args = new { Tenant = TenantA, scene.Trip, scene.Sku,
+            scene.Warehouse, scene.Vehicle };
+        var bLine = dbCheck.QuerySingle<(decimal Qty, decimal Cost, decimal BReleased)>("""
+            SELECT BaseQuantity,CostAmount,ReleasedBQuantity FROM dbo.TripUnloadLine
+            WHERE TenantId=@Tenant AND TripId=@Trip AND SkuId=@Sku AND RightKind='B'
+            """, args);
+        Assert.Equal((20m, 200m, 30m), bLine);
+        var bRight = dbCheck.QuerySingle<(decimal Granted, decimal Consumed,
+            decimal Released, string Status)>("""
+            SELECT GrantedBaseQuantity,ConsumedBaseQuantity,ReleasedBaseQuantity,Status
+            FROM dbo.StockRight
+            WHERE TenantId=@Tenant AND TripId=@Trip AND SkuId=@Sku AND RightKind='B'
+            """, args);
+        Assert.Equal((30m, 0m, 30m, "RELEASED"), bRight);
+        Assert.Equal((100m, 1000m), dbCheck.QuerySingle<(decimal Qty, decimal Cost)>("""
+            SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+            """, args));
+        Assert.Equal((0m, 0m), dbCheck.QuerySingle<(decimal Qty, decimal Cost)>("""
+            SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
+            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+            """, args));
+    }
+
+    [Fact]
+    public async Task Unload_records_release_only_B_line_after_partially_loaded_B_is_fully_sold()
+    {
+        using var factory = fixture.CreateFactory();
+        using var sales = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantB);
+        using var cashier = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantB,
+            actor: "synthetic-cashier", roles: ["cashier"]);
+        using var warehouse = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantB,
+            actor: "synthetic-warehouse", roles: ["warehouse"]);
+        var scene = await Prepare(sales, TenantB);
+        using (var db = Open(TenantB))
+            db.Execute("""
+                UPDATE dbo.TripManifestLine SET PlannedBaseQuantity=20
+                WHERE TenantId=@Tenant AND Id=@Line AND RightKind='B'
+                """, new { Tenant = TenantB, Line = scene.BManifestLine });
+
+        await ExpectApplied(sales, BCommands + "load-manifest",
+            new LoadManifestCommand(Producer, Id(), Id(), scene.Manifest), "MANIFEST_LOADED");
+        await ExpectApplied(sales, ACommands + "grant-b-credit",
+            new GrantBCreditCommand(Producer, Id(), Id(),
+                scene.Trip, scene.Customer, scene.ShipTo, "B",
+                "SYNTHETIC_UNITLESS", 100m), "B_CREDIT_GRANTED");
+        await ExpectApplied(sales, CCommands + "post-b-sale-delivery-receipt",
+            new PostBSaleDeliveryReceiptCommand(Producer, Id(), Id(),
+                scene.Trip, scene.Customer, scene.ShipTo, scene.BManifestLine,
+                scene.Sku, 20m, 15m, 200m, SeedVerifiedCashWitness(TenantB, scene)),
+            "B_SALE_DELIVERY_POSTED");
+        var offered = await Post(sales, DCommands + "offer-cash-handover",
+            new OfferCashHandoverCommand(Producer, Id(), Id(), scene.Trip, 200m));
+        Assert.Equal("CASH_HANDOVER_OFFERED", offered.OutcomeCode);
+        string countRef = Id();
+        using (var db = Open(TenantB))
+            db.Execute("""
+                INSERT dbo.CashierCountEvidence(TenantId,EvidenceRef,TripId,
+                    CountedAmount,CountedBy,VerificationStatus,CountedAtUtc)
+                VALUES(@Tenant,@Evidence,@Trip,200,N'synthetic-cashier',
+                    N'VERIFIED',SYSUTCDATETIME())
+                """, new { Tenant = TenantB, Evidence = countRef, scene.Trip });
+        await ExpectApplied(cashier, DCommands + "accept-cash-handover",
+            new AcceptCashHandoverCommand(Producer, Id(), Id(),
+                scene.Trip, Assert.IsType<Guid>(offered.SourceId), countRef),
+            "CASH_HANDOVER_ACCEPTED");
+        await ExpectApplied(warehouse, DCommands + "unload-trip-remainder",
+            new UnloadTripRemainderCommand(Producer, Id(), Id(),
+                scene.Trip, scene.Manifest), "TRIP_REMAINDER_UNLOADED");
+
+        using var verify = Open(TenantB);
+        var args = new { Tenant = TenantB, scene.Trip, scene.Sku,
+            scene.Warehouse, scene.Vehicle };
+        var bLine = verify.QuerySingle<(decimal Qty, decimal Cost, decimal BRelease)>("""
+            SELECT BaseQuantity,CostAmount,ReleasedBQuantity
+            FROM dbo.TripUnloadLine WHERE TenantId=@Tenant AND TripId=@Trip
+                AND SkuId=@Sku AND RightKind='B'
+            """, args);
+        Assert.Equal((0m, 0m, 10m), bLine);
+        var bRight = verify.QuerySingle<(decimal Granted, decimal Consumed,
+            decimal Released, string Status)>("""
+            SELECT GrantedBaseQuantity,ConsumedBaseQuantity,ReleasedBaseQuantity,Status
+            FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip
+                AND SkuId=@Sku AND RightKind='B'
+            """, args);
+        Assert.Equal((30m, 20m, 10m, "RELEASED"), bRight);
+        Assert.Equal((80m, 800m), verify.QuerySingle<(decimal Qty, decimal Cost)>("""
+            SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku
+            """, args));
+        Assert.Equal((0m, 0m), verify.QuerySingle<(decimal Qty, decimal Cost)>("""
+            SELECT OnHandBaseQuantity,OnHandCostAmount FROM dbo.PhysicalStockBalance
+            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+            """, args));
+        Assert.Equal(1, verify.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                AND sl.Id=e.BusinessSourceLineId
+            JOIN dbo.TripUnloadLine ul ON ul.TenantId=sl.TenantId
+                AND ul.SourceLineId=sl.Id
+            WHERE ul.TenantId=@Tenant AND ul.TripId=@Trip AND ul.RightKind='B'
+                AND e.EffectKey=N'RIGHT-B-RELEASE'
+                AND e.LedgerKind=N'RIGHT_B_RELEASED' AND e.QuantityDelta=-10
+            """, args));
+    }
 
 }
