@@ -37,6 +37,17 @@ public sealed record PreflightBSaleCommand(
     Guid TripId, Guid SkuId, decimal BaseQuantity,
     decimal UnitPrice, decimal OfferedCashAmount) : IApp01aCommand;
 
+/// <summary>
+/// Synthetic-only B sale with source-bound loaded right and independently
+/// verified physical cash evidence; no caller-supplied VERIFIED flag.
+/// </summary>
+public sealed record PostBSaleDeliveryReceiptCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
+    Guid TripManifestLineId, Guid SkuId, decimal BaseQuantity,
+    decimal UnitPrice, decimal ReceivedCashAmount,
+    string VerificationEvidenceRef) : IApp01aCommand;
+
 public sealed record GrantBCreditCommand(
     string ProducerId, string CommandId, string SourceNumber,
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
