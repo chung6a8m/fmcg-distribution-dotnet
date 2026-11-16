@@ -163,6 +163,31 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(1m, diff[1].Difference);
     }
 
+    private string SeedVerifiedCashWitness(string tenant, Scene scene)
+    {
+        string evidenceRef = Id();
+        using var db = Open(tenant);
+        db.Execute("""
+            INSERT dbo.VerifiedCashEvidence(TenantId,EvidenceRef,TripId,CustomerId,
+                ShipToSnapshotId,PaymentMethod,VerificationStatus,VerifiedAmount,
+                VerifiedBy,VerifiedAtUtc)
+            VALUES(@Tenant,@Ref,@Trip,@Customer,@ShipTo,N'CASH',N'VERIFIED',200,
+                N'synthetic-cash-checker',SYSUTCDATETIME());
+            """, new { Tenant = tenant, Ref = evidenceRef, scene.Trip,
+                scene.Customer, scene.ShipTo });
+        return evidenceRef;
+    }
+
+    [Fact]
+    public void Comparator_fails_closed_on_missing_SQL_measurement()
+    {
+        var oracle = ReadOracle();
+        var cells = Compare(oracle, 4, "T4_A25", new Dictionary<string, decimal>());
+        Assert.Equal(13, cells.Count);
+        Assert.Equal(12, cells.Count(c => !c.Match));
+        Assert.All(cells.Skip(1), c => Assert.Equal("<missing>", c.Actual));
+    }
+
     private async Task<Scene> Prepare(HttpClient client, string tenant)
     {
         var s = new Scene(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -432,6 +457,114 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             WHERE bc.TenantId=@Tenant AND bc.ProducerId=@Producer
                 AND bc.CommandId=@RejectCommand
             """, args);
+        // These observations deliberately re-read persisted commercial source,
+        // stock issues, AR, receipts and grant counters from SQL. They do not
+        // infer T3/T4 from the HTTP outcome or the golden expected cells.
+        var posting = db.QuerySingle<PostingEvidence>("""
+            SELECT
+                (SELECT COUNT(*) FROM dbo.SaleDelivery
+                    WHERE TenantId=@Tenant AND TripId=@Trip) Sales,
+                (SELECT COUNT(*) FROM dbo.SaleDelivery
+                    WHERE TenantId=@Tenant AND TripId=@Trip AND RightKind='B') BSales,
+                (SELECT COUNT(*) FROM dbo.SaleDelivery
+                    WHERE TenantId=@Tenant AND TripId=@Trip AND RightKind='A') ASales,
+                (SELECT COUNT(*) FROM dbo.SaleDelivery d
+                    JOIN dbo.BusinessSource src ON src.TenantId=d.TenantId
+                        AND src.Id=d.BusinessSourceId AND src.SourceKind=d.BusinessSourceKind
+                    JOIN dbo.BusinessSourceLine sl ON sl.TenantId=d.TenantId
+                        AND sl.Id=d.BusinessSourceLineId AND sl.BusinessSourceId=src.Id
+                        AND sl.SkuId=d.SkuId AND sl.BaseQuantity=d.BaseQuantity
+                        AND sl.Amount=d.PayableAmount
+                    JOIN dbo.TripManifestLine ml ON ml.TenantId=d.TenantId
+                        AND ml.Id=d.TripManifestLineId AND ml.TripId=d.TripId
+                        AND ml.StockRightId=d.StockRightId AND ml.LoadSourceLineId=d.LoadSourceLineId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) SourceLinked,
+                (SELECT COUNT(*) FROM dbo.DeliveryStockIssue i
+                    JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) Issues,
+                (SELECT COUNT(*) FROM dbo.ReceivableOpenItem r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) ArItems,
+                (SELECT COUNT(*) FROM dbo.CashReceipt
+                    WHERE TenantId=@Tenant AND TripId=@Trip) Receipts,
+                (SELECT COUNT(*) FROM dbo.ReceiptAllocation a
+                    JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId AND r.Id=a.CashReceiptId
+                    WHERE r.TenantId=@Tenant AND r.TripId=@Trip) Allocations,
+                (SELECT COUNT(*) FROM dbo.BGrantConsumption
+                    WHERE TenantId=@Tenant AND TripId=@Trip) GrantConsumptions,
+                (SELECT COUNT(*) FROM dbo.CashReceipt r
+                    JOIN dbo.VerifiedCashEvidence w ON w.TenantId=r.TenantId
+                        AND w.EvidenceRef=r.VerificationEvidenceRef
+                        AND w.TripId=r.TripId AND w.CustomerId=r.CustomerId
+                        AND w.VerifiedAmount=r.ReceivedAmount
+                        AND w.VerificationStatus=N'VERIFIED'
+                        AND w.VerifiedAtUtc=r.VerifiedAtUtc
+                    WHERE r.TenantId=@Tenant AND r.TripId=@Trip
+                        AND r.VerificationStatus=N'VERIFIED') WitnessMatches,
+                (SELECT COUNT(*) FROM dbo.CashReceipt r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND d.RightKind='A') AReceipts,
+                (SELECT COUNT(*) FROM dbo.BGrantConsumption c
+                    JOIN dbo.SaleDelivery d ON d.TenantId=c.TenantId AND d.Id=c.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND d.RightKind='A') AGrantConsumptions,
+                (SELECT COUNT(*) FROM dbo.LedgerEffect e
+                    JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                        AND sl.Id=e.BusinessSourceLineId
+                    JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
+                        AND src.Id=sl.BusinessSourceId
+                    WHERE src.TenantId=@Tenant AND src.TripId=@Trip
+                        AND src.SourceKind=N'B_SALE_DELIVERY') BEffectRows,
+                (SELECT COUNT(*) FROM dbo.LedgerEffect e
+                    JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                        AND sl.Id=e.BusinessSourceLineId
+                    JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
+                        AND src.Id=sl.BusinessSourceId
+                    WHERE src.TenantId=@Tenant AND src.TripId=@Trip
+                        AND src.SourceKind=N'A_DELIVERY') AEffectRows,
+                (SELECT COUNT(*) FROM dbo.AConfirmedLineSnapshot
+                    WHERE TenantId=@Tenant AND AOrderLineId=@OrderLine) FrozenSnapshots,
+                COALESCE((SELECT UnitPriceSnapshot FROM dbo.AConfirmedLineSnapshot
+                    WHERE TenantId=@Tenant AND AOrderLineId=@OrderLine),0) FrozenUnitPrice,
+                COALESCE((SELECT TermsDaysSnapshot FROM dbo.AConfirmedLineSnapshot
+                    WHERE TenantId=@Tenant AND AOrderLineId=@OrderLine),0) FrozenTermsDays,
+                (SELECT COALESCE(SUM(i.BaseQuantity),0)
+                    FROM dbo.DeliveryStockIssue i
+                    JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) IssuedQty,
+                (SELECT COALESCE(SUM(i.CostAmount),0)
+                    FROM dbo.DeliveryStockIssue i
+                    JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) IssuedCost,
+                (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery
+                    WHERE TenantId=@Tenant AND TripId=@Trip) SaleQty,
+                (SELECT COALESCE(SUM(r.OriginalAmount),0) FROM dbo.ReceivableOpenItem r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) OriginalAr,
+                (SELECT COALESCE(SUM(r.AppliedAmount),0) FROM dbo.ReceivableOpenItem r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) AppliedAr,
+                (SELECT COALESCE(SUM(r.OutstandingAmount),0) FROM dbo.ReceivableOpenItem r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip) OutstandingAr,
+                (SELECT COALESCE(SUM(ReceivedAmount),0) FROM dbo.CashReceipt
+                    WHERE TenantId=@Tenant AND TripId=@Trip) ReceiptReceived,
+                (SELECT COALESCE(SUM(AppliedAmount),0) FROM dbo.CashReceipt
+                    WHERE TenantId=@Tenant AND TripId=@Trip) ReceiptApplied,
+                (SELECT COALESCE(SUM(ConsumedAmount),0) FROM dbo.BCreditGrant
+                    WHERE TenantId=@Tenant AND TripId=@Trip AND CustomerId=@Customer) GrantConsumed,
+                (SELECT COALESCE(SUM(ConsumedAmount),0) FROM dbo.BGrantConsumption
+                    WHERE TenantId=@Tenant AND TripId=@Trip) SourceCreditConsumed,
+                (SELECT BusinessDate FROM dbo.Trip
+                    WHERE TenantId=@Tenant AND Id=@Trip) TripDate,
+                (SELECT MIN(r.DueBusinessDate) FROM dbo.ReceivableOpenItem r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                    WHERE d.TenantId=@Tenant AND d.TripId=@Trip
+                        AND d.RightKind='A') ADue,
+                (SELECT Status FROM dbo.AOrder
+                    WHERE TenantId=@Tenant AND Id=@Order) OrderStatus
+            """, new { Tenant = tenant, s.Trip, s.Order, s.OrderLine, s.Customer });
+        string postingDigest = Convert.ToHexString(
+            SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(posting)));
         var evidence = new Evidence(manifestStatus, openingQty, openingCost,
             db.ExecuteScalar<decimal>("""
                 SELECT AllocatedBaseQuantity FROM dbo.StockPool
@@ -477,7 +610,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             ["aHold"] = aHold, ["bQuota"] = bQuota, ["arA"] = arA,
             ["arB"] = arB, ["custody"] = custody, ["fund"] = fund
         };
-        return new Snapshot(step, values, evidence);
+        return new Snapshot(step, values, evidence, posting, postingDigest);
     }
 
     private static void AssertPersistenceInvariants(Snapshot snapshot, int stage)
@@ -523,7 +656,98 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(b.UnknownSources, a.UnknownSources);
         Assert.Equal(b.LedgerRows, a.LedgerRows);
         Assert.Equal(b.LedgerDigest, a.LedgerDigest);
+        Assert.Equal(before.PostingDigest, after.PostingDigest);
         Assert.Equal(b.RejectedCommandSources, a.RejectedCommandSources);
+    }
+
+    private void AssertPostedLineage(string tenant, Scene scene, Snapshot snapshot, int stage)
+    {
+        Assert.True(stage is 3 or 4);
+        var p = snapshot.Posting;
+        Assert.Equal(stage == 3 ? 1 : 2, p.Sales);
+        Assert.Equal(1, p.BSales);
+        Assert.Equal(stage == 3 ? 0 : 1, p.ASales);
+        Assert.Equal(p.Sales, p.SourceLinked);
+        Assert.Equal(p.Sales, p.Issues);
+        Assert.Equal(p.Sales, p.ArItems);
+        Assert.Equal(1, p.Receipts);
+        Assert.Equal(1, p.Allocations);
+        Assert.Equal(1, p.GrantConsumptions);
+        Assert.Equal(1, p.WitnessMatches);
+        Assert.Equal(0, p.AReceipts);
+        Assert.Equal(0, p.AGrantConsumptions);
+        Assert.Equal(7, p.BEffectRows);
+        Assert.Equal(stage == 3 ? 0 : 4, p.AEffectRows);
+        Assert.Equal(1, p.FrozenSnapshots);
+        Assert.Equal(15m, p.FrozenUnitPrice);
+        Assert.Equal(7, p.FrozenTermsDays);
+        Assert.Equal(stage == 3 ? 20m : 45m, p.SaleQty);
+        Assert.Equal(stage == 3 ? 20m : 45m, p.IssuedQty);
+        Assert.Equal(stage == 3 ? 200m : 450m, p.IssuedCost);
+        Assert.Equal(stage == 3 ? 300m : 675m, p.OriginalAr);
+        Assert.Equal(200m, p.AppliedAr);
+        Assert.Equal(stage == 3 ? 100m : 475m, p.OutstandingAr);
+        Assert.Equal(200m, p.ReceiptReceived);
+        Assert.Equal(200m, p.ReceiptApplied);
+        Assert.Equal(100m, p.GrantConsumed);
+        Assert.Equal(100m, p.SourceCreditConsumed);
+        Assert.Equal(stage == 3 ? "CONFIRMED" : "PARTIALLY_DELIVERED", p.OrderStatus);
+        if (stage == 3) Assert.Null(p.ADue);
+        else Assert.Equal(p.TripDate.Date.AddDays(7), p.ADue?.Date);
+
+        // Independent physical/source and financial/ledger reconciliations.
+        Assert.Equal(p.IssuedQty, snapshot.Values["soldQty"]);
+        Assert.Equal(p.IssuedCost, snapshot.Values["cogs"]);
+        Assert.Equal(p.OutstandingAr, snapshot.Values["arA"] + snapshot.Values["arB"]);
+        Assert.Equal(p.ReceiptReceived, snapshot.Values["custody"]);
+        Assert.Equal(70m - p.IssuedQty, snapshot.Values["tripQty"]);
+        Assert.Equal(700m - p.IssuedCost, snapshot.Values["tripCost"]);
+        Assert.Equal(30m, snapshot.Values["mainQty"]);
+        Assert.Equal(300m, snapshot.Values["mainCost"]);
+        Assert.Equal(0m, snapshot.Values["fund"]);
+        Assert.Equal(0, snapshot.Evidence.RejectedCommandSources);
+        Assert.Equal(1, snapshot.Evidence.RejectedCommands);
+
+        using var db = Open(tenant);
+        var effects = db.Query<PostingEffectRow>("""
+            SELECT src.SourceKind,e.EffectKey,e.LedgerKind,e.QuantityDelta,e.AmountDelta
+            FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                AND sl.Id=e.BusinessSourceLineId
+            JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
+                AND src.Id=sl.BusinessSourceId
+            WHERE src.TenantId=@Tenant AND src.TripId=@Trip
+                AND src.SourceKind IN (N'B_SALE_DELIVERY',N'A_DELIVERY')
+            """, new { Tenant = tenant, scene.Trip }).ToArray();
+        static void CheckLegs(PostingEffectRow[] rows, string kind,
+            params (string Key, string Ledger, decimal Quantity, decimal Amount)[] expected)
+        {
+            var current = rows.Where(x => x.SourceKind == kind).ToArray();
+            Assert.Equal(expected.Length, current.Length);
+            foreach (var e in expected)
+            {
+                var leg = Assert.Single(current.Where(x => x.EffectKey == e.Key));
+                Assert.Equal(e.Ledger, leg.LedgerKind);
+                Assert.Equal(e.Quantity, leg.QuantityDelta);
+                Assert.Equal(e.Amount, leg.AmountDelta);
+            }
+        }
+        CheckLegs(effects, "B_SALE_DELIVERY",
+            ("PHYSICAL-OUT", "PHYSICAL_STOCK", -20m, -200m),
+            ("COGS", "COGS", 0m, 200m),
+            ("AR-GROSS", "AR", 0m, 300m),
+            ("AR-CASH-ALLOC", "AR", 0m, -200m),
+            ("CASH-CUSTODY", "CUSTODY", 0m, 200m),
+            ("RIGHT-B-USED", "RIGHT_B_CONSUMED", -20m, 0m),
+            ("CREDIT-B-USED", "RIGHT_CREDIT_B_CONSUMED", 0m, -100m));
+        if (stage == 3)
+            CheckLegs(effects, "A_DELIVERY");
+        else
+            CheckLegs(effects, "A_DELIVERY",
+                ("PHYSICAL-OUT", "PHYSICAL_STOCK", -25m, -250m),
+                ("COGS", "COGS", 0m, 250m),
+                ("AR-GROSS", "AR", 0m, 375m),
+                ("RIGHT-A-USED", "RIGHT_A_CONSUMED", -25m, 0m));
     }
 
     private async Task WriteEvidence(string tenant, Oracle oracle,
@@ -531,8 +755,8 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     {
         var cells = reads.SelectMany(r => Compare(oracle, r.Row,
             r.Snapshot.Step, r.Snapshot.Values)).ToArray();
-        bool passed = failure is null && reads.Count == 3
-            && cells.Length == 39 && cells.All(c => c.Match);
+        bool passed = failure is null && reads.Count == 5
+            && cells.Length == 65 && cells.All(c => c.Match);
         string directory = Path.Combine(AppContext.BaseDirectory, "TestResults", "APP-01C4");
         Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, tenant + "-oracle.json");
@@ -546,11 +770,12 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             WorkflowSha = Environment.GetEnvironmentVariable("GITHUB_SHA"),
             Baseline = "business/reference-data/expected-results/golden-oracles.json#AC-03",
             OracleSha256 = oracle.Sha256,
-            ExpectedCells = 39, CheckedCells = cells.Length,
+            ExpectedCells = 65, CheckedCells = cells.Length,
             MatchedCells = cells.Count(c => c.Match),
             Status = passed ? "PASS" : "FAIL_OR_INCOMPLETE",
             Steps = reads.Select(r => new { r.Row, r.Snapshot.Step,
-                Actual = r.Snapshot.Values, r.Snapshot.Evidence }),
+                Actual = r.Snapshot.Values, r.Snapshot.Evidence,
+                r.Snapshot.Posting, r.Snapshot.PostingDigest }),
             Cells = cells,
             Failure = failure
         };
@@ -560,7 +785,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     }
 
     [Fact]
-    public async Task Both_LocalDB_tenants_match_all_39_AC03_cells_from_persisted_T0_T1_T2()
+    public async Task Both_LocalDB_tenants_match_all_65_AC03_cells_from_persisted_T0_through_T4()
     {
         var oracle = ReadOracle();
         var observations = new Dictionary<string, List<Observation>> {
@@ -639,10 +864,10 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             foreach (string tenant in new[] { TenantA, TenantB })
             {
                 var reads = observations[tenant];
-                Assert.Equal(3, reads.Count);
+                Assert.Equal(5, reads.Count);
                 var cells = reads.SelectMany(r => Compare(oracle, r.Row,
                     r.Snapshot.Step, r.Snapshot.Values)).ToArray();
-                Assert.Equal(39, cells.Length);
+                Assert.Equal(65, cells.Length);
                 Assert.True(cells.All(c => c.Match),
                     tenant + ": " + string.Join("; ",
                         cells.Where(c => !c.Match).Select(c =>
