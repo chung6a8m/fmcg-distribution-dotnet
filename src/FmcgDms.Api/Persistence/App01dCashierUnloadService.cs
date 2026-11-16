@@ -101,7 +101,9 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
         public decimal SourceCostAmount { get; set; }
     }
 
-    private sealed record ReturnLine(LoadedRemainder Loaded, decimal Cost);
+    // Unused B quota may exceed physical remainder if partially loaded.
+    private sealed record ReturnLine(LoadedRemainder Loaded, decimal Cost,
+        decimal BReleased);
 
     public Task<BusinessCommandOutcome> OfferCashHandoverAsync(
         ClaimsPrincipal principal, OfferCashHandoverCommand request, CancellationToken ct) =>
@@ -513,14 +515,13 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                 || line.Remaining < 0
                 || line.Remaining > line.GrantedBaseQuantity - line.ConsumedBaseQuantity
                     - line.ReleasedBaseQuantity
+                || line.LoadedBaseQuantity > line.GrantedBaseQuantity
                 || line.ReleasedBaseQuantity != 0
-                || (line.Remaining > 0 && line.RightStatus != "HELD")
-                || (line.Remaining == 0 && line.RightStatus != "CONSUMED")
-                || line.GrantedBaseQuantity != line.LoadedBaseQuantity)
+                || (line.ConsumedBaseQuantity == line.GrantedBaseQuantity
+                    ? line.RightStatus != "CONSUMED"
+                    : line.RightStatus != "HELD"))
                 return BusinessCommandOutcome.Rejected("REMAINDER_RIGHT_SOURCE_DRIFT");
         }
-        if (lines.All(l => l.Remaining == 0))
-            return BusinessCommandOutcome.Rejected("NOTHING_TO_UNLOAD");
 
         var returns = new List<ReturnLine>();
         var skuTotals = new List<(Guid Sku, decimal Qty, decimal Cost)>();
@@ -561,12 +562,23 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                 if (cost < 0 || cost > vehicle.OnHandCostAmount - assigned)
                     return BusinessCommandOutcome.Rejected("UNLOAD_COST_INVALID");
                 assigned += cost;
-                returns.Add(new ReturnLine(remaining[i], cost));
+                decimal bRelease = remaining[i].RightKind == "B"
+                    ? remaining[i].GrantedBaseQuantity - remaining[i].ConsumedBaseQuantity
+                    : 0m;
+                returns.Add(new ReturnLine(remaining[i], cost, bRelease));
             }
             if (assigned != vehicle.OnHandCostAmount)
                 return BusinessCommandOutcome.Rejected("UNLOAD_COST_MISMATCH");
             skuTotals.Add((group.Key, qty, vehicle.OnHandCostAmount));
         }
+        // Retire never-loaded B quota even if every physically loaded B
+        // item was sold; this is a release-only source line (0 qty / 0 cost).
+        foreach (var line in lines.Where(l => l.RightKind == "B" && l.Remaining == 0
+            && l.GrantedBaseQuantity > l.ConsumedBaseQuantity))
+            returns.Add(new ReturnLine(line, 0m,
+                line.GrantedBaseQuantity - line.ConsumedBaseQuantity));
+        if (returns.Count == 0)
+            return BusinessCommandOutcome.Rejected("NOTHING_TO_UNLOAD");
 
         Guid source = Guid.NewGuid();
         await db.ExecuteAsync(Sql("""
@@ -601,14 +613,17 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                     Sku = line.SkuId, Qty = line.Remaining, Cost = entry.Cost,
                     ManifestLine = line.ManifestLineId, LoadLine = line.LoadSourceLineId,
                     Right = line.StockRightId, Kind = line.RightKind,
-                    BReleased = line.RightKind == "B" ? line.Remaining : 0m }, tx, ct));
-            await AddEffect(db, tx, tenant, sourceLine, "VEHICLE-OUT",
-                "PHYSICAL_STOCK", -line.Remaining, -entry.Cost,
-                line.SkuId, manifest.VehicleLocationId, ct);
-            await AddEffect(db, tx, tenant, sourceLine, "WAREHOUSE-IN",
-                "PHYSICAL_STOCK", line.Remaining, entry.Cost,
-                line.SkuId, manifest.WarehouseLocationId, ct);
-            if (line.RightKind == "B")
+                    BReleased = entry.BReleased }, tx, ct));
+            if (line.Remaining > 0)
+            {
+                await AddEffect(db, tx, tenant, sourceLine, "VEHICLE-OUT",
+                    "PHYSICAL_STOCK", -line.Remaining, -entry.Cost,
+                    line.SkuId, manifest.VehicleLocationId, ct);
+                await AddEffect(db, tx, tenant, sourceLine, "WAREHOUSE-IN",
+                    "PHYSICAL_STOCK", line.Remaining, entry.Cost,
+                    line.SkuId, manifest.WarehouseLocationId, ct);
+            }
+            if (entry.BReleased > 0)
             {
                 if (await db.ExecuteAsync(Sql("""
                     UPDATE dbo.StockRight SET ReleasedBaseQuantity=ReleasedBaseQuantity+@Qty,
@@ -617,12 +632,12 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                             THEN N'RELEASED' ELSE N'HELD' END
                     WHERE TenantId=@Tenant AND Id=@Right AND RightKind='B'
                         AND Status=N'HELD' AND ReleasedBaseQuantity=0
-                        AND GrantedBaseQuantity-ConsumedBaseQuantity>=@Qty;
+                        AND GrantedBaseQuantity-ConsumedBaseQuantity=@Qty;
                     """, new { Tenant = tenant, Right = line.StockRightId,
-                        Qty = line.Remaining }, tx, ct)) != 1)
+                        Qty = entry.BReleased }, tx, ct)) != 1)
                     throw new InvalidOperationException("B release lost its right lock.");
                 await AddEffect(db, tx, tenant, sourceLine, "RIGHT-B-RELEASE",
-                    "RIGHT_B_RELEASED", -line.Remaining, 0m,
+                    "RIGHT_B_RELEASED", -entry.BReleased, 0m,
                     line.SkuId, null, ct);
             }
         }
@@ -674,11 +689,10 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
             """, new { Tenant = tenant, Source = source }, tx, ct));
         if (totals.Qty != skuTotals.Sum(x => x.Qty)
             || totals.Cost != skuTotals.Sum(x => x.Cost)
-            || totals.BReleased != returns.Where(x => x.Loaded.RightKind == "B")
-                .Sum(x => x.Loaded.Remaining)
+            || totals.BReleased != returns.Sum(x => x.BReleased)
             || totals.Lines != returns.Count
-            || totals.Effects != returns.Count * 2
-                + returns.Count(x => x.Loaded.RightKind == "B"))
+            || totals.Effects != returns.Count(x => x.Loaded.Remaining > 0) * 2
+                + returns.Count(x => x.BReleased > 0))
             throw new InvalidOperationException("Unload source/ledger incomplete.");
         return BusinessCommandOutcome.Applied("TRIP_REMAINDER_UNLOADED", source);
     }
