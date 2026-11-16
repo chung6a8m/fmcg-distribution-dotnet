@@ -65,7 +65,7 @@ jobs:
           APP01E1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01E2_TEST_RUN_ID: app01e2-${{ github.run_id }}-${{ github.run_attempt }}
           APP01E2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 123 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 124 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -579,6 +579,22 @@ jobs:
                   if ($o.SourceId -or $a.SourceId -or $a.Lines -ne 0 -or
                       $a.Effects -ne 0) { throw "E.2 rejected command posted $name $side" }
                 } else { throw "E.2 invalid terminal command status $name $side" }
+              }
+              if (!$r.Replay.StateUnchanged -or
+                  $r.Replay.BeforeLedgerSha256 -cne $r.Sql.LedgerSha256 -or
+                  $r.Replay.AfterLedgerSha256 -cne $r.Sql.LedgerSha256) {
+                throw "E.2 replay altered lineage or physical state: $name"
+              }
+              foreach ($side in @('Left','Right')) {
+                $original = $r.$side.Outcome
+                $replay = $r.Replay.$side
+                if ($replay.Http -ne 200 -or !$replay.Outcome.Replayed -or
+                    $replay.Outcome.Status -cne $original.Status -or
+                    $replay.Outcome.OutcomeCode -cne $original.OutcomeCode -or
+                    $replay.Outcome.ReasonCode -cne $original.ReasonCode -or
+                    $replay.Outcome.SourceId -cne $original.SourceId) {
+                  throw "E.2 replay outcome mismatch: $name $side"
+                }
               }
               foreach ($field in $fields) {
                 $matches = @($r.Cells | Where-Object { $_.Field -ceq $field })
