@@ -33,7 +33,21 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
         decimal OpeningCost, decimal PoolAllocated, int Rights, int ManifestLines,
         int Sources, int SourceLines, int Movements, int PhysicalLegs,
         decimal PhysicalLegQtyNet, decimal PhysicalLegCostNet,
-        int NonPhysicalEffects, int UnknownSources, int RejectedCommands);
+        int NonPhysicalEffects, int UnknownSources, int RejectedCommands,
+        int LedgerRows, string LedgerDigest, int RejectedCommandSources);
+    // Full source-backed ledger identity; rights effects must not be invisible to T2.
+    private sealed class LedgerEntry
+    {
+        public Guid Id { get; set; }
+        public Guid BusinessSourceLineId { get; set; }
+        public string EffectKey { get; set; } = "";
+        public string LedgerKind { get; set; } = "";
+        public Guid? CustomerId { get; set; }
+        public Guid? SkuId { get; set; }
+        public Guid? StockLocationId { get; set; }
+        public decimal QuantityDelta { get; set; }
+        public decimal AmountDelta { get; set; }
+    }
     private sealed record Snapshot(string Step, Dictionary<string, decimal> Values,
         Evidence Evidence);
     private sealed record Observation(int Row, Snapshot Snapshot);
@@ -320,6 +334,32 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
                 AND src.Id=sl.BusinessSourceId
             WHERE src.TenantId=@Tenant AND src.TripId=@Trip
             """, args);
+        // Include RIGHT_A and RIGHT_B entries, not just physical or financial
+        // effects. A rights-only posting on an existing source/line is invisible
+        // to the 39 golden numeric cells and to source/line cardinality alone.
+        var ledger = db.Query<LedgerEntry>("""
+            SELECT e.Id,e.BusinessSourceLineId,e.EffectKey,e.LedgerKind,
+                e.CustomerId,e.SkuId,e.StockLocationId,e.QuantityDelta,e.AmountDelta
+            FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                AND sl.Id=e.BusinessSourceLineId
+            JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
+                AND src.Id=sl.BusinessSourceId
+            WHERE src.TenantId=@Tenant AND src.TripId=@Trip
+            ORDER BY e.Id
+            """, args).ToArray();
+        string ledgerDigest = Convert.ToHexString(
+            SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(ledger)));
+        // A rejected command must not own any business source, even if a buggy
+        // implementation omitted or changed TripId on that source.
+        int rejectedCommandSources = db.ExecuteScalar<int>("""
+            SELECT COUNT(*)
+            FROM dbo.BusinessSource src
+            JOIN dbo.BusinessCommand bc ON bc.TenantId=src.TenantId
+                AND bc.Id=src.BusinessCommandId
+            WHERE bc.TenantId=@Tenant AND bc.ProducerId=@Producer
+                AND bc.CommandId=@RejectCommand
+            """, args);
         var evidence = new Evidence(manifestStatus, openingQty, openingCost,
             db.ExecuteScalar<decimal>("""
                 SELECT AllocatedBaseQuantity FROM dbo.StockPool
@@ -353,7 +393,8 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
                     AND CommandId=@RejectCommand AND Status=N'REJECTED'
                     AND OutcomeCode=N'REJECTED_QUOTA'
                     AND ReasonCode=N'B_QUOTA_INSUFFICIENT'
-                """, args));
+                """, args),
+            ledger.Length, ledgerDigest, rejectedCommandSources);
         // Sold quantity is custody depletion relative to SQL opening, not an
         // invented sale row. The unexpected-source/financial guards below make
         // it impossible to silently treat a stock loss or sale as a T1 transfer.
@@ -385,6 +426,8 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(0m, e.PhysicalLegCostNet);
         Assert.Equal(0, e.NonPhysicalEffects);
         Assert.Equal(0, e.UnknownSources);
+        Assert.Equal(loaded ? 6 : 2, e.LedgerRows); // two rights + four transfer legs
+        Assert.Equal(0, e.RejectedCommandSources);
         Assert.Equal(stage == 2 ? 1 : 0, e.RejectedCommands);
     }
 
@@ -394,15 +437,21 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
             Assert.Equal(expected, after.Values[field]);
         var b = before.Evidence;
         var a = after.Evidence;
+        Assert.Equal(b.ManifestStatus, a.ManifestStatus);
         Assert.Equal(b.OpeningQty, a.OpeningQty);
         Assert.Equal(b.OpeningCost, a.OpeningCost);
         Assert.Equal(b.PoolAllocated, a.PoolAllocated);
         Assert.Equal(b.Rights, a.Rights);
+        Assert.Equal(b.ManifestLines, a.ManifestLines);
         Assert.Equal(b.Sources, a.Sources);
         Assert.Equal(b.SourceLines, a.SourceLines);
         Assert.Equal(b.Movements, a.Movements);
         Assert.Equal(b.PhysicalLegs, a.PhysicalLegs);
         Assert.Equal(b.NonPhysicalEffects, a.NonPhysicalEffects);
+        Assert.Equal(b.UnknownSources, a.UnknownSources);
+        Assert.Equal(b.LedgerRows, a.LedgerRows);
+        Assert.Equal(b.LedgerDigest, a.LedgerDigest);
+        Assert.Equal(b.RejectedCommandSources, a.RejectedCommandSources);
     }
 
     private async Task WriteEvidence(string tenant, Oracle oracle,
@@ -503,7 +552,16 @@ public sealed class App01b3GoldenOracleTests(SqlScratchFixture fixture)
                     reject with { BaseQuantity = 30m, OfferedCashAmount = 450m },
                     HttpStatusCode.Conflict);
                 Assert.Equal("IDEMPOTENCY_PAYLOAD_MISMATCH", conflict.ReasonCode);
-                AssertNoBusinessEffectsChanged(t2, Capture(tenant, scene, reject.CommandId));
+                Snapshot afterRetry = Capture(tenant, scene, reject.CommandId);
+                AssertPersistenceInvariants(afterRetry, 2);
+                AssertNoBusinessEffectsChanged(t2, afterRetry);
+                // Mutation sentinel: an extra/modified rights ledger row changes
+                // the fingerprint although every golden numeric cell stays equal.
+                var changedRightsLedger = t2 with {
+                    Evidence = t2.Evidence with { LedgerDigest = "MUTATED_RIGHT_B" }
+                };
+                Assert.NotNull(Record.Exception(() =>
+                    AssertNoBusinessEffectsChanged(t2, changedRightsLedger)));
             }
 
             foreach (string tenant in new[] { TenantA, TenantB })
