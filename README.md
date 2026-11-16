@@ -37,7 +37,7 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Synthetic JWT is actor-bound and command routes have Warehouse/Sales permission separation. Read-only auditor endpoint `GET /api/synthetic/app01a/audit/as-of?asOf=<UTC>` provides logical as-of actor/source/effect/pending, approval lineage and A/B rights/effects reconciliation; **not temporal SQL history, production audit or accounting**.
 - Adds 17 physical LocalDB verification cases (including review-fix regressions) for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Reviewed final-HEAD CI and TestRunId are recorded in [APP-01A closeout](docs/closeout/2026-11-16-app-01a.md). See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
 
-## APP-01B.1 — Physical stock schema (feature branch, review pending)
+## APP-01B.1 — Physical stock schema (schema verified)
 
 Migration `202611160004` adds `PhysicalStockOpening` (immutable T0), `PhysicalStockBalance` (per-location physical quantity/cost), `TripManifest`/`TripManifestLine` (A/B-rights-bound draft/load state) and immutable `PhysicalStockMovement` (one source-linked paired warehouse→vehicle transfer record per line). Stock rights/`StockPool` remain synthetic **allocation** counters, not physical stock. New tests target **49/49 LocalDB minimum** across nonce-owned two tenant databases, with source/Trip/warehouse/vehicle/decimal/immutability negatives. See [APP-01B.1 design and verification](docs/roadmap/app-01b1-physical-stock-schema.md).
 

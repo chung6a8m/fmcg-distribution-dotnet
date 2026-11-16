@@ -1,6 +1,6 @@
 # APP-01B.1 — Schema & Physical Stock State
 
-**Status:** IMPLEMENTED ON FEATURE BRANCH / REVIEW AND CI PENDING (2026-11-16).  
+**Status:** APP-01B.1 SCHEMA_VERIFIED — [review and final-HEAD CI on PR #25](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/25) (2026-11-16).  
 **Scope:** synthetic, nonproduction, physical SQL Server LocalDB schema **only**. No T1 load command, B31 rejection command, T0–T2 oracle run, 39/39 acceptance, or production authorization.
 
 Source: [APP-01B proposal](app-01b-manifest-transfer-proposal.md), [immutable AC-03 oracle](../../business/reference-data/expected-results/golden-oracles.json), [APP-01A closeout](../closeout/2026-11-16-app-01a.md). `business/` and `business.lock.json` are unchanged.
@@ -22,7 +22,7 @@ Migration: `202611160004`, class `App01b1PhysicalStock`. All tables carry `Tenan
 
 ## State and source rules
 
-- Opening requires an explicit row for **both** warehouse and vehicle, including vehicle `0/0`; a missing opening cannot implicitly obtain a live balance. Opening snapshots and physical movement records have immutable DML triggers. Already loaded manifests and lines cannot be edited or deleted.
+- Opening requires an explicit row for **both** warehouse and vehicle, including vehicle `0/0`; a missing opening cannot implicitly obtain a live balance. Opening snapshots and physical movement records have immutable DML triggers. A loaded manifest is immutable; its staged lines cannot be deleted or restaged, and their only permitted update is an exact staged-to-source-backed load. After loading, lines are immutable.
 - `TripManifest` `LOADED` requires a matching `BusinessSource` with `SourceKind=MANIFEST_LOAD` and the same tenant/Trip. `DRAFT` has no load source. Each loaded line references the same manifest source and a `BusinessSourceLine` with **matching** line number, SKU, base quantity and cost amount. SQL constraints check line-level binding; APP-01B.2 checks that all intended lines, rights and total quantities are complete before committing a loaded header.
 - At most one manifest per Trip in APP-01B T0→T2. One right can only be staged once; A and B cannot be relabeled, exchanged or counted twice. Posting a greater quantity than a right's remaining entitlement requires an APP-01B.2 transactional guard (schema checks planned/loaded quantities, not aggregate availability).
 - `decimal(18,3)` exact base quantities and `decimal(19,4)` exact synthetic cost amounts; **no** floating point arithmetic, currency conversion, AR, COGS, cash or invoice. `SYNTHETIC_UNITLESS` is the non-monetary test cost unit.
@@ -44,8 +44,8 @@ Migration: `202611160004`, class `App01b1PhysicalStock`. All tables carry `Tenan
 
 ### Review checklist
 
-- [ ] Final PR HEAD SQL Server LocalDB CI: 49/49 minimum, no skip/fail.
-- [ ] No `business/` or `business.lock.json` modifications; no production authority.
-- [ ] Confirm migration replay with both tenant nonce databases and negative FK/immutability cases.
-- [ ] Verify frontend/PWA, browser 100%, SDK 10.0.404, Node 26 and audit gates remain green.
-- [ ] Independent review of FK integrity, source lineage and future APP-01B.2 transaction contract.
+- [x] Final PR HEAD SQL Server LocalDB CI: 49/49 minimum, no skip/fail.
+- [x] No `business/` or `business.lock.json` modifications; no production authority.
+- [x] Confirm migration replay with both tenant nonce databases and negative FK/immutability cases.
+- [x] Verify frontend/PWA, browser 100%, SDK 10.0.404, Node 26 and audit gates remain green.
+- [x] Independent review of FK integrity, source lineage and future APP-01B.2 transaction contract.
