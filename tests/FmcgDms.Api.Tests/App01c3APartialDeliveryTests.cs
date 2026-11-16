@@ -585,11 +585,11 @@ public sealed class App01c3APartialDeliveryTests(SqlScratchFixture fixture)
             Assert.Equal(HttpStatusCode.Forbidden,unauthorized.StatusCode);
         Assert.Equal("TRIP_NOT_ELIGIBLE",(await PostA(b,req)).Outcome.ReasonCode);
         Assert.Equal("A_FROZEN_LOADED_RIGHT_NOT_FOUND",(await PostA(a,
-            req with {TripManifestLineId=s.BManifestLine})).Outcome.ReasonCode);
+            req with {CommandId=Key(),SourceNumber=Key(),TripManifestLineId=s.BManifestLine})).Outcome.ReasonCode);
         Assert.Equal("A_FROZEN_LOADED_RIGHT_NOT_FOUND",(await PostA(a,
-            req with {AOrderLineId=Guid.NewGuid()})).Outcome.ReasonCode);
+            req with {CommandId=Key(),SourceNumber=Key(),AOrderLineId=Guid.NewGuid()})).Outcome.ReasonCode);
         Assert.Equal("CUSTOMER_SHIPTO_OR_SKU_NOT_ELIGIBLE",(await PostA(a,
-            req with {ShipToSnapshotId=Guid.NewGuid()})).Outcome.ReasonCode);
+            req with {CommandId=Key(),SourceNumber=Key(),ShipToSnapshotId=Guid.NewGuid()})).Outcome.ReasonCode);
         Assert.Equal(before,Fingerprint(A,s));
         Assert.Equal(otherBefore,Fingerprint(B,other));
     }
