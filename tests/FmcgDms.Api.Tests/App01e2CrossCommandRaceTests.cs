@@ -132,8 +132,9 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
 
     private static async Task<Reply> Send<T>(HttpClient client, string path, T command)
     {
-        using var response = await client.PostAsJsonAsync(
-            path, command, TestContext.Current.CancellationToken);
+        using var content = JsonContent.Create(command, command!.GetType());
+        using var response = await client.PostAsync(
+            path, content, TestContext.Current.CancellationToken);
         BusinessCommandOutcome? outcome =
             await response.Content.ReadFromJsonAsync<BusinessCommandOutcome>(
                 TestContext.Current.CancellationToken);
@@ -525,7 +526,8 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         };
         decimal bDelivered = scenario switch
         {
-            "manifest-vs-b20" or "a25-vs-b20" or "b20-vs-unload" when r => 20m,
+            "manifest-vs-b20" or "a25-vs-b20" when r => 20m,
+            "b20-vs-unload" when l => 20m,
             "cashier-accept-vs-unload" or "cashier-accept-vs-accept"
                 or "cashier-offer-vs-accept" => 20m,
             _ => 0m
@@ -661,9 +663,9 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         Assert.Equal(expected.Keys, actual.Keys);
         foreach (var (field, value) in expected)
             Assert.Equal(value, actual[field]);
-        Assert.Equal("RECONCILING", snapshot.Numbers.Unloads == 1
-            ? snapshot.TripStatus : "RECONCILING");
-        if (snapshot.Numbers.Unloads == 0)
+        if (snapshot.Numbers.Unloads == 1)
+            Assert.Equal("RECONCILING", snapshot.TripStatus);
+        else
             Assert.Contains(snapshot.TripStatus, new[] { "PREPARED", "IN_PROGRESS" });
         Assert.Equal(scenario == "rights-pool" ? "NONE" : "LOADED",
             snapshot.ManifestStatus);
@@ -725,14 +727,20 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
             DataSource = "localhost"
         };
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await using var _ = await App01e2SqlContentionGate.HoldAsync(
-                master.ConnectionString, "tenant-a", trip, warehouse, sku, "trip-app"));
+        {
+            await using var gate = await App01e2SqlContentionGate.HoldAsync(
+                master.ConnectionString, "tenant-a", trip, warehouse, sku, "trip-app");
+        });
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await using var _ = await App01e2SqlContentionGate.HoldAsync(
-                notLocalDb.ConnectionString, "tenant-a", trip, warehouse, sku, "trip-app"));
+        {
+            await using var gate = await App01e2SqlContentionGate.HoldAsync(
+                notLocalDb.ConnectionString, "tenant-a", trip, warehouse, sku, "trip-app");
+        });
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await using var _ = await App01e2SqlContentionGate.HoldAsync(
-                Connection("tenant-a"), "tenant-b", trip, warehouse, sku, "trip-app"));
+        {
+            await using var gate = await App01e2SqlContentionGate.HoldAsync(
+                Connection("tenant-a"), "tenant-b", trip, warehouse, sku, "trip-app");
+        });
     }
 
     [Theory]
@@ -865,7 +873,7 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         Assert.Equal(pair.Right.Outcome, replayB.Outcome with { Replayed = false });
         SqlSnapshot afterReplay = ReadSql(tenant, s);
         Assert.Equal(actual.LedgerSha256, afterReplay.LedgerSha256);
-        Assert.Equal(actual.Numbers.Cells(), afterReplay.Numbers.Cells());
+        Assert.Equal(actual.Numbers.Cells().ToArray(), afterReplay.Numbers.Cells().ToArray());
         Assert.Equal(actual.TripStatus, afterReplay.TripStatus);
         Assert.Equal(actual.ManifestStatus, afterReplay.ManifestStatus);
 
