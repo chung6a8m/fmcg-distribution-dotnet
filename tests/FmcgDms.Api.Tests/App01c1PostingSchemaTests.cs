@@ -331,7 +331,7 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, "UPDATE dbo.CashReceipt SET AppliedAmount=201 WHERE Id=@receipt",
             new { receipt }, 547);
         Reject(db, "UPDATE dbo.CashReceipt SET ReceivedAmount=201 WHERE Id=@receipt",
-            new { receipt }, 51066);
+            new { receipt }, 51066, 547);
         Reject(db, "DELETE dbo.ReceiptAllocation WHERE Id=@allocation",
             new { allocation }, 51064);
         var foreign = SeedLoadedTrip(db, A);
