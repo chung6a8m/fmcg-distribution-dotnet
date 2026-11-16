@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01C.4 65-cell T0-T4 + APP-01B.3 39-cell regression
+      - name: Two-tenant LocalDB APP-01D 91-cell T0-T6 + APP-01C.4/B.3 regressions
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -59,7 +59,9 @@ jobs:
           APP01C3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01C4_TEST_RUN_ID: app01c4-${{ github.run_id }}-${{ github.run_attempt }}
           APP01C4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 96 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01D_TEST_RUN_ID: app01d-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01D_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 97 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -117,6 +119,17 @@ jobs:
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
             Set-Content -Path TestResults/APP-01C4-TestRunId.txt -Encoding utf8
           Write-Host "APP-01C.4 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01D SQL oracle TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01d-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
+            Set-Content -Path TestResults/APP-01D-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01D TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -249,6 +262,129 @@ jobs:
               throw "APP-01C.4 $name missing SQL posting source/ledger lineage"
             }
             Write-Host "APP-01C.4 $name : 65/65 persisted SQL cells PASS ($id; $sourceHead)"
+          }
+      - name: Fail closed on APP-01D independently persisted T0-T6 SQL oracles
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem tests -Recurse -File -Filter '*-oracle.json' |
+            Where-Object { $_.FullName -like '*TestResults*APP-01D*' })
+          if ($reports.Count -ne 2) { throw "Expected exactly 2 independent APP-01D tenant SQL reports; found $($reports.Count)" }
+          $id = "app01d-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $hash = (Get-FileHash business/reference-data/expected-results/golden-oracles.json -Algorithm SHA256).Hash
+          $expectedSteps = @('T0','T1_LOAD','T2_REJECT','T3_B20','T4_A25','T5_HANDOVER','T6_RETURN')
+          $expectedFields = @('step','mainQty','tripQty','soldQty','mainCost',
+            'tripCost','cogs','aHold','bQuota','arA','arB','custody','fund')
+          $oracle = (Get-Content business/reference-data/expected-results/golden-oracles.json -Raw |
+            ConvertFrom-Json).'AC-03'
+          if ((@($oracle.cols) -join '|') -cne ($expectedFields -join '|') -or
+              @($oracle.steps).Count -lt 7) {
+            throw 'The immutable AC-03 expected schema has changed'
+          }
+          foreach ($tenant in @('tenant-a','tenant-b')) {
+            $name = "$tenant-oracle.json"
+            $found = @($reports | Where-Object { $_.Name -eq $name })
+            if ($found.Count -ne 1) { throw "Missing or duplicated D SQL report $name" }
+            $r = Get-Content $found[0].FullName -Raw | ConvertFrom-Json
+            if ($r.Schema -ne 'APP01D_SQL_ORACLE_V1' -or $r.TenantId -ne $tenant -or
+                $r.Status -ne 'PASS' -or $r.Failure -or
+                $r.ExpectedCells -ne 91 -or $r.CheckedCells -ne 91 -or
+                $r.MatchedCells -ne 91 -or @($r.Cells).Count -ne 91 -or
+                @($r.Cells | Where-Object { -not $_.Match }).Count -ne 0 -or
+                @($r.Steps).Count -ne 7) {
+              throw "APP-01D $name failed 91/91 SQL evidence gate"
+            }
+            if ($r.TestRunId -ne $id -or $r.SourceHeadSha -ne $sourceHead -or
+                $r.WorkflowSha -ne $env:GITHUB_SHA -or $r.OracleSha256 -ne $hash) {
+              throw "APP-01D $name missing exact run/source SHA or immutable oracle hash"
+            }
+            if ($r.Database -notmatch '^Fmcg_App00_[a-f0-9]{32}_[AB]$' -or
+                (($tenant -eq 'tenant-a') -and !$r.Database.EndsWith('_A')) -or
+                (($tenant -eq 'tenant-b') -and !$r.Database.EndsWith('_B'))) {
+              throw "APP-01D $name is not backed by its own nonce LocalDB"
+            }
+            for ($i = 0; $i -lt 7; $i++) {
+              $snapshot = $r.Steps[$i]
+              $rowCells = @($r.Cells | Where-Object { $_.Row -eq $i })
+              if ($snapshot.Row -ne $i -or $snapshot.Step -cne $expectedSteps[$i] -or
+                  $oracle.steps[$i][0] -cne $expectedSteps[$i] -or
+                  -not $snapshot.Evidence.LedgerDigest -or
+                  -not $snapshot.PostingDigest -or $rowCells.Count -ne 13 -or
+                  @($snapshot.Actual.PSObject.Properties).Count -ne 12) {
+                throw "APP-01D $name incomplete checkpoint index $i"
+              }
+              # Independently validate every field identity, locked expected value,
+              # SQL snapshot actual, and signed actual-minus-expected decimal diff.
+              # Cardinality alone must never accept duplicate or substituted cells.
+              for ($j = 0; $j -lt 13; $j++) {
+                $field = $expectedFields[$j]
+                $matches = @($rowCells | Where-Object { $_.Field -ceq $field })
+                if ($matches.Count -ne 1) {
+                  throw "APP-01D $name row $i missing/duplicated $field"
+                }
+                $cell = $matches[0]
+                if ($j -eq 0) {
+                  if ($cell.Expected -cne $expectedSteps[$i] -or
+                      $cell.Actual -cne $expectedSteps[$i] -or
+                      $null -ne $cell.Difference) {
+                    throw "APP-01D $name row $i has altered step cell"
+                  }
+                } else {
+                  if ($null -eq $snapshot.Actual.PSObject.Properties[$field] -or
+                      $null -eq $cell.Difference) {
+                    throw "APP-01D $name row $i missing SQL value/diff $field"
+                  }
+                  $expected = [decimal]::Parse([string]$oracle.steps[$i][$j],
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $reportedExpected = [decimal]::Parse([string]$cell.Expected,
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $actual = [decimal]::Parse([string]$cell.Actual,
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $sqlActual = [decimal]$snapshot.Actual.$field
+                  if ($reportedExpected -ne $expected -or $actual -ne $expected -or
+                      $actual -ne $sqlActual -or
+                      [decimal]$cell.Difference -ne ($actual - $expected)) {
+                    throw "APP-01D $name row $i invalid expected/actual/diff $field"
+                  }
+                }
+              }
+            }
+            if ($r.Steps[3].Evidence.Sources -ne 6 -or
+                $r.Steps[3].Evidence.SourceLines -ne 7 -or
+                $r.Steps[3].Evidence.LedgerRows -ne 14 -or
+                $r.Steps[4].Evidence.Sources -ne 7 -or
+                $r.Steps[4].Evidence.SourceLines -ne 8 -or
+                $r.Steps[4].Evidence.LedgerRows -ne 18 -or
+                $r.Steps[3].Posting.ValidAllocations -ne 1 -or
+                $r.Steps[4].Posting.ValidAllocations -ne 1 -or
+                $r.Steps[4].Posting.AllocatedCash -ne 200) {
+              throw "APP-01D $name incomplete T3/T4 source/credit/cash envelope"
+            }
+            if ($r.Steps[3].Posting.Sales -ne 1 -or $r.Steps[3].Posting.SourceLinked -ne 1 -or
+                $r.Steps[3].Posting.BEffectRows -ne 7 -or $r.Steps[3].Posting.AEffectRows -ne 0 -or
+                $r.Steps[4].Posting.Sales -ne 2 -or $r.Steps[4].Posting.SourceLinked -ne 2 -or
+                $r.Steps[4].Posting.BEffectRows -ne 7 -or $r.Steps[4].Posting.AEffectRows -ne 4) {
+              throw "APP-01D $name missing SQL posting source/ledger lineage"
+            }
+            # T5 OFFER must be invisible to custody/fund; only cashier ACCEPT
+            # adds two legs. T6 appends two paired transfers and a B release.
+            # Financial posting provenance remains byte-identical to T4.
+            if ($r.Steps[5].Evidence.Sources -ne 9 -or
+                $r.Steps[5].Evidence.SourceLines -ne 10 -or
+                $r.Steps[5].Evidence.LedgerRows -ne 20 -or
+                $r.Steps[6].Evidence.Sources -ne 10 -or
+                $r.Steps[6].Evidence.SourceLines -ne 12 -or
+                $r.Steps[6].Evidence.LedgerRows -ne 25 -or
+                $r.Steps[6].Evidence.PhysicalLegs -ne 10 -or
+                $r.Steps[5].PostingDigest -cne $r.Steps[4].PostingDigest -or
+                $r.Steps[6].PostingDigest -cne $r.Steps[4].PostingDigest -or
+                $r.Steps[6].Posting.Sales -ne 2 -or
+                $r.Steps[6].Posting.ReceiptReceived -ne 200 -or
+                $r.Steps[6].Posting.OutstandingAr -ne 475) {
+              throw "APP-01D $name missing source-bound cashier/unload ledger envelope"
+            }
+            Write-Host "APP-01D $name : 91/91 persisted SQL cells PASS ($id; $sourceHead)"
           }
       - name: Verify MTP test evidence exists
         shell: pwsh
