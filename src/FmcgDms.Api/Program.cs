@@ -100,6 +100,16 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         ToCommandHttp(await service.PreflightBSaleAsync(user, input, ct)))
         .RequireAuthorization("SyntheticSales");
 
+    // APP-01C.2: synthetic-only B20 atomic posting. The service requires
+    // a preexisting trusted cash witness; this route is absent in production.
+    var postingCommands = app.MapGroup("/api/synthetic/app01c/commands")
+        .RequireAuthorization();
+    postingCommands.MapPost("/post-b-sale-delivery-receipt", async (
+        PostBSaleDeliveryReceiptCommand input, ClaimsPrincipal user,
+        App01c2BPostingService service, CancellationToken ct) =>
+        ToCommandHttp(await service.PostBSaleDeliveryReceiptAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
+
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
     // target tenant/database by query string, header or body.
     app.MapGet("/api/synthetic/app01a/audit/as-of", async (
