@@ -545,16 +545,25 @@ public sealed class App01b2ManifestCommandTests(SqlScratchFixture fixture)
         var otherSku = Guid.NewGuid();
         db.Execute("""
             INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom)
-            VALUES(@Sku,@Tenant,@Code,N'Mutated SKU',N'EA');
+            VALUES(@Sku,@Tenant,@Code,N'Mutated SKU',N'EA')
+            """, new { Sku = otherSku, Tenant = A, Code = Key() });
+        // C.3 freezes exact confirm SKU/quantity via a composite FK.
+        // SQL itself now rejects a forbidden mutation before manifest load;
+        // prior C.2 tests used to permit the mutation and reject on load.
+        var before = State(A, s);
+        Assert.Throws<SqlException>(() => db.Execute("""
             UPDATE dbo.AOrderLine SET SkuId=@Sku
             WHERE TenantId=@Tenant AND Id=@OrderLine
-            """, new { Sku = otherSku, Tenant = A, Code = Key(), s.OrderLine });
-        var before = State(A, s);
-        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE",
-            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.ReasonCode);
+            """, new { Sku = otherSku, Tenant = A, s.OrderLine }));
         Assert.Equal(before, State(A, s));
-        Assert.Equal(0, State(A, s).Movements);
+        Assert.Equal("MANIFEST_LOADED",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.OutcomeCode);
+        Assert.Equal(2, State(A, s).Movements);
+        Assert.Equal(s.Sku, db.ExecuteScalar<Guid>("""
+            SELECT SkuId FROM dbo.AOrderLine WHERE TenantId=@Tenant AND Id=@Line
+            """, new { Tenant = A, Line = s.OrderLine }));
     }
+
     [Fact]
     public async Task Confirmed_A_quantity_mutation_cannot_authorize_stale_manifest_load()
     {
@@ -562,23 +571,20 @@ public sealed class App01b2ManifestCommandTests(SqlScratchFixture fixture)
         using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
         var s = await Prepare(client);
         using var db = Open(A);
-        Assert.Equal(1, db.Execute("""
+        var before = State(A, s);
+        Assert.Throws<SqlException>(() => db.Execute("""
             UPDATE dbo.AOrderLine SET BaseQuantity=20
             WHERE TenantId=@Tenant AND Id=@Line
             """, new { Tenant = A, Line = s.OrderLine }));
-        var before = State(A, s);
-        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE",
-            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.ReasonCode);
         Assert.Equal(before, State(A, s));
         Assert.Equal("DRAFT", db.ExecuteScalar<string>("""
             SELECT Status FROM dbo.TripManifest
             WHERE TenantId=@Tenant AND Id=@Manifest
             """, new { Tenant = A, s.Manifest }));
-
-        db.Execute("""
-            UPDATE dbo.AOrderLine SET BaseQuantity=40
+        Assert.Equal(40m, db.ExecuteScalar<decimal>("""
+            SELECT BaseQuantity FROM dbo.AOrderLine
             WHERE TenantId=@Tenant AND Id=@Line
-            """, new { Tenant = A, Line = s.OrderLine });
+            """, new { Tenant = A, Line = s.OrderLine }));
         Assert.Equal("MANIFEST_LOADED",
             (await Send(client, RootB + "load-manifest", Load(s))).Outcome.OutcomeCode);
     }
