@@ -301,17 +301,7 @@ public sealed partial class App01a2CommandTests
             && x.GrantedBaseQuantity == 30m);
         Assert.DoesNotContain(report.Effects,
             x => x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
-        Assert.True(report.ReconciliationIssues.Count == 0,
-            "Audit issues: " + string.Join("; ", report.ReconciliationIssues)
-            + " | Rights: " + string.Join("; ", report.StockRights.Select(r =>
-            {
-                var line = report.SourceLines.SingleOrDefault(l => l.Id == r.BusinessSourceLineId);
-                var ledger = report.Effects.Where(e => e.BusinessSourceLineId == r.BusinessSourceLineId);
-                return $"kind='{r.RightKind}',qty={r.GrantedBaseQuantity},loc={r.StockLocationId},sku={r.SkuId},"
-                    + $"lineSku={line?.SkuId},lineQty={line?.BaseQuantity},effects="
-                    + string.Join(",", ledger.Select(e =>
-                        $"{e.LedgerKind}/{e.QuantityDelta}/{e.StockLocationId}/{e.SkuId}"));
-            })));
+        Assert.Empty(report.ReconciliationIssues);
     }
 
     [Fact]
@@ -325,26 +315,39 @@ public sealed partial class App01a2CommandTests
         Assert.Equal("APPLIED", reserve.Outcome.Status);
         Assert.Equal("APPLIED", quota.Outcome.Status);
         using var db = Open(fixture, A);
-        int changed = db.Execute("""
-            UPDATE e SET QuantityDelta=CASE WHEN s.Id=@Reserve THEN 39 ELSE 31 END
+        const string patchEffects = """
+            UPDATE e SET QuantityDelta=CASE WHEN s.Id=@Reserve THEN @AQty ELSE @BQty END
             FROM dbo.LedgerEffect e
             JOIN dbo.BusinessSourceLine l ON l.TenantId=e.TenantId
                 AND l.Id=e.BusinessSourceLineId
             JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
             WHERE s.Id IN (@Reserve,@Quota) AND e.LedgerKind IN (N'RIGHT_A',N'RIGHT_B')
-            """, new { Reserve = reserve.Outcome.SourceId, Quota = quota.Outcome.SourceId });
-        Assert.Equal(2, changed);
-        using var auditor = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
-            actor: "audit-corruption", roles: ["auditor"]);
-        var report = await Audit(auditor, DateTimeOffset.UtcNow.AddSeconds(1));
-        var bucket = Assert.Single(report.StockAllocations,
-            x => x.StockLocationId == s.Warehouse && x.SkuId == s.Sku);
-        Assert.Equal(70m, bucket.RightGranted);
-        Assert.Equal(70m, bucket.EffectGranted); // aggregate comparison alone misses this
-        Assert.Equal(2, report.StockRights.Count(r =>
-            r.StockLocationId == s.Warehouse && r.SkuId == s.Sku));
-        Assert.Equal(2, report.ReconciliationIssues.Count(x =>
-            x.StartsWith("STOCK_RIGHT_LINE_EFFECT_MISMATCH:", StringComparison.Ordinal)));
+            """;
+        var args = new { Reserve = reserve.Outcome.SourceId, Quota = quota.Outcome.SourceId };
+        try
+        {
+            int changed = db.Execute(patchEffects,
+                new { args.Reserve, args.Quota, AQty = 39m, BQty = 31m });
+            Assert.Equal(2, changed);
+            using var auditor = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+                actor: "audit-corruption", roles: ["auditor"]);
+            var report = await Audit(auditor, DateTimeOffset.UtcNow.AddSeconds(1));
+            var bucket = Assert.Single(report.StockAllocations,
+                x => x.StockLocationId == s.Warehouse && x.SkuId == s.Sku);
+            Assert.Equal(70m, bucket.RightGranted);
+            Assert.Equal(70m, bucket.EffectGranted); // aggregate comparison alone misses this
+            Assert.Equal(2, report.StockRights.Count(r =>
+                r.StockLocationId == s.Warehouse && r.SkuId == s.Sku));
+            Assert.Equal(2, report.ReconciliationIssues.Count(x =>
+                x.StartsWith("STOCK_RIGHT_LINE_EFFECT_MISMATCH:", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            // The collection intentionally reuses both physical tenant databases;
+            // fault injection must not pollute later audit tests.
+            db.Execute(patchEffects,
+                new { args.Reserve, args.Quota, AQty = 40m, BQty = 30m });
+        }
     }
 
     [Fact]
