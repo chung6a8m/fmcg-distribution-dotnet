@@ -17,7 +17,7 @@ namespace FmcgDms.Api.Tests;
 /// E.3 fault matrices and E.4 disconnect/restart remain separate.
 /// </summary>
 [Collection("SqlScratch")]
-public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
+public sealed partial class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
 {
     private const string Producer = "app01e2-races";
     private const string A = "/api/synthetic/app01a/commands/";
@@ -386,7 +386,7 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
             LEFT JOIN dbo.BusinessSource s ON s.TenantId=c.TenantId
                 AND s.BusinessCommandId=c.Id
             WHERE c.TenantId=@Tenant AND c.ProducerId=@Producer AND c.CommandId=@Command
-            """, new { Tenant = tenant, Producer, Command = command.CommandId });
+            """, new { Tenant = tenant, Producer = command.ProducerId, Command = command.CommandId });
     }
 
     private void AssertCommandFromSql(string tenant, Scene s, Request request, Reply reply,
@@ -426,7 +426,7 @@ public sealed class App01e2CrossCommandRaceTests(SqlScratchFixture fixture)
         Assert.Equal(0, db.ExecuteScalar<int>("""
             SELECT COUNT(*) FROM dbo.BusinessCommand
             WHERE TenantId=@Tenant AND ProducerId=@Producer AND CommandId=@Command
-            """, new { Tenant = other, Producer, Command = request.Payload.CommandId }));
+            """, new { Tenant = other, Producer = request.Payload.ProducerId, Command = request.Payload.CommandId }));
     }
 
     private SqlSnapshot ReadSql(string tenant, Scene s)
