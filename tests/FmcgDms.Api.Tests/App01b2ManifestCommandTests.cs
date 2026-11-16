@@ -496,4 +496,56 @@ public sealed class App01b2ManifestCommandTests(SqlScratchFixture fixture)
         Assert.All(amounts, amount => Assert.Equal(decimal.Round(amount, 4), amount));
         Assert.Equal(0, state.Financial);
     }
+
+    [Fact]
+    public async Task Forged_allocation_source_lineage_cannot_drive_a_physical_load()
+    {
+        using var factory = fixture.CreateFactory();
+        using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var s = await Prepare(client);
+        var before = State(A, s);
+        using var db = Open(A);
+        Guid allocationSource = db.QuerySingle<Guid>("""
+            SELECT src.Id FROM dbo.BusinessSource src
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=src.TenantId
+                AND sl.BusinessSourceId=src.Id
+            JOIN dbo.StockRight r ON r.TenantId=sl.TenantId
+                AND r.BusinessSourceLineId=sl.Id
+            WHERE r.TenantId=@Tenant AND r.Id=@Right
+            """, new { Tenant = A, Right = s.ARight });
+        db.Execute("""
+            UPDATE dbo.BusinessSource SET SourceKind=N'TAMPERED_ALLOC'
+            WHERE TenantId=@Tenant AND Id=@Source
+            """, new { Tenant = A, Source = allocationSource });
+        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.ReasonCode);
+        Assert.Equal(before, State(A, s));
+        db.Execute("""
+            UPDATE dbo.BusinessSource SET SourceKind=N'STOCK_ALLOC'
+            WHERE TenantId=@Tenant AND Id=@Source
+            """, new { Tenant = A, Source = allocationSource });
+        Assert.Equal("MANIFEST_LOADED",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.OutcomeCode);
+    }
+
+    [Fact]
+    public async Task Confirmed_A_order_line_cannot_change_sku_behind_held_stock_right()
+    {
+        using var factory = fixture.CreateFactory();
+        using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var s = await Prepare(client);
+        using var db = Open(A);
+        var otherSku = Guid.NewGuid();
+        db.Execute("""
+            INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom)
+            VALUES(@Sku,@Tenant,@Code,N'Mutated SKU',N'EA');
+            UPDATE dbo.AOrderLine SET SkuId=@Sku
+            WHERE TenantId=@Tenant AND Id=@OrderLine
+            """, new { Sku = otherSku, Tenant = A, Code = Key(), s.OrderLine });
+        var before = State(A, s);
+        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.ReasonCode);
+        Assert.Equal(before, State(A, s));
+        Assert.Equal(0, State(A, s).Movements);
+    }
 }
