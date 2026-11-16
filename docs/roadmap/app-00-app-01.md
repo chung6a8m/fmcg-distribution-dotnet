@@ -13,6 +13,14 @@ Business source: [read-only Business Baseline](../../business/README.md), [oracl
 | APP-01E | 2-client races, retry/rollback, source reconciliation, integrated regression | Evidence TestRunId/actual/diff, reviewed CI HEAD; AC-11 full remains NOT_VERIFIED without C→P, lost ACK/restart |
 
 Use `SYNTHETIC_UNITLESS` and `invoiceEligible=false`. No production B, offline business writes, EV/P0 or tenant go-live.
-APP-00B is a prerequisite to APP-01A implementation; do not treat toolchain PASS as business/EV/P0 acceptance. Keep each increment in its own PR, resolve findings and rerun CI before merge.
+APP-00B was a prerequisite and is **ACCEPTED**; do not treat toolchain PASS as business/EV/P0 acceptance. Keep each increment in its own PR, resolve findings and rerun CI before merge.
 
-APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP00B-13-03](../decisions/owner-app00b-13-03-browser-acceptance.md); [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is authorized to close. The APP-00B prerequisite no longer blocks APP-01A implementation, which must proceed as a separate reviewed increment under its own exit criteria. 125% remains **EXCEPTION_ACCEPTED / NOT_TESTED**, not a roadmap requirement.
+APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP00B-13-03](../decisions/owner-app00b-13-03-browser-acceptance.md); [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is **CLOSED / completed**. The APP-00B prerequisite no longer blocks APP-01A implementation, which must proceed as a separate reviewed increment under its own exit criteria. 125% remains **EXCEPTION_ACCEPTED / NOT_TESTED**, not a roadmap requirement.
+
+## APP-01A execution split (synthetic/nonproduction)
+
+- **APP-01A.1 — Integrated schema (IN_PROGRESS / PR evidence pending):** one schema per tenant DB, FK Tenant binding and Customer/ShipTo/source lineage, per-row checks, command/effect unique keys, shared A/B StockRight, two-tenant fresh/replay/negative tests. See [design and limit](app-01a1-integrated-schema.md). This does **not** implement A/B commands or prove stock over-allocation prevention.
+- **APP-01A.2 — Commands and explicit transactions (NOT_STARTED):** ConfirmAOrder/ReserveAStock, B quota/grant, canonical payload hash and durable idempotent outcomes, resource-level serialization/checks. A confirm must create no AR/COGS.
+- **APP-01A.3 — Integrated behavior verification (NOT_STARTED):** replay/conflict, rollback, wrong Customer/ShipTo/pool, cross-tenant, concurrent reservations, audit/source/ledger assertions with reviewed CI HEAD and TestRunId.
+
+APP-01A itself remains **NOT_VERIFIED** until all three increments meet the original Issue #2 exit criteria. PRs should be reviewed independently; no synthetic schema or green foundation CI implies EV/P0 or production acceptance.
