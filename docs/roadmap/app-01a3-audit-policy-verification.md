@@ -1,6 +1,6 @@
 # APP-01A.3 — Synthetic behavior hardening, as-of audit, approval and tenant matrix
 
-**State on PR #23: IMPLEMENTED / CI_PENDING / INDEPENDENT_REVIEW_PENDING.** Part of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); APP-01A overall is **NOT_VERIFIED** until an independently reviewed final PR HEAD passes all gates. All work remains synthetic and nonproduction. The immutable Business Baseline and lock are unchanged.
+**State on PR #23: IMPLEMENTED / CI_VERIFIED (code HEAD) / INDEPENDENT_REVIEW_PENDING.** Part of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); APP-01A overall is **NOT_VERIFIED** until an independently reviewed final PR HEAD passes all gates. All work remains synthetic and nonproduction. The immutable Business Baseline and lock are unchanged.
 
 ## Security/authority boundary
 
@@ -42,6 +42,15 @@ Audit runs one SQL `Serializable` read transaction across all result sets and fi
 | Fault rollback | SQL trigger throws **after ledger effect insert** for B quota and credit; command, source, right, credit grant and both pool counters remain unchanged; identical command identity can succeed after trigger removal |
 
 One run's exact `TestRunId` is the GitHub Actions `app01a3-<run_id>-<attempt>` file uploaded alongside TRX/Cobertura; record the **PR final HEAD SHA**, run link/conclusion, counts, findings and review resolution in PR #23. Run `scripts/Run-App00A.ps1` on Windows/LocalDB, `Verify-Business.ps1` and frontend/Playwright regression. `TestRunId` describes the synthetic test execution, not an EV/P0 or production business TestRun.
+
+## Verified CI evidence (code HEAD, prior to final documentation update)
+
+- Source code HEAD: [`cdf62edf2a727d1a72fc2a013e7da9f443279f96`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/cdf62edf2a727d1a72fc2a013e7da9f443279f96).
+- [Windows CI #43796071525](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525): **SUCCESS**, TestRunId `app01a3-43796071525-1`; GitHub Actions temporary merge SHA separately recorded from source HEAD in the TRX artifact.
+- .NET 10 build **0 warnings / 0 errors**, xUnit v3 Microsoft Testing Platform + two physical nonce-owned LocalDBs **38/38 PASS**, 0 failed/skipped. Migration replay and fault-injection passed; TRX/Cobertura uploaded ([artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525/artifacts/14194327518)).
+- Locked Business Baseline verification PASS, Node 26 setup, frontend/online-first PWA build and dependency tests PASS, Playwright Chromium **5/5 PASS** ([artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43796071525/artifacts/14194113273)).
+- npm production audit **0 vulnerabilities**; full build-tree audit retains **4 Low** in the pre-existing `deepmerge` → Rollup/Workbox/PWA dev/build dependency chain; the configured Moderate+ gate PASS. This is **not** a zero-finding full audit and does not authorize production.
+- The final documentation commit must have its own green CI on the final PR HEAD; review is still not performed. The PR must record that final run and TestRunId before merge.
 
 ## Remaining scope after APP-01A.3
 
