@@ -159,6 +159,24 @@ internal sealed class CommandDbRow
     public string? ReasonCode { get; set; }
 }
 
+internal sealed class SourceDbRow
+{
+    public Guid Id { get; set; }
+    public string SourceKind { get; set; } = "";
+    public string SourceNumber { get; set; } = "";
+    public string ActorId { get; set; } = "";
+    public Guid? TripId { get; set; }
+}
+
+internal sealed class RightDbRow
+{
+    public string RightKind { get; set; } = "";
+    public string Status { get; set; } = "";
+    public decimal GrantedBaseQuantity { get; set; }
+    public decimal ConsumedBaseQuantity { get; set; }
+    public decimal ReleasedBaseQuantity { get; set; }
+}
+
 internal sealed class LedgerFingerprintRow
 {
     public Guid Id { get; set; }
@@ -174,7 +192,12 @@ internal sealed record CommandSqlReadback(
     string Database, string TenantId, string ProducerId, string CommandId,
     string? Status, string? OutcomeCode, string? ReasonCode, Guid? SourceId,
     int Commands, int Sources, int SourceLines, int Effects, int Rights,
-    decimal Allocated, string LedgerSha256);
+    decimal Allocated, string LedgerSha256,
+    string? SourceKind, string? SourceNumber, string? SourceActorId, Guid? SourceTripId,
+    decimal? SourceLineQuantity, int BQuotaRows,
+    string? RightKind, string? RightStatus,
+    decimal? RightGranted, decimal? RightConsumed, decimal? RightReleased,
+    string? EffectKey, string? LedgerKind, decimal? EffectQuantity, decimal? EffectAmount);
 
 /// <summary>
 /// Reads observed values exclusively from persisted SQL rows; never from HTTP
@@ -200,8 +223,9 @@ internal static class RecoverySqlProbe
             SELECT COUNT(*) FROM dbo.BusinessSource
             WHERE TenantId=@Tenant AND BusinessCommandId=@CommandRowId
             """, p);
-        Guid? sourceId = await db.QuerySingleOrDefaultAsync<Guid?>("""
-            SELECT Id FROM dbo.BusinessSource
+        SourceDbRow? source = await db.QuerySingleOrDefaultAsync<SourceDbRow>("""
+            SELECT Id, SourceKind, SourceNumber, ActorId, TripId
+            FROM dbo.BusinessSource
             WHERE TenantId=@Tenant AND BusinessCommandId=@CommandRowId
             """, p);
         int sourceLines = await db.ExecuteScalarAsync<int>("""
@@ -209,8 +233,32 @@ internal static class RecoverySqlProbe
             JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
             WHERE s.TenantId=@Tenant AND s.BusinessCommandId=@CommandRowId
             """, p);
+        decimal? sourceLineQuantity = await db.QuerySingleOrDefaultAsync<decimal?>("""
+            SELECT l.BaseQuantity FROM dbo.BusinessSourceLine l
+            JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+            WHERE s.TenantId=@Tenant AND s.BusinessCommandId=@CommandRowId
+            """, p);
         int rights = await db.ExecuteScalarAsync<int>("""
             SELECT COUNT(*) FROM dbo.StockRight r
+            JOIN dbo.BusinessSourceLine l
+              ON l.TenantId=r.TenantId AND l.Id=r.BusinessSourceLineId
+            JOIN dbo.BusinessSource s
+              ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+            WHERE s.TenantId=@Tenant AND s.BusinessCommandId=@CommandRowId
+            """, p);
+        RightDbRow? right = await db.QuerySingleOrDefaultAsync<RightDbRow>("""
+            SELECT r.RightKind,r.Status,r.GrantedBaseQuantity,
+                   r.ConsumedBaseQuantity,r.ReleasedBaseQuantity
+            FROM dbo.StockRight r
+            JOIN dbo.BusinessSourceLine l
+              ON l.TenantId=r.TenantId AND l.Id=r.BusinessSourceLineId
+            JOIN dbo.BusinessSource s
+              ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+            WHERE s.TenantId=@Tenant AND s.BusinessCommandId=@CommandRowId
+            """, p);
+        int bQuotaRows = await db.ExecuteScalarAsync<int>("""
+            SELECT COUNT(*) FROM dbo.BQuota b
+            JOIN dbo.StockRight r ON r.TenantId=b.TenantId AND r.Id=b.StockRightId
             JOIN dbo.BusinessSourceLine l
               ON l.TenantId=r.TenantId AND l.Id=r.BusinessSourceLineId
             JOIN dbo.BusinessSource s
@@ -228,6 +276,7 @@ internal static class RecoverySqlProbe
             WHERE s.TenantId=@Tenant AND s.BusinessCommandId=@CommandRowId
             ORDER BY s.SourceNumber, l.LineNumber, e.EffectKey, e.Id
             """, p)).ToArray();
+        LedgerFingerprintRow? effect = ledger.Length == 1 ? ledger[0] : null;
         decimal allocated = await db.QuerySingleAsync<decimal>("""
             SELECT AllocatedBaseQuantity FROM dbo.StockPool
             WHERE TenantId=@Tenant AND StockLocationId=@Location AND SkuId=@Sku
@@ -236,8 +285,13 @@ internal static class RecoverySqlProbe
             SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(ledger)));
         return new CommandSqlReadback(
             database, tenant, producer, commandId, row?.Status, row?.OutcomeCode,
-            row?.ReasonCode, sourceId, row is null ? 0 : 1, sources,
-            sourceLines, ledger.Length, rights, allocated, digest);
+            row?.ReasonCode, source?.Id, row is null ? 0 : 1, sources,
+            sourceLines, ledger.Length, rights, allocated, digest,
+            source?.SourceKind, source?.SourceNumber, source?.ActorId, source?.TripId,
+            sourceLineQuantity, bQuotaRows,
+            right?.RightKind, right?.Status, right?.GrantedBaseQuantity,
+            right?.ConsumedBaseQuantity, right?.ReleasedBaseQuantity,
+            effect?.EffectKey, effect?.LedgerKind, effect?.QuantityDelta, effect?.AmountDelta);
     }
 }
 

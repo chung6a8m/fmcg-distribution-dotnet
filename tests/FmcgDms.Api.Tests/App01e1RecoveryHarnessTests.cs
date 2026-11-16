@@ -80,7 +80,8 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         RecoverySqlProbe.ReadAsync(
             Connection(tenant), tenant, Producer, key, s.Location, s.Sku);
 
-    private static void AssertCommitted(CommandSqlReadback actual)
+    private static void AssertCommitted(
+        CommandSqlReadback actual, GrantBQuotaCommand command)
     {
         Assert.Equal("APPLIED", actual.Status);
         Assert.Equal("B_QUOTA_GRANTED", actual.OutcomeCode);
@@ -91,6 +92,24 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         Assert.Equal(1, actual.Effects);
         Assert.Equal(1, actual.Rights);
         Assert.Equal(30m, actual.Allocated);
+
+        // Counts and a stable hash alone can conceal a wrong ledger kind,
+        // quantity, missing BQuota child or incorrectly attributed source.
+        Assert.Equal("STOCK_ALLOC", actual.SourceKind);
+        Assert.Equal(command.SourceNumber, actual.SourceNumber);
+        Assert.Equal(Actor, actual.SourceActorId);
+        Assert.Equal<Guid?>(command.TripId, actual.SourceTripId);
+        Assert.Equal(30m, actual.SourceLineQuantity);
+        Assert.Equal(1, actual.BQuotaRows);
+        Assert.Equal("B", actual.RightKind);
+        Assert.Equal("HELD", actual.RightStatus);
+        Assert.Equal(30m, actual.RightGranted);
+        Assert.Equal(0m, actual.RightConsumed);
+        Assert.Equal(0m, actual.RightReleased);
+        Assert.Equal("RIGHT-ALLOCATED", actual.EffectKey);
+        Assert.Equal("RIGHT_B", actual.LedgerKind);
+        Assert.Equal(30m, actual.EffectQuantity);
+        Assert.Equal(0m, actual.EffectAmount);
     }
 
     private static HarnessStage ExpectedStage(string label, CommandSqlReadback actual,
@@ -167,7 +186,7 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         });
         Assert.Equal(1, replies.Count(x => x.Outcome.Replayed));
         Assert.Equal(1, replies.Count(x => !x.Outcome.Replayed));
-        AssertCommitted(actual);
+        AssertCommitted(actual, command);
     }
 
     private static async Task ExpectSqlFaultAsync(HttpClient client, GrantBQuotaCommand command)
@@ -221,10 +240,25 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         Assert.Equal(0, rolledBack.Effects);
         Assert.Equal(0, rolledBack.Rights);
         Assert.Equal(0m, rolledBack.Allocated);
+        Assert.Null(rolledBack.SourceKind);
+        Assert.Null(rolledBack.SourceNumber);
+        Assert.Null(rolledBack.SourceActorId);
+        Assert.Null(rolledBack.SourceTripId);
+        Assert.Null(rolledBack.SourceLineQuantity);
+        Assert.Equal(0, rolledBack.BQuotaRows);
+        Assert.Null(rolledBack.RightKind);
+        Assert.Null(rolledBack.RightStatus);
+        Assert.Null(rolledBack.RightGranted);
+        Assert.Null(rolledBack.RightConsumed);
+        Assert.Null(rolledBack.RightReleased);
+        Assert.Null(rolledBack.EffectKey);
+        Assert.Null(rolledBack.LedgerKind);
+        Assert.Null(rolledBack.EffectQuantity);
+        Assert.Null(rolledBack.EffectAmount);
         Assert.Equal(HttpStatusCode.OK, retry.Code);
         Assert.False(retry.Outcome.Replayed);
         Assert.Equal(committed.SourceId, retry.Outcome.SourceId);
-        AssertCommitted(committed);
+        AssertCommitted(committed, command);
     }
 
     /// <summary>
@@ -264,7 +298,7 @@ public sealed class App01e1RecoveryHarnessTests(SqlScratchFixture fixture)
         Assert.Equal(afterDroppedAck.SourceId, replay.Outcome.SourceId);
         Assert.Equal(afterDroppedAck.LedgerSha256, afterReplay.LedgerSha256);
         Assert.Equal(afterDroppedAck.Allocated, afterReplay.Allocated);
-        AssertCommitted(afterDroppedAck);
-        AssertCommitted(afterReplay);
+        AssertCommitted(afterDroppedAck, command);
+        AssertCommitted(afterReplay, command);
     }
 }
