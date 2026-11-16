@@ -95,6 +95,19 @@ public sealed class App01a2CommandService(TenantConnections connections)
         public string CheckedBy { get; set; } = "";
     }
 
+    private sealed class ApprovedATerms
+    {
+        public int TermsDays { get; set; }
+        public string Decision { get; set; } = "";
+        public string PolicyVersion { get; set; } = "";
+        public string ProposedBy { get; set; } = "";
+        public string? CheckedBy { get; set; }
+        public string? EvidenceRef { get; set; }
+        public DateTime? ApprovedAtUtc { get; set; }
+        public DateTime EffectiveFromUtc { get; set; }
+        public DateTime EffectiveUntilUtc { get; set; }
+    }
+
     private async Task<BusinessCommandOutcome> ExecuteAsync(
         ClaimsPrincipal principal, IApp01aCommand request, string kind,
         (string Key, string Value)[] fields,
@@ -417,13 +430,36 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
 
+                // Terms are NOT self-approved by the sales request. Only an
+                // independently witnessed, effective A-order approval can be
+                // frozen. Older confirmed orders lacking this witness/snapshot
+                // are never silently backfilled.
+                var approved = await db.QuerySingleOrDefaultAsync<ApprovedATerms>(Sql("""
+                    SELECT TermsDays,Decision,PolicyVersion,ProposedBy,CheckedBy,
+                        EvidenceRef,ApprovedAtUtc,EffectiveFromUtc,EffectiveUntilUtc
+                    FROM dbo.AOrderTermsApproval WITH (UPDLOCK,HOLDLOCK)
+                    WHERE TenantId=@Tenant AND AOrderId=@Order
+                    """, new { Tenant = tenant, Order = order.Id }, tx, token));
+                DateTime nowUtc = DateTime.UtcNow;
+                if (approved is null || approved.Decision != "APPROVED"
+                    || approved.TermsDays is < 1 or > 365
+                    || string.IsNullOrWhiteSpace(approved.PolicyVersion)
+                    || string.IsNullOrWhiteSpace(approved.EvidenceRef)
+                    || string.IsNullOrWhiteSpace(approved.CheckedBy)
+                    || string.Equals(approved.ProposedBy.Trim(), approved.CheckedBy.Trim(),
+                        StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(actor, approved.CheckedBy.Trim(), StringComparison.OrdinalIgnoreCase)
+                    || approved.ApprovedAtUtc is null || approved.ApprovedAtUtc > nowUtc
+                    || approved.EffectiveFromUtc > nowUtc || approved.EffectiveUntilUtc <= nowUtc)
+                    return BusinessCommandOutcome.Rejected("A_TERMS_APPROVAL_REQUIRED");
+
                 var lines = (await db.QueryAsync<OrderLine>(Sql("""
                     SELECT Id,LineNumber,SkuId,BaseQuantity,UnitPrice
                     FROM dbo.AOrderLine WITH (UPDLOCK,HOLDLOCK)
                     WHERE TenantId=@Tenant AND AOrderId=@Order ORDER BY LineNumber
                     """, new { Tenant = tenant, Order = order.Id }, tx, token))).AsList();
                 if (lines.Count == 0) return BusinessCommandOutcome.Rejected("ORDER_EMPTY");
-                if (lines.Any(l => l.UnitPrice is null))
+                if (lines.Any(l => l.UnitPrice is not { } price || !ValidAmount(price)))
                     return BusinessCommandOutcome.Rejected("ORDER_PRICE_INCOMPLETE");
 
                 foreach (var line in lines)
@@ -443,16 +479,31 @@ public sealed class App01a2CommandService(TenantConnections connections)
                         return BusinessCommandOutcome.Rejected("ORDER_NOT_FULLY_RESERVED");
                 }
 
-                await db.ExecuteAsync(Sql("""
+                if (await db.ExecuteAsync(Sql("""
                     UPDATE dbo.AOrder SET Status=N'CONFIRMED',ConfirmedAtUtc=SYSUTCDATETIME()
                     WHERE TenantId=@Tenant AND Id=@Order AND Status=N'DRAFT'
-                    """, new { Tenant = tenant, Order = order.Id }, tx, token));
+                    """, new { Tenant = tenant, Order = order.Id }, tx, token)) != 1)
+                    throw new InvalidOperationException("A confirm state changed under lock.");
                 Guid source = await AddSource(db, tx, tenant, commandId, "A_CONFIRM",
                     request.SourceNumber, actor, order.CustomerId, order.TripId, token);
                 foreach (var line in lines)
-                    await AddLine(db, tx, tenant, source, line.LineNumber,
+                {
+                    Guid sourceLine = await AddLine(db, tx, tenant, source, line.LineNumber,
                         line.SkuId, line.BaseQuantity, null, token);
-                // Confirm posts no physical stock movement, AR, revenue or COGS.
+                    await db.ExecuteAsync(Sql("""
+                        INSERT dbo.AConfirmedLineSnapshot(TenantId,AOrderLineId,AOrderId,
+                            TripId,CustomerId,SkuId,ConfirmBusinessSourceId,ConfirmSourceLineId,
+                            ConfirmedBaseQuantity,UnitPriceSnapshot,TermsDaysSnapshot)
+                        VALUES(@Tenant,@OrderLine,@Order,@Trip,@Customer,@Sku,@Source,
+                            @SourceLine,@Qty,@Price,@Terms);
+                        """, new { Tenant = tenant, OrderLine = line.Id, Order = order.Id,
+                            Trip = order.TripId.Value, Customer = order.CustomerId,
+                            Sku = line.SkuId, Source = source, SourceLine = sourceLine,
+                            Qty = line.BaseQuantity, Price = line.UnitPrice!.Value,
+                            Terms = approved.TermsDays }, tx, token));
+                }
+                // Confirm freezes price and N-day terms; no stock movement,
+                // AR, revenue, cash or COGS is posted until actual delivery.
                 return BusinessCommandOutcome.Applied("A_ORDER_CONFIRMED", source);
             }, ct);
 
