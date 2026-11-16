@@ -1031,4 +1031,333 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                 await WriteEvidence(tenant, oracle, observations[tenant], failure);
         }
     }
+
+    private sealed class App01dEffect
+    {
+        public string SourceKind { get; set; } = "";
+        public string EffectKey { get; set; } = "";
+        public string LedgerKind { get; set; } = "";
+        public Guid? StockLocationId { get; set; }
+        public decimal QuantityDelta { get; set; }
+        public decimal AmountDelta { get; set; }
+    }
+
+    private sealed class App01dUnloadedLine
+    {
+        public string RightKind { get; set; } = "";
+        public decimal BaseQuantity { get; set; }
+        public decimal CostAmount { get; set; }
+        public decimal ReleasedBQuantity { get; set; }
+    }
+
+    private void VerifyApp01dPostingFromSql(string tenant, Scene scene, bool unloaded)
+    {
+        using var db = Open(tenant);
+        var args = new { Tenant = tenant, scene.Trip, scene.Sku,
+            scene.Warehouse, scene.Vehicle };
+        // Independent witness, not command-return data: cashier must match a
+        // physical count, different actor, exact offer, Trip and amount.
+        var (offers, accepted, witnessed, receipt, allocated, money) =
+            db.QuerySingle<(int, int, int, decimal, decimal, decimal)>("""
+            SELECT
+              (SELECT COUNT(*) FROM dbo.CashHandoverOffer
+                WHERE TenantId=@Tenant AND TripId=@Trip),
+              (SELECT COUNT(*) FROM dbo.CashHandoverAcceptance
+                WHERE TenantId=@Tenant AND TripId=@Trip),
+              (SELECT COUNT(*) FROM dbo.CashHandoverAcceptance a
+                JOIN dbo.CashHandoverOffer o ON o.TenantId=a.TenantId
+                  AND o.Id=a.OfferId AND o.TripId=a.TripId
+                  AND o.OfferedAmount=a.AcceptedAmount
+                JOIN dbo.CashierCountEvidence w ON w.TenantId=a.TenantId
+                  AND w.EvidenceRef=a.EvidenceRef AND w.TripId=a.TripId
+                  AND w.CountedAmount=a.AcceptedAmount
+                  AND w.CountedBy=a.AcceptedBy
+                  AND w.VerificationStatus=N'VERIFIED'
+                WHERE a.TenantId=@Tenant AND a.TripId=@Trip
+                  AND o.OfferedBy<>a.AcceptedBy),
+              (SELECT COALESCE(SUM(ReceivedAmount),0) FROM dbo.CashReceipt
+                WHERE TenantId=@Tenant AND TripId=@Trip),
+              (SELECT COALESCE(SUM(a.AppliedAmount),0) FROM dbo.ReceiptAllocation a
+                JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId
+                  AND r.Id=a.CashReceiptId
+                WHERE r.TenantId=@Tenant AND r.TripId=@Trip),
+              (SELECT COALESCE(SUM(AcceptedAmount),0)
+                FROM dbo.CashHandoverAcceptance
+                WHERE TenantId=@Tenant AND TripId=@Trip)
+            """, args);
+        Assert.Equal(1, offers);
+        Assert.Equal(1, accepted);
+        Assert.Equal(1, witnessed);
+        Assert.Equal(200m, receipt);
+        Assert.Equal(200m, allocated);
+        Assert.Equal(200m, money);
+
+        var sourceKinds = db.Query<(string SourceKind, int Total)>("""
+            SELECT SourceKind,COUNT(*) AS Total FROM dbo.BusinessSource
+            WHERE TenantId=@Tenant AND TripId=@Trip
+              AND SourceKind IN (N'CASH_HANDOVER_OFFER',
+                N'CASH_HANDOVER_ACCEPT',N'TRIP_UNLOAD')
+            GROUP BY SourceKind
+            """, args).ToDictionary(x => x.SourceKind, x => x.Total);
+        Assert.Equal(unloaded ? 3 : 2, sourceKinds.Count);
+        Assert.Equal(1, sourceKinds["CASH_HANDOVER_OFFER"]);
+        Assert.Equal(1, sourceKinds["CASH_HANDOVER_ACCEPT"]);
+        if (unloaded) Assert.Equal(1, sourceKinds["TRIP_UNLOAD"]);
+
+        var effects = db.Query<App01dEffect>("""
+            SELECT src.SourceKind,e.EffectKey,e.LedgerKind,e.StockLocationId,
+                e.QuantityDelta,e.AmountDelta
+            FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                AND sl.Id=e.BusinessSourceLineId
+            JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
+                AND src.Id=sl.BusinessSourceId
+            WHERE src.TenantId=@Tenant AND src.TripId=@Trip
+              AND src.SourceKind IN (N'CASH_HANDOVER_OFFER',
+                N'CASH_HANDOVER_ACCEPT',N'TRIP_UNLOAD')
+            """, args).ToArray();
+        // Exactly zero ledger effects from offer, two from acceptance, five
+        // from unload. Unexpected source kind/key fails even if amounts net 0.
+        Assert.Equal(unloaded ? 7 : 2, effects.Length);
+        Assert.DoesNotContain(effects, x => x.SourceKind == "CASH_HANDOVER_OFFER");
+        var acceptEffects = effects.Where(x => x.SourceKind == "CASH_HANDOVER_ACCEPT").ToArray();
+        Assert.Equal(2, acceptEffects.Length);
+        var outCash = Assert.Single(acceptEffects, x => x.EffectKey == "CUSTODY-OUT");
+        Assert.Equal("CUSTODY", outCash.LedgerKind);
+        Assert.Equal(0m, outCash.QuantityDelta);
+        Assert.Equal(-200m, outCash.AmountDelta);
+        var inFund = Assert.Single(acceptEffects, x => x.EffectKey == "FUND-IN");
+        Assert.Equal("FUND", inFund.LedgerKind);
+        Assert.Equal(0m, inFund.QuantityDelta);
+        Assert.Equal(200m, inFund.AmountDelta);
+
+        var a = db.QuerySingle<(decimal GrantedBaseQuantity,
+            decimal ConsumedBaseQuantity, decimal ReleasedBaseQuantity, string Status)>("""
+            SELECT GrantedBaseQuantity,ConsumedBaseQuantity,ReleasedBaseQuantity,Status
+            FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip AND SkuId=@Sku
+              AND RightKind='A'
+            """, args);
+        var b = db.QuerySingle<(decimal GrantedBaseQuantity,
+            decimal ConsumedBaseQuantity, decimal ReleasedBaseQuantity, string Status)>("""
+            SELECT GrantedBaseQuantity,ConsumedBaseQuantity,ReleasedBaseQuantity,Status
+            FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip AND SkuId=@Sku
+              AND RightKind='B'
+            """, args);
+        Assert.Equal((40m,25m,0m,"HELD"), a);
+        Assert.Equal((30m,20m,unloaded ? 10m : 0m,
+            unloaded ? "RELEASED" : "HELD"), b);
+        if (!unloaded)
+        {
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.TripUnload
+                WHERE TenantId=@Tenant AND TripId=@Trip
+                """, args));
+            return;
+        }
+
+        var lines = db.Query<App01dUnloadedLine>("""
+            SELECT l.RightKind,l.BaseQuantity,l.CostAmount,l.ReleasedBQuantity
+            FROM dbo.TripUnloadLine l
+            JOIN dbo.TripUnload u ON u.TenantId=l.TenantId AND u.Id=l.TripUnloadId
+            JOIN dbo.TripManifestLine ml ON ml.TenantId=l.TenantId
+                AND ml.Id=l.TripManifestLineId AND ml.TripId=l.TripId
+                AND ml.StockRightId=l.StockRightId AND ml.LoadSourceLineId=l.LoadSourceLineId
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=l.TenantId
+                AND sl.Id=l.SourceLineId AND sl.BusinessSourceId=u.Id
+                AND sl.SkuId=l.SkuId AND sl.BaseQuantity=l.BaseQuantity
+                AND sl.Amount=l.CostAmount
+            WHERE u.TenantId=@Tenant AND u.TripId=@Trip
+            """, args).ToArray();
+        Assert.Equal(2, lines.Length);
+        var aReturn = Assert.Single(lines, x => x.RightKind == "A");
+        var bReturn = Assert.Single(lines, x => x.RightKind == "B");
+        Assert.Equal((15m,150m,0m),
+            (aReturn.BaseQuantity,aReturn.CostAmount,aReturn.ReleasedBQuantity));
+        Assert.Equal((10m,100m,10m),
+            (bReturn.BaseQuantity,bReturn.CostAmount,bReturn.ReleasedBQuantity));
+        var unloadEffects = effects.Where(x => x.SourceKind == "TRIP_UNLOAD").ToArray();
+        Assert.Equal(5, unloadEffects.Length);
+        var vehicle = unloadEffects.Where(x => x.EffectKey == "VEHICLE-OUT").ToArray();
+        var warehouse = unloadEffects.Where(x => x.EffectKey == "WAREHOUSE-IN").ToArray();
+        var release = Assert.Single(unloadEffects, x => x.EffectKey == "RIGHT-B-RELEASE");
+        Assert.Equal(2, vehicle.Length);
+        Assert.Equal(2, warehouse.Length);
+        Assert.All(vehicle, x => {
+            Assert.Equal("PHYSICAL_STOCK", x.LedgerKind);
+            Assert.Equal(scene.Vehicle, x.StockLocationId);
+        });
+        Assert.All(warehouse, x => {
+            Assert.Equal("PHYSICAL_STOCK", x.LedgerKind);
+            Assert.Equal(scene.Warehouse, x.StockLocationId);
+        });
+        Assert.Equal((-25m,-250m),
+            (vehicle.Sum(x => x.QuantityDelta),vehicle.Sum(x => x.AmountDelta)));
+        Assert.Equal((25m,250m),
+            (warehouse.Sum(x => x.QuantityDelta),warehouse.Sum(x => x.AmountDelta)));
+        Assert.Equal("RIGHT_B_RELEASED", release.LedgerKind);
+        Assert.Equal(-10m, release.QuantityDelta);
+        Assert.Equal(0m, release.AmountDelta);
+        Assert.Equal("RECONCILING", db.QuerySingle<string>("""
+            SELECT Status FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip
+            """, args));
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.SaleDelivery
+            WHERE TenantId=@Tenant AND TripId=@Trip AND InvoiceEligible=1
+            """, args));
+    }
+
+    [Fact]
+    public async Task Two_tenants_match_91_independent_SQL_cells_through_cashier_and_unload()
+    {
+        var oracle = ReadOracle(7);
+        var reads = new Dictionary<string, List<Observation>> {
+            [TenantA] = [], [TenantB] = []
+        };
+        string? failure = null;
+        try
+        {
+            using var factory = fixture.CreateFactory();
+            using var salesA = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantA);
+            using var salesB = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantB);
+            using var cashierA = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantA,
+                actor: "synthetic-cashier", roles: ["cashier"]);
+            using var cashierB = SqlScratchFixture.WithTenant(factory.CreateClient(), TenantB,
+                actor: "synthetic-cashier", roles: ["cashier"]);
+            var sceneA = await Prepare(salesA, TenantA);
+            var sceneB = await Prepare(salesB, TenantB);
+            var rejectA = new PreflightBSaleCommand(Producer, Id(), Id(),
+                sceneA.Trip, sceneA.Sku, 31m, 15m, 465m);
+            var rejectB = new PreflightBSaleCommand(Producer, Id(), Id(),
+                sceneB.Trip, sceneB.Sku, 31m, 15m, 465m);
+            foreach (var (sales, cashier, tenant, scene, reject) in new[] {
+                (salesA,cashierA,TenantA,sceneA,rejectA),
+                (salesB,cashierB,TenantB,sceneB,rejectB)
+            })
+            {
+                string other = tenant == TenantA ? TenantB : TenantA;
+                Scene otherScene = tenant == TenantA ? sceneB : sceneA;
+                string otherReject = tenant == TenantA ? rejectB.CommandId : rejectA.CommandId;
+                var otherBefore = Capture(other, otherScene, otherReject);
+                var t0 = Capture(tenant, scene, reject.CommandId);
+                reads[tenant].Add(new Observation(0,t0));
+                await ExpectApplied(sales, BCommands + "load-manifest",
+                    new LoadManifestCommand(Producer,Id(),Id(),scene.Manifest), "MANIFEST_LOADED");
+                var t1 = Capture(tenant, scene, reject.CommandId);
+                reads[tenant].Add(new Observation(1,t1));
+                var denial = await Post(sales,BCommands + "preflight-b-sale",reject);
+                Assert.Equal("B_QUOTA_INSUFFICIENT",denial.ReasonCode);
+                var t2 = Capture(tenant,scene,reject.CommandId);
+                reads[tenant].Add(new Observation(2,t2));
+                AssertNoBusinessEffectsChanged(t1,t2);
+
+                await ExpectApplied(sales,ACommands + "grant-b-credit",
+                    new GrantBCreditCommand(Producer,Id(),Id(),scene.Trip,
+                        scene.Customer,scene.ShipTo,"B","SYNTHETIC_UNITLESS",100m),
+                    "B_CREDIT_GRANTED");
+                await ExpectApplied(sales,CCommands + "post-b-sale-delivery-receipt",
+                    new PostBSaleDeliveryReceiptCommand(Producer,Id(),Id(),
+                        scene.Trip,scene.Customer,scene.ShipTo,scene.BManifestLine,
+                        scene.Sku,20m,15m,200m,SeedVerifiedCashWitness(tenant,scene)),
+                    "B_SALE_DELIVERY_POSTED");
+                var t3 = Capture(tenant,scene,reject.CommandId);
+                reads[tenant].Add(new Observation(3,t3));
+                AssertPostedLineage(tenant,scene,t3,3);
+                await ExpectApplied(sales,CCommands + "post-a-partial-delivery",
+                    new PostAPartialDeliveryCommand(Producer,Id(),Id(),
+                        scene.Trip,scene.Customer,scene.ShipTo,scene.Order,
+                        scene.OrderLine,scene.AManifestLine,scene.Sku,25m),
+                    "A_PARTIAL_DELIVERY_POSTED");
+                var t4 = Capture(tenant,scene,reject.CommandId);
+                reads[tenant].Add(new Observation(4,t4));
+                AssertPostedLineage(tenant,scene,t4,4);
+
+                const stringPath = "/api/synthetic/app01d/commands/";
+                var offer = new OfferCashHandoverCommand(Producer,Id(),Id(),scene.Trip,200m);
+                var offered = await Post(sales,stringPath + "offer-cash-handover",offer);
+                Assert.Equal("CASH_HANDOVER_OFFERED",offered.OutcomeCode);
+                var offerSource = Assert.IsType<Guid>(offered.SourceId);
+                var afterOffer = Capture(tenant,scene,reject.CommandId);
+                Assert.Equal("T4_A25",afterOffer.Step);
+                foreach (var (field,value) in t4.Values)
+                    Assert.Equal(value,afterOffer.Values[field]);
+                Assert.Equal(t4.Evidence.LedgerDigest,afterOffer.Evidence.LedgerDigest);
+                Assert.Equal(t4.PostingDigest,afterOffer.PostingDigest);
+                Assert.Equal(t4.Evidence.Sources+1,afterOffer.Evidence.Sources);
+                Assert.True((await Post(sales,stringPath+"offer-cash-handover",offer)).Replayed);
+                Assert.Equal("IDEMPOTENCY_PAYLOAD_MISMATCH",
+                    (await Post(sales,stringPath+"offer-cash-handover",
+                        offer with {OfferedAmount=190m},HttpStatusCode.Conflict)).ReasonCode);
+
+                string countRef = Id();
+                using (var db = Open(tenant))
+                    db.Execute("""
+                        INSERT dbo.CashierCountEvidence(TenantId,EvidenceRef,TripId,
+                            CountedAmount,CountedBy,VerificationStatus,CountedAtUtc)
+                        VALUES(@Tenant,@CountRef,@Trip,200,N'synthetic-cashier',
+                            N'VERIFIED',SYSUTCDATETIME())
+                        """,new {Tenant=tenant,CountRef,scene.Trip});
+                var accept = new AcceptCashHandoverCommand(Producer,Id(),Id(),
+                    scene.Trip,offerSource,countRef);
+                using (var wrongRole = await sales.PostAsJsonAsync(
+                    stringPath+"accept-cash-handover",accept,TestContext.Current.CancellationToken))
+                    Assert.Equal(HttpStatusCode.Forbidden,wrongRole.StatusCode);
+                var wrongWitness = await Post(cashier,stringPath+"accept-cash-handover",
+                    accept with {CommandId=Id(),CountEvidenceRef="unknown"});
+                Assert.Equal("CASHIER_COUNT_NOT_VERIFIED",wrongWitness.ReasonCode);
+                AssertNoBusinessEffectsChanged(afterOffer,Capture(tenant,scene,reject.CommandId));
+                var accepted = await Post(cashier,stringPath+"accept-cash-handover",accept);
+                Assert.Equal("CASH_HANDOVER_ACCEPTED",accepted.OutcomeCode);
+                var t5 = Capture(tenant,scene,reject.CommandId);
+                reads[tenant].Add(new Observation(5,t5));
+                VerifyApp01dPostingFromSql(tenant,scene,unloaded:false);
+                Assert.Equal(t4.PostingDigest,t5.PostingDigest);
+                Assert.True((await Post(cashier,stringPath+"accept-cash-handover",accept)).Replayed);
+                AssertNoBusinessEffectsChanged(t5,Capture(tenant,scene,reject.CommandId));
+                var doubleAccept = await Post(cashier,stringPath+"accept-cash-handover",
+                    accept with {CommandId=Id(),SourceNumber=Id()});
+                Assert.Equal("OFFER_ALREADY_ACCEPTED",doubleAccept.ReasonCode);
+
+                var unload = new UnloadTripRemainderCommand(Producer,Id(),Id(),
+                    scene.Trip,scene.Manifest);
+                var returned = await Post(sales,stringPath+"unload-trip-remainder",unload);
+                Assert.Equal("TRIP_REMAINDER_UNLOADED",returned.OutcomeCode);
+                var t6 = Capture(tenant,scene,reject.CommandId);
+                reads[tenant].Add(new Observation(6,t6));
+                VerifyApp01dPostingFromSql(tenant,scene,unloaded:true);
+                Assert.Equal(t5.PostingDigest,t6.PostingDigest);
+                foreach (var field in new[] {"cogs","arA","arB","custody","fund"})
+                    Assert.Equal(t5.Values[field],t6.Values[field]);
+                Assert.True((await Post(sales,stringPath+"unload-trip-remainder",unload)).Replayed);
+                AssertNoBusinessEffectsChanged(t6,Capture(tenant,scene,reject.CommandId));
+                var doubleUnload = await Post(sales,stringPath+"unload-trip-remainder",
+                    unload with {CommandId=Id(),SourceNumber=Id()});
+                Assert.Equal("TRIP_NOT_ELIGIBLE",doubleUnload.ReasonCode);
+                AssertNoBusinessEffectsChanged(t6,Capture(tenant,scene,reject.CommandId));
+                AssertNoBusinessEffectsChanged(otherBefore,Capture(other,otherScene,otherReject));
+            }
+            foreach (string tenant in new[] {TenantA,TenantB})
+            {
+                var observations = reads[tenant];
+                Assert.Equal(7,observations.Count);
+                var cells = observations.SelectMany(x=>Compare(oracle,x.Row,
+                    x.Snapshot.Step,x.Snapshot.Values)).ToArray();
+                Assert.Equal(91,cells.Length);
+                Assert.True(cells.All(x=>x.Match),tenant+": "+string.Join("; ",
+                    cells.Where(x=>!x.Match).Select(x=>
+                        $"{x.Row}/{x.Field} expected={x.Expected}, actual={x.Actual}")));
+            }
+        }
+        catch (Exception ex)
+        {
+            failure=ex.ToString();
+            throw;
+        }
+        finally
+        {
+            foreach (string tenant in new[] {TenantA,TenantB})
+                await WriteEvidence(tenant,oracle,reads[tenant],failure,checkpoints:7);
+        }
+    }
+
+
 }
