@@ -771,12 +771,12 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         using var db = Open(tenant);
         // No extra or substituted source kind may hide behind matching sums
         // and an otherwise correct seven-plus-four delivery effect set.
-        var sourceKinds = db.Query<(string Kind, int Rows)>("""
-            SELECT SourceKind, COUNT(*) AS Rows FROM dbo.BusinessSource
+        var sourceKinds = db.Query<(string Kind, int SourceCount)>("""
+            SELECT SourceKind, COUNT(*) AS SourceCount FROM dbo.BusinessSource
             WHERE TenantId=@Tenant AND TripId=@Trip
             GROUP BY SourceKind
             """, new { Tenant = tenant, scene.Trip })
-            .ToDictionary(x => x.Kind, x => x.Rows, StringComparer.Ordinal);
+            .ToDictionary(x => x.Kind, x => x.SourceCount, StringComparer.Ordinal);
         Assert.Equal(stage == 3 ? 5 : 6, sourceKinds.Count);
         Assert.Equal(2, sourceKinds["STOCK_ALLOC"]);
         Assert.Equal(1, sourceKinds["A_CONFIRM"]);
