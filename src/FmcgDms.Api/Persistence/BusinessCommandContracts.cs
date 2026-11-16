@@ -48,6 +48,17 @@ public sealed record PostBSaleDeliveryReceiptCommand(
     decimal UnitPrice, decimal ReceivedCashAmount,
     string VerificationEvidenceRef) : IApp01aCommand;
 
+/// <summary>
+/// One A delivery against a loaded, exact reserved source/order line.
+/// ConfirmAOrder independently froze price and approved N-day terms.
+/// No unit price or terms are accepted from this delivery command.
+/// </summary>
+public sealed record PostAPartialDeliveryCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
+    Guid AOrderId, Guid AOrderLineId, Guid TripManifestLineId, Guid SkuId,
+    decimal BaseQuantity) : IApp01aCommand;
+
 public sealed record GrantBCreditCommand(
     string ProducerId, string CommandId, string SourceNumber,
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
