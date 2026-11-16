@@ -496,7 +496,7 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
                 AND l.LoadedBaseQuantity>0
             ORDER BY l.LineNumber;
             """, new { Tenant = tenant, Manifest = req.ManifestId, Trip = req.TripId },
-                tx, ct)).ToList();
+                tx, ct))).ToList();
         if (lines.Count == 0)
             return BusinessCommandOutcome.Rejected("MANIFEST_EMPTY");
         int totalLoadedLines = await db.ExecuteScalarAsync<int>(Sql("""
