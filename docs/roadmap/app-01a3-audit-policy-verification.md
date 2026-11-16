@@ -31,11 +31,11 @@ Audit runs one SQL `Serializable` read transaction across all result sets and fi
 
 ## Physical LocalDB verification matrix
 
-12 new tests over the 25 prior tests (expected minimum **37**, xUnit v3/MTP v2) cover:
+13 new tests over the 25 prior tests (expected minimum **38**, xUnit v3/MTP v2) cover:
 
 | Case group | Expected result |
 |---|---|
-| Schema/policy | Migration replays independently in A/B; self-approval and foreign tenant FK fail; pending/rejected/expired/missing/ambiguous/over-limit/actor-checker conflicts deny with zero new effects |
+| Schema/policy | Migration replays independently in A/B; self-approval and foreign tenant FK fail; pending/rejected/expired/missing/ambiguous/over-limit/actor-checker conflicts deny with zero new effects; referenced approval edit/delete denied |
 | Audit cutoff/graph | Before/after status, source actor and lineage, credit approval evidence, A/B stock-right vs ledger sum, no AR/COGS; explicit PENDING and later-completion hiding |
 | HTTP matrix | 401 unbound identity, 403 role/unknown tenant/misrouted DB, 404 disabled production endpoint; malicious tenant header ignored; tenant A source never exposed in B and vice versa |
 | Concurrency | Four independent A/B clients contend for 100 units without over-allocation; 4 same-key mixed-payload clients produce one APPLIED, one REPLAYED and 2 CONFLICT; competing 70+70 credit grants produce one grant within 100 approved |
