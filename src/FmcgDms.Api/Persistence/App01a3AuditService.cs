@@ -13,6 +13,27 @@ namespace FmcgDms.Api.Persistence;
 /// </summary>
 public sealed class App01a3AuditService(TenantConnections connections)
 {
+    // Reconcile B posting's immutable source-backed records/effects as part of
+    // audit-as-of, without assuming mutable current right/grant counters are
+    // historical snapshots at an earlier cutoff.
+    private sealed class BPostingEvidence
+    {
+        public Guid DeliveryId { get; set; }
+        public Guid BusinessSourceLineId { get; set; }
+        public decimal BaseQuantity { get; set; }
+        public decimal PayableAmount { get; set; }
+        public decimal CostAmount { get; set; }
+        public decimal? IssuedQuantity { get; set; }
+        public decimal? IssuedCost { get; set; }
+        public decimal? ArOriginal { get; set; }
+        public decimal? ArApplied { get; set; }
+        public decimal? ArOutstanding { get; set; }
+        public decimal? CashReceived { get; set; }
+        public decimal? CashApplied { get; set; }
+        public decimal ReceiptAllocated { get; set; }
+        public decimal CreditUsed { get; set; }
+    }
+
     public async Task<App01aAuditSnapshot> QueryAsync(
         ClaimsPrincipal principal, DateTimeOffset asOf, CancellationToken ct)
     {
@@ -145,6 +166,40 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 FROM RightsAndEffects
                 GROUP BY StockLocationId,SkuId
                 ORDER BY StockLocationId,SkuId;
+
+                -- APP-01C.2: source-bound B posting reconciliation is independent
+                -- of the earlier A/B grant-allocation audit. Do not use mutable
+                -- current balances as a historical as-of ledger.
+                SELECT d.Id AS DeliveryId,d.BusinessSourceLineId,
+                    d.BaseQuantity,d.PayableAmount,d.CostAmount,
+                    i.BaseQuantity AS IssuedQuantity,i.CostAmount AS IssuedCost,
+                    ar.OriginalAmount AS ArOriginal,ar.AppliedAmount AS ArApplied,
+                    ar.OutstandingAmount AS ArOutstanding,
+                    receipt.ReceivedAmount AS CashReceived,
+                    receipt.AppliedAmount AS CashApplied,
+                    (SELECT COALESCE(SUM(a.AppliedAmount),0)
+                        FROM dbo.ReceiptAllocation a
+                        WHERE a.TenantId=d.TenantId
+                            AND a.CashReceiptId=receipt.Id
+                            AND a.ReceivableOpenItemId=ar.Id) AS ReceiptAllocated,
+                    (SELECT COALESCE(SUM(x.ConsumedAmount),0)
+                        FROM dbo.BGrantConsumption x
+                        WHERE x.TenantId=d.TenantId
+                            AND x.SaleDeliveryId=d.Id) AS CreditUsed
+                FROM dbo.SaleDelivery d
+                JOIN dbo.BusinessSource s ON s.TenantId=d.TenantId
+                    AND s.Id=d.BusinessSourceId AND s.SourceKind=N'B_SALE_DELIVERY'
+                JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId
+                    AND c.Id=s.BusinessCommandId AND c.Status=N'APPLIED'
+                LEFT JOIN dbo.DeliveryStockIssue i ON i.TenantId=d.TenantId
+                    AND i.SaleDeliveryId=d.Id
+                LEFT JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId
+                    AND ar.SaleDeliveryId=d.Id
+                LEFT JOIN dbo.CashReceipt receipt ON receipt.TenantId=d.TenantId
+                    AND receipt.SaleDeliveryId=d.Id
+                WHERE d.TenantId=@Tenant
+                    AND s.RecordedAtUtc<=@AsOf AND c.CompletedAtUtc<=@AsOf
+                ORDER BY s.RecordedAtUtc,d.Id;
                 """, new { Tenant = tenant, AsOf = asOf.UtcDateTime },
                 tx, cancellationToken: ct));
 
@@ -155,6 +210,7 @@ public sealed class App01a3AuditService(TenantConnections connections)
             var credits = (await multi.ReadAsync<App01aAuditCredit>()).AsList();
             var rights = (await multi.ReadAsync<App01aAuditRight>()).AsList();
             var stock = (await multi.ReadAsync<App01aAuditStock>()).AsList();
+            var bPostings = (await multi.ReadAsync<BPostingEvidence>()).AsList();
 
             // Reconciliation issues are evidence, never silently repaired.
             // Per-line checks prevent offsetting ledger errors from hiding behind a
@@ -209,6 +265,40 @@ public sealed class App01a3AuditService(TenantConnections connections)
             foreach (var bucket in stock)
                 if (bucket.RightGranted != bucket.EffectGranted)
                     issues.Add($"STOCK_RIGHT_EFFECT_MISMATCH:{bucket.StockLocationId:N}:{bucket.SkuId:N}");
+
+            // A valid posted B sale cannot be a partial posting: every
+            // immutable source line has exactly the physical/COGS, AR, cash,
+            // right and credit effects that its delivery requires.
+            var bSourceLineIds = bPostings.Select(p => p.BusinessSourceLineId).ToHashSet();
+            foreach (var p in bPostings)
+            {
+                var legs = effects.Where(e => e.BusinessSourceLineId == p.BusinessSourceLineId)
+                    .ToArray();
+                bool Leg(string key, string kind, decimal qty, decimal amount) =>
+                    legs.Count(e => e.EffectKey == key && e.LedgerKind == kind
+                        && e.QuantityDelta == qty && e.AmountDelta == amount) == 1;
+                if (p.IssuedQuantity != p.BaseQuantity || p.IssuedCost != p.CostAmount
+                    || p.ArOriginal != p.PayableAmount || p.CashReceived is not > 0
+                    || p.CashApplied != p.CashReceived
+                    || p.ArApplied != p.CashReceived
+                    || p.ArOutstanding != p.PayableAmount - p.CashReceived
+                    || p.ReceiptAllocated != p.CashReceived
+                    || p.CreditUsed != p.PayableAmount - p.CashReceived
+                    || !Leg("PHYSICAL-OUT", "PHYSICAL_STOCK", -p.BaseQuantity, -p.CostAmount)
+                    || !Leg("COGS", "COGS", 0m, p.CostAmount)
+                    || !Leg("AR-GROSS", "AR", 0m, p.PayableAmount)
+                    || !Leg("AR-CASH-ALLOC", "AR", 0m, -(p.CashReceived ?? 0m))
+                    || !Leg("CASH-CUSTODY", "CUSTODY", 0m, p.CashReceived ?? 0m)
+                    || !Leg("RIGHT-B-USED", "RIGHT_B_CONSUMED", -p.BaseQuantity, 0m)
+                    || (p.CreditUsed > 0
+                        && !Leg("CREDIT-B-USED", "RIGHT_CREDIT_B_CONSUMED", 0m, -p.CreditUsed))
+                    || legs.Length != (p.CreditUsed > 0 ? 7 : 6))
+                    issues.Add($"B_POSTING_SOURCE_LEDGER_MISMATCH:{p.DeliveryId:N}");
+            }
+            foreach (var leg in effects.Where(e => e.LedgerKind is
+                "RIGHT_B_CONSUMED" or "RIGHT_CREDIT_B_CONSUMED"))
+                if (!bSourceLineIds.Contains(leg.BusinessSourceLineId))
+                    issues.Add($"B_CONSUMPTION_WITHOUT_DELIVERY:{leg.Id:N}");
 
             await tx.CommitAsync(ct);
             return new App01aAuditSnapshot(tenant, asOf.ToUniversalTime(),

@@ -297,6 +297,13 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             sourceLine = b.SourceLine, kind = "B", amount = 300m,
             due = (DateTime?)null
         });
+        db.Execute("""
+            INSERT dbo.VerifiedCashEvidence(TenantId,EvidenceRef,TripId,CustomerId,
+                ShipToSnapshotId,PaymentMethod,VerificationStatus,VerifiedAmount,
+                VerifiedBy,VerifiedAtUtc)
+            VALUES(@tenant,N'synthetic-verified-cash',@Trip,@Customer,@ShipTo,
+                N'CASH',N'VERIFIED',200,N'synthetic-schema-checker',SYSUTCDATETIME());
+            """, new { tenant = A, s.Trip, s.Customer, s.ShipTo });
         db.Execute(InsertReceiptSql, new {
             id = receipt, tenant = A, delivery = b.Id, s.Trip, s.Customer,
             sourceLine = b.SourceLine, amount = 200m, evidence = "synthetic-verified-cash"
@@ -324,7 +331,7 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, "UPDATE dbo.CashReceipt SET AppliedAmount=201 WHERE Id=@receipt",
             new { receipt }, 547);
         Reject(db, "UPDATE dbo.CashReceipt SET ReceivedAmount=201 WHERE Id=@receipt",
-            new { receipt }, 51066);
+            new { receipt }, 51066, 547);
         Reject(db, "DELETE dbo.ReceiptAllocation WHERE Id=@allocation",
             new { allocation }, 51064);
         var foreign = SeedLoadedTrip(db, A);
@@ -342,7 +349,9 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, InsertReceiptSql, new {
             id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
             foreign.Trip, foreign.Customer, sourceLine = otherSale.SourceLine,
-            amount = -1m, evidence = "synthetic-verified-cash"
+            // Use a fresh unknown witness: replaying the first witness is
+            // rejected by the UNIQUE constraint before the negative-cash CHECK.
+            amount = -1m, evidence = Guid.NewGuid().ToString("N")
         }, 547);
     }
 
