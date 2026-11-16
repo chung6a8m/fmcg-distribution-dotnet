@@ -548,4 +548,95 @@ public sealed class App01b2ManifestCommandTests(SqlScratchFixture fixture)
         Assert.Equal(before, State(A, s));
         Assert.Equal(0, State(A, s).Movements);
     }
+    [Fact]
+    public async Task Confirmed_A_quantity_mutation_cannot_authorize_stale_manifest_load()
+    {
+        using var factory = fixture.CreateFactory();
+        using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var s = await Prepare(client);
+        using var db = Open(A);
+        Assert.Equal(1, db.Execute("""
+            UPDATE dbo.AOrderLine SET BaseQuantity=20
+            WHERE TenantId=@Tenant AND Id=@Line
+            """, new { Tenant = A, Line = s.OrderLine }));
+        var before = State(A, s);
+        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.ReasonCode);
+        Assert.Equal(before, State(A, s));
+        Assert.Equal("DRAFT", db.ExecuteScalar<string>("""
+            SELECT Status FROM dbo.TripManifest
+            WHERE TenantId=@Tenant AND Id=@Manifest
+            """, new { Tenant = A, s.Manifest }));
+
+        db.Execute("""
+            UPDATE dbo.AOrderLine SET BaseQuantity=40
+            WHERE TenantId=@Tenant AND Id=@Line
+            """, new { Tenant = A, Line = s.OrderLine });
+        Assert.Equal("MANIFEST_LOADED",
+            (await Send(client, RootB + "load-manifest", Load(s))).Outcome.OutcomeCode);
+    }
+
+    [Fact]
+    public async Task Split_A_reservations_for_one_confirmed_line_allow_valid_manifest_load()
+    {
+        using var factory = fixture.CreateFactory();
+        using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var s = Seed(A, 100m, 1000m, openVehicle: true);
+        foreach (var amount in new[] { 15m, 25m })
+            Assert.Equal("A_STOCK_RESERVED", (await Send(client,
+                RootA + "reserve-a-stock", new ReserveAStockCommand(
+                    Producer, Key(), Key(), s.Order, s.OrderLine, s.Warehouse, amount)))
+                .Outcome.OutcomeCode);
+        Assert.Equal("B_QUOTA_GRANTED", (await Send(client,
+            RootA + "grant-b-quota", new GrantBQuotaCommand(
+                Producer, Key(), Key(), s.Trip, s.Warehouse, s.Sku, 30m)))
+            .Outcome.OutcomeCode);
+        await Confirm(client, s);
+
+        using var db = Open(A);
+        Guid a15 = db.QuerySingle<Guid>("""
+            SELECT r.Id FROM dbo.StockRight r
+            JOIN dbo.AReservation a ON a.TenantId=r.TenantId AND a.StockRightId=r.Id
+            WHERE a.TenantId=@Tenant AND a.AOrderLineId=@Line AND r.GrantedBaseQuantity=15
+            """, new { Tenant = A, Line = s.OrderLine });
+        Guid a25 = db.QuerySingle<Guid>("""
+            SELECT r.Id FROM dbo.StockRight r
+            JOIN dbo.AReservation a ON a.TenantId=r.TenantId AND a.StockRightId=r.Id
+            WHERE a.TenantId=@Tenant AND a.AOrderLineId=@Line AND r.GrantedBaseQuantity=25
+            """, new { Tenant = A, Line = s.OrderLine });
+        Guid b30 = db.QuerySingle<Guid>("""
+            SELECT r.Id FROM dbo.StockRight r
+            JOIN dbo.BQuota b ON b.TenantId=r.TenantId AND b.StockRightId=r.Id
+            WHERE r.TenantId=@Tenant AND r.TripId=@Trip
+            """, new { Tenant = A, s.Trip });
+
+        db.Execute("""
+            INSERT dbo.TripManifest(Id,TenantId,ManifestNumber,TripId,
+                WarehouseLocationId,VehicleLocationId)
+                VALUES(@Manifest,@Tenant,@Number,@Trip,@Warehouse,@Vehicle);
+            INSERT dbo.TripManifestLine(Id,TenantId,TripManifestId,TripId,
+                WarehouseLocationId,VehicleLocationId,LineNumber,SkuId,
+                StockRightId,RightKind,PlannedBaseQuantity)
+                VALUES(NEWID(),@Tenant,@Manifest,@Trip,@Warehouse,@Vehicle,1,@Sku,@A15,'A',15);
+            INSERT dbo.TripManifestLine(Id,TenantId,TripManifestId,TripId,
+                WarehouseLocationId,VehicleLocationId,LineNumber,SkuId,
+                StockRightId,RightKind,PlannedBaseQuantity)
+                VALUES(NEWID(),@Tenant,@Manifest,@Trip,@Warehouse,@Vehicle,2,@Sku,@A25,'A',25);
+            INSERT dbo.TripManifestLine(Id,TenantId,TripManifestId,TripId,
+                WarehouseLocationId,VehicleLocationId,LineNumber,SkuId,
+                StockRightId,RightKind,PlannedBaseQuantity)
+                VALUES(NEWID(),@Tenant,@Manifest,@Trip,@Warehouse,@Vehicle,3,@Sku,@B30,'B',30);
+            """, new { Tenant = A, s.Manifest, s.Trip, s.Warehouse, s.Vehicle,
+                s.Sku, A15 = a15, A25 = a25, B30 = b30, Number = Key() });
+
+        var loaded = await Send(client, RootB + "load-manifest", Load(s));
+        Assert.Equal("MANIFEST_LOADED", loaded.Outcome.OutcomeCode);
+        var state = State(A, s);
+        Assert.Equal((30m, 300m, 70m, 700m),
+            (state.WhQty, state.WhCost, state.VehicleQty, state.VehicleCost));
+        Assert.Equal((70m, 40m, 30m), (state.PoolAllocated, state.AAvail, state.BAvail));
+        Assert.Equal(3, state.Movements);
+        Assert.Equal(0, state.Financial);
+    }
+
 }
