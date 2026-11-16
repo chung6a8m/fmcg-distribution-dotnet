@@ -275,7 +275,24 @@ public sealed class App01b2CommandService(TenantConnections connections)
                                 THEN 1 ELSE 0 END AS bit) AS SourceEligible,
                             CAST(CASE
                                 WHEN r.RightKind='A' AND ao.Status=N'CONFIRMED'
-                                    AND ao.TripId=@Trip AND al.SkuId=r.SkuId THEN 1
+                                    AND ao.TripId=@Trip AND al.SkuId=r.SkuId
+                                    -- ConfirmAOrder requires the whole A-order line
+                                    -- to be reserved. Recheck the *sum* (one line
+                                    -- may have several independent A reservations)
+                                    -- before the physical transfer, rather than
+                                    -- accepting a changed post-confirmation quantity.
+                                    AND al.BaseQuantity = (
+                                        SELECT COALESCE(SUM(rAll.GrantedBaseQuantity), 0)
+                                        FROM dbo.AReservation aAll
+                                        JOIN dbo.StockRight rAll WITH (HOLDLOCK)
+                                            ON rAll.TenantId=aAll.TenantId
+                                            AND rAll.Id=aAll.StockRightId
+                                        WHERE aAll.TenantId=r.TenantId
+                                            AND aAll.AOrderLineId=al.Id
+                                            AND rAll.RightKind='A'
+                                            AND rAll.TripId=@Trip
+                                            AND rAll.SkuId=al.SkuId
+                                    ) THEN 1
                                 WHEN r.RightKind='B' AND b.Id IS NOT NULL THEN 1
                                 ELSE 0 END AS bit) AS Eligible
                         FROM dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
