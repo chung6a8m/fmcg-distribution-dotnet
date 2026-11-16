@@ -128,19 +128,25 @@ public sealed class App01a2CommandTests(SqlScratchFixture fixture)
         using var db = Open(fixture, A);
         Assert.Equal("CONFIRMED", db.ExecuteScalar<string>(
             "SELECT Status FROM dbo.AOrder WHERE Id=@Order", new { s.Order }));
-        var pool = db.QuerySingle<(decimal OnHandBaseQuantity, decimal AllocatedBaseQuantity)>(
-            "SELECT OnHandBaseQuantity,AllocatedBaseQuantity FROM dbo.StockPool WHERE StockLocationId=@Warehouse AND SkuId=@Sku",
-            new { s.Warehouse, s.Sku });
-        Assert.Equal(100m, pool.OnHandBaseQuantity);
-        Assert.Equal(70m, pool.AllocatedBaseQuantity);
+        Assert.Equal(100m, db.ExecuteScalar<decimal>(
+            "SELECT OnHandBaseQuantity FROM dbo.StockPool WHERE StockLocationId=@Warehouse AND SkuId=@Sku",
+            new { s.Warehouse, s.Sku }));
+        Assert.Equal(70m, db.ExecuteScalar<decimal>(
+            "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE StockLocationId=@Warehouse AND SkuId=@Sku",
+            new { s.Warehouse, s.Sku }));
         Assert.Equal(70m, db.ExecuteScalar<decimal>("""
             SELECT SUM(GrantedBaseQuantity-ConsumedBaseQuantity-ReleasedBaseQuantity)
             FROM dbo.StockRight WHERE StockLocationId=@Warehouse AND SkuId=@Sku
             """, new { s.Warehouse, s.Sku }));
         Assert.Equal(2, db.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE LedgerKind IN (N'RIGHT_A',N'RIGHT_B')"));
-        Assert.Equal(0, db.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE LedgerKind IN (N'AR',N'COGS',N'REVENUE',N'STOCK')"));
+            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE StockLocationId=@Warehouse AND SkuId=@Sku AND LedgerKind IN (N'RIGHT_A',N'RIGHT_B')",
+            new { s.Warehouse, s.Sku }));
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine l ON e.BusinessSourceLineId=l.Id
+            JOIN dbo.BusinessSource src ON l.BusinessSourceId=src.Id
+            WHERE src.TripId=@Trip AND e.LedgerKind IN (N'AR',N'COGS',N'REVENUE',N'STOCK')
+            """, new { s.Trip }));
     }
 
     [Fact]
