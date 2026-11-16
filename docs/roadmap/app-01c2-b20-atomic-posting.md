@@ -15,8 +15,11 @@ review findings and approval must be attached to the PR before marking verified.
   No caller-provided tenant connection string, manual `VERIFIED` flag or offline write.
 - The command names the exact **loaded B manifest line**, Trip, SKU, Customer and
   ShipTo, validated against composite FK/source lineage, active entities, exact
-  stock right, B quota and outward vehicle movement. The actor is a signed `sub`
-  equal to `actor_id`; no warehouse-only or foreign-tenant posting.
+  stock right, B quota and outward vehicle movement. Vehicle quantity and cost
+  must reconcile exactly to the immutable physical opening + manifest loads
+  minus posted delivery issues; inflated/mispriced mutable balances fail closed.
+  The actor is a signed `sub` equal to `actor_id`; no warehouse-only or
+  foreign-tenant posting.
 - Sale quantity must fit *both* remaining B right and this manifest line's
   loaded quantity minus prior `SaleDelivery` rows. Physical vehicle on-hand and
   cost must be available. Unit price and received cash are exact decimals,
@@ -27,7 +30,9 @@ review findings and approval must be attached to the PR before marking verified.
   Trip/Customer/ShipTo, cash amount, non-sales verifier and evidence reference.
   A composite FK and receipt evidence uniqueness require this persisted witness
   and reject pending/mismatched/reused references. The witness is immutable once
-  verified. No real-world cash-verifier API is implemented or authorized.
+  verified. The witness verifier is compared to the signed seller identity
+  after whitespace normalization (rejecting a padded self-verifier).
+  No real-world cash-verifier API is implemented or authorized.
 - Credit exposure = payable − verified receipt application. Only actually
   granted B credit in the same Trip/Customer/ShipTo, with synthetic approved
   source evidence, can fund that residual. Multiple distinct grants are spent
@@ -88,7 +93,7 @@ persisted as a no-effect command and must stay unchanged.
 - New `App01c2BPostingTests` (10 xUnit tests; LocalDB) cover two tenant
   fixtures: T3 exact SQL balances/source cardinality and ledger, identical
   replay/canonical decimal/cross-kind conflict, pending/wrong/fake/self-witness,
-  quota and credit insufficiency, short vehicle stock, two concurrent B sales
+  quota and credit insufficiency, short/inflated or mispriced vehicle stock, two concurrent B sales
   racing for right and grant, SQL-triggered rollback after receipt allocation
   with same-key retry, wrong actor/cross-tenant, multiple source grants, and
   fractional moving-average exactness. Prior APP-01B.3 39/39 T0–T2 SQL
