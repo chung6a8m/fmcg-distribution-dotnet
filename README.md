@@ -33,7 +33,7 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 
 - Adds synthetic AP-01 credit-policy evidence with maker/checker separation, versioned scope, expiry, explicit cap and source-linked approval ID. No approval, ambiguous approval or missing policy is fail-closed; **real credit policies and thresholds are still UNSET**.
 - Synthetic JWT is actor-bound and command routes have Warehouse/Sales permission separation. Read-only auditor endpoint `GET /api/synthetic/app01a/audit/as-of?asOf=<UTC>` provides logical as-of actor/source/effect/pending, approval lineage and A/B rights/effects reconciliation; **not temporal SQL history, production audit or accounting**.
-- Adds >=12 physical LocalDB verification cases for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Requires reviewed final-HEAD CI and TestRunId before APP-01A acceptance. See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
+- Adds 13 physical LocalDB verification cases for concurrent clients, mixed-payload replay, effect-trigger rollback, approval negatives, two-tenant HTTP authorization and disabled production surface. Requires reviewed final-HEAD CI and TestRunId before APP-01A acceptance. See [APP-01A.3 verification contract](docs/roadmap/app-01a3-audit-policy-verification.md).
 
 ## Windows local checks
 
