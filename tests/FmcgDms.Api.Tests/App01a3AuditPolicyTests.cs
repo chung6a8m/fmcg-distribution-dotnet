@@ -299,8 +299,14 @@ public sealed partial class App01a2CommandTests
             && x.GrantedBaseQuantity == 40m);
         Assert.Contains(report.StockRights, x => x.RightKind == "B"
             && x.GrantedBaseQuantity == 30m);
+        // Prior APP-01C.2 tests may have posted sales elsewhere in the same
+        // physical tenant fixture. This A-confirm must have no financial
+        // effects of *its own*, rather than assert the entire tenant is empty.
+        var thisSceneSourceIds = report.Sources.Where(x => x.TripId == s.Trip)
+            .Select(x => x.Id).ToHashSet();
         Assert.DoesNotContain(report.Effects,
-            x => x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
+            x => thisSceneSourceIds.Contains(x.SourceId)
+                && x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
         Assert.Empty(report.ReconciliationIssues);
     }
 
