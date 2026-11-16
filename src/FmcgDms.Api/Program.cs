@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using Dapper;
 using FmcgDms.Api.Authentication;
+using FmcgDms.Api.Persistence;
 using FmcgDms.Api.Tenancy;
 
 var builder = WebApplication.CreateBuilder(args);
 SyntheticAuth.Configure(builder);
 builder.Services.AddSingleton<TenantConnections>();
+builder.Services.AddScoped<App01a2CommandService>();
 
 var app = builder.Build();
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
@@ -58,8 +60,31 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
             "SELECT Id,Description FROM dbo.DiagnosticItem ORDER BY CreatedAtUtc,Id");
         return Results.Ok(rows);
     });
+    // APP-01A.2 is deliberately not a production route. Signed synthetic JWT,
+    // exact tenant binding and nonce-owned LocalDB are required by the service.
+    var commands = app.MapGroup("/api/synthetic/app01a/commands").RequireAuthorization();
+    commands.MapPost("/reserve-a-stock", async (
+        ReserveAStockCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.ReserveAStockAsync(user, input, ct)));
+    commands.MapPost("/confirm-a-order", async (
+        ConfirmAOrderCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.ConfirmAOrderAsync(user, input, ct)));
+    commands.MapPost("/grant-b-quota", async (
+        GrantBQuotaCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.GrantBQuotaAsync(user, input, ct)));
+    commands.MapPost("/grant-b-credit", async (
+        GrantBCreditCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.GrantBCreditAsync(user, input, ct)));
+
 }
 app.Run();
+
+static IResult ToCommandHttp(BusinessCommandOutcome outcome) => outcome.Status switch
+{
+    "CONFLICT" => Results.Conflict(outcome),
+    _ when outcome.ReasonCode == "INVALID_COMMAND_IDENTITY" => Results.BadRequest(outcome),
+    _ => Results.Ok(outcome)
+};
 
 public sealed record DiagnosticItemInput(string Description);
 public sealed record DiagnosticItem(Guid Id, string Description);
