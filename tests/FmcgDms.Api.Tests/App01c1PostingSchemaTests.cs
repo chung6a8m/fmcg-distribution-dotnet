@@ -349,7 +349,9 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
         Reject(db, InsertReceiptSql, new {
             id = Guid.NewGuid(), tenant = A, delivery = otherSale.Id,
             foreign.Trip, foreign.Customer, sourceLine = otherSale.SourceLine,
-            amount = -1m, evidence = "synthetic-verified-cash"
+            // Use a fresh unknown witness: replaying the first witness is
+            // rejected by the UNIQUE constraint before the negative-cash CHECK.
+            amount = -1m, evidence = Guid.NewGuid().ToString("N")
         }, 547);
     }
 
