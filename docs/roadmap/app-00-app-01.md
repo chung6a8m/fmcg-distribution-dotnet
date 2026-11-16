@@ -15,4 +15,4 @@ Business source: [read-only Business Baseline](../../business/README.md), [oracl
 Use `SYNTHETIC_UNITLESS` and `invoiceEligible=false`. No production B, offline business writes, EV/P0 or tenant go-live.
 APP-00B is a prerequisite to APP-01A implementation; do not treat toolchain PASS as business/EV/P0 acceptance. Keep each increment in its own PR, resolve findings and rerun CI before merge.
 
-APP-00B/C browser gate: 100% UI and PWA evidence + explicit Owner acceptance remain pending in [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13); 125% is **not** a roadmap requirement. APP-01A remains blocked until #13 is accepted.
+APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP00B-13-03](../decisions/owner-app00b-13-03-browser-acceptance.md); [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13) is authorized to close. The APP-00B prerequisite no longer blocks APP-01A implementation, which must proceed as a separate reviewed increment under its own exit criteria. 125% remains **EXCEPTION_ACCEPTED / NOT_TESTED**, not a roadmap requirement.
