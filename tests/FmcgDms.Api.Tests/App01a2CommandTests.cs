@@ -45,6 +45,13 @@ public sealed partial class App01a2CommandTests(SqlScratchFixture fixture)
             INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNumber,SkuId,
                 BaseQuantity,UomCode,UomToBaseFactor,UnitPrice)
                 VALUES(@OrderLine,@Tenant,@Order,1,@Sku,@OrderQuantity,N'EA',1,15);
+            INSERT dbo.AOrderTermsApproval(TenantId,AOrderId,TripId,CustomerId,
+                    TermsDays,Decision,PolicyVersion,ProposedBy,CheckedBy,
+                    EvidenceRef,ApprovedAtUtc,EffectiveFromUtc,EffectiveUntilUtc)
+                VALUES(@Tenant,@Order,@Trip,@Customer,7,N'APPROVED',N'C3-SYNTHETIC-v1',
+                    N'synthetic-sales-maker',N'synthetic-finance-checker',N'A-terms-fixture',
+                    DATEADD(minute,-1,SYSUTCDATETIME()),
+                    DATEADD(day,-1,SYSUTCDATETIME()),DATEADD(day,7,SYSUTCDATETIME()));
             INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
                 VALUES(@Tenant,@Warehouse,@Sku,@OnHand);
             INSERT dbo.BCreditPool(TenantId,TripId,CustomerId,PoolCode,CurrencyUnit,ApprovedLimit)
