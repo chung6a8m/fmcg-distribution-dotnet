@@ -155,6 +155,14 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
           $hash = (Get-FileHash business/reference-data/expected-results/golden-oracles.json -Algorithm SHA256).Hash
           $expectedSteps = @('T0','T1_LOAD','T2_REJECT','T3_B20','T4_A25')
+          $expectedFields = @('step','mainQty','tripQty','soldQty','mainCost',
+            'tripCost','cogs','aHold','bQuota','arA','arB','custody','fund')
+          $oracle = (Get-Content business/reference-data/expected-results/golden-oracles.json -Raw |
+            ConvertFrom-Json).'AC-03'
+          if ((@($oracle.cols) -join '|') -cne ($expectedFields -join '|') -or
+              @($oracle.steps).Count -lt 5) {
+            throw 'The immutable AC-03 expected schema has changed'
+          }
           foreach ($tenant in @('tenant-a','tenant-b')) {
             $name = "$tenant-oracle.json"
             $found = @($reports | Where-Object { $_.Name -eq $name })
@@ -179,12 +187,60 @@ jobs:
             }
             for ($i = 0; $i -lt 5; $i++) {
               $snapshot = $r.Steps[$i]
+              $rowCells = @($r.Cells | Where-Object { $_.Row -eq $i })
               if ($snapshot.Row -ne $i -or $snapshot.Step -cne $expectedSteps[$i] -or
+                  $oracle.steps[$i][0] -cne $expectedSteps[$i] -or
                   -not $snapshot.Evidence.LedgerDigest -or
-                  -not $snapshot.PostingDigest -or
-                  @($r.Cells | Where-Object { $_.Row -eq $i }).Count -ne 13) {
+                  -not $snapshot.PostingDigest -or $rowCells.Count -ne 13 -or
+                  @($snapshot.Actual.PSObject.Properties).Count -ne 12) {
                 throw "APP-01C.4 $name incomplete checkpoint index $i"
               }
+              # Independently validate every field identity, locked expected value,
+              # SQL snapshot actual, and signed actual-minus-expected decimal diff.
+              # Cardinality alone must never accept duplicate or substituted cells.
+              for ($j = 0; $j -lt 13; $j++) {
+                $field = $expectedFields[$j]
+                $matches = @($rowCells | Where-Object { $_.Field -ceq $field })
+                if ($matches.Count -ne 1) {
+                  throw "APP-01C.4 $name row $i missing/duplicated $field"
+                }
+                $cell = $matches[0]
+                if ($j -eq 0) {
+                  if ($cell.Expected -cne $expectedSteps[$i] -or
+                      $cell.Actual -cne $expectedSteps[$i] -or
+                      $null -ne $cell.Difference) {
+                    throw "APP-01C.4 $name row $i has altered step cell"
+                  }
+                } else {
+                  if ($null -eq $snapshot.Actual.PSObject.Properties[$field] -or
+                      $null -eq $cell.Difference) {
+                    throw "APP-01C.4 $name row $i missing SQL value/diff $field"
+                  }
+                  $expected = [decimal]::Parse([string]$oracle.steps[$i][$j],
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $reportedExpected = [decimal]::Parse([string]$cell.Expected,
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $actual = [decimal]::Parse([string]$cell.Actual,
+                    [Globalization.CultureInfo]::InvariantCulture)
+                  $sqlActual = [decimal]$snapshot.Actual.$field
+                  if ($reportedExpected -ne $expected -or $actual -ne $expected -or
+                      $actual -ne $sqlActual -or
+                      [decimal]$cell.Difference -ne ($actual - $expected)) {
+                    throw "APP-01C.4 $name row $i invalid expected/actual/diff $field"
+                  }
+                }
+              }
+            }
+            if ($r.Steps[3].Evidence.Sources -ne 6 -or
+                $r.Steps[3].Evidence.SourceLines -ne 7 -or
+                $r.Steps[3].Evidence.LedgerRows -ne 14 -or
+                $r.Steps[4].Evidence.Sources -ne 7 -or
+                $r.Steps[4].Evidence.SourceLines -ne 8 -or
+                $r.Steps[4].Evidence.LedgerRows -ne 18 -or
+                $r.Steps[3].Posting.ValidAllocations -ne 1 -or
+                $r.Steps[4].Posting.ValidAllocations -ne 1 -or
+                $r.Steps[4].Posting.AllocatedCash -ne 200) {
+              throw "APP-01C.4 $name incomplete T3/T4 source/credit/cash envelope"
             }
             if ($r.Steps[3].Posting.Sales -ne 1 -or $r.Steps[3].Posting.SourceLinked -ne 1 -or
                 $r.Steps[3].Posting.BEffectRows -ne 7 -or $r.Steps[3].Posting.AEffectRows -ne 0 -or
