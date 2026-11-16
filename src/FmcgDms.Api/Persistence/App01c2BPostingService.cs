@@ -238,6 +238,19 @@ public sealed class App01c2BPostingService(TenantConnections connections)
         Guid commandId, PostBSaleDeliveryReceiptCommand request,
         decimal payable, CancellationToken ct)
     {
+        // Source identity is globally unique by tenant/kind/number; check it
+        // before mutable quota/credit preflight so a reused source never gets
+        // misreported as an ordinary stock or grant insufficiency.
+        bool sourceUsed = await db.ExecuteScalarAsync<bool>(Sql("""
+            SELECT CAST(CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.BusinessSource WITH (UPDLOCK,HOLDLOCK)
+                WHERE TenantId=@Tenant AND SourceKind=N'B_SALE_DELIVERY'
+                    AND SourceNumber=@Number
+            ) THEN 1 ELSE 0 END AS bit)
+            """, new { Tenant = tenant, Number = request.SourceNumber }, tx, ct));
+        if (sourceUsed)
+            return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
+
         var p = new
         {
             Tenant = tenant, Trip = request.TripId, Customer = request.CustomerId,
@@ -398,16 +411,6 @@ public sealed class App01c2BPostingService(TenantConnections connections)
         }
         if (uncovered > 0)
             return BusinessCommandOutcome.Rejected("B_CREDIT_INSUFFICIENT");
-
-        bool sourceUsed = await db.ExecuteScalarAsync<bool>(Sql("""
-            SELECT CAST(CASE WHEN EXISTS (
-                SELECT 1 FROM dbo.BusinessSource WITH (UPDLOCK,HOLDLOCK)
-                WHERE TenantId=@Tenant AND SourceKind=N'B_SALE_DELIVERY'
-                    AND SourceNumber=@Number
-            ) THEN 1 ELSE 0 END AS bit)
-            """, new { Tenant = tenant, Number = request.SourceNumber }, tx, ct));
-        if (sourceUsed)
-            return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
 
         // All writes below are covered by the SAME explicit Serializable tx.
         Guid sourceId = Guid.NewGuid(), sourceLine = Guid.NewGuid();
