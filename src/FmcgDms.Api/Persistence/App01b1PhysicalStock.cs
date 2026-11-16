@@ -268,7 +268,33 @@ public sealed class App01b1PhysicalStock : Migration
             AS
             BEGIN
                 SET NOCOUNT ON;
-                IF EXISTS (SELECT 1 FROM deleted WHERE LoadSourceLineId IS NOT NULL)
+                -- A loaded line is always immutable. Once its parent is LOADED,
+                -- an unposted line cannot be deleted or restaged either. The
+                -- only permitted update is an exact staged -> source-backed
+                -- load, preserving identity/right/quantities planned at DRAFT.
+                IF EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    LEFT JOIN inserted i
+                        ON i.TenantId=d.TenantId AND i.Id=d.Id
+                    LEFT JOIN dbo.TripManifest h
+                        ON h.TenantId=d.TenantId AND h.Id=d.TripManifestId
+                    WHERE d.LoadSourceLineId IS NOT NULL
+                       OR (h.Status=N'LOADED' AND (
+                            i.Id IS NULL
+                            OR i.TripManifestId <> d.TripManifestId
+                            OR i.TripId <> d.TripId
+                            OR i.WarehouseLocationId <> d.WarehouseLocationId
+                            OR i.VehicleLocationId <> d.VehicleLocationId
+                            OR i.LineNumber <> d.LineNumber
+                            OR i.SkuId <> d.SkuId
+                            OR i.StockRightId <> d.StockRightId
+                            OR i.RightKind <> d.RightKind
+                            OR i.PlannedBaseQuantity <> d.PlannedBaseQuantity
+                            OR i.LoadBusinessSourceId IS NULL
+                            OR i.LoadSourceLineId IS NULL
+                            OR i.LoadedBaseQuantity <= 0))
+                )
                     THROW 51044, 'APP01B1 loaded manifest line is immutable', 1;
             END;
             """);
