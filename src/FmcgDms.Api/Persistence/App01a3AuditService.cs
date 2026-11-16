@@ -72,6 +72,8 @@ public sealed class App01a3AuditService(TenantConnections connections)
 
                 SELECT g.Id,g.ApprovalId,p.CaseNumber,p.PolicyVersion,
                     p.ProposedBy,p.CheckedBy,p.Decision,p.EvidenceRef,
+                    p.Reason AS ApprovalReason,p.ApprovedLimit,
+                    p.EffectiveFromUtc,p.EffectiveUntilUtc,p.ReviewedAtUtc,
                     g.TripId,g.CustomerId,g.GrantedAmount,s.Id AS SourceId
                 FROM dbo.BCreditGrant g
                 JOIN dbo.BusinessSourceLine l ON l.TenantId=g.TenantId
@@ -225,6 +227,11 @@ public sealed class App01aAuditCredit
     public string? CheckedBy { get; set; }
     public string? Decision { get; set; }
     public string? EvidenceRef { get; set; }
+    public string? ApprovalReason { get; set; }
+    public decimal? ApprovedLimit { get; set; }
+    public DateTime? EffectiveFromUtc { get; set; }
+    public DateTime? EffectiveUntilUtc { get; set; }
+    public DateTime? ReviewedAtUtc { get; set; }
     public Guid TripId { get; set; }
     public Guid CustomerId { get; set; }
     public decimal GrantedAmount { get; set; }
