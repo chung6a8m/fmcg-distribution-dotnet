@@ -569,7 +569,11 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
                @ManifestLine,@LoadLine,@Right,@Kind,@Sku,
                @Order,@OrderLine,@Source,@SourceKind,@SourceLine,
                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',
-            (SELECT BusinessDate FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip))
+            -- Invalid trip/tenant negatives should reach FK validation (547),
+            -- rather than fail earlier with NOT NULL (515) on a missing trip.
+            COALESCE((SELECT BusinessDate FROM dbo.Trip
+                      WHERE TenantId=@Tenant AND Id=@Trip),
+                     CONVERT(date,SYSUTCDATETIME())))
         """;
 
     private static SaleInput MakeSale(string tenant, Scene s, string kind, Guid id,
