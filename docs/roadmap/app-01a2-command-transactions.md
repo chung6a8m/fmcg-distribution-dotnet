@@ -1,6 +1,6 @@
 # APP-01A.2 — Command transactions and shared A/B allocation
 
-**Status: IMPLEMENTED / CI AND INDEPENDENT REVIEW PENDING.** Synthetic/nonproduction increment of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); see [APP-01A.1 schema](app-01a1-integrated-schema.md). APP-01A as a whole remains **NOT_VERIFIED**. No change to `business/` or `business.lock.json`.
+**Status: IMPLEMENTED / INDEPENDENT REVIEW FINDING FIXED / CI_VERIFIED.** Synthetic/nonproduction increment of [Issue #2](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/2); see [APP-01A.1 schema](app-01a1-integrated-schema.md). APP-01A as a whole remains **NOT_VERIFIED**. No change to `business/` or `business.lock.json`.
 
 ## Behavior and allocation authority
 
@@ -34,6 +34,11 @@ All requests carry `ProducerId`, `CommandId`, `SourceNumber`. All four commands 
 - Business negatives persist `REJECTED / reason` in `BusinessCommand`, committed with no rights/source/effects. Examples: `STOCK_INSUFFICIENT`, `STOCK_POOL_NOT_FOUND`, `SOURCE_ALREADY_USED`, `A_LINE_OVER_RESERVED`, `ORDER_NOT_FULLY_RESERVED`, `CUSTOMER_SHIPTO_MISMATCH`, `POOL_UNSUPPORTED`, `CREDIT_LIMIT_INSUFFICIENT`. HTTP 200 denotes **a durable outcome, not necessarily business approval**; always inspect `Status` and `ReasonCode`.
 - A and B stock grants share `SourceKind=STOCK_ALLOC` and the `BusinessSource(TenantId,SourceKind,SourceNumber)` unique identity; reusing an external stock source in a *different* command/mode is rejected without allocation. A confirmed order and B credit grant use their own source namespaces. `LedgerKind=RIGHT_A/RIGHT_B/RIGHT_CREDIT_B` captures the **entitlement** only, not a physical inventory movement or AR/COGS posting.
 - SQL faults roll back the allocation counter and `BusinessCommand/BusinessSource/BusinessSourceLine/StockRight/ARservation/BQuota/BCreditGrant/LedgerEffect`. After a rollback, no durable outcome is claimed; retry can use the same key.
+
+## Independent review and CI evidence (PR #22)
+
+- Independent P2 finding: a `PREPARED` Trip could reference a warehouse or inactive vehicle; all four commands now verify active `VEHICLE` location, returning `TRIP_NOT_PREPARED` without rights/credit effects. [Fix commit `fd93228`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/fd93228f2f2338004b855d04e8481064cb803c42).
+- [Reviewed code HEAD CI #43792122101](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43792122101) **SUCCESS**: .NET build 0 warnings / 0 errors, 25/25 xUnit v3 / physical LocalDB (0 failed/skipped), immutable Business Baseline, npm security gates, frontend/PWA and 5/5 Playwright. PR completion requires fresh CI on the final documentation HEAD before merge.
 
 ## Verification contract and known limits
 
