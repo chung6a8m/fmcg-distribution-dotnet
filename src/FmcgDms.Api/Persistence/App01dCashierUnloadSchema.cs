@@ -160,10 +160,15 @@ public sealed class App01dCashierUnloadSchema : Migration
                     (TenantId, SourceLineId, TripUnloadId, SkuId, BaseQuantity, CostAmount)
                     REFERENCES dbo.BusinessSourceLine
                         (TenantId, Id, BusinessSourceId, SkuId, BaseQuantity, Amount),
+                -- Physical return and quota release are separate measures.
+                -- A partial B load can retire never-loaded quota without
+                -- any physical return, using a zero-quantity B source line.
                 CONSTRAINT CK_TripUnloadLine_Amounts CHECK (
-                    BaseQuantity>0 AND CostAmount>=0
-                    AND ((RightKind='A' AND ReleasedBQuantity=0)
-                      OR (RightKind='B' AND ReleasedBQuantity=BaseQuantity)))
+                    BaseQuantity>=0 AND CostAmount>=0
+                    AND ((RightKind='A' AND BaseQuantity>0 AND ReleasedBQuantity=0)
+                      OR (RightKind='B' AND ReleasedBQuantity>0
+                          AND ReleasedBQuantity>=BaseQuantity
+                          AND (BaseQuantity>0 OR CostAmount=0))))
             );
             CREATE INDEX IX_TripUnloadLine_Trip
                 ON dbo.TripUnloadLine (TenantId, TripId, SkuId);
