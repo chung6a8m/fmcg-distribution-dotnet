@@ -149,18 +149,18 @@ public sealed class IntegratedSchema : Migration
                 Id uniqueidentifier NOT NULL CONSTRAINT PK_BusinessSourceLine PRIMARY KEY,
                 TenantId nvarchar(64) NOT NULL,
                 BusinessSourceId uniqueidentifier NOT NULL,
-                LineNo int NOT NULL,
+                LineNumber int NOT NULL,
                 SkuId uniqueidentifier NULL,
                 BaseQuantity decimal(18,3) NULL,
                 Amount decimal(19,4) NULL,
                 RowVersion rowversion NOT NULL,
                 CONSTRAINT UQ_BusinessSourceLine_TenantId_Id UNIQUE (TenantId, Id),
-                CONSTRAINT UQ_BusinessSourceLine_Number UNIQUE (TenantId, BusinessSourceId, LineNo),
+                CONSTRAINT UQ_BusinessSourceLine_Number UNIQUE (TenantId, BusinessSourceId, LineNumber),
                 CONSTRAINT FK_BusinessSourceLine_Source FOREIGN KEY (TenantId, BusinessSourceId)
                     REFERENCES dbo.BusinessSource (TenantId, Id),
                 CONSTRAINT FK_BusinessSourceLine_Sku FOREIGN KEY (TenantId, SkuId)
                     REFERENCES dbo.Sku (TenantId, Id),
-                CONSTRAINT CK_BusinessSourceLine_LineNo CHECK (LineNo > 0)
+                CONSTRAINT CK_BusinessSourceLine_LineNumber CHECK (LineNumber > 0)
             );
 
             CREATE TABLE dbo.AOrder (
@@ -190,7 +190,7 @@ public sealed class IntegratedSchema : Migration
                 Id uniqueidentifier NOT NULL CONSTRAINT PK_AOrderLine PRIMARY KEY,
                 TenantId nvarchar(64) NOT NULL,
                 AOrderId uniqueidentifier NOT NULL,
-                LineNo int NOT NULL,
+                LineNumber int NOT NULL,
                 SkuId uniqueidentifier NOT NULL,
                 BaseQuantity decimal(18,3) NOT NULL,
                 UomCode nvarchar(24) NOT NULL,
@@ -198,13 +198,13 @@ public sealed class IntegratedSchema : Migration
                 UnitPrice decimal(19,4) NULL,
                 RowVersion rowversion NOT NULL,
                 CONSTRAINT UQ_AOrderLine_TenantId_Id UNIQUE (TenantId, Id),
-                CONSTRAINT UQ_AOrderLine_Number UNIQUE (TenantId, AOrderId, LineNo),
+                CONSTRAINT UQ_AOrderLine_Number UNIQUE (TenantId, AOrderId, LineNumber),
                 CONSTRAINT FK_AOrderLine_Order FOREIGN KEY (TenantId, AOrderId)
                     REFERENCES dbo.AOrder (TenantId, Id),
                 CONSTRAINT FK_AOrderLine_Sku FOREIGN KEY (TenantId, SkuId)
                     REFERENCES dbo.Sku (TenantId, Id),
                 CONSTRAINT CK_AOrderLine_Amounts CHECK (
-                    LineNo > 0 AND BaseQuantity > 0 AND UomToBaseFactor > 0
+                    LineNumber > 0 AND BaseQuantity > 0 AND UomToBaseFactor > 0
                     AND (UnitPrice IS NULL OR UnitPrice >= 0))
             );
 

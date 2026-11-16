@@ -315,7 +315,7 @@ public sealed class App01a1SchemaTests(SqlScratchFixture fixture)
     {
         Guid id = Guid.NewGuid();
         db.Execute("""
-            INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNo,SkuId,BaseQuantity,
+            INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNumber,SkuId,BaseQuantity,
                 UomCode,UomToBaseFactor,UnitPrice)
             VALUES(@id,@tenant,@order,1,@sku,10,N'EA',1,15)
             """, new { id, tenant, order, sku });
@@ -356,7 +356,7 @@ public sealed class App01a1SchemaTests(SqlScratchFixture fixture)
             number = NewCode(), customer, trip
         });
         db.Execute("""
-            INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNo,SkuId,BaseQuantity,Amount)
+            INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,SkuId,BaseQuantity,Amount)
             VALUES(@line,@tenant,@source,1,@sku,10,100)
             """, new { line = lineId, tenant, source = sourceId, sku });
         return lineId;
