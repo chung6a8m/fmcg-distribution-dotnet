@@ -28,7 +28,7 @@
     "vite-plugin-pwa": "2.0.0"
   },
   "engines": {
-    "node": ">=26.13.0 <27"
+    "node": ">=26.13.1 <27"
   },
   "overrides": {
     "workbox-build": {

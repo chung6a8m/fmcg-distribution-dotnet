@@ -32,7 +32,12 @@ test('Workbox and patched glob stay build-time-only dependencies', () => {
 })
 
 test('Node.js 26 LTS runtime and lockfile engine stay aligned', () => {
-  assert.equal(pkg.engines.node, '>=26.13.0 <27')
+  assert.equal(pkg.engines.node, '>=26.13.1 <27')
   assert.equal(lock.packages['']?.engines?.node, pkg.engines.node)
-  assert.equal(Number(process.versions.node.split('.')[0]), 26, 'Use Node.js 26 LTS to test frontend dependencies')
+  const [major, minor, patch] = process.versions.node.split('.').map(Number)
+  assert.equal(major, 26, 'Use Node.js 26 LTS to test frontend dependencies')
+  assert.ok(
+    minor > 13 || (minor === 13 && patch >= 1),
+    `Node.js 26.13.1+ security baseline is required; found ${process.versions.node}`
+  )
 })

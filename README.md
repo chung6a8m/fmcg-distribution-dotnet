@@ -17,9 +17,9 @@ APP-00B dependencies are merged. Before APP-01A, complete browser/PWA acceptance
 
 ## Windows local checks
 
-For a Windows machine managed by nvm-windows, run `nvm install 26.13.0` and `nvm use 26.13.0` in PowerShell, then check `node --version` (expect `v26.x`). If Node was installed directly instead, use the official Node 26 LTS installer from https://nodejs.org/en/download. Do not mix the two installation methods. The `web/.nvmrc` file selects the Node 26 release line for compatible version managers.
+For a Windows machine managed by nvm-windows, run `nvm install 26.13.1` and `nvm use 26.13.1` in PowerShell, then check `node --version` (expect `v26.x`). If Node was installed directly instead, use the official Node 26 LTS installer from https://nodejs.org/en/download. Do not mix the two installation methods. The `web/.nvmrc` file selects the Node 26 release line for compatible version managers.
 
-Requires .NET 10 SDK 10.0.404, Node 26 LTS (>=26.13.0), PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
+Requires .NET 10 SDK 10.0.404, Node 26 LTS (>=26.13.1), PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
 
 ```powershell
 sqllocaldb start MSSQLLocalDB

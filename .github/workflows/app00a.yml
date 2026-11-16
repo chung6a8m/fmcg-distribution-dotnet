@@ -29,7 +29,80 @@ jobs:
         shell: pwsh
         run: |
           $actual = (node --version).Trim()
-          if ($actual -notmatch '^v26\.') { throw "Expected Node.js 26 LTS, got $actual" }
+          if ($actual -notmatch '^v26\.\d+\.\d+
+      - name: Validate immutable business contract
+        shell: pwsh
+        run: |
+          ./scripts/Verify-Business.ps1
+          python tools/validate_business.py
+      - name: Start SQL Server LocalDB
+        shell: pwsh
+        run: |
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version'
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Two-tenant scratch integration tests
+        env:
+          APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 9 -- --report-trx --coverage --coverage-output-format cobertura
+      - name: Verify MTP test evidence exists
+        shell: pwsh
+        run: |
+          $results = Get-ChildItem -Path TestResults -Recurse -File -ErrorAction Stop
+          if (-not ($results | Where-Object { $_.Extension -eq '.trx' })) { throw 'Expected MTP TRX evidence is missing.' }
+          if (-not ($results | Where-Object { $_.Name -like '*.cobertura.xml' })) { throw 'Expected Cobertura coverage evidence is missing.' }
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Audit npm non-dev dependency tree (all severities)
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=low
+      - name: Audit full npm dependency tree (block moderate and above)
+        working-directory: web
+        run: npm audit --audit-level=moderate
+      - name: Verify Workbox glob is patched and build-time-only
+        working-directory: web
+        run: npm run test:dependencies
+      - name: Verify Tailwind CSS v4 integration
+        working-directory: web
+        run: npm ls tailwindcss @tailwindcss/vite --depth=0
+      - name: Frontend health contract regression tests
+        working-directory: web
+        run: npm run test
+      - name: Build online-first React PWA
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Browser/PWA E2E regression (100% only; 125% Owner exception)
+        working-directory: web
+        run: npm run test:e2e
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00b-playwright-evidence
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn
+      - name: Verify generated PWA artifacts and user-confirmed update hook
+        working-directory: web
+        run: npm run test:pwa-build
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-test-evidence
+          path: '**/TestResults/**/*'
+          if-no-files-found: warn
+) { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
       - name: Validate immutable business contract
         shell: pwsh
         run: |
