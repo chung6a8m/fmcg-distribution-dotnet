@@ -383,8 +383,10 @@ public sealed class App01c3APostingService(TenantConnections connections)
         var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql("""
             SELECT b.OnHandBaseQuantity,b.OnHandCostAmount,
                 o.BaseQuantity + COALESCE(loaded.Qty,0) - COALESCE(issued.Qty,0)
+                    - COALESCE(unloaded.Qty,0)
                     AS SourceBaseQuantity,
                 o.CostAmount + COALESCE(loaded.Cost,0) - COALESCE(issued.Cost,0)
+                    - COALESCE(unloaded.Cost,0)
                     AS SourceCostAmount
             FROM dbo.PhysicalStockBalance b WITH (UPDLOCK,HOLDLOCK)
             JOIN dbo.PhysicalStockOpening o WITH (HOLDLOCK)
@@ -406,6 +408,16 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 WHERE i.TenantId=b.TenantId AND l.VehicleLocationId=b.StockLocationId
                     AND i.SkuId=b.SkuId
             ) issued
+            -- Reused vehicles must subtract completed T6 unloads from the
+            -- immutable opening + load - delivery source reconciliation.
+            OUTER APPLY (
+                SELECT SUM(ul.BaseQuantity) AS Qty,SUM(ul.CostAmount) AS Cost
+                FROM dbo.TripUnloadLine ul WITH (HOLDLOCK)
+                JOIN dbo.TripUnload u WITH (HOLDLOCK)
+                    ON u.TenantId=ul.TenantId AND u.Id=ul.TripUnloadId
+                WHERE ul.TenantId=b.TenantId AND u.VehicleLocationId=b.StockLocationId
+                    AND ul.SkuId=b.SkuId
+            ) unloaded
             WHERE b.TenantId=@Tenant AND b.StockLocationId=@Vehicle AND b.SkuId=@Sku
             """, new { Tenant = tenant, Vehicle = trip.VehicleLocationId,
                 Sku = request.SkuId }, tx, ct));
