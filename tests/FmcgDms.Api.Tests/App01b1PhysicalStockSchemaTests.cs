@@ -178,9 +178,9 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
         Error(db, LineInsert, LineArgs(A, manifest, otherTrip, warehouse, vehicle,
             3, sku, unusedBRight, "B", 5m), 547);
         Error(db, LineInsert, LineArgs(A, manifest, trip, otherWarehouse, vehicle,
-            3, sku, bRight, "B", 30m), 547);
+            3, sku, unusedBRight, "B", 5m), 547);
         Error(db, LineInsert, LineArgs(B, manifest, trip, warehouse, vehicle,
-            3, sku, bRight, "B", 30m), 547);
+            3, sku, unusedBRight, "B", 5m), 547);
 
         Assert.Equal(0, db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.PhysicalStockMovement WHERE TenantId=@tenant",
