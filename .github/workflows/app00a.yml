@@ -46,10 +46,19 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01A.1/.2 commands and trip-vehicle regression
+      - name: Two-tenant LocalDB APP-01A.1/.2/.3 command, audit, policy and security matrix
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 25 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 37 -- --report-trx --coverage --coverage-output-format cobertura
+      - name: Record reproducible APP-01A.3 TestRunId and PR head
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01a3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "TestRunId=$id`nCommit=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
+            Set-Content -Path TestResults/APP-01A3-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01A.3 TestRunId=$id; Commit=$env:GITHUB_SHA"
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |
