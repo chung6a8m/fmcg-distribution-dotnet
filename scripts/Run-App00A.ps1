@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & dotnet build FmcgDms.slnx --configuration Release --no-restore
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& dotnet test --solution FmcgDms.slnx --configuration Release --no-build --minimum-expected-tests 49 -- --report-trx --coverage --coverage-output-format cobertura
+& dotnet test --solution FmcgDms.slnx --configuration Release --no-build --minimum-expected-tests 62 -- --report-trx --coverage --coverage-output-format cobertura
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Push-Location web
 try {
@@ -26,4 +26,4 @@ try {
     & npm run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally { Pop-Location }
-Write-Host 'APP-00A, APP-01A and APP-01B.1 schema verification completed (synthetic only).'
+Write-Host 'APP-00A, APP-01A and APP-01B.2 manifest/quota verification completed (synthetic only).'

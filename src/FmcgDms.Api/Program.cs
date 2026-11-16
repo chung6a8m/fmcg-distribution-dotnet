@@ -10,6 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 SyntheticAuth.Configure(builder);
 builder.Services.AddSingleton<TenantConnections>();
 builder.Services.AddScoped<App01a2CommandService>();
+builder.Services.AddScoped<App01b2CommandService>();
 builder.Services.AddScoped<App01a3AuditService>();
 
 var app = builder.Build();
@@ -82,6 +83,21 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         GrantBCreditCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
         ToCommandHttp(await service.GrantBCreditAsync(user, input, ct)))
         .RequireAuthorization("SyntheticWarehouse");
+
+    // APP-01B.2: signed LocalDB-only synthetic warehouse transfer and B sale
+    // quota preflight. Neither route exists in production.
+    var manifestCommands = app.MapGroup("/api/synthetic/app01b/commands")
+        .RequireAuthorization();
+    manifestCommands.MapPost("/load-manifest", async (
+        LoadManifestCommand input, ClaimsPrincipal user,
+        App01b2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.LoadManifestAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
+    manifestCommands.MapPost("/preflight-b-sale", async (
+        PreflightBSaleCommand input, ClaimsPrincipal user,
+        App01b2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.PreflightBSaleAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
 
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
     // target tenant/database by query string, header or body.

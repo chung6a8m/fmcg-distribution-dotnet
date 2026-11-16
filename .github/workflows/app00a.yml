@@ -46,23 +46,23 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01A + APP-01B.1 physical schema matrix
+      - name: Two-tenant LocalDB APP-01A + APP-01B.2 manifest/B31 matrix
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 49 -- --report-trx --coverage --coverage-output-format cobertura
-      - name: Record reproducible APP-01B.1 TestRunId and PR head
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 62 -- --report-trx --coverage --coverage-output-format cobertura
+      - name: Record reproducible APP-01B.2 TestRunId and PR head
         if: always()
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force TestResults | Out-Null
-          $id = "app01b1-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $id = "app01b2-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           # A pull_request workflow runs on a synthetic merge commit; record
           # the actual reviewed source HEAD separately from GitHub's merge SHA.
           $sourceHead = '${{ github.event.pull_request.head.sha }}'
           if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
           "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
-            Set-Content -Path TestResults/APP-01B1-TestRunId.txt -Encoding utf8
-          Write-Host "APP-01B.1 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+            Set-Content -Path TestResults/APP-01B2-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01B.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |

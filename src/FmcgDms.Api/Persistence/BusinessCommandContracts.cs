@@ -23,6 +23,20 @@ public sealed record GrantBQuotaCommand(
     string ProducerId, string CommandId, string SourceNumber,
     Guid TripId, Guid StockLocationId, Guid SkuId, decimal BaseQuantity) : IApp01aCommand;
 
+/// <summary>Load the entire pre-staged, rights-scoped DRAFT manifest once.</summary>
+public sealed record LoadManifestCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid ManifestId) : IApp01aCommand;
+
+/// <summary>
+/// Non-posting B_ONLINE sale offer check for AC-03 T2 (synthetic only).
+/// A valid within-quota offer is still rejected until APP-01C.
+/// </summary>
+public sealed record PreflightBSaleCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid SkuId, decimal BaseQuantity,
+    decimal UnitPrice, decimal OfferedCashAmount) : IApp01aCommand;
+
 public sealed record GrantBCreditCommand(
     string ProducerId, string CommandId, string SourceNumber,
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
