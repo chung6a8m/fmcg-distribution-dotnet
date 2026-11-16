@@ -60,6 +60,8 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         public int ArItems { get; set; }
         public int Receipts { get; set; }
         public int Allocations { get; set; }
+        public int ValidAllocations { get; set; }
+        public decimal AllocatedCash { get; set; }
         public int GrantConsumptions { get; set; }
         public int WitnessMatches { get; set; }
         public long WitnessTimestampDriftMicroseconds { get; set; }
@@ -488,15 +490,33 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                     WHERE d.TenantId=@Tenant AND d.TripId=@Trip) ArItems,
                 (SELECT COUNT(*) FROM dbo.CashReceipt
                     WHERE TenantId=@Tenant AND TripId=@Trip) Receipts,
+
                 (SELECT COUNT(*) FROM dbo.ReceiptAllocation a
                     JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId AND r.Id=a.CashReceiptId
                     WHERE r.TenantId=@Tenant AND r.TripId=@Trip) Allocations,
+                (SELECT COUNT(*) FROM dbo.ReceiptAllocation a
+                    JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId AND r.Id=a.CashReceiptId
+                    JOIN dbo.ReceivableOpenItem oi ON oi.TenantId=a.TenantId
+                        AND oi.Id=a.ReceivableOpenItemId
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId
+                        AND d.Id=r.SaleDeliveryId
+                    WHERE r.TenantId=@Tenant AND r.TripId=@Trip
+                        AND d.RightKind='B' AND oi.SaleDeliveryId=d.Id
+                        AND a.CustomerId=r.CustomerId
+                        AND a.AppliedAmount=r.AppliedAmount
+                        AND a.AppliedAmount=oi.AppliedAmount) ValidAllocations,
+                (SELECT COALESCE(SUM(a.AppliedAmount),0) FROM dbo.ReceiptAllocation a
+                    JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId AND r.Id=a.CashReceiptId
+                    WHERE r.TenantId=@Tenant AND r.TripId=@Trip) AllocatedCash,
                 (SELECT COUNT(*) FROM dbo.BGrantConsumption
                     WHERE TenantId=@Tenant AND TripId=@Trip) GrantConsumptions,
                 (SELECT COUNT(*) FROM dbo.CashReceipt r
+                    JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId
+                        AND d.Id=r.SaleDeliveryId
                     JOIN dbo.VerifiedCashEvidence w ON w.TenantId=r.TenantId
                         AND w.EvidenceRef=r.VerificationEvidenceRef
                         AND w.TripId=r.TripId AND w.CustomerId=r.CustomerId
+                        AND w.ShipToSnapshotId=d.ShipToSnapshotId
                         AND w.VerifiedAmount=r.ReceivedAmount
                         AND w.VerificationStatus=N'VERIFIED'
                         AND w.VerifiedAtUtc IS NOT NULL
@@ -673,6 +693,28 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
     private void AssertPostedLineage(string tenant, Scene scene, Snapshot snapshot, int stage)
     {
         Assert.True(stage is 3 or 4);
+        // The golden 65 cells alone cannot detect zero-net, wrong-kind or
+        // cancelling extra source/effect rows. Require the exact persisted
+        // posting envelope at each stage, including the B credit grant.
+        var e = snapshot.Evidence;
+        Assert.Equal("LOADED", e.ManifestStatus);
+        Assert.Equal(100m, e.OpeningQty);
+        Assert.Equal(1000m, e.OpeningCost);
+        Assert.Equal(70m, e.PoolAllocated);
+        Assert.Equal(2, e.Rights);
+        Assert.Equal(2, e.ManifestLines);
+        Assert.Equal(2, e.Movements);
+        Assert.Equal(stage == 3 ? 6 : 7, e.Sources);
+        Assert.Equal(stage == 3 ? 7 : 8, e.SourceLines);
+        Assert.Equal(stage == 3 ? 14 : 18, e.LedgerRows);
+        Assert.Equal(stage == 3 ? 5 : 6, e.PhysicalLegs);
+        Assert.Equal(stage == 3 ? -20m : -45m, e.PhysicalLegQtyNet);
+        Assert.Equal(stage == 3 ? -200m : -450m, e.PhysicalLegCostNet);
+        Assert.Equal(stage == 3 ? 7 : 10, e.NonPhysicalEffects);
+        Assert.Equal(stage == 3 ? 2 : 3, e.UnknownSources);
+        Assert.Equal(0, e.RejectedCommandSources);
+        Assert.Equal(1, e.RejectedCommands);
+
         var p = snapshot.Posting;
         Assert.Equal(stage == 3 ? 1 : 2, p.Sales);
         Assert.Equal(1, p.BSales);
@@ -682,6 +724,8 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(p.Sales, p.ArItems);
         Assert.Equal(1, p.Receipts);
         Assert.Equal(1, p.Allocations);
+        Assert.Equal(1, p.ValidAllocations);
+        Assert.Equal(200m, p.AllocatedCash);
         Assert.Equal(1, p.GrantConsumptions);
         Assert.Equal(1, p.WitnessMatches);
         // SqlClient may bind DateTime as SQL datetime (3.33ms precision) when
@@ -703,6 +747,8 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(stage == 3 ? 100m : 475m, p.OutstandingAr);
         Assert.Equal(200m, p.ReceiptReceived);
         Assert.Equal(200m, p.ReceiptApplied);
+        Assert.Equal(p.ReceiptApplied, p.AllocatedCash);
+        Assert.Equal(p.AppliedAr, p.AllocatedCash);
         Assert.Equal(100m, p.GrantConsumed);
         Assert.Equal(100m, p.SourceCreditConsumed);
         Assert.Equal(stage == 3 ? "CONFIRMED" : "PARTIALLY_DELIVERED", p.OrderStatus);
@@ -723,6 +769,21 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
         Assert.Equal(1, snapshot.Evidence.RejectedCommands);
 
         using var db = Open(tenant);
+        // No extra or substituted source kind may hide behind matching sums
+        // and an otherwise correct seven-plus-four delivery effect set.
+        var sourceKinds = db.Query<(string Kind, int Rows)>("""
+            SELECT SourceKind, COUNT(*) AS Rows FROM dbo.BusinessSource
+            WHERE TenantId=@Tenant AND TripId=@Trip
+            GROUP BY SourceKind
+            """, new { Tenant = tenant, scene.Trip })
+            .ToDictionary(x => x.Kind, x => x.Rows, StringComparer.Ordinal);
+        Assert.Equal(stage == 3 ? 5 : 6, sourceKinds.Count);
+        Assert.Equal(2, sourceKinds["STOCK_ALLOC"]);
+        Assert.Equal(1, sourceKinds["A_CONFIRM"]);
+        Assert.Equal(1, sourceKinds["MANIFEST_LOAD"]);
+        Assert.Equal(1, sourceKinds["B_CREDIT_GRANT"]);
+        Assert.Equal(1, sourceKinds["B_SALE_DELIVERY"]);
+        if (stage == 4) Assert.Equal(1, sourceKinds["A_DELIVERY"]);
         var effects = db.Query<PostingEffectRow>("""
             SELECT src.SourceKind,e.EffectKey,e.LedgerKind,e.QuantityDelta,e.AmountDelta
             FROM dbo.LedgerEffect e
@@ -731,7 +792,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             JOIN dbo.BusinessSource src ON src.TenantId=sl.TenantId
                 AND src.Id=sl.BusinessSourceId
             WHERE src.TenantId=@Tenant AND src.TripId=@Trip
-                AND src.SourceKind IN (N'B_SALE_DELIVERY',N'A_DELIVERY')
+                AND src.SourceKind IN (N'B_CREDIT_GRANT',N'B_SALE_DELIVERY',N'A_DELIVERY')
             """, new { Tenant = tenant, scene.Trip }).ToArray();
         static void CheckLegs(PostingEffectRow[] rows, string kind,
             params (string Key, string Ledger, decimal Quantity, decimal Amount)[] expected)
@@ -746,6 +807,8 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                 Assert.Equal(e.Amount, leg.AmountDelta);
             }
         }
+        CheckLegs(effects, "B_CREDIT_GRANT",
+            ("RIGHT_CREDIT_B", "RIGHT_CREDIT_B", 0m, 100m));
         CheckLegs(effects, "B_SALE_DELIVERY",
             ("PHYSICAL-OUT", "PHYSICAL_STOCK", -20m, -200m),
             ("COGS", "COGS", 0m, 200m),
