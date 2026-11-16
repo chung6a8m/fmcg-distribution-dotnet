@@ -29,4 +29,4 @@ Sources (immutable): [AC-03 expected steps](../../business/reference-data/expect
 - Verify Business Baseline lock, no production DB, two LocalDB migration replay/tenant cross-read-write negatives, .NET/Playwright/PWA gates, independent review and final-HEAD CI after fixes. Only then mark **APP-01B SYNTHETIC_VERIFIED**.
 - **NOT INCLUDED:** sale/delivery actual posting (APP-01C), AR/COGS/cash/credit consumption or receipt, cashier handover/return (APP-01D), full 91/91 and recovery cross-module matrix (APP-01E), real price/tax/legal invoice, B_ONLINE external mode, offline business writes, EV/P0 or tenant go-live.
 
-**Recommended immediate next task:** implement APP-01B.1 first in one reviewable PR; defer endpoint/business command commits to APP-01B.2 and oracle acceptance to APP-01B.3.
+**Current increment:** [APP-01B.1 physical schema and LocalDB test contract](app-01b1-physical-stock-schema.md) is implemented on a review branch (CI/review pending). Next, after schema acceptance, implement endpoint/business command and physical balance transfer in APP-01B.2; defer oracle 39/39 to APP-01B.3.
