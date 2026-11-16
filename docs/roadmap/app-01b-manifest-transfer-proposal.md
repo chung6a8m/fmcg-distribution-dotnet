@@ -1,6 +1,6 @@
 # APP-01B proposal — T0→T2 manifest, custody transfer and quota rejection
 
-**State: PROPOSED / NOT_IMPLEMENTED / NOT_RUN (2026-11-16).** Owner authorized the APP-01A..E *synthetic nonproduction* roadmap in [owner decisions](../decisions/owner-app-2026-11-15.md). APP-01A [closeout](../closeout/2026-11-16-app-01a.md) is SYNTHETIC_VERIFIED. This document proposes the next small vertical slice; it is **not** a claim of APP-01B acceptance, 39/39 golden verification or real warehouse custody.
+**State: APP-01B.1 SCHEMA IMPLEMENTED / IN REVIEW; APP-01B.2/.3 NOT_IMPLEMENTED / 39/39 NOT_RUN (2026-11-16).** Owner authorized the APP-01A..E *synthetic nonproduction* roadmap in [owner decisions](../decisions/owner-app-2026-11-15.md). APP-01A [closeout](../closeout/2026-11-16-app-01a.md) is SYNTHETIC_VERIFIED. This document proposes the next small vertical slice; it is **not** a claim of APP-01B acceptance, 39/39 golden verification or real warehouse custody.
 
 ## Business contract and oracle
 
