@@ -17,7 +17,9 @@ APP-00B dependencies are merged. Before APP-01A, complete browser/PWA acceptance
 
 ## Windows local checks
 
-Requires .NET 10 SDK 10.0.404, Node 24 LTS, PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
+For a Windows machine managed by nvm-windows, run `nvm install 26.13.0` and `nvm use 26.13.0` in PowerShell, then check `node --version` (expect `v26.x`). If Node was installed directly instead, use the official Node 26 LTS installer from https://nodejs.org/en/download. Do not mix the two installation methods. The `web/.nvmrc` file selects the Node 26 release line for compatible version managers.
+
+Requires .NET 10 SDK 10.0.404, Node 26 LTS (>=26.13.0), PowerShell and SQL Server 2019+ LocalDB. Do not aim at production SQL.
 
 ```powershell
 sqllocaldb start MSSQLLocalDB
@@ -35,6 +37,6 @@ To run only the public liveness probe: `dotnet run --project src/FmcgDms.Api --u
 
 ## Frontend Playwright regression (synthetic only)
 
-From `web/` on Node 24, run `npm ci --no-audit --no-fund`, `npm run build`, `npx playwright install chromium`, then `npm run test:e2e`. The browser suite starts a production `vite preview` and checks API live/fallback states, **100%** layout at desktop and narrow CSS viewport, and real service-worker V1→V2 behavior (the V2 release is synthesized from the built PWA in a temporary directory, served under the same origin; no tracked source files are rewritten). CI uploads `app00b-playwright-evidence` with reports, screenshots and traces.
+From `web/` on Node 26 LTS, run `npm ci --no-audit --no-fund`, `npm run build`, `npx playwright install chromium`, then `npm run test:e2e`. The browser suite starts a production `vite preview` and checks API live/fallback states, **100%** layout at desktop and narrow CSS viewport, and real service-worker V1→V2 behavior (the V2 release is synthesized from the built PWA in a temporary directory, served under the same origin; no tracked source files are rewritten). CI uploads `app00b-playwright-evidence` with reports, screenshots and traces.
 
 **Owner exception OWN-APP00B-13-02:** 125% zoom/display scale is outside APP-00B/C acceptance and not deferred in the roadmap. At below-320px CSS viewports, layout may overflow. This does not remove the 100%/PWA evidence or Owner acceptance gate in [Issue #13](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/13); APP-01A remains blocked. No EV/P0 or tenant go-live authorization.

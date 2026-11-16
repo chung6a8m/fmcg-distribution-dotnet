@@ -3,6 +3,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js 26 LTS is required (node not found on PATH).' }
+$nodeVersion = (& node --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v26\.') { throw "Node.js 26 LTS is required; found $nodeVersion." }
 & "$PSScriptRoot/Verify-Business.ps1"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & python tools/validate_business.py

@@ -30,3 +30,9 @@ test('Workbox and patched glob stay build-time-only dependencies', () => {
   assert.equal(lock.packages['node_modules/workbox-build']?.dev, true)
   assert.equal(lock.packages['node_modules/glob']?.dev, true)
 })
+
+test('Node.js 26 LTS runtime and lockfile engine stay aligned', () => {
+  assert.equal(pkg.engines.node, '>=26.13.0 <27')
+  assert.equal(lock.packages['']?.engines?.node, pkg.engines.node)
+  assert.equal(Number(process.versions.node.split('.')[0]), 26, 'Use Node.js 26 LTS to test frontend dependencies')
+})
