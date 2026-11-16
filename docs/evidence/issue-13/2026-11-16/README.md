@@ -51,4 +51,4 @@ One earlier Edge-control attempt did not navigate after the automation layer cli
 
 - 125% browser zoom / Windows scaling is **EXCEPTION_ACCEPTED / NOT_TESTED** under `OWN-APP00B-13-02`; it is not a PASS and is not deferred roadmap work.
 - This evidence does not authorize offline business writes, EV/P0, production, pilot or tenant go-live.
-- APP-01A remains blocked until the repository Owner explicitly accepts this evidence and Issue #13 is closed.
+- The repository Owner explicitly accepted this evidence on 2026-11-16 under [OWN-APP00B-13-03](../../../decisions/owner-app00b-13-03-browser-acceptance.md). Issue #13 is authorized to close after the decision record reaches `main` with green final-HEAD CI; the APP-00B browser prerequisite no longer blocks APP-01A.

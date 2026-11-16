@@ -70,7 +70,7 @@ Run on Node 24.22.2:
 
 Expected: all commands exit 0; the PWA regression proves prompt, no silent reload, focus, click, and V2 reload.
 
-- [ ] **Step 5: Record and cross-link acceptance evidence**
+- [x] **Step 5: Record and cross-link acceptance evidence**
 
 Document commit, OS, Edge version, Node/npm versions, 100% desktop/narrow metrics, console health, PWA steps, screenshots, the 125% exception, and the synthetic/nonproduction boundary. Link the evidence from Issue #13 and PR #5, then request explicit Owner acceptance before closing #13.
 
