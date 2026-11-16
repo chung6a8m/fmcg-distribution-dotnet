@@ -16,6 +16,8 @@ public sealed class IntegratedSchema : Migration
         Execute.Sql("""
             ALTER TABLE dbo.AppTenantBinding
                 ADD CONSTRAINT UQ_AppTenantBinding_TenantId UNIQUE (TenantId);
+            ALTER TABLE dbo.AppTenantBinding
+                ADD CONSTRAINT CK_AppTenantBinding_OneSlot CHECK (Slot = 1);
 
             CREATE TABLE dbo.Customer (
                 Id uniqueidentifier NOT NULL CONSTRAINT PK_Customer PRIMARY KEY,
@@ -367,6 +369,8 @@ public sealed class IntegratedSchema : Migration
             DROP TABLE dbo.Sku;
             DROP TABLE dbo.ShipToSnapshot;
             DROP TABLE dbo.Customer;
+            ALTER TABLE dbo.AppTenantBinding
+                DROP CONSTRAINT CK_AppTenantBinding_OneSlot;
             ALTER TABLE dbo.AppTenantBinding
                 DROP CONSTRAINT UQ_AppTenantBinding_TenantId;
             """);

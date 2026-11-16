@@ -78,6 +78,12 @@ public sealed class App01a1SchemaTests(SqlScratchFixture fixture)
             "SELECT Name FROM dbo.Customer WHERE Id=@id AND TenantId=@tenant",
             new { id = sameCustomerId, tenant = TenantB }));
 
+        // Even a direct writer cannot add a second tenant binding to the same database.
+        ExpectConstraint(a, """
+            INSERT dbo.AppTenantBinding(Slot,TenantId,BoundAtUtc)
+            VALUES(2,@tenant,SYSUTCDATETIME())
+            """, new { tenant = TenantB }, 547);
+
         // Two tenant IDs cannot coexist in either owned database even via direct SQL.
         ExpectConstraint(a,
             "INSERT dbo.Customer(Id,TenantId,Code,Name) VALUES(@id,@tenant,@code,N'forbidden')",
