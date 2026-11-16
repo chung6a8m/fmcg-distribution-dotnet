@@ -20,7 +20,7 @@ APP-00B/C browser gate: 100% UI and PWA evidence is **ACCEPTED** under [OWN-APP0
 ## APP-01A execution split (synthetic/nonproduction)
 
 - **APP-01A.1 — Integrated schema (SCHEMA_IMPLEMENTED / physical LocalDB checks verified):** one schema per tenant DB, FK Tenant binding and Customer/ShipTo/source lineage, per-row checks, command/effect unique keys, shared A/B StockRight, two-tenant fresh/replay/negative tests. See [design and limit](app-01a1-integrated-schema.md). This does **not** implement A/B commands or prove stock over-allocation prevention.
-- **APP-01A.2 — Commands and explicit transactions (NOT_STARTED):** ConfirmAOrder/ReserveAStock, B quota/grant, canonical payload hash and durable idempotent outcomes, resource-level serialization/checks. A confirm must create no AR/COGS.
+- **APP-01A.2 — Commands and explicit transactions (IMPLEMENTED / REVIEWED / CI_VERIFIED):** ConfirmAOrder/ReserveAStock, B quota/grant, canonical payload hash and durable idempotent outcomes, resource-level serialization/checks. See [command contract](app-01a2-command-transactions.md); APP-01A overall remains NOT_VERIFIED. A confirm must create no AR/COGS.
 - **APP-01A.3 — Integrated behavior verification (NOT_STARTED):** replay/conflict, rollback, wrong Customer/ShipTo/pool, cross-tenant, concurrent reservations, audit/source/ledger assertions with reviewed CI HEAD and TestRunId.
 
 APP-01A itself remains **NOT_VERIFIED** until all three increments meet the original Issue #2 exit criteria. PRs should be reviewed independently; no synthetic schema or green foundation CI implies EV/P0 or production acceptance.
