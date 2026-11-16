@@ -306,7 +306,7 @@ public sealed partial class App01a2CommandTests
             .Select(x => x.Id).ToHashSet();
         Assert.DoesNotContain(report.Effects,
             x => thisSceneSourceIds.Contains(x.SourceId)
-                && x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
+                && (x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK"));
         Assert.Empty(report.ReconciliationIssues);
     }
 
