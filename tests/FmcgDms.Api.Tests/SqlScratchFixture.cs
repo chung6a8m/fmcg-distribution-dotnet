@@ -79,16 +79,21 @@ public sealed class SqlScratchFixture : IAsyncLifetime
         }
     }
 
-    public TestApiFactory CreateFactory(string? tenantAOverride = null) => new(this, tenantAOverride);
+    public TestApiFactory CreateFactory(string? tenantAOverride = null,
+        bool syntheticEnabled = true, string environment = "IntegrationTest") =>
+        new(this, tenantAOverride, syntheticEnabled, environment);
 
-    public static string IssueSyntheticToken(string tenantId)
+    public static string IssueSyntheticToken(string tenantId,
+        string actor = "synthetic-actor", string[]? roles = null, string? subject = null)
     {
+        roles ??= ["warehouse", "sales", "auditor"]; // legacy composite TEST actor only
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         string head = Base64Url(JsonSerializer.Serialize(new { alg = "HS256", typ = "JWT" }));
         string body = Base64Url(JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["iss"] = "fmcg-synthetic-app00", ["aud"] = "fmcg-synthetic-app00",
-            ["sub"] = "synthetic-actor", ["actor_id"] = "synthetic-actor",
+            ["sub"] = subject ?? actor, ["actor_id"] = actor,
+            ["synthetic_role"] = roles,
             ["tenant_id"] = tenantId, ["iat"] = now, ["nbf"] = now - 1, ["exp"] = now + 900
         }));
         string data = head + "." + body;
@@ -98,23 +103,26 @@ public sealed class SqlScratchFixture : IAsyncLifetime
 
     private static string Base64Url(string plain) => Base64Url(Encoding.UTF8.GetBytes(plain));
     private static string Base64Url(byte[] value) => Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    public static HttpClient WithTenant(HttpClient client, string tenantId)
+    public static HttpClient WithTenant(HttpClient client, string tenantId,
+        string actor = "synthetic-actor", string[]? roles = null)
     {
         client.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", IssueSyntheticToken(tenantId));
+            new AuthenticationHeaderValue("Bearer", IssueSyntheticToken(tenantId, actor, roles));
         return client;
     }
 }
 
-public sealed class TestApiFactory(SqlScratchFixture fixture, string? tenantAOverride = null) : WebApplicationFactory<Program>
+public sealed class TestApiFactory(
+    SqlScratchFixture fixture, string? tenantAOverride = null,
+    bool syntheticEnabled = true, string environment = "IntegrationTest") : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("IntegrationTest");
+        builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, config) =>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["SyntheticAuth:Enabled"] = "true",
+                ["SyntheticAuth:Enabled"] = syntheticEnabled ? "true" : "false",
                 ["SyntheticAuth:SigningKey"] = SqlScratchFixture.TestKey,
                 ["SyntheticAuth:Issuer"] = "fmcg-synthetic-app00",
                 ["SyntheticAuth:Audience"] = "fmcg-synthetic-app00",
