@@ -297,6 +297,13 @@ public sealed class App01c1PostingSchemaTests(SqlScratchFixture fixture)
             sourceLine = b.SourceLine, kind = "B", amount = 300m,
             due = (DateTime?)null
         });
+        db.Execute("""
+            INSERT dbo.VerifiedCashEvidence(TenantId,EvidenceRef,TripId,CustomerId,
+                ShipToSnapshotId,PaymentMethod,VerificationStatus,VerifiedAmount,
+                VerifiedBy,VerifiedAtUtc)
+            VALUES(@tenant,N'synthetic-verified-cash',@Trip,@Customer,@ShipTo,
+                N'CASH',N'VERIFIED',200,N'synthetic-schema-checker',SYSUTCDATETIME());
+            """, new { tenant = A, s.Trip, s.Customer, s.ShipTo });
         db.Execute(InsertReceiptSql, new {
             id = receipt, tenant = A, delivery = b.Id, s.Trip, s.Customer,
             sourceLine = b.SourceLine, amount = 200m, evidence = "synthetic-verified-cash"
