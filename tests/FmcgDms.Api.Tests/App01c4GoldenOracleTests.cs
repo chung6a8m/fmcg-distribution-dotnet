@@ -808,7 +808,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
             }
         }
         CheckLegs(effects, "B_CREDIT_GRANT",
-            ("RIGHT_CREDIT_B", "RIGHT_CREDIT_B", 0m, 100m));
+            ("RIGHT-ALLOCATED", "RIGHT_CREDIT_B", 0m, 100m));
         CheckLegs(effects, "B_SALE_DELIVERY",
             ("PHYSICAL-OUT", "PHYSICAL_STOCK", -20m, -200m),
             ("COGS", "COGS", 0m, 200m),
