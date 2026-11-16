@@ -66,10 +66,30 @@ public sealed class App01a3CreditApprovals : Migration
                 REFERENCES dbo.CreditPolicyApproval
                     (TenantId, Id, TripId, CustomerId, PoolCode, CurrencyUnit);
             """);
+
+        // Preserve exact policy version, maker/checker, evidence and expiry
+        // that justified an already posted synthetic credit grant. A correction
+        // requires a new approval case/version, never overwriting used evidence.
+        Execute.Sql("""
+            CREATE TRIGGER dbo.TR_CreditPolicyApproval_ImmutableUsed
+            ON dbo.CreditPolicyApproval
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    INNER JOIN dbo.BCreditGrant g
+                        ON g.TenantId=d.TenantId AND g.ApprovalId=d.Id
+                )
+                    THROW 51031, 'APP01A3 referenced credit approval evidence is immutable', 1;
+            END;
+            """);
     }
 
     public override void Down()
     {
+        Execute.Sql("DROP TRIGGER IF EXISTS dbo.TR_CreditPolicyApproval_ImmutableUsed;");
         Delete.ForeignKey("FK_BCreditGrant_Approval").OnTable("BCreditGrant").InSchema("dbo");
         Delete.Column("ApprovalId").FromTable("BCreditGrant").InSchema("dbo");
         Delete.Table("CreditPolicyApproval").InSchema("dbo");
