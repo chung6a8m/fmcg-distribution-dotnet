@@ -1295,7 +1295,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                             CountedAmount,CountedBy,VerificationStatus,CountedAtUtc)
                         VALUES(@Tenant,@CountRef,@Trip,200,N'synthetic-cashier',
                             N'VERIFIED',SYSUTCDATETIME())
-                        """,new {Tenant=tenant,CountRef,scene.Trip});
+                        """,new {Tenant=tenant,CountRef=countRef,scene.Trip});
                 var accept = new AcceptCashHandoverCommand(Producer,Id(),Id(),
                     scene.Trip,offerSource,countRef);
                 using (var wrongRole = await sales.PostAsJsonAsync(
