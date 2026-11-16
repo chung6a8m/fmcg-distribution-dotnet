@@ -54,6 +54,7 @@ public static class SyntheticAuth
                             string? tenant = principal?.FindFirst(TenantClaim)?.Value;
                             if (string.IsNullOrWhiteSpace(actor) || actor.Length > 128
                                 || actor.Any(char.IsControl)
+                                || !string.Equals(actor, actor.Trim(), StringComparison.Ordinal)
                                 || !string.Equals(actor, subject, StringComparison.Ordinal)
                                 || string.IsNullOrWhiteSpace(tenant))
                                 context.Fail("Bound synthetic actor and tenant required.");

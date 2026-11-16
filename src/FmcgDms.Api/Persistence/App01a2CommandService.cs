@@ -118,6 +118,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
         string actor = principal.FindFirst("actor_id")?.Value
             ?? throw new UnauthorizedAccessException("Validated actor identity required.");
         if (!ValidKey(actor, 128)
+            || !string.Equals(actor, actor.Trim(), StringComparison.Ordinal)
             || !string.Equals(actor, principal.FindFirst("sub")?.Value, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Invalid actor identity.");
 
@@ -557,13 +558,15 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 // Multiple active approvals are ambiguous: fail closed instead of
                 // silently selecting a more permissive limit.
                 var approvals = (await db.QueryAsync<CheckedCreditApproval>(Sql("""
+                    DECLARE @NowUtc datetime2(7) = SYSUTCDATETIME();
                     SELECT TOP (2) Id,ApprovedLimit,ProposedBy,CheckedBy
                     FROM dbo.CreditPolicyApproval WITH (UPDLOCK,HOLDLOCK)
                     WHERE TenantId=@Tenant AND TripId=@Trip AND CustomerId=@Customer
                         AND PoolCode=N'B' AND CurrencyUnit=N'SYNTHETIC_UNITLESS'
                         AND Decision=N'APPROVED'
-                        AND EffectiveFromUtc <= SYSUTCDATETIME()
-                        AND EffectiveUntilUtc > SYSUTCDATETIME()
+                        AND EffectiveFromUtc <= @NowUtc
+                        AND EffectiveUntilUtc > @NowUtc
+                        AND ReviewedAtUtc <= @NowUtc
                     ORDER BY EffectiveFromUtc DESC,Id
                     """, new { Tenant = tenant, Trip = request.TripId,
                         Customer = request.CustomerId }, tx, token))).AsList();
@@ -572,7 +575,10 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 if (approvals.Count != 1)
                     return BusinessCommandOutcome.Rejected("CREDIT_APPROVAL_AMBIGUOUS");
                 var approval = approvals[0];
-                if (string.Equals(approval.ProposedBy, approval.CheckedBy, StringComparison.OrdinalIgnoreCase)
+                if (!ValidKey(approval.ProposedBy, 128) || !ValidKey(approval.CheckedBy, 128)
+                    || !string.Equals(approval.ProposedBy, approval.ProposedBy.Trim(), StringComparison.Ordinal)
+                    || !string.Equals(approval.CheckedBy, approval.CheckedBy.Trim(), StringComparison.Ordinal)
+                    || string.Equals(approval.ProposedBy, approval.CheckedBy, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(actor, approval.CheckedBy, StringComparison.OrdinalIgnoreCase))
                     return BusinessCommandOutcome.Rejected("CREDIT_CHECKER_CONFLICT");
                 if (pool.ApprovedLimit > approval.ApprovedLimit)

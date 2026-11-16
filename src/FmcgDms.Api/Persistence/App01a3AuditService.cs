@@ -55,6 +55,17 @@ public sealed class App01a3AuditService(TenantConnections connections)
                     AND c.CompletedAtUtc<=@AsOf AND c.Status=N'APPLIED'
                 ORDER BY s.RecordedAtUtc,s.Id;
 
+                SELECT l.Id,l.BusinessSourceId AS SourceId,l.LineNumber,
+                    l.SkuId,l.BaseQuantity,l.Amount
+                FROM dbo.BusinessSourceLine l
+                JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId
+                    AND s.Id=l.BusinessSourceId
+                JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId
+                    AND c.Id=s.BusinessCommandId
+                WHERE l.TenantId=@Tenant AND s.RecordedAtUtc<=@AsOf
+                    AND c.CompletedAtUtc<=@AsOf AND c.Status=N'APPLIED'
+                ORDER BY s.RecordedAtUtc,s.Id,l.LineNumber,l.Id;
+
                 SELECT e.Id,e.BusinessSourceLineId,s.Id AS SourceId,e.EffectKey,
                     e.LedgerKind,e.CustomerId,e.SkuId,e.StockLocationId,
                     e.QuantityDelta,e.AmountDelta,e.RecordedAtUtc
@@ -70,7 +81,7 @@ public sealed class App01a3AuditService(TenantConnections connections)
                     AND c.CompletedAtUtc<=@AsOf AND c.Status=N'APPLIED'
                 ORDER BY e.RecordedAtUtc,e.Id;
 
-                SELECT g.Id,g.ApprovalId,p.CaseNumber,p.PolicyVersion,
+                SELECT g.Id,g.BusinessSourceLineId,g.ApprovalId,p.CaseNumber,p.PolicyVersion,
                     p.ProposedBy,p.CheckedBy,p.Decision,p.EvidenceRef,
                     p.Reason AS ApprovalReason,p.ApprovedLimit,
                     p.EffectiveFromUtc,p.EffectiveUntilUtc,p.ReviewedAtUtc,
@@ -87,6 +98,19 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 WHERE g.TenantId=@Tenant AND s.RecordedAtUtc<=@AsOf
                     AND c.CompletedAtUtc<=@AsOf AND c.Status=N'APPLIED'
                 ORDER BY s.RecordedAtUtc,g.Id;
+
+                SELECT r.Id,r.BusinessSourceLineId,r.RightKind,
+                    r.StockLocationId,r.SkuId,r.GrantedBaseQuantity
+                FROM dbo.StockRight r
+                JOIN dbo.BusinessSourceLine l ON l.TenantId=r.TenantId
+                    AND l.Id=r.BusinessSourceLineId
+                JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId
+                    AND s.Id=l.BusinessSourceId
+                JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId
+                    AND c.Id=s.BusinessCommandId
+                WHERE r.TenantId=@Tenant AND s.RecordedAtUtc<=@AsOf
+                    AND c.CompletedAtUtc<=@AsOf AND c.Status=N'APPLIED'
+                ORDER BY s.RecordedAtUtc,r.Id;
 
                 WITH RightsAndEffects AS (
                     SELECT r.StockLocationId,r.SkuId,
@@ -126,33 +150,69 @@ public sealed class App01a3AuditService(TenantConnections connections)
 
             var commands = (await multi.ReadAsync<App01aAuditCommand>()).AsList();
             var sources = (await multi.ReadAsync<App01aAuditSource>()).AsList();
+            var sourceLines = (await multi.ReadAsync<App01aAuditSourceLine>()).AsList();
             var effects = (await multi.ReadAsync<App01aAuditEffect>()).AsList();
             var credits = (await multi.ReadAsync<App01aAuditCredit>()).AsList();
+            var rights = (await multi.ReadAsync<App01aAuditRight>()).AsList();
             var stock = (await multi.ReadAsync<App01aAuditStock>()).AsList();
 
             // Reconciliation issues are evidence, never silently repaired.
+            // Per-line checks prevent offsetting ledger errors from hiding behind a
+            // matching (warehouse, SKU) total. A_CONFIRM lines have no rights/effects.
             var issues = new List<string>();
             var sourceIds = sources.Select(s => s.Id).ToHashSet();
+            var linesById = sourceLines.ToDictionary(l => l.Id);
             foreach (var c in commands.Where(c => c.Status == "APPLIED"))
                 if (!sources.Any(s => s.BusinessCommandId == c.Id))
                     issues.Add($"APPLIED_WITHOUT_SOURCE:{c.Id:N}");
             foreach (var s in sources)
-                if (s.LineCount < 1)
+                if (s.LineCount < 1 || !sourceLines.Any(l => l.SourceId == s.Id))
                     issues.Add($"SOURCE_WITHOUT_LINE:{s.Id:N}");
             foreach (var e in effects)
-                if (!sourceIds.Contains(e.SourceId))
-                    issues.Add($"EFFECT_WITHOUT_SOURCE:{e.Id:N}");
+                if (!sourceIds.Contains(e.SourceId) || !linesById.ContainsKey(e.BusinessSourceLineId))
+                    issues.Add($"EFFECT_WITHOUT_SOURCE_LINE:{e.Id:N}");
+            foreach (var right in rights)
+            {
+                string effectKind = right.RightKind == "A" ? "RIGHT_A" : "RIGHT_B";
+                var matches = effects.Where(e => e.BusinessSourceLineId == right.BusinessSourceLineId
+                    && e.LedgerKind == effectKind).ToArray();
+                if (!linesById.TryGetValue(right.BusinessSourceLineId, out var line)
+                    || line.SkuId != right.SkuId
+                    || line.BaseQuantity != right.GrantedBaseQuantity
+                    || matches.Length != 1
+                    || matches[0].SkuId != right.SkuId
+                    || matches[0].StockLocationId != right.StockLocationId
+                    || matches[0].QuantityDelta != right.GrantedBaseQuantity)
+                    issues.Add($"STOCK_RIGHT_LINE_EFFECT_MISMATCH:{right.BusinessSourceLineId:N}");
+            }
+            foreach (var e in effects.Where(e => e.LedgerKind is "RIGHT_A" or "RIGHT_B"))
+                if (!rights.Any(r => r.BusinessSourceLineId == e.BusinessSourceLineId
+                    && e.LedgerKind == (r.RightKind == "A" ? "RIGHT_A" : "RIGHT_B")))
+                    issues.Add($"STOCK_EFFECT_WITHOUT_RIGHT_LINE:{e.Id:N}");
             foreach (var g in credits)
+            {
                 if (g.ApprovalId is null || g.Decision != "APPROVED"
                     || string.IsNullOrWhiteSpace(g.EvidenceRef))
                     issues.Add($"CREDIT_WITHOUT_APPROVAL:{g.Id:N}");
+                var matches = effects.Where(e => e.BusinessSourceLineId == g.BusinessSourceLineId
+                    && e.LedgerKind == "RIGHT_CREDIT_B").ToArray();
+                if (!linesById.TryGetValue(g.BusinessSourceLineId, out var line)
+                    || line.Amount != g.GrantedAmount
+                    || matches.Length != 1
+                    || matches[0].AmountDelta != g.GrantedAmount
+                    || matches[0].CustomerId != g.CustomerId)
+                    issues.Add($"CREDIT_LINE_EFFECT_MISMATCH:{g.BusinessSourceLineId:N}");
+            }
+            foreach (var e in effects.Where(e => e.LedgerKind == "RIGHT_CREDIT_B"))
+                if (!credits.Any(g => g.BusinessSourceLineId == e.BusinessSourceLineId))
+                    issues.Add($"CREDIT_EFFECT_WITHOUT_GRANT_LINE:{e.Id:N}");
             foreach (var bucket in stock)
                 if (bucket.RightGranted != bucket.EffectGranted)
                     issues.Add($"STOCK_RIGHT_EFFECT_MISMATCH:{bucket.StockLocationId:N}:{bucket.SkuId:N}");
 
             await tx.CommitAsync(ct);
             return new App01aAuditSnapshot(tenant, asOf.ToUniversalTime(),
-                commands, sources, effects, credits, stock,
+                commands, sources, sourceLines, effects, credits, rights, stock,
                 commands.Where(c => c.Status is "PENDING" or "RECEIVED" or "PENDING_AS_OF").ToArray(),
                 issues);
         }
@@ -169,8 +229,10 @@ public sealed record App01aAuditSnapshot(
     string TenantId, DateTimeOffset AsOfUtc,
     IReadOnlyList<App01aAuditCommand> Commands,
     IReadOnlyList<App01aAuditSource> Sources,
+    IReadOnlyList<App01aAuditSourceLine> SourceLines,
     IReadOnlyList<App01aAuditEffect> Effects,
     IReadOnlyList<App01aAuditCredit> CreditGrants,
+    IReadOnlyList<App01aAuditRight> StockRights,
     IReadOnlyList<App01aAuditStock> StockAllocations,
     IReadOnlyList<App01aAuditCommand> Pending,
     IReadOnlyList<string> ReconciliationIssues);
@@ -202,6 +264,16 @@ public sealed class App01aAuditSource
     public long EffectCount { get; set; }
 }
 
+public sealed class App01aAuditSourceLine
+{
+    public Guid Id { get; set; }
+    public Guid SourceId { get; set; }
+    public int LineNumber { get; set; }
+    public Guid? SkuId { get; set; }
+    public decimal? BaseQuantity { get; set; }
+    public decimal? Amount { get; set; }
+}
+
 public sealed class App01aAuditEffect
 {
     public Guid Id { get; set; }
@@ -220,6 +292,7 @@ public sealed class App01aAuditEffect
 public sealed class App01aAuditCredit
 {
     public Guid Id { get; set; }
+    public Guid BusinessSourceLineId { get; set; }
     public Guid? ApprovalId { get; set; }
     public string? CaseNumber { get; set; }
     public string? PolicyVersion { get; set; }
@@ -236,6 +309,16 @@ public sealed class App01aAuditCredit
     public Guid CustomerId { get; set; }
     public decimal GrantedAmount { get; set; }
     public Guid SourceId { get; set; }
+}
+
+public sealed class App01aAuditRight
+{
+    public Guid Id { get; set; }
+    public Guid BusinessSourceLineId { get; set; }
+    public string RightKind { get; set; } = "";
+    public Guid StockLocationId { get; set; }
+    public Guid SkuId { get; set; }
+    public decimal GrantedBaseQuantity { get; set; }
 }
 
 public sealed class App01aAuditStock

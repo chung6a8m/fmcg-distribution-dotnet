@@ -45,10 +45,13 @@ public sealed class App01a3CreditApprovals : Migration
                     AND ApprovedLimit >= 0 AND EffectiveUntilUtc > EffectiveFromUtc
                     AND LEN(LTRIM(RTRIM(CaseNumber))) > 0
                     AND LEN(LTRIM(RTRIM(PolicyVersion))) > 0
-                    AND LEN(LTRIM(RTRIM(ProposedBy))) > 0),
+                    AND LEN(LTRIM(RTRIM(ProposedBy))) > 0
+                    AND DATALENGTH(ProposedBy) = DATALENGTH(LTRIM(RTRIM(ProposedBy)))),
                 CONSTRAINT CK_CreditPolicyApproval_Checker CHECK
                     (Decision <> N'APPROVED' OR (
                         CheckedBy IS NOT NULL AND CheckedBy <> ProposedBy
+                        AND LEN(LTRIM(RTRIM(CheckedBy))) > 0
+                        AND DATALENGTH(CheckedBy) = DATALENGTH(LTRIM(RTRIM(CheckedBy)))
                         AND EvidenceRef IS NOT NULL
                         AND LEN(LTRIM(RTRIM(EvidenceRef))) > 0
                         AND ReviewedAtUtc IS NOT NULL

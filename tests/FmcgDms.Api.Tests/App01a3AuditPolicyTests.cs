@@ -131,6 +131,63 @@ public sealed partial class App01a2CommandTests
     }
 
     [Fact]
+    public async Task Future_dated_checker_review_cannot_authorize_credit_or_change_durable_rejection()
+    {
+        var s = Seed(A);
+        using var db = Open(fixture, A);
+        db.Execute("""
+            UPDATE dbo.CreditPolicyApproval
+            SET ReviewedAtUtc=DATEADD(day,1,SYSUTCDATETIME())
+            WHERE TenantId=@Tenant AND TripId=@Trip
+            """, new { Tenant = A, s.Trip });
+        using var factory = fixture.CreateFactory();
+        using var writer = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var request = Credit(s, 10);
+        var denied = await Send(writer, "grant-b-credit", request);
+        Assert.Equal("REJECTED", denied.Outcome.Status);
+        Assert.Equal("CREDIT_APPROVAL_REQUIRED", denied.Outcome.ReasonCode);
+        db.Execute("""
+            UPDATE dbo.CreditPolicyApproval SET ReviewedAtUtc=DATEADD(minute,-1,SYSUTCDATETIME())
+            WHERE TenantId=@Tenant AND TripId=@Trip
+            """, new { Tenant = A, s.Trip });
+        var replay = await Send(writer, "grant-b-credit", request);
+        Assert.True(replay.Outcome.Replayed);
+        Assert.Equal("CREDIT_APPROVAL_REQUIRED", replay.Outcome.ReasonCode);
+        Assert.Equal("B_CREDIT_GRANTED",
+            (await Send(writer, "grant-b-credit", Credit(s, 10))).Outcome.OutcomeCode);
+        Assert.Equal(10m, db.ExecuteScalar<decimal>(
+            "SELECT GrantedAmount FROM dbo.BCreditPool WHERE TripId=@Trip", new { s.Trip }));
+        Assert.Equal(1, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.BCreditGrant WHERE TripId=@Trip", new { s.Trip }));
+    }
+
+    [Fact]
+    public async Task Noncanonical_checker_and_signed_actor_whitespace_cannot_bypass_separation()
+    {
+        var s = Seed(A);
+        using var factory = fixture.CreateFactory();
+        foreach (string actor in new[] { "synthetic-finance-checker ", " synthetic-finance-checker" })
+        {
+            using var client = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+                actor: actor, roles: ["warehouse"]);
+            using var response = await client.PostAsJsonAsync(
+                Root + "grant-b-credit", Credit(s, 10), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        }
+        using var db = Open(fixture, A);
+        Assert.Throws<SqlException>(() => db.Execute("""
+            UPDATE dbo.CreditPolicyApproval SET CheckedBy=N'synthetic-finance-checker '
+            WHERE TenantId=@Tenant AND TripId=@Trip
+            """, new { Tenant = A, s.Trip }));
+        using var checker = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+            actor: "synthetic-finance-checker", roles: ["warehouse"]);
+        Assert.Equal("CREDIT_CHECKER_CONFLICT",
+            (await Send(checker, "grant-b-credit", Credit(s, 10))).Outcome.ReasonCode);
+        Assert.Equal(0m, db.ExecuteScalar<decimal>(
+            "SELECT GrantedAmount FROM dbo.BCreditPool WHERE TripId=@Trip", new { s.Trip }));
+    }
+
+    [Fact]
     public async Task Used_approval_policy_evidence_cannot_be_rewritten_or_deleted()
     {
         var s = Seed(A);
@@ -233,9 +290,51 @@ public sealed partial class App01a2CommandTests
             && x.LedgerKind == "RIGHT_CREDIT_B" && x.AmountDelta == 25m);
         Assert.DoesNotContain(report.Effects,
             x => x.SourceId == confirm.Outcome.SourceId);
+        var confirmLine = Assert.Single(report.SourceLines,
+            x => x.SourceId == confirm.Outcome.SourceId);
+        Assert.Equal(s.Sku, confirmLine.SkuId);
+        Assert.Equal(40m, confirmLine.BaseQuantity);
+        Assert.DoesNotContain(report.StockRights, x => x.BusinessSourceLineId == confirmLine.Id);
+        Assert.Contains(report.StockRights, x => x.RightKind == "A"
+            && x.GrantedBaseQuantity == 40m);
+        Assert.Contains(report.StockRights, x => x.RightKind == "B"
+            && x.GrantedBaseQuantity == 30m);
         Assert.DoesNotContain(report.Effects,
             x => x.LedgerKind is "AR" or "COGS" or "REVENUE" or "STOCK");
         Assert.Empty(report.ReconciliationIssues);
+    }
+
+    [Fact]
+    public async Task Audit_detects_balanced_totals_with_wrong_per_line_effects()
+    {
+        var s = Seed(A);
+        using var factory = fixture.CreateFactory();
+        using var writer = SqlScratchFixture.WithTenant(factory.CreateClient(), A);
+        var reserve = await Send(writer, "reserve-a-stock", Reserve(s, 40));
+        var quota = await Send(writer, "grant-b-quota", Quota(s, 30));
+        Assert.Equal("APPLIED", reserve.Outcome.Status);
+        Assert.Equal("APPLIED", quota.Outcome.Status);
+        using var db = Open(fixture, A);
+        int changed = db.Execute("""
+            UPDATE e SET QuantityDelta=CASE WHEN s.Id=@Reserve THEN 39 ELSE 31 END
+            FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine l ON l.TenantId=e.TenantId
+                AND l.Id=e.BusinessSourceLineId
+            JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+            WHERE s.Id IN (@Reserve,@Quota) AND e.LedgerKind IN (N'RIGHT_A',N'RIGHT_B')
+            """, new { Reserve = reserve.Outcome.SourceId, Quota = quota.Outcome.SourceId });
+        Assert.Equal(2, changed);
+        using var auditor = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+            actor: "audit-corruption", roles: ["auditor"]);
+        var report = await Audit(auditor, DateTimeOffset.UtcNow.AddSeconds(1));
+        var bucket = Assert.Single(report.StockAllocations,
+            x => x.StockLocationId == s.Warehouse && x.SkuId == s.Sku);
+        Assert.Equal(70m, bucket.RightGranted);
+        Assert.Equal(70m, bucket.EffectGranted); // aggregate comparison alone misses this
+        Assert.Equal(2, report.StockRights.Count(r =>
+            r.StockLocationId == s.Warehouse && r.SkuId == s.Sku));
+        Assert.Equal(2, report.ReconciliationIssues.Count(x =>
+            x.StartsWith("STOCK_RIGHT_LINE_EFFECT_MISMATCH:", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -348,6 +447,34 @@ public sealed partial class App01a2CommandTests
         using var db = Open(fixture, A);
         Assert.Equal(0, db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.BusinessCommand WHERE ActorId=N'no-role'"));
+    }
+
+    [Fact]
+    public async Task Audit_cutoff_requires_explicit_timezone_and_normalizes_offsets()
+    {
+        using var factory = fixture.CreateFactory();
+        using var auditor = SqlScratchFixture.WithTenant(factory.CreateClient(), A,
+            actor: "cutoff-auditor", roles: ["auditor"]);
+        var cutoff = DateTimeOffset.UtcNow.AddMinutes(-2).ToOffset(TimeSpan.FromHours(7));
+        var withoutOffset = cutoff.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+        using var missingZone = await auditor.GetAsync(
+            AuditRoot + "?asOf=" + Uri.EscapeDataString(withoutOffset),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missingZone.StatusCode);
+        using var missing = await auditor.GetAsync(
+            AuditRoot, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        string explicitOffset = Uri.EscapeDataString(cutoff.ToString("O", CultureInfo.InvariantCulture));
+        using var repeated = await auditor.GetAsync(
+            AuditRoot + "?asOf=" + explicitOffset + "&asOf=" + explicitOffset,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, repeated.StatusCode);
+        using var valid = await auditor.GetAsync(
+            AuditRoot + "?asOf=" + explicitOffset, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, valid.StatusCode);
+        var report = await valid.Content.ReadFromJsonAsync<App01aAuditSnapshot>(
+            TestContext.Current.CancellationToken);
+        Assert.Equal(cutoff.ToUniversalTime(), Assert.IsType<App01aAuditSnapshot>(report).AsOfUtc);
     }
 
     [Fact]
