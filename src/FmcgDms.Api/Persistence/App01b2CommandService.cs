@@ -76,6 +76,15 @@ public sealed class App01b2CommandService(TenantConnections connections)
         public decimal ConsumedBaseQuantity { get; set; }
         public decimal ReleasedBaseQuantity { get; set; }
         public bool Eligible { get; set; }
+        public bool SourceEligible { get; set; }
+    }
+
+    private sealed class TripState
+    {
+        public string Status { get; set; } = "";
+        public Guid? VehicleId { get; set; }
+        public string VehicleKind { get; set; } = "";
+        public bool VehicleActive { get; set; }
     }
 
     private sealed class PhysicalBalance
@@ -259,12 +268,23 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     var right = await db.QuerySingleOrDefaultAsync<Right>(Sql("""
                         SELECT r.Id,r.RightKind,r.Status,r.TripId,r.StockLocationId,r.SkuId,
                             r.GrantedBaseQuantity,r.ConsumedBaseQuantity,r.ReleasedBaseQuantity,
+                            CAST(CASE WHEN allocation.SourceKind=N'STOCK_ALLOC'
+                                AND allocation.TripId=r.TripId
+                                AND allocationLine.SkuId=r.SkuId
+                                AND allocationLine.BaseQuantity=r.GrantedBaseQuantity
+                                THEN 1 ELSE 0 END AS bit) AS SourceEligible,
                             CAST(CASE
                                 WHEN r.RightKind='A' AND ao.Status=N'CONFIRMED'
-                                    AND ao.TripId=@Trip THEN 1
+                                    AND ao.TripId=@Trip AND al.SkuId=r.SkuId THEN 1
                                 WHEN r.RightKind='B' AND b.Id IS NOT NULL THEN 1
                                 ELSE 0 END AS bit) AS Eligible
                         FROM dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
+                        LEFT JOIN dbo.BusinessSourceLine allocationLine
+                            ON allocationLine.TenantId=r.TenantId
+                            AND allocationLine.Id=r.BusinessSourceLineId
+                        LEFT JOIN dbo.BusinessSource allocation
+                            ON allocation.TenantId=allocationLine.TenantId
+                            AND allocation.Id=allocationLine.BusinessSourceId
                         LEFT JOIN dbo.AReservation a ON a.TenantId=r.TenantId
                             AND a.StockRightId=r.Id
                         LEFT JOIN dbo.AOrderLine al ON al.TenantId=a.TenantId
@@ -279,7 +299,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     if (right is null || right.TripId != manifest.TripId
                         || right.StockLocationId != manifest.WarehouseLocationId
                         || right.SkuId != line.SkuId || right.RightKind != line.RightKind
-                        || !right.Eligible || right.Status != "HELD")
+                        || !right.Eligible || !right.SourceEligible || right.Status != "HELD")
                         return BusinessCommandOutcome.Rejected("MANIFEST_RIGHT_NOT_ELIGIBLE");
                     if (right.GrantedBaseQuantity - right.ConsumedBaseQuantity
                         - right.ReleasedBaseQuantity < line.PlannedBaseQuantity)
@@ -322,8 +342,8 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     // assign the residual deterministically to the last line.
                     decimal cost = quantity == warehouse.OnHandBaseQuantity
                         ? warehouse.OnHandCostAmount
-                        : decimal.Round(warehouse.OnHandCostAmount * quantity
-                            / warehouse.OnHandBaseQuantity, 4, MidpointRounding.AwayFromZero);
+                        : decimal.Round((warehouse.OnHandCostAmount / warehouse.OnHandBaseQuantity)
+                            * quantity, 4, MidpointRounding.AwayFromZero);
                     if (cost > warehouse.OnHandCostAmount) cost = warehouse.OnHandCostAmount;
                     var ordered = group.OrderBy(l => l.LineNumber).ToArray();
                     var portions = new List<(ManifestLine Line, decimal Cost)>();
@@ -332,8 +352,8 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     {
                         decimal portion = i == ordered.Length - 1
                             ? cost - assigned
-                            : decimal.Round(cost * ordered[i].PlannedBaseQuantity
-                                / quantity, 4, MidpointRounding.AwayFromZero);
+                            : decimal.Round((cost / quantity) * ordered[i].PlannedBaseQuantity,
+                                4, MidpointRounding.AwayFromZero);
                         if (portion > cost - assigned) portion = cost - assigned;
                         portions.Add((ordered[i], portion));
                         assigned += portion;
@@ -469,12 +489,16 @@ public sealed class App01b2CommandService(TenantConnections connections)
                 if (expectedOffer != request.OfferedCashAmount)
                     return BusinessCommandOutcome.Rejected("OFFER_AMOUNT_MISMATCH");
 
-                var trip = await db.QuerySingleOrDefaultAsync<(string Status, Guid? VehicleId)>(Sql("""
-                    SELECT Status,VehicleLocationId AS VehicleId
-                    FROM dbo.Trip WITH (UPDLOCK,HOLDLOCK)
-                    WHERE TenantId=@Tenant AND Id=@Trip
+                var trip = await db.QuerySingleOrDefaultAsync<TripState>(Sql("""
+                    SELECT t.Status,t.VehicleLocationId AS VehicleId,
+                        v.Kind AS VehicleKind,v.IsActive AS VehicleActive
+                    FROM dbo.Trip t WITH (UPDLOCK,HOLDLOCK)
+                    LEFT JOIN dbo.StockLocation v WITH (HOLDLOCK)
+                        ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
+                    WHERE t.TenantId=@Tenant AND t.Id=@Trip
                     """, new { Tenant = tenant, Trip = request.TripId }, tx, token));
-                if (trip.VehicleId is null || trip.Status != "PREPARED")
+                if (trip is null || trip.VehicleId is null || trip.Status != "PREPARED"
+                    || trip.VehicleKind != "VEHICLE" || !trip.VehicleActive)
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
 
                 bool loaded = await db.ExecuteScalarAsync<bool>(Sql("""
