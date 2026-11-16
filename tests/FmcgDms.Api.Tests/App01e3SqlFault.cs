@@ -92,16 +92,22 @@ internal sealed class App01e3SqlFault(
         }
     }
 
+    private sealed class TriggerInfo
+    {
+        public string TableName { get; set; } = "";
+        public string Definition { get; set; } = "";
+    }
+
     public async ValueTask DisposeAsync()
     {
         await using var db = await OpenOwnedScratchAsync(connectionString, tenant);
         // Never destroy an unexpected trigger merely because the name matches.
-        var target = await db.QuerySingleOrDefaultAsync<(string TableName, string Definition)>("""
+        var target = await db.QuerySingleOrDefaultAsync<TriggerInfo>("""
             SELECT OBJECT_NAME(t.parent_id) AS TableName,
                    OBJECT_DEFINITION(t.object_id) AS Definition
             FROM sys.triggers t WHERE t.name=@Name AND t.parent_class=1
             """, new { Name = Trigger });
-        if (target.TableName is null)
+        if (target is null)
             throw new InvalidOperationException("APP01E3 armed trigger disappeared unexpectedly.");
         if (!Targets.Any(t => t.StartsWith(target.TableName + ":", StringComparison.Ordinal))
             || !target.Definition.Contains("APP01E3_INJECT_PRECOMMIT", StringComparison.Ordinal))
