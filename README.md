@@ -9,7 +9,7 @@ The `business/` snapshot is complete and read-only. Verify its exact tree agains
 - .NET 10 LTS / ASP.NET Core API + Dapper + FluentMigrator; database-per-tenant SQL Server.
 - React + TypeScript + Vite + PWA online-first, no offline business writes.
 - Two SQL Server LocalDB scratch databases, signed **synthetic-only** JWT dev/test tenant identity, negative cross-tenant routing tests, migration guard.
-- No actual A/B/AR/COGS business API yet. That belongs to APP-01A..E.
+- No production A/B business API or AR/COGS booking yet. APP-01A.2 introduces signed synthetic LocalDB-only command endpoints.
 
 ## APP-00B — toolchain alignment
 
@@ -21,6 +21,13 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Foreign keys bind every root entity to `AppTenantBinding`; composite FKs enforce Customer+ShipTo identity and same-tenant source/rights; SQL checks and unique keys protect per-row amounts and duplicate source/effect identities.
 - Introduces 5 SQL Server LocalDB integration tests for two database migrations/replay, isolation/invalid tenant writes, Customer/ShipTo mismatch, A/B right kind/source uniqueness, and command/ledger duplicate protection.
 - **Schema only:** Dapper command transactions, deterministic canonical payload replay outcomes, aggregate stock availability/overlap checks, AR/COGS and real business APIs are **not implemented** in this PR. Those belong to APP-01A.2/.3 and APP-01B–E. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
+
+## APP-01A.2 — Transactional A/B rights (synthetic only)
+
+- Explicit Dapper SERIALIZABLE transactions implement `ReserveAStock`, `ConfirmAOrder`, `GrantBQuota` and `GrantBCredit` in one common source/command ledger.
+- Shared warehouse/SKU `StockPool` prevents A+B allocations beyond eligible synthetic opening stock; `BCreditPool` requires explicitly seeded synthetic credit capacity. No implicit stock or real credit approval, physical stock movement, delivery or AR/COGS.
+- SHA-256 canonical payload v1 and `(tenant, producer, command)` idempotency. Same payload replays the persisted outcome; changed payload returns 409 CONFLICT with zero new effects.
+- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 audit/policy/verification remain outstanding; APP-01A is NOT_VERIFIED.
 
 ## Windows local checks
 
