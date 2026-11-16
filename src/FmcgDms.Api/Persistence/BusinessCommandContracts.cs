@@ -59,6 +59,21 @@ public sealed record PostAPartialDeliveryCommand(
     Guid AOrderId, Guid AOrderLineId, Guid TripManifestLineId, Guid SkuId,
     decimal BaseQuantity) : IApp01aCommand;
 
+/// <summary>APP-01D: a cash OFFER has no ledger impact.</summary>
+public sealed record OfferCashHandoverCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, decimal OfferedAmount) : IApp01aCommand;
+
+/// <summary>Only independently counted cashier evidence can accept an offer.</summary>
+public sealed record AcceptCashHandoverCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid OfferId, string CountEvidenceRef) : IApp01aCommand;
+
+/// <summary>Atomically unload all remaining source-backed manifest lines.</summary>
+public sealed record UnloadTripRemainderCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid ManifestId) : IApp01aCommand;
+
 public sealed record GrantBCreditCommand(
     string ProducerId, string CommandId, string SourceNumber,
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
