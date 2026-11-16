@@ -159,6 +159,9 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
     public void Manifest_line_cannot_swap_A_B_right_trip_warehouse_or_sku()
     {
         using var db = new SqlConnection(fixture.TenantAConnectionString);
+        int financialEffectsBefore = db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE TenantId=@tenant AND LedgerKind IN (N'AR',N'COGS')",
+            new { tenant = A });
         Guid warehouse = AddLocation(db, A, "WAREHOUSE");
         Guid vehicle = AddLocation(db, A, "VEHICLE");
         Guid otherWarehouse = AddLocation(db, A, "WAREHOUSE");
@@ -195,8 +198,8 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
                 AND l.Id=m.TripManifestLineId
             WHERE l.TenantId=@tenant AND l.TripManifestId=@manifest
             """, new { tenant = A, manifest }));
-        Assert.Equal(0, db.ExecuteScalar<int>(
-            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE LedgerKind IN (N'AR',N'COGS')",
+        Assert.Equal(financialEffectsBefore, db.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.LedgerEffect WHERE TenantId=@tenant AND LedgerKind IN (N'AR',N'COGS')",
             new { tenant = A }));
     }
 
@@ -234,9 +237,32 @@ public sealed class App01b1PhysicalStockSchemaTests(SqlScratchFixture fixture)
                 LoadBusinessSourceId=@source WHERE Id=@manifest
             """, new { source, manifest });
 
+        // The header is final; staged lines may only transition to a load
+        // without deleting or rewriting their original right/plan.
+        Error(db, """
+            DELETE dbo.TripManifestLine WHERE TenantId=@tenant AND Id=@manifestLine
+            """, new { tenant = A, manifestLine }, 51044);
+        Error(db, """
+            UPDATE dbo.TripManifestLine SET PlannedBaseQuantity=41
+            WHERE TenantId=@tenant AND Id=@manifestLine
+            """, new { tenant = A, manifestLine }, 51044);
+
         Guid extraRight = AddRight(db, A, trip, warehouse, sku, "B", 10m);
         Error(db, LineInsert, LineArgs(A, manifest, trip, warehouse, vehicle,
             2, sku, extraRight, "B", 10m), 51045); // LOADED header is closed to inserts.
+        Error(db, """
+            UPDATE dbo.TripManifestLine SET StockRightId=@extraRight,RightKind='B'
+            WHERE TenantId=@tenant AND Id=@manifestLine
+            """, new { extraRight, tenant = A, manifestLine }, 51044);
+        Error(db, """
+            UPDATE dbo.TripManifestLine SET PlannedBaseQuantity=41,
+                LoadBusinessSourceId=@source,LoadSourceLineId=@sourceLine,
+                LoadedBaseQuantity=40,LoadedCostAmount=400
+            WHERE TenantId=@tenant AND Id=@manifestLine
+            """, new
+        {
+            tenant = A, manifestLine, source, sourceLine = exactSourceLine
+        }, 51044); // Cannot sneak restaging into the load transition.
 
         Error(db, LoadLineSql, new
         {
