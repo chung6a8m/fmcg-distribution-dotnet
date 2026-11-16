@@ -370,7 +370,8 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
             Key(),
             CashWitness(A,s,200m,status:"PENDING"),
             CashWitness(A,s,199m),
-            CashWitness(A,s,200m,verifier:"synthetic-actor")
+            CashWitness(A,s,200m,verifier:"synthetic-actor"),
+            CashWitness(A,s,200m,verifier:"synthetic-actor ")
         })
         {
             var result = await Post(client, Sale(s,evidence));
@@ -407,6 +408,29 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
         Assert.Equal("VEHICLE_STOCK_INSUFFICIENT", (await Post(client,
             Sale(s,CashWitness(A,s,200m)))).Outcome.ReasonCode);
         EqualState(damaged, State(A,s));
+
+        // A positive but inflated mutable balance must not become a saleable
+        // vehicle source; independent manifest movements still total 70/700.
+        db.Execute("""
+            UPDATE dbo.PhysicalStockBalance
+            SET OnHandBaseQuantity=80,OnHandCostAmount=800
+            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+            """, new { Tenant=A,s.Vehicle,s.Sku });
+        var inflated = State(A,s);
+        Assert.Equal("VEHICLE_STOCK_SOURCE_DRIFT", (await Post(client,
+            Sale(s,CashWitness(A,s,200m)))).Outcome.ReasonCode);
+        EqualState(inflated, State(A,s));
+
+        // Quantity alone can agree while cost provenance is corrupted.
+        db.Execute("""
+            UPDATE dbo.PhysicalStockBalance
+            SET OnHandBaseQuantity=70,OnHandCostAmount=701
+            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+            """, new { Tenant=A,s.Vehicle,s.Sku });
+        var wrongCost = State(A,s);
+        Assert.Equal("VEHICLE_STOCK_SOURCE_DRIFT", (await Post(client,
+            Sale(s,CashWitness(A,s,200m)))).Outcome.ReasonCode);
+        EqualState(wrongCost, State(A,s));
     }
 
     [Fact]
