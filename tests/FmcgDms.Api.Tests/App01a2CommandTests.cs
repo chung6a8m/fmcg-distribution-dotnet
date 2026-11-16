@@ -8,7 +8,7 @@ using Xunit;
 namespace FmcgDms.Api.Tests;
 
 [Collection("SqlScratch")]
-public sealed class App01a2CommandTests(SqlScratchFixture fixture)
+public sealed partial class App01a2CommandTests(SqlScratchFixture fixture)
 {
     private const string A = "tenant-a";
     private const string B = "tenant-b";
