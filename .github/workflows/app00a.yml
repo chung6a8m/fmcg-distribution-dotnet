@@ -2,7 +2,8 @@ name: APP-00A foundation
 on:
   pull_request:
   push:
-    branches: [main]
+    # Temporary exact-head CI gate for APP-01E.1; remove on main after PR merge.
+    branches: [main, 'feat/app-01e1-recovery-harness']
 permissions:
   contents: read
 jobs:
