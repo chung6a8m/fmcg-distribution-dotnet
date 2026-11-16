@@ -1271,7 +1271,7 @@ public sealed class App01c4GoldenOracleTests(SqlScratchFixture fixture)
                 reads[tenant].Add(new Observation(4,t4));
                 AssertPostedLineage(tenant,scene,t4,4);
 
-                const stringPath = "/api/synthetic/app01d/commands/";
+                const string stringPath = "/api/synthetic/app01d/commands/";
                 var offer = new OfferCashHandoverCommand(Producer,Id(),Id(),scene.Trip,200m);
                 var offered = await Post(sales,stringPath + "offer-cash-handover",offer);
                 Assert.Equal("CASH_HANDOVER_OFFERED",offered.OutcomeCode);
