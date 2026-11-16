@@ -123,7 +123,10 @@ public sealed partial class App01e2CrossCommandRaceTests
         int rowCount = 0;
         foreach (var table in data.OrderBy(x => x.TableName, StringComparer.Ordinal))
         {
-            using var json = JsonDocument.Parse(table.RowsJson);
+            // SQL Server FOR JSON PATH returns empty text for an empty result,
+            // not a JSON array. Represent that table as a canonical empty set.
+            using var json = JsonDocument.Parse(
+                string.IsNullOrWhiteSpace(table.RowsJson) ? "[]" : table.RowsJson);
             string[] rows = json.RootElement.EnumerateArray()
                 .Select(x => x.GetRawText()).OrderBy(x => x, StringComparer.Ordinal).ToArray();
             rowCount += rows.Length;
