@@ -56,9 +56,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force TestResults | Out-Null
           $id = "app01a3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          "TestRunId=$id`nCommit=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
+          # A pull_request workflow runs on a synthetic merge commit; record
+          # the actual reviewed source HEAD separately from GitHub's merge SHA.
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          "TestRunId=$id`nSourceHeadSha=$sourceHead`nWorkflowSha=$env:GITHUB_SHA`nRunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" |
             Set-Content -Path TestResults/APP-01A3-TestRunId.txt -Encoding utf8
-          Write-Host "APP-01A.3 TestRunId=$id; Commit=$env:GITHUB_SHA"
+          Write-Host "APP-01A.3 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |
