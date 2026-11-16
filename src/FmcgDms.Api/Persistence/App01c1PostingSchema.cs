@@ -55,6 +55,8 @@ public sealed class App01c1PostingSchema : Migration
                 CONSTRAINT PK_AConfirmedLineSnapshot PRIMARY KEY (TenantId, AOrderLineId),
                 CONSTRAINT UQ_AConfirmedLineSnapshot_Source UNIQUE
                     (TenantId, ConfirmSourceLineId),
+                CONSTRAINT UQ_AConfirmedLineSnapshot_DeliveryScope UNIQUE
+                    (TenantId, AOrderLineId, AOrderId, SkuId),
                 CONSTRAINT FK_AConfirmedLineSnapshot_Order FOREIGN KEY
                     (TenantId, AOrderId, TripId, CustomerId)
                     REFERENCES dbo.AOrder (TenantId, Id, TripId, CustomerId),
@@ -139,6 +141,10 @@ public sealed class App01c1PostingSchema : Migration
                 CONSTRAINT FK_SaleDelivery_AOrderLine FOREIGN KEY
                     (TenantId, AOrderLineId, AOrderId, SkuId)
                     REFERENCES dbo.AOrderLine (TenantId, Id, AOrderId, SkuId),
+                CONSTRAINT FK_SaleDelivery_FrozenAConfirm FOREIGN KEY
+                    (TenantId, AOrderLineId, AOrderId, SkuId)
+                    REFERENCES dbo.AConfirmedLineSnapshot
+                        (TenantId, AOrderLineId, AOrderId, SkuId),
                 CONSTRAINT CK_SaleDelivery_Mode CHECK (
                     (RightKind='A' AND BusinessSourceKind=N'A_DELIVERY'
                      AND AOrderId IS NOT NULL AND AOrderLineId IS NOT NULL)
@@ -281,7 +287,8 @@ public sealed class App01c1PostingSchema : Migration
                 RecordedAtUtc datetime2(7) NOT NULL
                     CONSTRAINT DF_BGrantConsumption_At DEFAULT (SYSUTCDATETIME()),
                 RowVersion rowversion NOT NULL,
-                CONSTRAINT UQ_BGrantConsumption_Delivery UNIQUE (TenantId, SaleDeliveryId),
+                -- Multiple source grants may fund a B sale, but never repeat
+                -- the same grant/delivery consumption pair.
                 CONSTRAINT UQ_BGrantConsumption_GrantDelivery UNIQUE
                     (TenantId, BCreditGrantId, SaleDeliveryId),
                 CONSTRAINT FK_BGrantConsumption_BDelivery FOREIGN KEY
