@@ -1,6 +1,6 @@
 # FMCG Distribution — .NET DMS Application
 
-**Status (2026-11-16):** APP-00A/APP-00B complete, APP-01A.1 schema [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21) and APP-01A.2 commands [PR #22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22) merged/CI verified. APP-01A.3 approval, as-of audit and two-tenant concurrency/security are implemented in **draft [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23), CI and independent review pending**. **APP-01A overall NOT_VERIFIED** and full AC-03 business flow not implemented. Owner authorization remains **synthetic nonproduction only**.
+**Status (2026-11-16):** APP-00A/APP-00B complete, APP-01A.1 schema [PR #21](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/21) and APP-01A.2 commands [PR #22](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/22) merged/CI verified. APP-01A.3 approval, as-of audit and two-tenant concurrency/security are implemented in **draft [PR #23](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/23), implementation CI verified and independent review pending**. **APP-01A overall NOT_VERIFIED** and full AC-03 business flow not implemented. Owner authorization remains **synthetic nonproduction only**.
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
@@ -27,7 +27,7 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Explicit Dapper SERIALIZABLE transactions implement `ReserveAStock`, `ConfirmAOrder`, `GrantBQuota` and `GrantBCredit` in one common source/command ledger.
 - Shared warehouse/SKU `StockPool` prevents A+B allocations beyond eligible synthetic opening stock; `BCreditPool` requires explicitly seeded synthetic credit capacity. No implicit stock or real credit approval, physical stock movement, delivery or AR/COGS.
 - SHA-256 canonical payload v1 and `(tenant, producer, command)` idempotency. Same payload replays the persisted outcome; changed payload returns 409 CONFLICT with zero new effects.
-- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 is in draft PR #23, pending CI/review; APP-01A overall is NOT_VERIFIED.
+- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 code-head CI verified in draft PR #23, independent review pending; APP-01A overall is NOT_VERIFIED.
 
 ## APP-01A.3 — Audit, approval and two-tenant verification (draft PR #23)
 
