@@ -2,6 +2,8 @@
 
 **Scope:** synthetic/nonproduction test infrastructure, separate reviewable increment. **Status: IMPLEMENTED / INDEPENDENT_REVIEW_AND_FINAL_HEAD_CI_PENDING.** This contract does **not** claim that the full APP-01E race matrix, AC-11, disconnected network, real client/server restart, C→P or production recovery has passed.
 
+**Independent-review hardening:** P2 count-only false-positive risk fixed: SQL evidence now checks the persisted BQuota child, source identity/actor/Trip, source-line quantity, B right kind/quantity/status, and RIGHT_B ledger key/quantity/amount, including null state after rollback. The 60 numeric probe cells remain a separate cardinality gate; all semantic assertions must also pass. A fresh exact-HEAD CI run is still required before merge.
+
 Canonical application base: APP-01D [PR #32](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/32), independently reviewed source HEAD `d32cd507`, [Actions #43878243524 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43878243524): **99 tests, 91/91 persisted AC-03 cells per LocalDB tenant**. Source: immutable [AC-03](../../business/reference-data/expected-results/golden-oracles.json), [APP-01D contract](app-01d-cashier-unload.md), shared `BusinessCommand`/`BusinessSource`/`BusinessSourceLine`/`LedgerEffect`. No edits to `business/` or `business.lock.json`.
 
 ## Five increment boundaries
