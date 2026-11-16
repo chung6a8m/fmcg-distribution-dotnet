@@ -32,6 +32,8 @@ public sealed class App01a3CreditApprovals : Migration
                 ReviewedAtUtc datetime2(7) NULL,
                 RowVersion rowversion NOT NULL,
                 CONSTRAINT UQ_CreditPolicyApproval_TenantId_Id UNIQUE (TenantId, Id),
+                CONSTRAINT UQ_CreditPolicyApproval_Tenant_Scope UNIQUE
+                    (TenantId, Id, TripId, CustomerId, PoolCode, CurrencyUnit),
                 CONSTRAINT UQ_CreditPolicyApproval_Tenant_Case UNIQUE (TenantId, CaseNumber),
                 CONSTRAINT FK_CreditPolicyApproval_Pool FOREIGN KEY
                     (TenantId, TripId, CustomerId, PoolCode, CurrencyUnit)
@@ -60,8 +62,9 @@ public sealed class App01a3CreditApprovals : Migration
             -- a checked approval ID; legacy synthetic grants are audit exceptions.
             ALTER TABLE dbo.BCreditGrant ADD ApprovalId uniqueidentifier NULL;
             ALTER TABLE dbo.BCreditGrant ADD CONSTRAINT FK_BCreditGrant_Approval
-                FOREIGN KEY (TenantId, ApprovalId)
-                REFERENCES dbo.CreditPolicyApproval (TenantId, Id);
+                FOREIGN KEY (TenantId, ApprovalId, TripId, CustomerId, PoolCode, CurrencyUnit)
+                REFERENCES dbo.CreditPolicyApproval
+                    (TenantId, Id, TripId, CustomerId, PoolCode, CurrencyUnit);
             """);
     }
 
