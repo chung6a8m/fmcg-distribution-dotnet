@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404 AS publish
+WORKDIR /src
+COPY Directory.Build.props Directory.Packages.props global.json ./
+COPY src/FmcgDms.Preprod.Runtime/ src/FmcgDms.Preprod.Runtime/
+COPY src/FmcgDms.Preprod.Worker/ src/FmcgDms.Preprod.Worker/
+RUN dotnet restore src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj \
+ && dotnet publish src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release --no-restore -o /out
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.15
+WORKDIR /app
+COPY --from=publish /out/ ./
+USER 1654:1654
+ENTRYPOINT ["dotnet", "FmcgDms.Preprod.Worker.dll"]

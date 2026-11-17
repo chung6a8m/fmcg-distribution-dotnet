@@ -1,0 +1,42 @@
+# Ephemeral GitHub-hosted Ubuntu CI overlay ONLY. Never use for persistent PREPROD.
+# Compose base still exposes only loopback-bound HTTPS, while Vault has no host ports.
+services:
+  vault:
+    image: hashicorp/vault:1.21.4
+    # Bypass image entrypoint's optional setcap mutation: CI uses disable_mlock.
+    # Vault binary itself runs non-root with read-only root and no capabilities.
+    entrypoint: ["/bin/vault"]
+    command: ["server", "-config=/vault/config/ci.hcl"]
+    environment:
+      VAULT_ADDR: https://127.0.0.1:8200
+      VAULT_CACERT: /vault/tls/ca.pem
+    volumes:
+      - ./vault-ci.hcl:/vault/config/ci.hcl:ro
+      - ./vault-policy-api.hcl:/vault/policies/api.hcl:ro
+      - ./vault-policy-worker.hcl:/vault/policies/worker.hcl:ro
+      - ${CI_VAULT_CERT_FILE:?set CI_VAULT_CERT_FILE}:/vault/tls/vault.crt:ro
+      - ${CI_VAULT_KEY_FILE:?set CI_VAULT_KEY_FILE}:/vault/tls/vault.key:ro
+      - ${CI_ROOT_CA_FILE:?set CI_ROOT_CA_FILE}:/vault/tls/ca.pem:ro
+    networks:
+      outbound:
+        aliases: [vault.private.example.invalid]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+      # /vault/logs uses the image-owned anonymous volume and is deleted
+      # with docker compose down -v; no host port or persistent audit store.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    # Vault uses in-memory storage + one-share unseal in this disposable CI job.
+    # NO root-token, init key, or workload token in Compose env/image/artifacts.
+  api:
+    environment:
+      SSL_CERT_FILE: /run/certs/ci-root.pem
+    volumes:
+      - ${CI_ROOT_CA_FILE:?set CI_ROOT_CA_FILE}:/run/certs/ci-root.pem:ro
+  worker:
+    environment:
+      SSL_CERT_FILE: /run/certs/ci-root.pem
+    volumes:
+      - ${CI_ROOT_CA_FILE:?set CI_ROOT_CA_FILE}:/run/certs/ci-root.pem:ro

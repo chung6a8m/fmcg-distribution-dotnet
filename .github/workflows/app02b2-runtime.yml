@@ -1,0 +1,117 @@
+name: APP-02B.2 PREPROD runtime CI (NOT real PREPROD)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  runtime-foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        run: test "$(dotnet --version)" = '10.0.404'
+      - name: Build isolated PREPROD API and Worker
+        run: |
+          dotnet restore src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release --no-restore
+          dotnet restore src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release --no-restore
+      - name: RUNTIME-01/RUNTIME-02 negative tests (in CI; not PREPROD)
+        run: |
+          dotnet test tests/FmcgDms.Preprod.Runtime.Tests/FmcgDms.Preprod.Runtime.Tests.csproj -c Release -- --report-trx
+      - name: Verify private network and workload secret boundaries
+        run: python3 tools/verify_preprod_runtime.py
+      - name: Lint operator probe and validate Caddy TLS routing (CI fixture only)
+        run: |
+          bash -n scripts/Collect-App02B2PreprodEvidence.sh
+          bash -n scripts/Load-App02B2Env.sh
+          bash -n tests/app02b2-env-parser.test.sh
+          bash tests/app02b2-env-parser.test.sh
+          bash -n scripts/Run-App02B2CiPreprod.sh
+          python3 -m py_compile scripts/Check-App02B2CiVaultAudit.py
+          python3 -m py_compile tools/verify_preprod_runtime.py
+          mkdir -p "$RUNNER_TEMP/app02b2-caddy"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj '/CN=preprod.example.invalid' \
+            -keyout "$RUNNER_TEMP/app02b2-caddy/tls.key" \
+            -out "$RUNNER_TEMP/app02b2-caddy/tls.crt" >/dev/null 2>&1
+          docker run --rm -e PREPROD_FQDN=preprod.example.invalid \
+            -v "$PWD/deploy/preprod/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.key:/run/certs/tls.key:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.crt:/run/certs/tls.crt:ro" \
+            caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Compile Docker API image
+        run: docker compose -f deploy/preprod/compose.yaml build api
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: Compile Docker Worker image
+        run: docker compose -f deploy/preprod/compose.yaml build worker
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: RUNTIME-01 actual OCI process fail-closed probes (CI only)
+        run: bash scripts/Verify-App02B2CiContainers.sh
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: RUNTIME-01/02 live ephemeral Linux Compose + real TLS Vault ACL/audit
+        shell: bash
+        env:
+          B2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/Run-App02B2CiPreprod.sh
+      - name: Tear down temporary CI Vault and destroy root/unseal/token material
+        if: always()
+        shell: bash
+        run: |
+          export PREPROD_FQDN=preprod.example.invalid
+          export PREPROD_BIND_IP=127.0.0.1
+          export VAULT_ADDR=https://vault.private.example.invalid:8200
+          export TLS_CERT_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/edge.crt"
+          export TLS_KEY_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/edge.key"
+          export VAULT_API_TOKEN_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tokens/api.token"
+          export VAULT_WORKER_TOKEN_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tokens/worker.token"
+          export CI_VAULT_CERT_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/vault.crt"
+          export CI_VAULT_KEY_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/vault.key"
+          export CI_ROOT_CA_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/ca.crt"
+          docker compose -f deploy/preprod/compose.yaml -f deploy/preprod/compose.ci.yaml down --volumes --remove-orphans --timeout 5 || true
+          sudo rm -rf "$RUNNER_TEMP/app02b2-ci-preprod"
+      - name: Record CI-only provenance (no PREPROD acceptance claim)
+        if: always()
+        run: |
+          mkdir -p TestResults
+          printf "TestRunId=app02b2-ci-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nRunUrl=https://github.com/%s/actions/runs/%s\nEnvironment=GITHUB_HOSTED_CI_NOT_PREPROD\n" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "${{ github.event.pull_request.head.sha || github.sha }}" \
+            "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            > TestResults/APP-02B2-CI-ONLY.txt
+      - name: Upload CI-only test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b2-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Runtime.Tests/TestResults/
+          if-no-files-found: warn

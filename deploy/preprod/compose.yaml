@@ -1,0 +1,92 @@
+name: fmcg-preprod-b2
+# APP-02B.2 ONLY: PREPROD_FOUNDATION_ONLY / NO_GO.
+# Vault/SQL/Control Plane are separate private services; never deploy them here.
+services:
+  edge:
+    image: caddy:2.10.2-alpine
+    environment:
+      PREPROD_FQDN: ${PREPROD_FQDN:?set PREPROD_FQDN}
+    ports:
+      - "${PREPROD_BIND_IP:?set PREPROD_BIND_IP}:443:443/tcp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${TLS_CERT_FILE:?set TLS_CERT_FILE}:/run/certs/tls.crt:ro
+      - ${TLS_KEY_FILE:?set TLS_KEY_FILE}:/run/certs/tls.key:ro
+    networks:
+      public: {}
+      private:
+        ipv4_address: 172.30.50.10
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /config:rw,noexec,nosuid,size=16m
+      - /data:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    depends_on: [api]
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/preprod/Dockerfile.api
+    environment:
+      DOTNET_ENVIRONMENT: Preprod
+      ASPNETCORE_ENVIRONMENT: Preprod
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      Runtime__Environment: Preprod
+      Runtime__Role: api
+      Runtime__Mode: FOUNDATION_ONLY
+      Runtime__Admission: NO_GO
+      Runtime__TrustedProxyIp: 172.30.50.10
+      Runtime__PublicHost: ${PREPROD_FQDN:?set PREPROD_FQDN}
+      Vault__Address: ${VAULT_ADDR:?set VAULT_ADDR}
+      Vault__ProbePath: preprod/data/runtime/api
+      Vault__TokenFile: /run/secrets/vault_api_token
+    volumes:
+      - ${VAULT_API_TOKEN_FILE:?set VAULT_API_TOKEN_FILE}:/run/secrets/vault_api_token:ro
+    networks: [private, outbound]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    user: "1654:1654"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: on-failure
+    # no ports, network_mode=host, privileged, SQL credential or synthetic auth
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/preprod/Dockerfile.worker
+    environment:
+      DOTNET_ENVIRONMENT: Preprod
+      Runtime__Environment: Preprod
+      Runtime__Role: worker
+      Runtime__Mode: FOUNDATION_ONLY
+      Runtime__Admission: NO_GO
+      Vault__Address: ${VAULT_ADDR:?set VAULT_ADDR}
+      Vault__ProbePath: preprod/data/runtime/worker
+      Vault__TokenFile: /run/secrets/vault_worker_token
+    volumes:
+      - ${VAULT_WORKER_TOKEN_FILE:?set VAULT_WORKER_TOKEN_FILE}:/run/secrets/vault_worker_token:ro
+    networks: [private, outbound]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m"]
+    user: "1654:1654"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: on-failure
+    # no business claims, tenant queue, management endpoint or published port
+
+networks:
+  public: {}
+  private:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.50.0/28
+  outbound:
+    # Egress only for private, HTTPS Vault and later registry; host firewall
+    # MUST restrict destination(s). Docker networks alone are not an egress ACL.
+    internal: false
