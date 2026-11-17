@@ -16,6 +16,12 @@ builder.Services.AddScoped<App01c3APostingService>();
 builder.Services.AddScoped<App01dCashierUnloadService>();
 builder.Services.AddScoped<App01a3AuditService>();
 builder.Services.AddScoped<App01e4OutcomeLookupService>();
+builder.Services.AddSingleton<App02a3WorkerSignal>();
+builder.Services.AddScoped<App02a3EventIntakeService>();
+builder.Services.AddScoped<App02a3ProcessingService>();
+builder.Services.AddScoped<App02a3OutboxService>();
+builder.Services.AddScoped<App02a3CaseService>();
+builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
@@ -155,6 +161,69 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
             return Results.BadRequest(new { error = "COMMAND_IDENTITY_INVALID" });
         return Results.Ok(await recovery.LookupAsync(user, producers[0]!, commands[0]!, ct));
     }).RequireAuthorization("SyntheticCommandRecovery");
+
+    // APP-02A.3: synthetic event intake/lookup and independent CASE actors.
+    // These routes never appear outside Development/IntegrationTest with
+    // synthetic authentication enabled; actual C posting is worker-owned.
+    var app02events = app.MapGroup("/api/synthetic/app02/events")
+        .RequireAuthorization();
+    app02events.MapPost("/intake", async (
+        App02EventInput input, ClaimsPrincipal principal,
+        App02a3EventIntakeService intake, CancellationToken ct) =>
+    {
+        try
+        {
+            App02IntakeResult saved = await intake.IntakeAsync(principal, input, ct);
+            if (saved.Status == "CONFLICT") return Results.Conflict(saved);
+            string locator = "/api/synthetic/app02/events/outcome?producerId=" +
+                Uri.EscapeDataString(input.ProducerId) + "&eventId=" +
+                Uri.EscapeDataString(input.EventId);
+            return Results.Accepted(locator, saved);
+        }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.BadRequest(new { error = ex.Code });
+        }
+    });
+    app02events.MapGet("/outcome", async (
+        HttpContext context, ClaimsPrincipal principal,
+        App02a3EventIntakeService intake, CancellationToken ct) =>
+    {
+        var producers = context.Request.Query["producerId"];
+        var eventIds = context.Request.Query["eventId"];
+        if (producers.Count != 1 || eventIds.Count != 1
+            || producers[0] is null || eventIds[0] is null)
+            return Results.BadRequest(new { error = "EVENT_IDENTITY_INVALID" });
+        try
+        {
+            return Results.Ok(await intake.LookupAsync(
+                principal, producers[0]!, eventIds[0]!, ct));
+        }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.BadRequest(new { error = ex.Code });
+        }
+    }).RequireAuthorization("SyntheticCommandRecovery");
+    app02events.MapPost("/cases/propose", async (
+        App02CaseProposalInput input, ClaimsPrincipal principal,
+        App02a3CaseService cases, CancellationToken ct) =>
+    {
+        try { return Results.Ok(await cases.ProposeAsync(principal, input, ct)); }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.Conflict(new { error = ex.Code });
+        }
+    });
+    app02events.MapPost("/cases/approve/{proposalId:guid}", async (
+        Guid proposalId, ClaimsPrincipal principal,
+        App02a3CaseService cases, CancellationToken ct) =>
+    {
+        try { return Results.Ok(await cases.ApproveAsync(principal, proposalId, ct)); }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.Conflict(new { error = ex.Code });
+        }
+    });
 
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
     // target tenant/database by query string, header or body.
