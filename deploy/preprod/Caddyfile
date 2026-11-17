@@ -1,0 +1,21 @@
+{
+    admin off
+    auto_https disable_redirects
+}
+https://{$PREPROD_FQDN} {
+    tls /run/certs/tls.crt /run/certs/tls.key
+
+    @health path /health/live /health/ready
+    handle @health {
+        reverse_proxy api:8080 {
+            # Deliberately overwrite untrusted client-forwarded values.
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+    handle {
+        respond "Not Found" 404
+    }
+}
