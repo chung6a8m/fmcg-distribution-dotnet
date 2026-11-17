@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using Microsoft.IdentityModel.JsonWebTokens;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -61,6 +62,19 @@ public static class IdentityHttp
                 {
                     try
                     {
+                        // Do not let TokenValidationParameters try-all-keys
+                        // accept an unknown or stale advertised kid.
+                        var presentedKid = ctx.SecurityToken switch
+                        {
+                            JwtSecurityToken jwtToken => jwtToken.Header.Kid,
+                            JsonWebToken jsonToken => jsonToken.Kid,
+                            _ => null
+                        };
+                        if (!string.Equals(presentedKid, identity.KeyId, StringComparison.Ordinal))
+                        {
+                            ctx.Fail("Unrecognized key version");
+                            return;
+                        }
                         if (ctx.Principal is null || !await ctx.HttpContext.RequestServices
                             .GetRequiredService<IdentitySessionService>()
                             .ValidateAccessAsync(ctx.Principal, ctx.HttpContext.RequestAborted))

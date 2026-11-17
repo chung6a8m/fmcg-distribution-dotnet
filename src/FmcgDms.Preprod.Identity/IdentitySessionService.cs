@@ -69,35 +69,33 @@ public sealed class IdentitySessionService(
             return null;
         var digest = HashRefresh(raw);
         var now = clock.GetUtcNow().UtcDateTime;
-        // Serializable + conditional UPDATE makes use-once atomic. Concurrent
-        // stale requests cannot both issue a new refresh grant.
+        // Claim by conditional write FIRST, to serialize two concurrent
+        // refresh requests rather than both taking a shared read lock.
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        int claimed = await db.RefreshGrants
+            .Where(x => x.TokenHash == digest && x.ConsumedUtc == null && x.ExpiresUtc > now)
+            .ExecuteUpdateAsync(up => up.SetProperty(x => x.ConsumedUtc, now), ct);
         var prior = await db.RefreshGrants.AsNoTracking()
             .SingleOrDefaultAsync(x => x.TokenHash == digest, ct);
         if (prior is null) return null;
         var session = await db.LoginSessions.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == prior.SessionId, ct);
         if (session is null || session.RevokedUtc is not null) return null;
-        if (prior.ConsumedUtc is not null)
+        if (claimed != 1)
         {
-            await RevokeSessionRowAsync(session.Id, now, ct);
-            await tx.CommitAsync(ct); // critical: persist reuse revocation before denial
+            // A consumed grant (including a concurrent refresh loser) is
+            // an attempted replay: poison the complete family before denial.
+            if (prior.ConsumedUtc is not null)
+            {
+                await RevokeSessionRowAsync(session.Id, now, ct);
+                await tx.CommitAsync(ct);
+            }
             return null;
         }
-        if (prior.ExpiresUtc <= now) return null;
         var user = await users.FindByIdAsync(session.UserId.ToString());
         if (user is null || user.Disabled || await users.IsLockedOutAsync(user)
             || !string.Equals(await users.GetSecurityStampAsync(user), session.SecurityStamp,
                 StringComparison.Ordinal))
-        {
-            await RevokeSessionRowAsync(session.Id, now, ct);
-            await tx.CommitAsync(ct);
-            return null;
-        }
-        int changed = await db.RefreshGrants
-            .Where(x => x.Id == prior.Id && x.ConsumedUtc == null && x.ExpiresUtc > now)
-            .ExecuteUpdateAsync(up => up.SetProperty(x => x.ConsumedUtc, now), ct);
-        if (changed != 1)
         {
             await RevokeSessionRowAsync(session.Id, now, ct);
             await tx.CommitAsync(ct);

@@ -24,35 +24,35 @@ public sealed class IdentitySessionsTests
         var user = env.User;
         user.Disabled = true;
         Assert.True((await env.Users.UpdateAsync(user)).Succeeded);
-        Assert.Null(await env.Sessions.LoginAsync("operator", Password, CancellationToken.None));
+        Assert.Null(await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken));
         user.Disabled = false;
         Assert.True((await env.Users.UpdateAsync(user)).Succeeded);
-        Assert.Null(await env.Sessions.LoginAsync("operator", "invalid-password", CancellationToken.None));
-        var issued = await env.Sessions.LoginAsync("operator", Password, CancellationToken.None);
+        Assert.Null(await env.Sessions.LoginAsync("operator", "invalid-password", TestContext.Current.CancellationToken));
+        var issued = await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken);
         Assert.NotNull(issued);
         Assert.NotEqual(issued.AccessToken, issued.RefreshToken);
         Assert.True(issued.RefreshToken.Length >= 40);
-        Assert.False(await env.Db.RefreshGrants.AnyAsync(g => g.TokenHash == issued.RefreshToken));
+        Assert.False(await env.Db.RefreshGrants.AnyAsync(g => g.TokenHash == issued.RefreshToken, TestContext.Current.CancellationToken));
         Assert.True(await env.Db.RefreshGrants.AnyAsync(g =>
-            g.TokenHash == IdentitySessionService.HashRefresh(issued.RefreshToken)));
+            g.TokenHash == IdentitySessionService.HashRefresh(issued.RefreshToken), TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Refresh_reuse_revokes_family_and_all_issued_access()
     {
         await using var env = await Fixture.CreateAsync();
-        var first = (await env.Sessions.LoginAsync("operator", Password, CancellationToken.None))!;
-        var second = (await env.Sessions.RotateAsync(first.RefreshToken, CancellationToken.None))!;
+        var first = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
+        var second = (await env.Sessions.RotateAsync(first.RefreshToken, TestContext.Current.CancellationToken))!;
         Assert.NotNull(second);
         Assert.NotEqual(first.RefreshToken, second.RefreshToken);
-        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(second.AccessToken), CancellationToken.None));
+        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(second.AccessToken), TestContext.Current.CancellationToken));
 
         // Replaying the consumed grant is not simply a 401. It poisons the
         // entire family, including its last unconsumed grant and bearer access.
-        Assert.Null(await env.Sessions.RotateAsync(first.RefreshToken, CancellationToken.None));
-        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(second.AccessToken), CancellationToken.None));
-        Assert.Null(await env.Sessions.RotateAsync(second.RefreshToken, CancellationToken.None));
-        Assert.All(await env.Db.LoginSessions.AsNoTracking().ToListAsync(),
+        Assert.Null(await env.Sessions.RotateAsync(first.RefreshToken, TestContext.Current.CancellationToken));
+        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(second.AccessToken), TestContext.Current.CancellationToken));
+        Assert.Null(await env.Sessions.RotateAsync(second.RefreshToken, TestContext.Current.CancellationToken));
+        Assert.All(await env.Db.LoginSessions.AsNoTracking().ToListAsync(TestContext.Current.CancellationToken),
             s => Assert.NotNull(s.RevokedUtc));
     }
 
@@ -60,15 +60,15 @@ public sealed class IdentitySessionsTests
     public async Task Logout_revoke_all_security_stamp_and_actor_binding()
     {
         await using var env = await Fixture.CreateAsync();
-        var a = (await env.Sessions.LoginAsync("operator", Password, CancellationToken.None))!;
-        var b = (await env.Sessions.LoginAsync("operator", Password, CancellationToken.None))!;
-        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(a.AccessToken), CancellationToken.None));
-        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), CancellationToken.None));
+        var a = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
+        var b = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
+        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(a.AccessToken), TestContext.Current.CancellationToken));
+        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), TestContext.Current.CancellationToken));
 
         var sa = Jwt(a.AccessToken).Claims.Single(x => x.Type == JwtRegisteredClaimNames.Sid).Value;
-        await env.Sessions.RevokeAsync(env.User.Id, Guid.Parse(sa), CancellationToken.None);
-        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(a.AccessToken), CancellationToken.None));
-        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), CancellationToken.None));
+        await env.Sessions.RevokeAsync(env.User.Id, Guid.Parse(sa), TestContext.Current.CancellationToken);
+        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(a.AccessToken), TestContext.Current.CancellationToken));
+        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), TestContext.Current.CancellationToken));
 
         var invalid = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()),
@@ -77,22 +77,22 @@ public sealed class IdentitySessionsTests
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new Claim("session_epoch", "0")
         ], "Bearer"));
-        Assert.False(await env.Sessions.ValidateAccessAsync(invalid, CancellationToken.None));
+        Assert.False(await env.Sessions.ValidateAccessAsync(invalid, TestContext.Current.CancellationToken));
 
         Assert.True((await env.Users.UpdateSecurityStampAsync(env.User)).Succeeded);
-        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), CancellationToken.None));
+        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(b.AccessToken), TestContext.Current.CancellationToken));
 
-        var c = (await env.Sessions.LoginAsync("operator", Password, CancellationToken.None))!;
-        await env.Sessions.RevokeAllAsync(env.User.Id, CancellationToken.None);
-        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(c.AccessToken), CancellationToken.None));
-        Assert.Null(await env.Sessions.RotateAsync(c.RefreshToken, CancellationToken.None));
+        var c = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
+        await env.Sessions.RevokeAllAsync(env.User.Id, TestContext.Current.CancellationToken);
+        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(c.AccessToken), TestContext.Current.CancellationToken));
+        Assert.Null(await env.Sessions.RotateAsync(c.RefreshToken, TestContext.Current.CancellationToken));
     }
 
     [Fact]
     public async Task Jwt_has_explicit_issuer_audience_signature_kid_and_no_tenant_permission()
     {
         await using var env = await Fixture.CreateAsync();
-        var auth = (await env.Sessions.LoginAsync("operator", Password, CancellationToken.None))!;
+        var auth = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
         var jwt = Jwt(auth.AccessToken);
         Assert.Equal("test-v1", jwt.Header.Kid);
         Assert.Equal("HS256", jwt.Header.Alg);
@@ -186,7 +186,7 @@ public sealed class IdentitySessionsTests
         public static async Task<Fixture> CreateAsync()
         {
             var connection = new SqliteConnection("Data Source=:memory:");
-            await connection.OpenAsync();
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
             var keys = new Keys(
                 "Server=control.private;Database=fmcg_identity;Encrypt=True",
                 RandomNumberGenerator.GetBytes(64), "test-v1",
@@ -203,7 +203,7 @@ public sealed class IdentitySessionsTests
             var root = services.BuildServiceProvider();
             var scope = root.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<PreprodIdentityDb>();
-            await db.Database.EnsureCreatedAsync();
+            await db.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
             var users = scope.ServiceProvider.GetRequiredService<UserManager<PreprodUser>>();
             var user = new PreprodUser
             {
