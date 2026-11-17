@@ -285,8 +285,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Eq("B-held=granted-consumed-released", f.GrantedB - f.ConsumedB - f.ReleasedB,
             f.BQuotaHeld);
         Eq("released-B=unload-source", f.ReturnBReleased, f.ReleasedB);
-        Eq("physical-ledger-qty-net=0", 0m, f.PhysicalLedgerQtyNet);
-        Eq("physical-ledger-cost-net=0", 0m, f.PhysicalLedgerCostNet);
+        Eq("physical-ledger-qty=negative-issued", -f.IssuedQty, f.PhysicalLedgerQtyNet);
+        Eq("physical-ledger-cost=negative-issued", -f.IssuedCost, f.PhysicalLedgerCostNet);
         Eq("sources-expected", E5Sources[row], f.SourceCount);
         Eq("source-lines-expected", E5Lines[row], f.SourceLineCount);
         Eq("ledger-effects-expected", E5Effects[row], f.EffectCount);
