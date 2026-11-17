@@ -3,6 +3,9 @@
 services:
   vault:
     image: hashicorp/vault:1.21.4
+    # Bypass image entrypoint's optional setcap mutation: CI uses disable_mlock.
+    # Vault binary itself runs non-root with read-only root and no capabilities.
+    entrypoint: ["/bin/vault"]
     command: ["server", "-config=/vault/config/ci.hcl"]
     environment:
       VAULT_ADDR: https://127.0.0.1:8200
