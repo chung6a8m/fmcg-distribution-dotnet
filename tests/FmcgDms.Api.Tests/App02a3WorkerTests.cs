@@ -59,12 +59,12 @@ public sealed partial class App01e2CrossCommandRaceTests
     }
 
     private static App02EventInput NewPEvent(Guid trip, Guid offer) =>
-        new("sales-terminal-" + Id(), "event-p-" + Id(),
+        new(SalesActor, "event-p-" + Id(),
             App02EventCanonicalV1.OfferKind, trip, offer, 200m,
             null, null, null, DateTimeOffset.UtcNow);
 
     private static App02EventInput NewCEvent(Guid trip, App02EventInput p, string count) =>
-        new("cashier-terminal-" + Id(), "event-c-" + Id(),
+        new(CashierActor, "event-c-" + Id(),
             App02EventCanonicalV1.AcceptanceKind, trip, null, null,
             p.ProducerId, p.EventId, count, DateTimeOffset.UtcNow);
 
