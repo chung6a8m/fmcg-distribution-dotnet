@@ -27,7 +27,7 @@
 
 **PR rule:** one independently reviewable increment per PR; first agree on contracts/expected values, then migration, then processor, then independent oracle. For each code PR: clean immutable business lock, same source-head revision under review and CI, two physical tenant databases where applicable, no skipped required tests, source/actor/tenant lineage, negative/fault tests and persisted artifacts with TestRunId. A changed HEAD invalidates earlier review/CI approval. Do not preset new pass counts before the scenario matrix is approved; keep all existing APP-01E/AC-03 and frontend/PWA/Playwright gates.
 
-## 3. APP-02A approved acceptance coverage (NOT_RUN; 12 scenario groups)
+## 3. APP-02A approved acceptance coverage (A.4 independent SQL oracle NOT_RUN; 12 scenario groups)
 
 Owner selected the [A11-01..A11-12 independent SQL matrix](app-02a1-scope-contract.md#8-approved-a11-01a11-12-acceptance-groups-not_run). It includes Offer P then Cashier C; out-of-order durable pending; 24h CASE and Maker/Checker with late-P same-ID resume; immutable correction, 6 technical retries, tenant/revocation negatives, atomic acceptance + two balanced custody/fund legs, transactional outbox + durable synthetic consumer, lost intake/apply/outbound ACK, process restart and two-worker races. Each group may expand into multiple test cases; **no run/pass count is claimed**.
 
@@ -46,7 +46,7 @@ The summary below remains an overview, **not an executed oracle**. Exact expecte
 | Cross-tenant actor/replay | Hard-fail access or isolation; inspect both physical DBs | Zero peer-tenant write or visibility |
 | Dependency stuck/expired | Observable queue age, asOf, owner/next action and audited case as decided by Owner | No silent deletion, endless unobservable retry or zero-as-unknown |
 
-The Owner has fixed the C/P envelope, identity, state/ACK rules, retry/case/retention and 12-group acceptance *scope* in APP-02A.1. Engineering must still freeze concrete versioned fixtures, expected numeric SQL cells and per-group negative cases in A.2 design, before implementation and before any A.2 SQL test claim. Business source IDs and exact decimal/lineage requirements must never be weakened to match code.
+The Owner fixed the C/P envelope, identity, state/ACK rules, retry/case/retention and 12-group acceptance *scope* in A.1. A.2 froze the event-v1 P/C canonical byte/hash fixtures and schema negatives; A.3 implemented the synthetic runtime and its focused regression tests. **A.4 still must independently freeze numeric expected SQL cells, mutation sentinels and per-group negative cases for A11-01..12 before executing its two-tenant expected/actual/diff oracle.** Do not derive independent expected values from A.3 API responses or weaken business source IDs, exact decimals or lineage to match implementation.
 
 ## 4. APP-02B–E dependencies and business completeness
 
@@ -58,7 +58,7 @@ The Owner has fixed the C/P envelope, identity, state/ACK rules, retry/case/rete
 
 ## 5. Evidence and decision ledger
 
-| Gate / evidence | At roadmap creation | Required action |
+| Gate / evidence | Current state | Required action |
 |---|---|---|
 | APP-01E synthetic two-tenant T0–T6 | **MERGED / SYNTHETIC_VERIFIED** | Preserve regressions and original evidence links |
 | APP-02A.1 Owner decisions / contract | **OWNER_APPROVED (8/8); MERGED / CONTRACT_APPROVED** | [Decision ledger](../decisions/owner-app02-2026-11-17.md), [PR #40](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/40), [final-head CI](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44020286899), [closeout](../closeout/2026-11-17-app-02a1.md); docs-only |
