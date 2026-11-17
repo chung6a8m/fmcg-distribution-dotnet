@@ -326,7 +326,7 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
     }
 
     [Fact]
-    public void Transactional_source_outbox_and_consumer_ack_are_distinct_sql_witnesses()
+    public void Business_apply_and_outbound_pending_are_distinct_sql_witnesses()
     {
         using var db = Open(fixture.TenantAConnectionString);
         Guid rolledBackTrip;
@@ -346,26 +346,9 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             Assert.Equal("PENDING", db.ExecuteScalar<string>(
                 "SELECT Status FROM dbo.App02OutboxDelivery WHERE MessageId=@message",
                 new { message = scene.Message }, tx)); // Apply ≠ outbound ACK.
-            db.Execute("""
-                UPDATE dbo.App02OutboxDelivery SET Status=N'LEASED',AttemptCount=1,
-                    LeaseOwner=N'synthetic-worker',LeaseExpiresAtUtc=DATEADD(minute,1,SYSUTCDATETIME())
-                WHERE MessageId=@message
-                """, new { message = scene.Message }, tx);
-            db.Execute("""
-                INSERT dbo.App02SyntheticConsumerInbox
-                    (TenantId,MessageId,ConsumerReceiptId,PayloadVersion,PayloadHash)
-                VALUES(@tenant,@message,@consumerReceipt,1,@hash)
-                """, new { tenant = A, message = scene.Message,
-                    consumerReceipt = Guid.NewGuid(), hash = scene.Hash }, tx);
-            db.Execute("""
-                UPDATE dbo.App02OutboxDelivery SET Status=N'ACKED',
-                    LeaseOwner=NULL,LeaseExpiresAtUtc=NULL,AckAtUtc=SYSUTCDATETIME()
-                WHERE MessageId=@message
-                """, new { message = scene.Message }, tx);
-            Assert.Equal("ACKED", db.ExecuteScalar<string>(
-                "SELECT Status FROM dbo.App02OutboxDelivery WHERE MessageId=@message",
-                new { message = scene.Message }, tx));
-            Assert.Equal(1, db.ExecuteScalar<int>(
+            // Do not fake consumer COMMIT inside this apply transaction:
+            // that boundary requires a separately committed A.3 consumer.
+            Assert.Equal(0, db.ExecuteScalar<int>(
                 "SELECT COUNT(*) FROM dbo.App02SyntheticConsumerInbox WHERE MessageId=@message",
                 new { message = scene.Message }, tx));
             tx.Rollback(); // Direct SQL probe must not leave a fake business posting.
@@ -380,7 +363,7 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
     }
 
     [Fact]
-    public void Outbound_ack_without_consumer_commit_is_forbidden()
+    public void Outbound_ack_without_consumer_inbox_witness_is_forbidden()
     {
         using var db = Open(fixture.TenantAConnectionString);
         using var tx = db.BeginTransaction();
