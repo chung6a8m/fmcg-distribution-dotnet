@@ -71,6 +71,12 @@ public sealed class App01e4OutcomeLookupService(TenantConnections connections)
                 ) s
                 WHERE c.TenantId=@Tenant AND c.ActorId=@Actor
                   AND c.ProducerId=@Producer AND c.CommandId=@Command
+                  -- The scratch database may use a case-insensitive SQL
+                  -- collation. Different signed actors/identities must not
+                  -- discover one another's outcomes through CI collation.
+                  AND CONVERT(varbinary(256),c.ActorId)=CONVERT(varbinary(256),@Actor)
+                  AND CONVERT(varbinary(256),c.ProducerId)=CONVERT(varbinary(256),@Producer)
+                  AND CONVERT(varbinary(256),c.CommandId)=CONVERT(varbinary(256),@Command)
                 """, new { Tenant = tenant, Actor = actor, Producer = producerId, Command = commandId },
                 cancellationToken: ct));
 
