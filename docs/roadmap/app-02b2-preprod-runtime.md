@@ -1,6 +1,6 @@
 # APP-02B.2 — PREPROD Runtime & Secrets Foundation
 
-**Status: IMPLEMENTED_IN_PR / PREPROD_RUNTIME_NOT_VERIFIED pending actual PREPROD witnesses and independent final-HEAD review.** Owner authorization: [OWN-APP02B-01/02/07/10](../decisions/owner-app02b-2026-11-17.md). Parent contract: [B.1 architecture](app-02b1-architecture-security-contract.md), [TM-01/TM-02/TM-10/TM-11](../security/app-02b1-threat-model.md), [30-case frozen matrix](../security/app-02b1-acceptance-evidence.md).
+**Status: 3/3 B.2 OWNER_APPROVED / IMPLEMENTED_IN_DRAFT_PR #50 / CI_ONLY_MERGE_CONDITIONAL / actual PREPROD_RUNTIME_NOT_VERIFIED.** Owner authorization: [OWN-APP02B-01/02/07/10](../decisions/owner-app02b-2026-11-17.md). Parent contract: [B.1 architecture](app-02b1-architecture-security-contract.md), [TM-01/TM-02/TM-10/TM-11](../security/app-02b1-threat-model.md), [30-case frozen matrix](../security/app-02b1-acceptance-evidence.md).
 
 ## Deliverables and exact security boundary
 
@@ -21,9 +21,11 @@
 | RUNTIME-02.B | API token→Worker path, Worker token→API path, revoked identity | Vault HTTP 403, Vault audit trace, no fallback; 503/Worker stop | PREPROD NOT_RUN |
 | RUNTIME-02.C | Attempt Control Plane or synthetic business/diagnostics access | 404, no SQL effect or stateful business endpoint | PREPROD NOT_RUN |
 
+**New Owner-approved B.2 limited merge path:** [OWN-APP02B2-01..03](../decisions/owner-app02b2-2026-11-17.md) select GitHub-hosted CI only, an independent AI technical review in a fresh context, and PR #50 merge **only after** [CI-B2-01..08](../security/app-02b2-ci-acceptance-addendum.md) are independently checked on the final HEAD with both Linux/Windows CI PASS and no open blocking findings. Successful CI may justify `MERGED / EPHEMERAL_CI_RUNTIME_TESTED`, never the original real-host `PREPROD_RUNTIME_VERIFIED`. PR #50 is still Draft / NOT_MERGED. The separate-context independent AI review has NOT been executed by this implementing session.
+
 **Expanded live CI evidence (not actual PREPROD):** GitHub Actions starts an isolated Compose Vault server with ephemeral TLS CA, KV-v2 policies and Vault audit, then runs actual HTTP positive/negative access, rotation/revocation, Worker stop, proxy and outage checks. Redacted APP-02B2-CI-EPHEMERAL-PREPROD.json and SHA-256 artifacts bind to run ID and source SHA, without keys, tokens or raw Vault audit. Result can be EPHEMERAL_CI_RUNTIME_TESTED only, never actual PREPROD_RUNTIME_VERIFIED, independent external scan or final G-B gate. See [CI operator notes](../../deploy/preprod/README.md).
 
-**CI is a different evidence class**: \`tests/FmcgDms.Preprod.Runtime.Tests\` uses fake Vault handler and synthetic guard inputs; \`tools/verify_preprod_runtime.py\` parses Compose network/secret policies; GitHub Actions builds both OCI images. This is \`CI_ENGINEERING_ONLY\` and **cannot** assert any live PREPROD RUNTIME case PASS or verify a tenant DB.
+**CI evidence scope:** the unit tests use fake Vault handler/guard fixtures, while the Ubuntu workflow also runs real *ephemeral* Compose/Vault HTTP/ACL/TLS/port/revocation negatives and builds the API/Worker images. The run is `CI_ENGINEERING_ONLY` / `EPHEMERAL_CI_RUNTIME_TESTED`; it never proves operator-owned PREPROD, tenant DB authorization or B.9 gates.
 
 ## Actual PREPROD evidence required before exit
 
@@ -37,6 +39,6 @@
 | Fault matrix expected/actual/diff, denial logs and reason codes | Signed negative execution; peer-tenant data not applicable until B.4 |
 | Operator, independent Reviewer, change/incident reference, evidence archive SHA | Distinct reviewer; any missing witness means NOT_VERIFIED |
 
-B.2 exit \`PREPROD_RUNTIME_VERIFIED\` requires **actual PREPROD** RUNTIME-01 and RUNTIME-02, independent review with no blocking findings, final-HEAD CI PASS and immutable evidence; otherwise \`PREPROD_RUNTIME_NOT_VERIFIED\`. G-B01..05's frozen thirty cases still remain \`NOT_RUN\` until B.9's independent physical two-tenant matrix, regardless of B.2 status.
+**Two independent states:** original full B.2 `PREPROD_RUNTIME_VERIFIED` still requires real operator-owned PREPROD RUNTIME-01/RUNTIME-02, independent real-environment evidence and review, and remains `NOT_VERIFIED`. The narrowly Owner-approved *source merge* may be `MERGED / EPHEMERAL_CI_RUNTIME_TESTED` only after independent fresh-context AI review and CI-B2-01..08 PASS on exact final HEAD. All B.9 G-B01..05 / 30 frozen cases remain `NOT_RUN`.
 
 **Forbidden promotion**: No real AC-11/EV-08; original production G-STOCK/G-CUT/G-IDEMP/G-LEDGER/G-INV NOT_VERIFIED; B_NO_CHANNEL BLOCKED; APP-02C/D/E, production deployment, Pilot and Go-Live NOT_AUTHORIZED. Preserve historical APP-01/02A regression artifacts and immutable \`business/\` + \`business.lock.json\`. 
