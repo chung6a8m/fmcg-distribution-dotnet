@@ -9,7 +9,7 @@ The `business/` snapshot is complete and read-only. Verify its exact tree agains
 - .NET 10 LTS / ASP.NET Core API + Dapper + FluentMigrator; database-per-tenant SQL Server.
 - React + TypeScript + Vite + PWA online-first, no offline business writes.
 - Two SQL Server LocalDB scratch databases, signed **synthetic-only** JWT dev/test tenant identity, negative cross-tenant routing tests, migration guard.
-- No production A/B business API or AR/COGS booking yet. APP-01A.2 introduces signed synthetic LocalDB-only command endpoints.
+- At APP-00A closeout there was no A/B production API or AR/COGS posting. Later APP-01A–E added bounded synthetic-only commands and posting; there is still no authorized production A/B business API.
 
 ## APP-00B — toolchain alignment
 
@@ -20,7 +20,7 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Adds an integrated, **per-tenant** Customer/ShipTo/Sku/StockLocation/Trip, A order/line, source/command/effect ledger, shared A/B StockRight, AReservation, BQuota and BCreditGrant schema.
 - Foreign keys bind every root entity to `AppTenantBinding`; composite FKs enforce Customer+ShipTo identity and same-tenant source/rights; SQL checks and unique keys protect per-row amounts and duplicate source/effect identities.
 - Introduces 5 SQL Server LocalDB integration tests for two database migrations/replay, isolation/invalid tenant writes, Customer/ShipTo mismatch, A/B right kind/source uniqueness, and command/ledger duplicate protection.
-- **APP-01A.1 scope was schema-only**; Dapper command transactions and aggregate allocation were subsequently implemented in APP-01A.2. Real AR/COGS and delivery remain APP-01B–E. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
+- **APP-01A.1 scope was schema-only**; Dapper transactions and allocation followed in APP-01A.2, and synthetic physical delivery/AR/COGS posting followed in APP-01B–D. These subsequent nonproduction increments do not constitute real financial posting or production approval. See [APP-01A.1 design/acceptance](docs/roadmap/app-01a1-integrated-schema.md).
 
 ## APP-01A.2 — Transactional A/B rights (synthetic only)
 
@@ -52,8 +52,12 @@ Migration `202611160004` adds `PhysicalStockOpening` (immutable T0), `PhysicalSt
 ## APP-01C.2 and APP-01C.3 — Source-bound synthetic T3 B20 / T4 A25
 
 - [APP-01C.2](docs/roadmap/app-01c2-b20-atomic-posting.md) B20: one Dapper `Serializable` transaction posts exact loaded B stock issue, verified cash witness, receipt allocation, AR/COGS, driver custody, B right and approved credit-grant consumption. PR #29 merged; no real cash verification/policy or production authorization.
-- [APP-01C.3](docs/roadmap/app-01c3-a25-atomic-posting.md) A25: independently approved synthetic N-day terms and price are frozen in an immutable source-bound snapshot **at Confirm**. `POST /api/synthetic/app01c/commands/post-a-partial-delivery` accepts only source/order/right/quantity references, never a new price or due date. A25 moves only the delivered quantity/cost, creates due-dated AR and four source-linked ledger effects; no receipt, B credit or custody. A/A and A/B postings share Trip lock. On branch for independent review and exact-HEAD CI; do not claim verified before green CI.
-- Both posting APIs exist **only** under signed synthetic auth in Development/IntegrationTest with nonce-owned two-tenant LocalDB, and are not production routes. New A25 CI target **93 tests** while preserving the independent APP-01B.3 39/39 SQL oracle per tenant; future APP-01C.4 must separately establish **65/65 T0–T4 per tenant**, not full 91/91. Business Baseline remains locked.
+- [APP-01C.3](docs/roadmap/app-01c3-a25-atomic-posting.md) A25: independently approved synthetic N-day terms and price are frozen in an immutable source-bound snapshot **at Confirm**. `POST /api/synthetic/app01c/commands/post-a-partial-delivery` accepts only source/order/right/quantity references, never a new price or due date. A25 moves only the delivered quantity/cost, creates due-dated AR and four source-linked ledger effects; no receipt, B credit or custody. A/A and A/B postings share Trip lock. **APP-01C.3 is MERGED / COMMANDS_VERIFIED** ([PR #30](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/30)); its separate independent T0–T4 SQL oracle followed in **APP-01C.4 MERGED / SQL_ORACLE_VERIFIED** ([PR #31](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/31)).
+- Both posting APIs exist **only** under signed synthetic auth in Development/IntegrationTest with nonce-owned two-tenant LocalDB and are not production routes. The historical APP-01C.3 93-test floor was followed by [APP-01C.4 exact-HEAD Windows CI](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43856950012): **96/96 tests and 65/65 T0–T4 SQL cells per tenant**. Later [APP-01D](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/32) and [APP-01E.5](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/37) separately verified bounded T0–T6 and reconciliation; none authorizes production. Business Baseline remains locked.
+
+## Next proposed roadmap — APP-02 (NOT_AUTHORIZED)
+
+[APP-02 Integrated Event Processing & Product Verification Foundation](docs/roadmap/app-02.md) is a **proposal awaiting a separate Owner scope/authorization decision**. The [APP-02A.1 scope, AC-11/C→P dependency contract and verification entry plan](docs/roadmap/app-02a1-scope-contract.md) is the first documentation-only handoff. APP-02A.2–A.4 propose durable inbox/outbox, dependency processing/recovery and independent two-tenant SQL evidence; APP-02B–E propose production runtime foundations, A_ONLINE E2E, B_ONLINE/Mixed E2E, then EV/P0/pilot-readiness gates. No APP-02 business command, schema, production mode, EV/P0 verification or pilot is approved by this documentation change. Preserve `SYNTHETIC_UNITLESS`, `invoiceEligible=false` and the immutable `business/` snapshot; offline business writes remain disabled and B_NO_CHANNEL remains blocked.
 
 ## Windows local checks
 
