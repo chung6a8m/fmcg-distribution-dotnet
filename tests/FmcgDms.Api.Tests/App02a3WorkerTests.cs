@@ -223,7 +223,8 @@ public sealed partial class App01e2CrossCommandRaceTests
                 cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             using HttpResponseMessage approved = await checker.PostAsync(
-                A3 + "cases/approve/" + proposalId, content: null);
+                A3 + "cases/approve/" + proposalId, content: null,
+                cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
             var disposition = await approved.Content.ReadFromJsonAsync<App02CaseApprovalOutcome>(TestContext.Current.CancellationToken);
             Assert.Equal("RECEIVED", disposition?.Status);
