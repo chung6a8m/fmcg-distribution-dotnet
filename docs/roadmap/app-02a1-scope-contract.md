@@ -1,86 +1,109 @@
 # APP-02A.1 — Owner Scope & AC-11/C→P Dependency/Recovery Contract
 
-**State (2026-11-17): PROPOSED / DOCUMENTATION_PREPARED / OWNER_AUTHORIZATION_PENDING.** This is the proposed **first APP-02 increment** and an implementation handoff, not an Owner-approved decision or a completed AC-11 test. No source code, SQL migration, API, outbox worker, business oracle, deployment or actual external evidence is changed by this plan. Parent: [APP-02 roadmap](app-02.md).
+**State (2026-11-17): OWNER_DECISIONS_APPROVED / DOCUMENTATION_REVIEW_PENDING / NOT_IMPLEMENTED.** The Owner explicitly authorized **APP-02A.1–A.4 synthetic/nonproduction only** in [OWN-APP02-01..08](../decisions/owner-app02-2026-11-17.md). This document freezes the **Owner-selected contract** for review; it is **not** `CONTRACT_APPROVED` until an independent documentation review and final-head gates pass, and is not an AC-11 test result. APP-02B–E, production integrations, EV/P0, pilot and go-live remain **NOT_AUTHORIZED / NOT_VERIFIED**. Parent: [APP-02 roadmap](app-02.md).
 
-## 1. Why this increment exists
+## 1. Authority, traceability and baseline
 
-APP-01E proved bounded synthetic command rollback/retry, two-client contention, post-COMMIT lost ACK and restart recovery and T0–T6 reconciliation across two nonce-owned LocalDB tenants. It did **not** establish the complete [AC-11](../../business/acceptance.md) dependency rule: *event C depends on event P*, missing/reordered dependency must remain durable and a safe retry cannot multiply business effects. Normative requirements: [BR-16](../../business/business-rules.md), [POL-16](../../business/policies.md), [AC-11](../../business/acceptance.md), EV-08; also AC-01 for tenant isolation and AC-13 for restore/revocation boundaries where relevant.
+The separately reviewed APP-01E.5 T0–T6 LocalDB closeout proved bounded synthetic command retry, rollback, loss of HTTP ACK, OS restart and cross-transaction reconciliation, **not** dependency processing C→P. Normative immutable requirements: [AC-11](../../business/acceptance.md), [BR-16](../../business/business-rules.md), [POL-16](../../business/policies.md), EV-08 (external evidence pending). Related: AC-01 (tenancy), AC-10/21 and BR/POL-13 (cash handover), AC-13 / BR/POL-17 (revocation/recovery) and AC-15 / BR/POL-19 (source/outcome/reconciliation).
 
-**Key distinction:** durable intake ACK, durable business application and downstream external acknowledgment are separate facts. Network failure is UNKNOWN, not business REJECTED. "Exactly once" means **exactly one persisted source/business effect for a canonical identity**, even if transport delivery is at least once; no exactly-once network delivery assumption.
+Selected Owner dispositions:
 
-## 2. Decisions that must be closed by Owner before A.2
+| ID | Approved contract | Details |
+|---|---|---|
+| OWN-APP02-01 | APP-02A.1–A.4 synthetic-only authorization; B–E require new approval | [Owner record](../decisions/owner-app02-2026-11-17.md) |
+| OWN-APP02-02 | `P=CashHandoverOffered`, `C=CashierAcceptanceRequested`, one P → at most one successful C | §2 |
+| OWN-APP02-03 | Separate `(TenantId,ProducerId,EventId)` event identity, versioned SHA-256, separate receipt/source IDs | §3 |
+| OWN-APP02-04 | Durable intake ACK separate from business outcome, distinct lifecycle / UNKNOWN | §4 |
+| OWN-APP02-05 | Event-driven; safety scan 15 minutes; six technical retries; 24-hour dependency CASE; no auto-delete | §5 |
+| OWN-APP02-06 | Independent Maker/Checker; same-ID resume, immutable correction source and audit | §6 |
+| OWN-APP02-07 | Transactional Outbox + durable synthetic consumer; at-least-once, stable MessageId | §7 |
+| OWN-APP02-08 | Twelve independent SQL evidence scenario groups; two physical tenants; strict final-head CI/review; EV/P0 separate | §8 |
 
-| Candidate ID (not an approved decision) | Open question | Proposed safe default for review | Blocking effect |
-|---|---|---|---|
-| **OWN-APP02-01** | Authorize APP-02A.1–A.4 synthetic-only first, and independently gate APP-02B–E? | **Authorize a separate nonproduction AC-11 slice first**; all production work requires additional Owner decision | **APP-02 remains NOT_AUTHORIZED** until explicitly accepted |
-| **OWN-APP02-02** | What do C and P concretely represent (event kind, origin, order, producer, source, dependency cardinality)? | Do **not** infer from short letters or substitute APP-01 command replay; bind business source event IDs and permitted dependency order | Cannot freeze event schema / expected oracle |
-| **OWN-APP02-03** | Event identity, actor/tenant ownership, payload normalization and hash version? | Propose unique `(server-bound TenantId, ProducerId, EventId)` in the approved namespace **without PayloadHash in the unique key**; store canonical hash/algorithm version as immutable conflict witnesses, and keep receipt ID separate from business source ID | Cannot define durable conflict/replay correctness |
-| **OWN-APP02-04** | When is a receipt ACK permitted? How do RECEIVED, PENDING, APPLIED, REJECTED, UNKNOWN and CASE differ? | ACK only after durable intake COMMIT; APPLIED only after source/effect COMMIT; no UNKNOWN→REJECTED inference | Cannot implement retry or outcome lookup safely |
-| **OWN-APP02-05** | Missing P/expired dependency, timeout, retry budget, retention and case owner? | Fail closed; keep pending/case durably, observable with asOf/next action; no silent TTL-drop | Cannot implement recovery, DLQ or retention |
-| **OWN-APP02-06** | Conflict, dead-letter/case closure and manual correction authorization? | No automatic effect rewrite; maker/checker or audited correction as business requires; immutable lineage | Cannot automate reconciliation of exceptional state |
-| **OWN-APP02-07** | Outbound delivery destination and effect acknowledgment boundary? | No real external provider, invoice or accounting side effect in synthetic increment; validate outbox local protocol first | External delivery design remains future gated work |
-| **OWN-APP02-08** | Which new evidence and P0 criteria are requested beyond AC-11? | Separate synthetic APP-02A.4 verification from EV-08 actual environment and production G-IDEMP | Do not inflate synthetic evidence into EV/P0 acceptance |
+All eight are **OWNER_APPROVED as decisions**, not `AC11_SYNTHETIC_VERIFIED`. Approved safety boundaries: immutable `business/` tree / `business.lock.json`, `SYNTHETIC_UNITLESS`, `invoiceEligible=false`, development/integration-test-only signed synthetic JWT and nonce-owned LocalDB, no offline business writes, `B_NO_CHANNEL` blocked, real financial/credit/invoice policy **UNSET**.
 
-Each decision record must contain **chosen value, scope, effective status, unresolved blockers, AC/BR/POL/EV traceability and Owner disposition**. Merely reviewing/merging this file does not imply the Owner has approved any candidate.
+## 2. Concrete C/P mapping, meaning and source of truth
 
-## 3. Candidate behavioral contract (to be refined, not yet frozen)
+| Field | Prerequisite P | Dependent C |
+|---|---|---|
+| Event kind | `CashHandoverOffered` | `CashierAcceptanceRequested` |
+| Originator | Authenticated **Sales** producer/actor | Authenticated **Cashier** producer/actor, independent of Sales |
+| APP-01D mapping | Immutable non-posting `CashHandoverOffer` / OFFER `BusinessSource` | APP-01D `CashHandoverAcceptance` with independent `CashierCountEvidence`, linked to exactly one offer |
+| Durable requirement | P itself persisted and verified in same tenant with exact Trip, offer amount and source identity | May be durably received **before** P, with stable reference to the intended P; no acceptance or financial effect until valid P and count witness |
+| Business effect | **None** on OFFER (no custody/fund/AR/COGS) | **One** acceptance posting, **two** exactly balanced ledger legs (`CUSTODY-OUT` and `FUND-IN`), **no second AR/receipt allocation** |
+| Cardinality | One P can have at most **one successful** acceptance | Each C names **one** prerequisite P; different C event IDs cannot accept the same P twice |
 
-### Envelope
+C must carry a *stable canonical reference* to the intended P identity even when P has not yet been persisted. A.2 schema must specify the event→APP-01D offer/source/command correlation and the independent count-evidence reference without creating a phantom P, pre-seeding a real-world cash fact, or trusting an unsourced client flag. P with same-trip/amount but a different identity is **not** an authorized replacement dependency. Existing APP-01D cash-handover logic and source/ledger authority are reused/bridged, never shadow-posted by a new ledger.
 
-A durable intake event should be independently attributable to a **server-bound TenantId**, signed/validated actor, producer, stable event identity, event kind, payload/hash version, immutable source references and optional explicit prerequisite identity/edge. Separate `occurredAt` from `receivedAtUtc`; timestamps do not prove business eligibility or dependency completion. Avoid client-provided tenant routing authority. Decide whether source commands and events share an identity namespace **before** schema approval.
+## 3. Event identity, envelope and canonical replay
 
-Potential lifecycle: `RECEIVED` (durably accepted but not business-posted) → `PENDING_DEPENDENCY` (C waits for P) → `APPLIED` or a reasoned `REJECTED`/owned `CASE` as the contract permits. `UNKNOWN` is an **observer/outcome-lookup state**, not a persisted business rejection. An inbound HTTP 200/202 by itself is not an APPLIED ledger witness. Pending age/queue backlog must be visible with asOf, n/N, case owner and next action.
+Canonical uniqueness is **`(server-bound TenantId, ProducerId, EventId)`**, with an event namespace **separate from APP-01 `BusinessCommand`**. `EventKind` and payload hash are **not** elements of the uniqueness key. Stable `ReceiptId` is distinct from `EventId` and `BusinessSourceId`; the latter is the posted APP-01 source, not an intake acknowledgment. `ProducerId` identifies the sender source system; `ActorId` is taken from a validated signed synthetic JWT, and the initiating actor plus event source lineage are immutable. Tenant and effective permissions are server-derived, never caller-chosen connection strings or tenant routing.
 
-### Invariants
+Minimum envelope: `ProducerId`, `EventId`, `EventKind`, stable P identity/reference, Trip/offer/amount source refs as applicable, immutable actor identity, `occurredAt`, `receivedAtUtc` (server), canonical payload version, SHA-256 canonical hash, and source/business correlation. Time fields do not confer dependency or actor eligibility. Exact event-v1 canonical byte serialization, normalized decimals, field order, time representation, hash examples and cross-language fixtures must be written and independently reviewed **before A.2 schema implementation**; reuse APP-01's proven idempotency principles but do not conflate identity namespaces.
 
-1. **One identity, one normalized payload, one outcome:** replay of identical identity/content returns the saved state; changed content under that identity produces conflict with **zero added effects**. No hidden new event identity on timeout.
-2. **Dependency before effect:** C with absent/not-yet-durable P is retained pending without early APP-01 source/ledger effects. A P belonging to another tenant must **never** satisfy C or be disclosed through lookup/status/error details. A malformed or forbidden reference must fail closed as a reasoned rejection or owned case under the approved policy; opaque missing/foreign references must be handled without an existence oracle. Only a valid same-tenant P permits idempotent resumption.
-3. **Atomic business apply:** any source, rights/stock/AR/cash/ledger effects and durable completion mark must commit atomically. Rollback means no partial economic or identity state except a separately committed intake/pending record allowed by the frozen contract.
-4. **Tenant/actor isolation:** both intake, dependency lookup, consumption and outcome reads are tenant/actor scoped. Opposite physical tenant is unchanged after any local journey.
-5. **Crash-safe replay:** ack loss, server/worker restart or 2-worker SQL contention cannot drop the accepted C or post twice. Application recovery reads durable SQL state, not just HTTP responses or in-memory flags.
-6. **Cases and external reality:** an occurred real-world event is not silently discarded when late; represent exception/case with owner and reconciliation. External effects are out of synthetic scope and cannot be presumed reversible or repeated.
-7. **No scope inflation:** `SYNTHETIC_UNITLESS`, `invoiceEligible=false`, real policy UNSET, offline write disabled, B_NO_CHANNEL BLOCKED; the immutable Business Baseline stays the authority for expected outcomes.
+Same key + same canonical content: return persisted receipt/state without a second business source or effect. Same key + different content/kind/hash witness: **HTTP 409 CONFLICT**, do not overwrite original record or effects; a retry must **never mint a new ID**. A forged/foreign tenant identity must fail without cross-tenant reads or existence disclosure. Revalidate current rights when an event is about to apply or a CASE is resumed; a revoked user cannot regain a right via retry, stale JWT, or restore.
 
-### Candidate physical design for A.2 (NOT IMPLEMENTED)
+## 4. Three acknowledgment boundaries and legal lifecycle
 
-- Durable inbox **receipt** uniquely keyed by the approved canonical event identity (candidate: server-bound tenant + producer + event ID within a fixed namespace), **not identity plus payload hash**. Persist normalized payload hash and hash/version as immutable columns for same-key replay/conflict detection, plus tenant-bound actor/source lineage and auditable transitions. Same key with changed payload must not insert a second receipt.
-- Explicit dependency edge(s) with P identity and guarded tenant semantics; independent constraint prevents C/P cross-tenant joins and unexpected cycle paths if the approved model allows multiple edges.
-- Transactional outbox record tied to committed domain source, with durable delivery attempt/ACK state; outbound processing is separate from primary business source posting.
-- Recovery/case journal for terminal policy rejection, unresolved dependency, retry disposition, case ownership and source-linked correction.
-- Existing APP-01 `Command`/`BusinessSource`/`SourceLine`/`LedgerEffect` authority must be reused or explicitly bridged; **no competing accounting truth** and no unguarded duplicate source/effects.
+1. **Intake:** authenticate/authorize intake, validate canonical identity and shape, durably insert/update receipt within SQL COMMIT; **only then** return the intake ACK (e.g. HTTP 202 and stable receipt/outcome lookup locator). `RECEIVED` does **not** mean money moved. Pre-COMMIT failure has no durable ACK; if response is lost, producer must lookup/retry the **same identity**.
+2. **Apply:** the consumer checks the *committed valid P*, matching tenant/Trip/offer, independently witnessed cashier count, non-self actor and current permissions. One explicit transaction atomically posts APP-01D acceptance/source, `CUSTODY-OUT` and `FUND-IN`, source-linked ledger, one-P acceptance uniqueness, a completion marker `APPLIED`, and the associated **transactional outbox message**. A fault rolls back *all* of those apply writes while the earlier committed intake/pending record remains.
+3. **Outbound:** dispatcher may deliver at least once, but synthetic receiver ACKs **only after its own durable inbox COMMIT**. This is *not* proof of an external accounting post, invoice, or another financial effect.
 
-These are conceptual entities, not table names, a migration list or an instruction to insert a production transport.
+Legal persisted states: `RECEIVED` (intake COMMIT) → `PENDING_DEPENDENCY` if required P is missing/undurable; `RECEIVED`/`PENDING_DEPENDENCY` → `APPLIED` only after valid business COMMIT; unrecoverable policy/shape issues → reasoned `REJECTED` when safely attributable; unresolved/expired/retry-exhausted events → owned `CASE`. `CASE` may be resumed under approved Maker/Checker disposition, revalidated and eventually applied or closed with immutable reason. **`UNKNOWN` is strictly a client/observer result** when the response was lost or outcome cannot yet be determined; no automatic UNKNOWN→REJECTED transition. `REJECTED` is nonposting, not a substitute for missing ACK. A syntactically invalid request may fail before durable intake and carries no business effects.
 
-## 4. Proposed negative/fault acceptance and SQL witnesses
+Missing and foreign P must not become a cross-tenant existence oracle: a well-formed but unresolved P reference is indistinguishable externally whether absent or inaccessible; retain C pending then CASE by the approved window. Explicit unauthorized actor operations are denied without disclosing peer-tenant data. All status/lookup routes are tenant and actor scoped.
 
-| ID | Given / fault | Expected actual witness from SQL | Rejected outcome |
-|---|---|---|---|
-| A11-01 | P committed, C follows | P and C source/line/dependency lineage, one C economic effect | Duplicate C effect |
-| A11-02 | C accepted before P | C durable `PENDING_DEPENDENCY`, no premature source posting; exactly one apply after P | C dropped or applied early |
-| A11-03 | P absent / invalid / wrong tenant | Durable pending for unresolved P; reasoned rejection/case for invalid or forbidden references under approved policy; no peer-tenant dependency resolution, existence disclosure, read or write | Guessing P, cross-tenant effect or leaking whether foreign P exists |
-| A11-04 | Same producer+event ID, same payload | Stable receipt/outcome/hash and invariant all-user-table fingerprint on replay where applicable | New source/ledger rows |
-| A11-05 | Same identity, changed payload/kind | Conflict with old outcome and unchanged user-table digest | Changed committed source/effect |
-| A11-06 | Two consumers race on pending C/P | Observed SQL contention/ordered recovery, one posted effect | Lost C, duplicate apply, deadlock masking |
-| A11-07 | SQL failure after one or more effects before COMMIT | Full business transaction rollback, recoverable same-key retry | Partial source/rights/ledger |
-| A11-08 | ACK lost after intake COMMIT and/or after apply COMMIT | Outcome lookup separates durable RECEIVED/PENDING/APPLIED from client UNKNOWN; same-key recovery | Fresh identity or false rejection |
-| A11-09 | Server/worker process restarted with pending C | Different OS process reloads pending SQL and resumes when P appears | In-memory-only dependency loss |
-| A11-10 | Actor revoked / different tenant retries | Denied without resurrecting rights or cross-tenant changes | Old JWT/peer tenant accepted |
-| A11-11 | Dependency unresolved beyond approved threshold | Observable pending/case with asOf, owner, next action and explicit policy disposition | Auto-drop or fabricated `0` |
-| A11-12 | Independent reconciliation after replay/recovery | Source/line/effect uniqueness, physical/credit/AR/cash conservation as relevant; signed expected/actual/diff | Self-certified HTTP-only success |
+## 5. Dependency recovery, retry, CASE and retention
 
-These are **candidate scenario IDs**, not new immutable business AC IDs or claims of executed tests. A.1 must specify concrete expected events, permitted state transitions, payloads and outputs before A.4 asserts the oracle.
+- **Event-driven wake-up on committed P** plus an independent **safety scan every 15 minutes**. C-before-P is durably `PENDING_DEPENDENCY`, with **zero acceptance/ledger/outbox effects**, until the correctly identified P arrives.
+- **Six** bounded exponential-backoff **technical** retries (e.g. SQL/transient dispatcher faults); do **not** count scheduled checks or time spent waiting for P as technical attempts. Base delay and maximum cap are engineering configuration and must be frozen with deterministic-clock tests before A.3.
+- At **24 hours after C receipt** without valid P, move to durable `CASE` with `asOf`, `reason`, `owner=cashier supervision`, `nextAction`, and observable queue/backlog age. Exhausted technical retry budget or irreconcilable dependency triggers an owned CASE as applicable; no silent drop or arbitrary 0-as-unknown report.
+- If P arrives **after CASE creation**, it must **not** auto-apply C. Require approved human disposition plus current-role, dependency, count evidence and source/ledger revalidation.
+- Preserve original receipt, hash, dependency, status history and audit durably: **no TTL auto-delete**. Production archival, retention duration and RPO/RTO are unresolved APP-02B decisions, not defaults inferred from this synthetic contract.
 
-## 5. Work split after the authorization gate
+## 6. Maker/Checker, conflict and immutable correction
 
-- **A.1 (this documentation-only proposal):** formalize scope and decision register, approve event mapping, protocol, state transitions, failure matrix, oracle/evidence contracts, safety exclusions and review ownership. No migrations.
-- **A.2 (separate PR):** scoped per-tenant migration/schema with FK/unique/immutability constraints, no posting behavior; fresh/repeat SQL LocalDB two-tenant tests and independent negative data tests.
-- **A.3 (separate PR):** service/worker/inbox/outbox command processing, pending dependency admission/release, safe exactly-once source posting under at-least-once delivery, tested concurrency and restart. No production endpoint or external provider integration without separate approval.
-- **A.4 (separate PR):** independent SQL readback oracle, two tenants, mismatch sentinels, all-user-table hashes, replay/conflict/rollback/lost-ACK/process restart evidence with source/workflow/actor/tenant TestRunId, script that fails closed on missing cells/provenance; preserve APP-01E.5 **247/247** historical suite and all previous gates. New test floor is determined only after A.2–A.4 scenarios are frozen.
+Maker = authorized **cashier supervisor**, Checker = a separately authorized person who is **neither Maker nor C initiating actor**. Approval must record immutable maker/checker identities, reason code, evidence link, proposed resolution, disposition, approval time and final source/case linkage. For `CASE` the permitted paths are **HOLD**, **CLOSE with reason**, or **APPROVED_RESUME**; an approval does not itself bypass eligibility checks or post money. Resume **the original EventId** after rechecking P, witness, tenant, source lineage and current authorization; reject stale/superseded or already accepted P.
 
-## 6. Review / Definition of Ready for A.2
+A conflict (`EventId` same, content different) does not enter an auto-repair path and can never overwrite payload or reassign a new identity. A correction **after APPLIED** is a separate, explicitly authorized, immutable **correction source/command with linkage to the original**, not modification/deletion of the posted `CashHandoverAcceptance` or its ledger legs. Correction mechanics remain nonproduction design/verification and are not authorization for real financial adjustments.
 
-A.1 may be marked **CONTRACT_APPROVED** only when all of the following are explicitly recorded: (a) independent docs review and no unresolved findings, (b) Owner authorization specifying synthetic scope and deferred production scope, (c) concrete C/P mapping including permitted dependencies, (d) state/ACK/identity/hash/retry/case rules with clear owner and refusal modes, (e) negative/fault matrix with expected and SQL witness sources, (f) immutable baseline and prior regression gates, (g) security/tenant boundary and no production/EV/P0/pilot assumption.
+## 7. Transactional Outbox and durable synthetic recipient
 
-If anything remains missing, leave **APP-02A.1 PROPOSED / OWNER_AUTHORIZATION_PENDING** and **APP-02A.2 BLOCKED**. Do not label documentation review as AC-11 verified.
+On successful C apply, create a `CashHandoverAcceptanceApplied` outbox message **in the same SQL transaction** as source and two ledger effects. Message has stable `MessageId`, tenant, business source, immutable payload/hash/version and delivery/ACK witnesses; there is no actual external invoice/provider/accounting integration.
 
-**Reference index:** [APP-02 roadmap](app-02.md) · [APP-00–APP-01 historical closeout](app-00-app-01.md) · [Business Acceptance](../../business/acceptance.md) · [Owner APP-00/01 authority](../decisions/owner-app-2026-11-15.md).
+Dispatcher uses **at-least-once** delivery, retrying with the **same** `MessageId` across ACK loss and restart. The synthetic consumer has a **durable SQL inbox** and validates/deduplicates `MessageId` plus content; ACK only after receiver receipt COMMIT. Duplicate same ID/content returns saved outcome; same ID/different content is conflict without additional consumer effect. A lost consumer ACK must not re-emit the original acceptance or create a second consumer business application. Pending and failed sends remain observable with owner/next action. No exactly-once transport/distributed atomicity claim; source and consumer receipt are separately committed facts.
+
+## 8. Approved A11-01..A11-12 acceptance groups (NOT_RUN)
+
+| ID | Scenario / injected fault | Required independent persisted SQL witness and negative assertion |
+|---|---|---|
+| **A11-01** | P committed then C; cashier witness valid | OFFER source **nonposting**, exactly one acceptance source and two balanced custody/fund legs; one linked outbox message, consumer receipt after its own COMMIT; no AR change |
+| **A11-02** | C intake before P, then correct P arrives | C receipt/P reference durably PENDING; no premature source/ledger/outbox; exactly one eventual acceptance and outbox after P |
+| **A11-03** | Missing, invalid or foreign P | Missing/opaque P PENDING→CASE at 24h; invalid local input fail-closed; no foreign P existence oracle, peer-tenant read/write or phantom OFFER |
+| **A11-04** | Same event key/content replay | Identical persisted identity/hash/outcome; no new acceptance/outbox or other business writes; one successful P acceptance across multiple C IDs |
+| **A11-05** | Same event key with changed payload/kind | HTTP 409; original receipt/outcome/hash unchanged; zero added business/source/ledger effects |
+| **A11-06** | Two-worker C/P competition and duplicate intake | Deterministic legal ordering with SQL uniqueness/locks; exactly one acceptance+outbox; no lost pending, duplicate money or masked deadlock |
+| **A11-07** | Failure during apply after one or more writes, pre-COMMIT | All acceptance/source/ledger/outbox writes rolled back; separately committed receipt survives; safe same-ID retry posts once |
+| **A11-08** | Lost ACK at intake, apply lookup or outbound consumer | Client UNKNOWN resolved via persisted lookup/retry; same EventId/MessageId; no false REJECTED or duplicate effects; durable receiver ACK only after consumer COMMIT |
+| **A11-09** | Different OS process / worker restarts while C pending or outbox in flight | Reload SQL pending/leases/delivery state and continue safely; no in-memory-only progress, lost C or duplicated posting |
+| **A11-10** | Revoked actor, wrong role, foreign tenant replay/lookup | Denied/revalidated current rights, no resurrection; same-tenant isolation and opposite physical tenant **zero writes/visibility** |
+| **A11-11** | Missing P 24h; 6 transient retries; late P; CASE disposition | Clock-driven transition to owned CASE with asOf/reason/next action; Maker ≠ Checker ≠ C initiator; no auto-apply on late P; approved same-ID resume/HOLD/CLOSE, immutable linked correction and audit as applicable |
+| **A11-12** | Full two-tenant source and outbound reconciliation after fault/replay | Independently derived expected/actual/diff; source→offer→acceptance→two legs→outbox→consumer inbox lineage, full-table fingerprints, negative sentinels and cross-tenant no-write; no self-certification via API return |
+
+The **12 groups** are scope coverage IDs, not “12 tests PASS” and not additional immutable business ACs. Each may require many test cases; freeze exact scenario version, decimal expected cells, timestamps, source correlation and mutation sentinels in the A.2–A.4 design handoffs. Independent oracle reads persisted physical SQL; no expected value may be derived from the implementation response. Count/witness/role negatives, CASE/correction/fault paths and outbound ACK must be explicitly mapped to the groups; do not hide them as optional follow-ups.
+
+## 9. Architecture sketch and PR handoff (no implementation in A.1)
+
+A.2 schema proposal: event inbox receipt unique on `(TenantId,ProducerId,EventId)` **without hash in the unique key**; stable C→P dependency reference scoped to server-bound tenant; immutable event canonical hash/version and actor/source history; unique per-P acceptance protection; source-linked transactional outbox with recipient delivery/ACK states; durable synthetic consumer inbox; case/approval/correction journal. Enforce tenant FK/unique constraints and append-only/transition invariants. Integrate with APP-01D source/command/ledger; do not add a parallel accounting truth. Exact table names/DDL/HTTP routes are **not** authorized by this documentation alone.
+
+- **A.1 (this docs PR):** record Owner choices, traceability, states, scope and 12-group oracle handoff; independent review and checked final HEAD still needed before `CONTRACT_APPROVED`.
+- **A.2 (separate PR after A.1 accepted):** migrations/schema; fresh/replayed migrations in **two physically separate nonce-owned LocalDB tenant databases**, unique/FK/immutable/cross-tenant negatives; **no posting behavior**.
+- **A.3 (separate PR after A.2):** explicit transactional inbox processing, P-triggered/safety recovery, CASE Maker/Checker, APP-01D bridge, source/ledger posting, outbox/consumer and fault/restart/two-worker checks; **no production consumer**.
+- **A.4 (separate PR after A.3):** independently sourced SQL expected/actual/diff for all A11-01..12 groups on both tenants; no missing cells; complete source/effect/inbox/outbox/case lineage, peer-tenant no writes, rollback/replay/lost-ACK/OS restart; TestRunId, exact reviewed PR HEAD and green CI, with previous APP-01E.5 **historical** 247/247 tests / AC-03 / frontend/PWA/Playwright regressions preserved. Do not claim these historical counts for this unrun increment or pre-set its new test floor.
+
+## 10. A.1 exit gate vs production/verification boundaries
+
+**A.1 may become `CONTRACT_APPROVED` only after:** Owner record is linked; independent review of this contract and the 12-group expected/actual SQL witness plan has no unresolved blockers; exact reviewed HEAD and required CI are verified; the concrete C/P identity/meaning, actor/tenant boundary, current-permission checks, intake/apply/outbound ACK and legal states, retry/case/maker-checker/retention, source-bridge and exclusions are reconciled; immutable business lock and prior tests are preserved. Until then: **OWNER_DECISIONS_APPROVED / DOCUMENTATION_REVIEW_PENDING**, **A.2 BLOCKED_ON_A1_REVIEW**, no AC-11 pass claim.
+
+**Only A.4 passing all gates can be labeled `AC11_SYNTHETIC_VERIFIED`**. EV-08 actual-environment evidence is **NOT_VERIFIED**, and G-IDEMP plus G-STOCK/G-CUT/G-LEDGER/G-INV production P0 gates remain **NOT_VERIFIED**; APP-02B–E, production actor/tenant auth, real cash/invoice/accounting, offline writes, B_NO_CHANNEL, pilot and tenant go-live remain separate forbidden/ungated scopes. The Owner's 125% browser display exception remains `EXCEPTION_ACCEPTED / NOT_TESTED`, not a new acceptance requirement.
+
+**References:** [Owner APP-02 decisions](../decisions/owner-app02-2026-11-17.md) · [APP-02 roadmap](app-02.md) · [APP-00–APP-01 historical closeout](app-00-app-01.md) · [AC-11](../../business/acceptance.md) · [BR-16](../../business/business-rules.md) · [POL-16](../../business/policies.md).
