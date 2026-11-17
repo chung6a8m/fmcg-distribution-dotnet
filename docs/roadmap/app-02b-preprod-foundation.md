@@ -1,6 +1,6 @@
 # APP-02B — PREPROD Production-grade Foundation: implementation and independent gates
 
-**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10) / B.1 CONTRACT_APPROVED (DOCS_ONLY) / B.2 IMPLEMENTED_IN_DRAFT_PR #50 / CI_ONLY_MERGE_CONDITIONAL / actual PREPROD_RUNTIME_NOT_VERIFIED / B.3–B.9 NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
+**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10 + OWN-APP02B2-01..03) / B.1 CONTRACT_APPROVED (DOCS_ONLY) / B.2 IMPLEMENTED_IN_DRAFT_PR #50 / CI_ONLY_MERGE_CONDITIONAL / actual PREPROD_RUNTIME_NOT_VERIFIED / B.3–B.9 NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
 
 ## 1. Starting baseline and frozen boundaries
 
