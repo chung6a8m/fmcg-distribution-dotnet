@@ -97,7 +97,8 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             using var db = Open(connection);
             foreach (string table in new[]
             {
-                "App02EventReceipt", "App02EventProgress", "App02ResolvedDependency",
+                "App02EventReceipt", "App02EventProgress", "App02EventStatusHistory",
+                "App02ResolvedDependency",
                 "App02AcceptanceApplication", "App02OutboxMessage",
                 "App02OutboxDelivery", "App02SyntheticConsumerInbox",
                 "App02ExceptionCase", "App02CaseDisposition", "App02CorrectionLink"
@@ -149,6 +150,12 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
         Assert.Equal("PENDING_DEPENDENCY", db.ExecuteScalar<string>(
             "SELECT Status FROM dbo.App02EventProgress WHERE ReceiptId=@cReceipt",
             new { cReceipt }));
+        Assert.Equal(new[] { "PENDING_DEPENDENCY", "RECEIVED" },
+            db.Query<string>("""
+                SELECT StatusTo FROM dbo.App02EventStatusHistory
+                WHERE TenantId=@tenant AND ReceiptId=@cReceipt
+                """, new { tenant = A, cReceipt })
+                .OrderBy(x => x, StringComparer.Ordinal).ToArray());
         Assert.Equal(0, db.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.App02ResolvedDependency WHERE CReceiptId=@cReceipt",
             new { cReceipt }));
@@ -323,6 +330,14 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             UPDATE dbo.App02EventProgress SET Status=N'RECEIVED',ReasonCode=NULL
             WHERE ReceiptId=@receipt
             """, new { receipt }, [51145]);
+        Assert.Equal(2, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02EventStatusHistory
+            WHERE TenantId=@tenant AND ReceiptId=@receipt AND StatusTo=N'CASE'
+            """, new { tenant = A, receipt }));
+        Reject(db, """
+            UPDATE dbo.App02EventStatusHistory SET StatusTo=N'APPLIED'
+            WHERE TenantId=@tenant AND ReceiptId=@receipt
+            """, new { tenant = A, receipt }, [51120]);
     }
 
     [Fact]

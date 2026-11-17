@@ -318,6 +318,38 @@ public sealed class App02a2DurableEventsSchema : Migration
                     REFERENCES dbo.App02ExceptionCase
                         (TenantId,CaseId,ReceiptId);
 
+            -- Every progress INSERT/UPDATE adds an append-only journal witness.
+            CREATE TABLE dbo.App02EventStatusHistory (
+                HistoryId uniqueidentifier NOT NULL
+                    CONSTRAINT DF_App02History_Id DEFAULT (NEWID())
+                    CONSTRAINT PK_App02EventStatusHistory PRIMARY KEY,
+                TenantId nvarchar(64) NOT NULL,
+                ReceiptId uniqueidentifier NOT NULL,
+                StatusFrom nvarchar(24) NULL,
+                StatusTo nvarchar(24) NOT NULL,
+                TechnicalRetryCount tinyint NOT NULL,
+                ReasonCode nvarchar(64) NULL,
+                ActiveCaseId uniqueidentifier NULL,
+                NextAttemptAtUtc datetime2(7) NULL,
+                LoggedAtUtc datetime2(7) NOT NULL
+                    CONSTRAINT DF_App02History_At DEFAULT (SYSUTCDATETIME()),
+                CONSTRAINT FK_App02History_Receipt FOREIGN KEY
+                    (TenantId,ReceiptId)
+                    REFERENCES dbo.App02EventReceipt (TenantId,ReceiptId),
+                CONSTRAINT FK_App02History_Case FOREIGN KEY
+                    (TenantId,ActiveCaseId,ReceiptId)
+                    REFERENCES dbo.App02ExceptionCase
+                        (TenantId,CaseId,ReceiptId),
+                CONSTRAINT CK_App02History_Status CHECK (
+                    (StatusFrom IS NULL OR StatusFrom IN
+                        (N'RECEIVED',N'PENDING_DEPENDENCY',N'APPLIED',N'REJECTED',N'CASE'))
+                    AND StatusTo IN
+                        (N'RECEIVED',N'PENDING_DEPENDENCY',N'APPLIED',N'REJECTED',N'CASE')
+                    AND TechnicalRetryCount<=6)
+            );
+            CREATE INDEX IX_App02History_ReceiptTime
+                ON dbo.App02EventStatusHistory (TenantId,ReceiptId,LoggedAtUtc);
+
             CREATE TABLE dbo.App02CaseDisposition (
                 DispositionId uniqueidentifier NOT NULL
                     CONSTRAINT PK_App02CaseDisposition PRIMARY KEY,
@@ -380,6 +412,7 @@ public sealed class App02a2DurableEventsSchema : Migration
         foreach (string table in new[]
         {
             "App02EventReceipt", "App02ResolvedDependency",
+            "App02EventStatusHistory",
             "App02AcceptanceApplication", "App02OutboxMessage",
             "App02SyntheticConsumerInbox", "App02ExceptionCase",
             "App02CaseDisposition", "App02CorrectionLink"
@@ -591,6 +624,14 @@ public sealed class App02a2DurableEventsSchema : Migration
                                      WHERE e.TenantId=ca.TenantId
                                        AND e.BusinessSourceLineId=ca.SourceLineId)=2))
                     THROW 51146, 'APP02 C APPLIED requires balanced APP01D ledger, acceptance and outbox', 1;
+
+                INSERT dbo.App02EventStatusHistory
+                    (TenantId,ReceiptId,StatusFrom,StatusTo,
+                     TechnicalRetryCount,ReasonCode,ActiveCaseId,NextAttemptAtUtc)
+                SELECT i.TenantId,i.ReceiptId,d.Status,i.Status,
+                    i.TechnicalRetryCount,i.ReasonCode,i.ActiveCaseId,i.NextAttemptAtUtc
+                FROM inserted i LEFT JOIN deleted d
+                    ON d.TenantId=i.TenantId AND d.ReceiptId=i.ReceiptId;
             END;
             """);
         Execute.Sql("""
@@ -653,6 +694,7 @@ public sealed class App02a2DurableEventsSchema : Migration
         Execute.Sql("""
             ALTER TABLE dbo.App02EventProgress DROP CONSTRAINT FK_App02Progress_ActiveCase;
             DROP TABLE dbo.App02CorrectionLink;
+            DROP TABLE dbo.App02EventStatusHistory;
             DROP TABLE dbo.App02CaseDisposition;
             DROP TABLE dbo.App02ExceptionCase;
             DROP TABLE dbo.App02SyntheticConsumerInbox;
