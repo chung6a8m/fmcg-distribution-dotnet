@@ -61,6 +61,16 @@ jobs:
           TLS_KEY_FILE: /tmp/fixture.key
           VAULT_API_TOKEN_FILE: /tmp/api.token
           VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: RUNTIME-01 actual OCI process fail-closed probes (CI only)
+        run: bash scripts/Verify-App02B2CiContainers.sh
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
       - name: Record CI-only provenance (no PREPROD acceptance claim)
         if: always()
         run: |
