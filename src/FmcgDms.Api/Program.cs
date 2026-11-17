@@ -21,6 +21,7 @@ builder.Services.AddScoped<App02a3EventIntakeService>();
 builder.Services.AddScoped<App02a3ProcessingService>();
 builder.Services.AddScoped<App02a3OutboxService>();
 builder.Services.AddScoped<App02a3CaseService>();
+builder.Services.AddScoped<App02a3CorrectionService>();
 builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
@@ -219,6 +220,29 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App02a3CaseService cases, CancellationToken ct) =>
     {
         try { return Results.Ok(await cases.ApproveAsync(principal, proposalId, ct)); }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.Conflict(new { error = ex.Code });
+        }
+    });
+
+    // APP-02A.3: correction is an immutable NONPOSTING annotation only.
+    // Financial reversal is NOT authorized by this synthetic interface.
+    app02events.MapPost("/corrections/propose", async (
+        App02CorrectionProposalInput input, ClaimsPrincipal principal,
+        App02a3CorrectionService corrections, CancellationToken ct) =>
+    {
+        try { return Results.Ok(await corrections.ProposeAsync(principal, input, ct)); }
+        catch (App02InvalidEventException ex)
+        {
+            return Results.Conflict(new { error = ex.Code });
+        }
+    });
+    app02events.MapPost("/corrections/approve/{proposalId:guid}", async (
+        Guid proposalId, ClaimsPrincipal principal,
+        App02a3CorrectionService corrections, CancellationToken ct) =>
+    {
+        try { return Results.Ok(await corrections.ApproveAsync(principal, proposalId, ct)); }
         catch (App02InvalidEventException ex)
         {
             return Results.Conflict(new { error = ex.Code });
