@@ -72,10 +72,10 @@ public sealed partial class App01e2CrossCommandRaceTests
         HttpClient client, App02EventInput input)
     {
         using HttpResponseMessage response =
-            await client.PostAsJsonAsync(A3 + "intake", input);
+            await client.PostAsJsonAsync(A3 + "intake", input, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
         App02IntakeResult? result =
-            await response.Content.ReadFromJsonAsync<App02IntakeResult>();
+            await response.Content.ReadFromJsonAsync<App02IntakeResult>(TestContext.Current.CancellationToken);
         Assert.Equal("RECEIVED_COMMITTED", result?.Ack);
         return Assert.IsType<App02IntakeResult>(result);
     }
@@ -134,7 +134,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal(cReceipt, replay.ReceiptId);
         Assert.Equal("APPLIED", replay.Status);
         using (HttpResponseMessage changed = await cashier.PostAsJsonAsync(
-            A3 + "intake", c with { CountEvidenceRef = "changed-" + Id() }))
+            A3 + "intake", c with { CountEvidenceRef = "changed-" + Id() },
+            TestContext.Current.CancellationToken))
             Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
         Assert.Equal(1, db.ExecuteScalar<int>("""
             SELECT COUNT(*) FROM dbo.CashHandoverAcceptance
@@ -211,18 +212,20 @@ public sealed partial class App01e2CrossCommandRaceTests
         using (HttpResponseMessage proposed = await maker.PostAsJsonAsync(
             A3 + "cases/propose", new App02CaseProposalInput(
                 caseId, "APPROVED_RESUME", "P_ARRIVED",
-                "CASE-COUNT-" + Id(), "Revalidate exact named P and count")))
+                "CASE-COUNT-" + Id(), "Revalidate exact named P and count"),
+            TestContext.Current.CancellationToken))
         {
             Assert.Equal(HttpStatusCode.OK, proposed.StatusCode);
-            var proposal = await proposed.Content.ReadFromJsonAsync<App02CaseProposalOutcome>();
+            var proposal = await proposed.Content.ReadFromJsonAsync<App02CaseProposalOutcome>(TestContext.Current.CancellationToken);
             Guid proposalId = Assert.IsType<App02CaseProposalOutcome>(proposal).ProposalId;
             using HttpResponseMessage denied = await maker.PostAsync(
-                A3 + "cases/approve/" + proposalId, content: null);
+                A3 + "cases/approve/" + proposalId, content: null,
+                cancellationToken: TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             using HttpResponseMessage approved = await checker.PostAsync(
                 A3 + "cases/approve/" + proposalId, content: null);
             Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
-            var disposition = await approved.Content.ReadFromJsonAsync<App02CaseApprovalOutcome>();
+            var disposition = await approved.Content.ReadFromJsonAsync<App02CaseApprovalOutcome>(TestContext.Current.CancellationToken);
             Assert.Equal("RECEIVED", disposition?.Status);
         }
         Assert.Equal("APPLIED", await worker.ProcessAsync(
@@ -274,7 +277,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             tenant, receipt2, DateTimeOffset.UtcNow,
             TestContext.Current.CancellationToken));
         using HttpResponseMessage denied = await cashier.PostAsJsonAsync(A3 + "intake",
-            c2 with { EventId = "new-" + Id() });
+            c2 with { EventId = "new-" + Id() }, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         Assert.Equal(0, db.ExecuteScalar<int>("""
             SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
