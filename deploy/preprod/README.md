@@ -34,3 +34,32 @@ Expected readiness payload is \`{"state":"foundation_ready","admission":"NO_GO"}
 Run the *operator-owned* \`scripts/Collect-App02B2PreprodEvidence.sh\` for bounded mechanical probes, then attach the independent firewall/network/Vault-audit witnesses to a **nonpublic**, redacted evidence store with immutable SHA-256, environment/host ID, actual run/test IDs, final source/image digests, operator and independent reviewer names. Never check private operational evidence into this public repo.
 
 If actual deployment, external observer, policy-403 or independent review is missing, mark \`PREPROD_RUNTIME_NOT_VERIFIED\` and the corresponding gate **BLOCKED/NOT_RUN**, never \`PREPROD_RUNTIME_VERIFIED\`. GitHub-hosted CI proves only a synthetic engineering exercise, not a physical PREPROD deployment.
+
+
+## GitHub Actions: disposable Linux PREPROD fixture (CI ONLY)
+
+The workflow .github/workflows/app02b2-runtime.yml now starts real containers using
+deploy/preprod/compose.yaml plus deploy/preprod/compose.ci.yaml. Its
+scripts/Run-App02B2CiPreprod.sh provisions isolated hashicorp/vault:1.21.4
+in **server mode (not Vault -dev)**, with TLS verified against a one-day CI root CA,
+in-memory storage, one-share CI unseal, KV-v2, real role-scoped ACL policies,
+Vault audit, and separate short-lived API/Worker tokens. Caddy publishes only
+127.0.0.1:443 on Ubuntu runner; API, Worker and Vault have no host ports.
+The API remains FOUNDATION_ONLY / NO_GO.
+
+The CI test exercises live 200/403 Vault permissions, proxy/direct-port denial,
+forged forwarded headers, TLS trust rejection, health-only route allowlisting,
+in-place token rotation, token revocation (API readiness 503 and Worker stop),
+and Vault outage. It checks real Vault audit events inside the runner and
+exports only redacted JSON plus SHA-256 to the app02b2-ci-only Actions
+artifact. GitHub CI tears down containers and volumes and destroys ephemeral
+root/unseal/workload tokens and private TLS keys in an unconditional cleanup
+step. No repository secrets or persistent public server.
+
+This CI stack is deliberately not production-grade Vault hosting: inmem storage,
+one-share unseal, runner-local generated CA, temporary audit and tokens, and
+GitHub-hosted firewalls are CI fixtures. It does NOT implement real SQL Server,
+Tenant Registry/revocation authority, Control Plane, off-host backups, external
+internet-origin scan, or an independent approved Linux VPS/VM. A green CI is
+EPHEMERAL_CI_RUNTIME_TESTED, not PREPROD_RUNTIME_VERIFIED. Actual host and
+independent security review evidence described earlier remain mandatory.

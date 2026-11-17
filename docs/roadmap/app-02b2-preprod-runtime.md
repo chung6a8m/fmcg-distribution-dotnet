@@ -21,6 +21,8 @@
 | RUNTIME-02.B | API token→Worker path, Worker token→API path, revoked identity | Vault HTTP 403, Vault audit trace, no fallback; 503/Worker stop | PREPROD NOT_RUN |
 | RUNTIME-02.C | Attempt Control Plane or synthetic business/diagnostics access | 404, no SQL effect or stateful business endpoint | PREPROD NOT_RUN |
 
+**Expanded live CI evidence (not actual PREPROD):** GitHub Actions starts an isolated Compose Vault server with ephemeral TLS CA, KV-v2 policies and Vault audit, then runs actual HTTP positive/negative access, rotation/revocation, Worker stop, proxy and outage checks. Redacted APP-02B2-CI-EPHEMERAL-PREPROD.json and SHA-256 artifacts bind to run ID and source SHA, without keys, tokens or raw Vault audit. Result can be EPHEMERAL_CI_RUNTIME_TESTED only, never actual PREPROD_RUNTIME_VERIFIED, independent external scan or final G-B gate. See [CI operator notes](../../deploy/preprod/README.md).
+
 **CI is a different evidence class**: \`tests/FmcgDms.Preprod.Runtime.Tests\` uses fake Vault handler and synthetic guard inputs; \`tools/verify_preprod_runtime.py\` parses Compose network/secret policies; GitHub Actions builds both OCI images. This is \`CI_ENGINEERING_ONLY\` and **cannot** assert any live PREPROD RUNTIME case PASS or verify a tenant DB.
 
 ## Actual PREPROD evidence required before exit
