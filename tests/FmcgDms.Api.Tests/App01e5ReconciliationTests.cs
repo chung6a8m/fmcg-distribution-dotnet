@@ -97,7 +97,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal("SYNTHETIC_UNITLESS", oracle.GetProperty("unit").GetString());
         Assert.False(oracle.GetProperty("invoiceEligible").GetBoolean());
         Assert.Equal(E5Columns, oracle.GetProperty("cols")
-            .EnumerateArray().Select(x => x.GetString()).ToArray());
+            .EnumerateArray().Select(x => x.GetString()!).ToArray());
         JsonElement[][] rows = oracle.GetProperty("steps").EnumerateArray()
             .Select(x => x.EnumerateArray().Select(v => v.Clone()).ToArray()).ToArray();
         Assert.Equal(7, rows.Length);
@@ -357,9 +357,9 @@ public sealed partial class App01e2CrossCommandRaceTests
         var cells = new List<E5Cell>(91);
         string? failure = null;
         string? finalReplaySha = null;
-        string? otherTenant = tenant == "tenant-a" ? "tenant-b" : "tenant-a";
+        string otherTenant = tenant == "tenant-a" ? "tenant-b" : "tenant-a";
         string? rejectedId = null;
-        Scene? scene = null;
+        Scene scene;
         try
         {
             using var factory = fixture.CreateFactory();
