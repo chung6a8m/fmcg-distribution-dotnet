@@ -532,8 +532,31 @@ public sealed class App02a2DurableEventsSchema : Migration
                             JOIN dbo.App02OutboxMessage o ON o.TenantId=a.TenantId
                                 AND o.CReceiptId=a.CReceiptId
                                 AND o.MessageId=a.MessageId
-                            WHERE a.TenantId=i.TenantId AND a.CReceiptId=i.ReceiptId))
-                    THROW 51146, 'APP02 C APPLIED requires acceptance and outbox', 1;
+                            JOIN dbo.App02OutboxDelivery delivery
+                                ON delivery.TenantId=o.TenantId
+                                AND delivery.MessageId=o.MessageId
+                            JOIN dbo.CashHandoverAcceptance ca
+                                ON ca.TenantId=a.TenantId
+                                AND ca.Id=a.AcceptanceId
+                            JOIN dbo.LedgerEffect custody
+                                ON custody.TenantId=ca.TenantId
+                                AND custody.BusinessSourceLineId=ca.SourceLineId
+                                AND custody.EffectKey=N'CUSTODY-OUT'
+                                AND custody.LedgerKind=N'CUSTODY'
+                                AND custody.AmountDelta=-ca.AcceptedAmount
+                                AND custody.QuantityDelta=0
+                            JOIN dbo.LedgerEffect fund
+                                ON fund.TenantId=ca.TenantId
+                                AND fund.BusinessSourceLineId=ca.SourceLineId
+                                AND fund.EffectKey=N'FUND-IN'
+                                AND fund.LedgerKind=N'FUND'
+                                AND fund.AmountDelta=ca.AcceptedAmount
+                                AND fund.QuantityDelta=0
+                            WHERE a.TenantId=i.TenantId AND a.CReceiptId=i.ReceiptId
+                                AND (SELECT COUNT(*) FROM dbo.LedgerEffect e
+                                     WHERE e.TenantId=ca.TenantId
+                                       AND e.BusinessSourceLineId=ca.SourceLineId)=2))
+                    THROW 51146, 'APP02 C APPLIED requires balanced APP01D ledger, acceptance and outbox', 1;
             END;
             """);
         Execute.Sql("""
