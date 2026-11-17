@@ -138,6 +138,11 @@ expect "$(vault_http_status api preprod/data/runtime/worker)" 403 VAULT_API_PEER
 expect "$(vault_http_status worker preprod/data/runtime/api)" 403 VAULT_WORKER_PEER_DENY
 expect "$(vault_http_status api sys/policies/acl)" 403 VAULT_API_ADMIN_DENY
 
+# The edge image also runs as a nonroot account; permit only its real GID
+# to read the disposable TLS leaf key instead of chmod 0644.
+caddy_gid="$(docker run --rm --entrypoint id caddy:2.10.2-alpine -g)"
+sudo chgrp "$caddy_gid" "$tls/edge.key"
+chmod 0640 "$tls/edge.key"
 # Compose base images were previously built; overlay mounts ephemeral trust root.
 dc up -d --no-build api worker edge >/dev/null
 https_status() {
