@@ -4,6 +4,24 @@ Set-StrictMode -Version Latest
 $fixturePath = 'tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json'
 $expected = Get-Content $fixturePath -Raw | ConvertFrom-Json
 $expectedHash = (Get-FileHash $fixturePath -Algorithm SHA256).Hash
+# Approved independent numeric oracle: changing the fixture requires review
+# and an explicit new frozen hash, not a silently recomputed self-certification.
+$frozenFixtureHash = '8A38FEF7EA95156A4C0DD6282BE99F47840B0FAD8086813151AF70B0D9E7E7A1'
+if ($expectedHash -cne $frozenFixtureHash) {
+    throw "A4 independently frozen expected fixture SHA drift: $expectedHash"
+}
+function Test-A4Cell {
+    param($Cell, [string]$Metric, [decimal]$Expected)
+    try {
+        $actual = [decimal]$Cell.Actual
+        $difference = [decimal]$Cell.Difference
+        return ($Cell.Metric -ceq $Metric -and $Cell.Match -eq $true -and
+            [decimal]$Cell.Expected -eq $Expected -and
+            $actual -eq $Expected -and
+            $difference -eq ($actual - $Expected) -and $difference -eq 0)
+    }
+    catch { return $false }
+}
 $columns = @('PReceipts','CReceipts','Pending','Applied','CaseState','Rejected',
 'Resolutions','Applications','Acceptances','BoundSources','CustodyLegs',
 'CustodyAmount','FundLegs','FundAmount','OfferEffects','Outbox','Consumers',
@@ -27,6 +45,7 @@ if ($files.Count -ne 24) { throw "Expected 24 A4 SQL reports, found $($files.Cou
 $groupCount = 0
 $checkpointCount = 0
 $cellCount = 0
+$negativeSentinels = 0
 $physical = @()
 foreach ($tenant in @('tenant-a','tenant-b')) {
     $slot = if ($tenant -ceq 'tenant-a') {'A'} else {'B'}
@@ -68,14 +87,47 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
             $state = [string]$expected.groups.PSObject.Properties[$group].Value.$phase
             $want = @($expected.states.PSObject.Properties[$state].Value)
             if ($want.Count -ne 24) { throw "A4 missing frozen state $state" }
+            # Verify actual persisted lifecycle is not an invented/empty history.
+            # C receipts may have earlier states; every current nonzero
+            # terminal/pending count MUST have a matching history transition.
+            $history = @($s.SqlStatusHistory)
+            $legal = @('RECEIVED','PENDING_DEPENDENCY','APPLIED','CASE','REJECTED')
+            foreach ($status in $history) {
+                if ($legal -cnotcontains $status) {
+                    throw "A4 illegal persisted history status: $name / $phase / $status"
+                }
+            }
+            foreach ($pair in @(@('PENDING_DEPENDENCY',2),@('APPLIED',3),@('CASE',4),@('REJECTED',5))) {
+                if ([decimal]$want[[int]$pair[1]] -gt 0 -and
+                    $history -cnotcontains [string]$pair[0]) {
+                    throw "A4 missing required persisted history: $name / $phase / $($pair[0])"
+                }
+            }
             for ($j = 0; $j -lt 24; $j++) {
                 $cell = $s.Cells[$j]
                 $e = [decimal]$want[$j]
-                $a = [decimal]$cell.Actual
-                if ($cell.Metric -cne $columns[$j] -or !$cell.Match -or
-                    [decimal]$cell.Expected -ne $e -or $a -ne $e -or
-                    [decimal]$cell.Difference -ne ($a - $e) -or [decimal]$cell.Difference -ne 0) {
+                if (!(Test-A4Cell $cell $columns[$j] $e)) {
                     throw "A4 expected/actual/diff mismatch: $name / $phase / $($columns[$j])"
+                }
+                # Mutation sentinels exercise the SAME validator used for
+                # normal evidence: each corrupted field must be rejected.
+                if ($tenant -ceq 'tenant-a' -and $group -ceq 'A11-01' -and
+                    $i -eq 0 -and $j -eq 0) {
+                    $original = $cell | ConvertTo-Json -Depth 4 -Compress
+                    foreach ($field in @('Metric','Expected','Actual','Difference','Match')) {
+                        $mutant = $original | ConvertFrom-Json
+                        switch ($field) {
+                            'Metric' { $mutant.Metric = '__MUTATED__' }
+                            'Expected' { $mutant.Expected = [decimal]$mutant.Expected + 1 }
+                            'Actual' { $mutant.Actual = [decimal]$mutant.Actual + 1 }
+                            'Difference' { $mutant.Difference = [decimal]$mutant.Difference + 1 }
+                            'Match' { $mutant.Match = $false }
+                        }
+                        if (Test-A4Cell $mutant $columns[$j] $e) {
+                            throw "A4 validator accepted tampered $field witness"
+                        }
+                        $negativeSentinels++
+                    }
                 }
                 $cellCount++
             }
@@ -89,7 +141,8 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
 if ($physical[0] -ceq $physical[1] -or
     $physical[0].Substring(0, $physical[0].Length - 1) -cne
       $physical[1].Substring(0, $physical[1].Length - 1) -or
-    $groupCount -ne 24 -or $checkpointCount -ne 60 -or $cellCount -ne 1440) {
+    $groupCount -ne 24 -or $checkpointCount -ne 60 -or $cellCount -ne 1440 -or
+    $negativeSentinels -ne 5) {
     throw "A4 requires 24 groups, 60 checkpoints and 1440 physical SQL cells, observed $groupCount/$checkpointCount/$cellCount"
 }
-Write-Host "APP-02A.4 PASS: 24/24 per-tenant groups, 60/60 checkpoints, 1440/1440 SQL cells, peer full-table digest stable, TestRunId=$id, source HEAD=$source"
+Write-Host "APP-02A.4 PASS: 24/24 per-tenant groups, 60/60 checkpoints, 1440/1440 SQL cells, peer full-table digest stable, 5/5 validator mutations rejected, TestRunId=$id, source HEAD=$source"
