@@ -56,14 +56,17 @@ issue_cert edge "$PREPROD_FQDN" ""
 issue_cert vault vault.private.example.invalid ",IP:127.0.0.1"
 chmod 0644 "$tls/ca.crt" "$tls/edge.crt" "$tls/vault.crt"
 chmod 0600 "$tls/ca.key" "$tls/edge.key"
-# Vault image uses a non-root vault user (group 1000). CI-only leaf key:
-sudo chgrp 1000 "$tls/vault.key"
-chmod 0640 "$tls/vault.key"
+# Keep TLS private key owner-only until the actual image's runtime GID is known.
+chmod 0600 "$tls/vault.key"
 
 # Exercise ordinary Vault server mode: actual init/unseal, KV-v2, ACL, audit.
 # inmem storage and 1/1 unseal are CI-only fixtures, never a hosting pattern.
 dc config --quiet
 dc pull vault >/dev/null
+# Match the real Vault image's nonroot primary GID, not an assumed UID/GID.
+vault_gid="$(docker run --rm --entrypoint id hashicorp/vault:1.21.4 -g)"
+sudo chgrp "$vault_gid" "$tls/vault.key"
+chmod 0640 "$tls/vault.key"
 dc up -d vault >/dev/null
 init_json=""
 for attempt in $(seq 1 30); do
