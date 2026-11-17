@@ -497,4 +497,130 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal(peerBefore, peer.ExecuteScalar<int>(
             "SELECT COUNT(*) FROM dbo.App02EventReceipt"));
     }
+
+    [Fact]
+    public async Task App02a3_six_SQL_rollback_retries_end_in_durable_CASE_without_partial_posting()
+    {
+        const string tenant = "tenant-b";
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        var scene = await SetupA3(tenant, setup, sales);
+        var p = NewPEvent(scene.Scene.Trip, scene.Offer);
+        var c = NewCEvent(scene.Scene.Trip, p, scene.Count);
+        await IntakeA3(sales, p);
+        Guid receipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        using var db = Open(tenant);
+        try
+        {
+            db.Execute("""
+                EXEC(N'
+                  CREATE TRIGGER dbo.APP02A3_TestFaultSix ON dbo.LedgerEffect AFTER INSERT AS
+                  BEGIN
+                    IF EXISTS (
+                      SELECT 1 FROM inserted i
+                      JOIN dbo.BusinessSourceLine sl ON sl.TenantId=i.TenantId
+                        AND sl.Id=i.BusinessSourceLineId
+                      JOIN dbo.BusinessSource bs ON bs.TenantId=sl.TenantId
+                        AND bs.Id=sl.BusinessSourceId
+                      WHERE bs.SourceKind=N''CASH_HANDOVER_ACCEPT''
+                        AND bs.SourceNumber LIKE N''APP02:%'')
+                      THROW 51224, ''APP02 synthetic six-retry fault'', 1;
+                  END
+                ')
+                """);
+            DateTimeOffset t = DateTimeOffset.UtcNow;
+            int[] minutes = [0, 1, 3, 7, 15, 31];
+            for (int i = 1; i <= 6; i++)
+            {
+                string state = await worker.ProcessAsync(tenant, receipt,
+                    t.AddMinutes(minutes[i - 1]), TestContext.Current.CancellationToken);
+                Assert.Equal(i == 6 ? "CASE" : "RETRY_SCHEDULED", state);
+            }
+            var progress = db.QuerySingle<(string Status, byte Retries, string Reason)>("""
+                SELECT Status,TechnicalRetryCount,ReasonCode
+                FROM dbo.App02EventProgress
+                WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt });
+            Assert.Equal("CASE", progress.Status);
+            Assert.Equal(6, progress.Retries);
+            Assert.Equal("TECHNICAL_RETRIES_EXHAUSTED", progress.Reason);
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+                WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt }));
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02OutboxMessage
+                WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt }));
+        }
+        finally
+        {
+            db.Execute("DROP TRIGGER IF EXISTS dbo.APP02A3_TestFaultSix");
+        }
+    }
+
+    [Fact]
+    public async Task App02a3_six_consumer_failures_end_in_delivery_CASE_without_ACK()
+    {
+        const string tenant = "tenant-a";
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        var scene = await SetupA3(tenant, setup, sales);
+        var p = NewPEvent(scene.Scene.Trip, scene.Offer);
+        var c = NewCEvent(scene.Scene.Trip, p, scene.Count);
+        await IntakeA3(sales, p);
+        Guid receipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        var outbound = scope.ServiceProvider.GetRequiredService<App02a3OutboxService>();
+        Assert.Equal("APPLIED", await worker.ProcessAsync(tenant, receipt,
+            DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        using var db = Open(tenant);
+        Guid message = db.QuerySingle<Guid>("""
+            SELECT MessageId FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt });
+        try
+        {
+            db.Execute("""
+                EXEC(N'
+                  CREATE TRIGGER dbo.APP02A3_TestConsumerFaultSix
+                  ON dbo.App02SyntheticConsumerInbox AFTER INSERT AS
+                  BEGIN
+                    THROW 51225, ''APP02 synthetic consumer unavailable'', 1;
+                  END
+                ')
+                """);
+            DateTimeOffset t = DateTimeOffset.UtcNow;
+            int[] minutes = [0, 1, 3, 7, 15, 31];
+            for (int i = 1; i <= 6; i++)
+            {
+                string state = await outbound.DispatchOneAsync(
+                    tenant, t.AddMinutes(minutes[i - 1]),
+                    stopAfterConsumerCommit: false,
+                    TestContext.Current.CancellationToken, onlyMessageId: message);
+                Assert.Equal(i == 6 ? "CASE" : "RETRY_SCHEDULED", state);
+            }
+            var delivery = db.QuerySingle<(string Status, byte Attempts)>("""
+                SELECT Status,AttemptCount FROM dbo.App02OutboxDelivery
+                WHERE TenantId=@Tenant AND MessageId=@Message
+                """, new { Tenant = tenant, Message = message });
+            Assert.Equal("CASE", delivery.Status);
+            Assert.Equal(6, delivery.Attempts);
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02SyntheticConsumerInbox
+                WHERE TenantId=@Tenant AND MessageId=@Message
+                """, new { Tenant = tenant, Message = message }));
+        }
+        finally
+        {
+            db.Execute("DROP TRIGGER IF EXISTS dbo.APP02A3_TestConsumerFaultSix");
+        }
+    }
 }
