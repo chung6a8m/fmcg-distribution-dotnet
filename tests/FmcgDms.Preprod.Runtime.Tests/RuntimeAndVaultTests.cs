@@ -70,7 +70,7 @@ public sealed class RuntimeAndVaultTests
         try
         {
             // One token is deliberately denied by Vault; no secret value in exception.
-            await File.WriteAllTextAsync(file, new string('x', 24));
+            await File.WriteAllTextAsync(file, new string('x', 24), TestContext.Current.CancellationToken);
             var config = Settings(changes: new() { ["Vault:TokenFile"] = file });
             var client = new VaultAdmissionClient(config, "api", new FakeVaultHandler(req =>
             {
@@ -86,9 +86,9 @@ public sealed class RuntimeAndVaultTests
                 (await Assert.ThrowsAsync<RuntimeDeniedException>(() =>
                     client.ValidateAsync(TestContext.Current.CancellationToken))).ReasonCode);
 
-            await File.WriteAllTextAsync(file, new string('y', 24));
+            await File.WriteAllTextAsync(file, new string('y', 24), TestContext.Current.CancellationToken);
             await client.ValidateAsync(TestContext.Current.CancellationToken);
-            await File.WriteAllTextAsync(file, new string('z', 24));
+            await File.WriteAllTextAsync(file, new string('z', 24), TestContext.Current.CancellationToken);
             Assert.Equal("VAULT_MARKER_INVALID",
                 (await Assert.ThrowsAsync<RuntimeDeniedException>(() =>
                     client.ValidateAsync(TestContext.Current.CancellationToken))).ReasonCode);
@@ -103,7 +103,7 @@ public sealed class RuntimeAndVaultTests
         var file = Path.GetTempFileName();
         try
         {
-            await File.WriteAllTextAsync(file, new string('k', 24));
+            await File.WriteAllTextAsync(file, new string('k', 24), TestContext.Current.CancellationToken);
             var config = Settings(changes: new() { ["Vault:TokenFile"] = file });
             using var client = new VaultAdmissionClient(config, "api",
                 new FakeVaultHandler(_ => throw new HttpRequestException("secret-containing-inner-message")));
