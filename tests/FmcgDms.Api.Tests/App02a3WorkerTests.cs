@@ -93,6 +93,12 @@ public sealed partial class App01e2CrossCommandRaceTests
         var s = await SetupA3(tenant, setup, sales);
         App02EventInput p = NewPEvent(s.Scene.Trip, s.Offer);
         App02EventInput c = NewCEvent(s.Scene.Trip, p, s.Count);
+        // An otherwise-valid signed Sales JWT cannot impersonate a second
+        // ProducerId; client JSON never selects producer/actor authority.
+        using (HttpResponseMessage spoof = await sales.PostAsJsonAsync(
+            A3 + "intake", p with { ProducerId = "forged-" + Id() },
+            TestContext.Current.CancellationToken))
+            Assert.Equal(HttpStatusCode.Forbidden, spoof.StatusCode);
         var pAck = await IntakeA3(sales, p);
         var cAck = await IntakeA3(cashier, c);
         Assert.Equal("APPLIED", pAck.Status); // P is nonposting offer event.
