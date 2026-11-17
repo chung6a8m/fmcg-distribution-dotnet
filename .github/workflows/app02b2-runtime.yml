@@ -8,7 +8,7 @@ permissions:
 jobs:
   runtime-foundation:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
@@ -30,6 +30,8 @@ jobs:
       - name: Lint operator probe and validate Caddy TLS routing (CI fixture only)
         run: |
           bash -n scripts/Collect-App02B2PreprodEvidence.sh
+          bash -n scripts/Run-App02B2CiPreprod.sh
+          python3 -m py_compile scripts/Check-App02B2CiVaultAudit.py
           python3 -m py_compile tools/verify_preprod_runtime.py
           mkdir -p "$RUNNER_TEMP/app02b2-caddy"
           openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
@@ -71,6 +73,27 @@ jobs:
           TLS_KEY_FILE: /tmp/fixture.key
           VAULT_API_TOKEN_FILE: /tmp/api.token
           VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: RUNTIME-01/02 live ephemeral Linux Compose + real TLS Vault ACL/audit
+        shell: bash
+        env:
+          B2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/Run-App02B2CiPreprod.sh
+      - name: Tear down temporary CI Vault and destroy root/unseal/token material
+        if: always()
+        shell: bash
+        run: |
+          export PREPROD_FQDN=preprod.example.invalid
+          export PREPROD_BIND_IP=127.0.0.1
+          export VAULT_ADDR=https://vault.private.example.invalid:8200
+          export TLS_CERT_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/edge.crt"
+          export TLS_KEY_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/edge.key"
+          export VAULT_API_TOKEN_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tokens/api.token"
+          export VAULT_WORKER_TOKEN_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tokens/worker.token"
+          export CI_VAULT_CERT_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/vault.crt"
+          export CI_VAULT_KEY_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/vault.key"
+          export CI_ROOT_CA_FILE="$RUNNER_TEMP/app02b2-ci-preprod/tls/ca.crt"
+          docker compose -f deploy/preprod/compose.yaml -f deploy/preprod/compose.ci.yaml down --volumes --remove-orphans --timeout 5 || true
+          sudo rm -rf "$RUNNER_TEMP/app02b2-ci-preprod"
       - name: Record CI-only provenance (no PREPROD acceptance claim)
         if: always()
         run: |
