@@ -8,11 +8,12 @@ APP-02A.4 is SYNTHETIC_NONPRODUCTION only; it changes neither worker/schema nor 
 
 ## Frozen independent expected SQL matrix
 
-- Fixed versioned fixture: [app02a4-expected.json](../../tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json), SHA-256 recorded in reports and rechecked by an independent validator. Decimal amount 200.0000 and expected counts/states frozen without consulting implementation API response.
+- Fixed versioned fixture: [app02a4-expected.json](../../tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json), SHA-256 recorded in reports and rechecked by an independent validator. Decimal amount 200.0000 and expected counts/states frozen without consulting implementation API response. The PowerShell verifier additionally pins independent oracle SHA-256 `8A38FEF7EA95156A4C0DD6282BE99F47840B0FAD8086813151AF70B0D9E7E7A1`; any fixture change requires explicit independent reapproval.
 - [Physical SQL observer](../../tests/FmcgDms.Api.Tests/App02a4IndependentSqlOracle.cs) separately queries persisted P/C receipts, progress, exact P→C reference, APP-01D acceptance/source, two ledger effects, outbox/consumer/delivery ACK, retry and CASE/disposition/correction lineage, orphan/invalid hash/ACK sentinels, status history, and full user-table SQL fingerprint.
 - 24 named independent metric cells per checkpoint: Expected, Actual, signed Difference = Actual - Expected, Match. There are 30 checkpoints per tenant = 720 cells per tenant, **1440 across two tenant databases**.
 - Each of 24 tests writes a tenant+group-named report to TestResults/APP-02A4 even after a fault. Every report includes group/tenant, SQL DB name, TestRunId, final source HEAD SHA, workflow SHA, fixture SHA, SQL status history, full SQL digest and opposite tenant physical DB SHA before/after.
-- [Verify-App02A4.ps1](../../scripts/Verify-App02A4.ps1) independently validates all cells and signed differences against the checked-in fixture, 24 complete report files, exactly 60 checkpoints, SQL names/nonce boundaries, source SHA, and zero peer writes. C# test-reported PASS alone does not qualify.
+- [Verify-App02A4.ps1](../../scripts/Verify-App02A4.ps1) independently validates all cells and signed differences against the checked-in and separately hash-pinned fixture, 24 complete report files, exactly 60 checkpoints, SQL names/nonce boundaries, source SHA, legal SQL status history and zero peer writes. It executes five in-memory mutation negatives against the actual cell validator (Metric/Expected/Actual/Difference/Match); a tampered value must not be accepted. C# test-reported PASS alone does not qualify.
+- The SQL observer also recomputes P/C receipt hashes while pending and verifies, for every applied C, the independently bound P identity/Trip/offer/amount, C reference/actor/count and expected outbox message kind. These link checks contribute to the `BrokenLinks=0` oracle cell.
 
 ## A11 group-by-group evidence (two tenants each)
 
@@ -20,7 +21,7 @@ APP-02A.4 is SYNTHETIC_NONPRODUCTION only; it changes neither worker/schema nor 
 |---|---|---|
 | A11-01 | applied → ack | P offer nonposting, C APP-01D source with two 200-unit legs, durable outbox/inbox/ACK |
 | A11-02 | pending → applied | C before correctly named P, zero premature source/ledger/outbox |
-| A11-03 | pending → case | Absent/foreign P opaque, malformed input rejected, owned 24h CASE without phantom offer |
+| A11-03 | pending → case | Real committed P in the opposite physical tenant remains opaque; malformed input rejected and 24h CASE without phantom local offer |
 | A11-04 | applied → replay → second-c | Same key/hash does not mutate SQL, second C for same P rejected without extra acceptance |
 | A11-05 | applied → conflict | Changed canonical content under same event key HTTP 409, full SQL digest unchanged |
 | A11-06 | compete | Two concurrent C/worker calls, one acceptance/outbox and one rejected |
@@ -38,7 +39,7 @@ Groups are scenario categories, not merely 12 nominal PASS labels. Exact indepen
 1. Windows GitHub Actions pinned .NET SDK 10.0.404, Node 26 LTS, two nonce-marked scratch LocalDBs, migrations; no skipped tests; minimum **296** .NET tests (historical 272 + 24 A4 tests).
 2. Both tenants: **12/12 A11 groups each**, **30/30 checkpoints each**, **720/720 SQL metric cells each**; no negative sentinel, broken source/ledger/outbox lineage, or opposite tenant full-table mutation; new oracle artifact + TestRunId bound to exact PR source HEAD and workflow SHA.
 3. Preserve historical APP-01E.5 182/182 cells and 518/518 equations, prior APP-01B/C/D/APP-01E regressions, auth, immutable business baseline, frontend/PWA and Playwright gates.
-4. Independent review of source, numeric fixtures, SQL queries, mutation sentinels and validator; fix findings and reverify on **final HEAD**. Never carry over an earlier green run after changing the source.
+4. Independent review of source, numeric fixtures, SQL queries, mutation sentinels and validator, including a durable opposite-tenant foreign P and five mutated cell-field negatives; fix findings and reverify on **final HEAD**. Never carry over an earlier green run after changing the source.
 5. Only after all previous gates pass may AC11_SYNTHETIC_VERIFIED be recorded (strictly synthetic). Actual EV-08 and five production P0 still NOT_VERIFIED; APP-02B–E, production integration and pilot remain NOT_AUTHORIZED.
 
 **Closeout evidence pending:** final source commit SHA, CI run+attempt, 24 report artifacts, database nonce names, independent reviewer verdict and explicit unchanged business lock.
