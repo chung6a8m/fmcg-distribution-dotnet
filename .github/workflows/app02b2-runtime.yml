@@ -1,0 +1,67 @@
+name: APP-02B.2 PREPROD runtime CI (NOT real PREPROD)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  runtime-foundation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        run: test "$(dotnet --version)" = '10.0.404'
+      - name: Build isolated PREPROD API and Worker
+        run: |
+          dotnet restore src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release --no-restore
+          dotnet restore src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release --no-restore
+      - name: RUNTIME-01/RUNTIME-02 negative tests (in CI; not PREPROD)
+        run: |
+          dotnet test tests/FmcgDms.Preprod.Runtime.Tests/FmcgDms.Preprod.Runtime.Tests.csproj -c Release -- --report-trx
+      - name: Verify private network and workload secret boundaries
+        run: python3 tools/verify_preprod_runtime.py
+      - name: Compile Docker API image
+        run: docker compose -f deploy/preprod/compose.yaml build api
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: Compile Docker Worker image
+        run: docker compose -f deploy/preprod/compose.yaml build worker
+        env:
+          PREPROD_FQDN: preprod.example.invalid
+          PREPROD_BIND_IP: 127.0.0.1
+          VAULT_ADDR: https://vault.private.example.invalid:8200
+          TLS_CERT_FILE: /tmp/fixture.crt
+          TLS_KEY_FILE: /tmp/fixture.key
+          VAULT_API_TOKEN_FILE: /tmp/api.token
+          VAULT_WORKER_TOKEN_FILE: /tmp/worker.token
+      - name: Record CI-only provenance (no PREPROD acceptance claim)
+        if: always()
+        run: |
+          mkdir -p TestResults
+          printf "TestRunId=app02b2-ci-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nRunUrl=https://github.com/%s/actions/runs/%s\nEnvironment=GITHUB_HOSTED_CI_NOT_PREPROD\n" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "${{ github.event.pull_request.head.sha || github.sha }}" \
+            "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            > TestResults/APP-02B2-CI-ONLY.txt
+      - name: Upload CI-only test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b2-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Runtime.Tests/TestResults/
+          if-no-files-found: warn
