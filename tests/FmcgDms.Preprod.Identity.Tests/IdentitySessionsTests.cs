@@ -215,7 +215,7 @@ public sealed class IdentitySessionsTests
         Assert.Contains("; secure", cleared);
         Assert.Contains("; httponly", cleared);
         Assert.Contains("; samesite=strict", cleared);
-        Assert.Contains("max-age=0", cleared);
+        Assert.Contains("expires=", cleared); // ASP.NET Core expires the deleted cookie.
         Assert.DoesNotContain("domain=", cleared);
     }
 
