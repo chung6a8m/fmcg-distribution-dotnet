@@ -39,6 +39,8 @@ services:
       Runtime__Role: api
       Runtime__Mode: FOUNDATION_ONLY
       Runtime__Admission: NO_GO
+      Identity__Enabled: ${PREPROD_IDENTITY_ENABLED:-false}
+      Identity__Scope: AUTH_ONLY
       Runtime__TrustedProxyIp: 172.30.50.10
       Runtime__PublicHost: ${PREPROD_FQDN:?set PREPROD_FQDN}
       Vault__Address: ${VAULT_ADDR:?set VAULT_ADDR}

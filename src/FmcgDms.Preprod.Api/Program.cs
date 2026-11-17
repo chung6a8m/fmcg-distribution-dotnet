@@ -1,5 +1,7 @@
 using System.Net;
 using FmcgDms.Preprod.Runtime;
+using FmcgDms.Preprod.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,6 +20,23 @@ catch (RuntimeDeniedException denied)
     throw;
 }
 
+// Identity is independent of the synthetic API and is opt-in only after a
+// scoped Vault secret and separately provisioned control-plane DB exist.
+bool identityEnabled = builder.Configuration.GetValue<bool>("Identity:Enabled");
+if (identityEnabled)
+{
+    try
+    {
+        var identitySecrets = await VaultIdentitySecrets.ReadAsync(builder.Configuration,
+            CancellationToken.None);
+        builder.Services.AddPreprodIdentity(identitySecrets);
+    }
+    catch (IdentityStartupDeniedException denied)
+    {
+        Console.Error.WriteLine("IDENTITY_START_DENIED code=" + denied.Code);
+        throw;
+    }
+}
 var trustedProxy = IPAddress.Parse(builder.Configuration["Runtime:TrustedProxyIp"]!);
 var publicHost = builder.Configuration["Runtime:PublicHost"]!;
 builder.Services.AddSingleton(new VaultAdmissionClient(builder.Configuration, "api"));
@@ -40,6 +59,29 @@ catch (RuntimeDeniedException denied)
     throw;
 }
 
+if (identityEnabled)
+{
+    // Never auto-create/upgrade a privileged SQL database at API boot. B.4
+    // controls operator-approved provisioning and migrations; unknown schema
+    // or unavailable authority is a hard startup denial.
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PreprodIdentityDb>();
+        if (!await db.Database.CanConnectAsync())
+            throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_UNAVAILABLE");
+        var count = await db.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name IN ('AspNetUsers','PreprodLoginSessions','PreprodRefreshGrants')")
+            .SingleAsync();
+        if (count != 3)
+            throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_UNAVAILABLE");
+    }
+    catch (Exception)
+    {
+        app.Logger.LogCritical("IDENTITY_START_DENIED code=IDENTITY_SCHEMA_UNAVAILABLE");
+        throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_UNAVAILABLE");
+    }
+}
 // Check socket origin BEFORE X-Forwarded-* rewrite; a direct connection or
 // a forged header from another container is not a trusted reverse proxy.
 app.Use(async (ctx, next) =>
@@ -64,7 +106,13 @@ app.Use(async (ctx, next) =>
     await next(ctx);
 });
 
-// B.2 is intentionally NON-BUSINESS, NO_GO even when probes pass.
+if (identityEnabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.MapIdentityOnly();
+}
+// B.2 remains NON-BUSINESS, NO_GO even when probes pass.
 app.MapGet("/health/live", () => Results.Ok(new { state = "live", admission = "NO_GO" }));
 app.MapGet("/health/ready", async (VaultAdmissionClient vault, CancellationToken ct) =>
 {

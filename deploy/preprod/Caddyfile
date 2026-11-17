@@ -15,6 +15,15 @@ https://{$PREPROD_FQDN} {
             header_up X-Forwarded-For {remote_host}
         }
     }
+    @identity path /auth/login /auth/refresh /auth/logout /auth/revoke-all /auth/me
+    handle @identity {
+        reverse_proxy api:8080 {
+            header_up Host {host}
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
     handle {
         respond "Not Found" 404
     }

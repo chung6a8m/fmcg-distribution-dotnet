@@ -1,0 +1,50 @@
+name: APP-02B.3 identity and sessions (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  identity-b3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Check pinned SDK
+        run: test "$(dotnet --version)" = '10.0.404'
+      - name: Build B.3 Identity and isolated PREPROD API
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Identity.Tests/FmcgDms.Preprod.Identity.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Identity.Tests/FmcgDms.Preprod.Identity.Tests.csproj -c Release --no-restore
+          dotnet restore src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release --no-restore
+      - name: B3 JWT, rotation/reuse, revocation, Identity and Origin negatives
+        run: |
+          dotnet test tests/FmcgDms.Preprod.Identity.Tests/FmcgDms.Preprod.Identity.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Preserve B2 inert-mode runtime negatives
+        run: |
+          dotnet test tests/FmcgDms.Preprod.Runtime.Tests/FmcgDms.Preprod.Runtime.Tests.csproj -c Release -- --report-trx
+      - name: CI-only provenance
+        if: always()
+        shell: bash
+        env:
+          B3_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=app02b3-ci-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nEnvironment=GITHUB_HOSTED_CI_NOT_PREPROD\nStatus=CI_TEST_ONLY_NO_REAL_PREPROD_GATE\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$B3_SOURCE_HEAD" "$GITHUB_SHA" \
+            > TestResults/APP-02B3-CI-ONLY.txt
+      - name: Evidence (no credentials)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b3-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Identity.Tests/TestResults/
+            tests/FmcgDms.Preprod.Runtime.Tests/TestResults/
+          if-no-files-found: warn
