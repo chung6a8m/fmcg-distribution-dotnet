@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <ProjectReference Include="../FmcgDms.Preprod.Runtime/FmcgDms.Preprod.Runtime.csproj" />
+    <ProjectReference Include="../FmcgDms.Preprod.Identity/FmcgDms.Preprod.Identity.csproj" />
   </ItemGroup>
 </Project>

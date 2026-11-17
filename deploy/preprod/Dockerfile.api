@@ -2,6 +2,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0.404 AS publish
 WORKDIR /src
 COPY Directory.Build.props Directory.Packages.props global.json ./
 COPY src/FmcgDms.Preprod.Runtime/ src/FmcgDms.Preprod.Runtime/
+COPY src/FmcgDms.Preprod.Identity/ src/FmcgDms.Preprod.Identity/
 COPY src/FmcgDms.Preprod.Api/ src/FmcgDms.Preprod.Api/
 RUN dotnet restore src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj \
  && dotnet publish src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release --no-restore -o /out

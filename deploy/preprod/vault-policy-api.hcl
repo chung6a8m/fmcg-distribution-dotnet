@@ -3,3 +3,8 @@
 path "preprod/data/runtime/api" {
   capabilities = ["read"]
 }
+
+# B.3 opt-in Identity material, never granted to Worker or public edge.
+path "preprod/data/identity/api" {
+  capabilities = ["read"]
+}
