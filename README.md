@@ -27,7 +27,7 @@ APP-00B dependencies and **100% browser/PWA acceptance are complete** ([Owner de
 - Explicit Dapper SERIALIZABLE transactions implement `ReserveAStock`, `ConfirmAOrder`, `GrantBQuota` and `GrantBCredit` in one common source/command ledger.
 - Shared warehouse/SKU `StockPool` prevents A+B allocations beyond eligible synthetic opening stock; `BCreditPool` requires explicitly seeded synthetic credit capacity. No implicit stock or real credit approval, physical stock movement, delivery or AR/COGS.
 - SHA-256 canonical payload v1 and `(tenant, producer, command)` idempotency. Same payload replays the persisted outcome; changed payload returns 409 CONFLICT with zero new effects.
-- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 is now reviewed/merged; the *synthetic APP-01A increment* is verified. APP-01B..E and full AC-03 remain unverified.
+- Routes `/api/synthetic/app01a/commands/*` exist **only** when signed synthetic auth is enabled in Development/IntegrationTest and require nonce-owned, bound LocalDB. See [detailed contract](docs/roadmap/app-01a2-command-transactions.md). APP-01A.3 was reviewed/merged; the *synthetic APP-01A increment* is verified. APP-01B–E were subsequent, separately gated increments and are now synthetic-verified only within their documented scopes (see current status above); full AC-11/C→P and production/business acceptance remain unverified.
 
 ## APP-01A.3 — Audit, approval and two-tenant verification (merged PR #23)
 
