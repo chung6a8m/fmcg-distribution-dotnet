@@ -426,12 +426,17 @@ public sealed partial class App01e2CrossCommandRaceTests
                 scene.Trip, 200m);
             var offerResult = await Apply(sales, D + "offer-cash-handover",
                 offer, "CASH_HANDOVER_OFFERED");
-            Assert.Equal(stages[4].Sql.Numbers.Cells().ToArray(),
-                ReadSql(tenant, scene).Numbers.Cells().ToArray());
+            // OFFER persists one non-posting source but must not mutate any
+            // economic, physical, grant, AR or receipt dimension.
             var offerSql = ReadSql(tenant, scene);
+            var economicBeforeOffer = stages[4].Sql.Numbers.Cells();
+            var economicAfterOffer = offerSql.Numbers.Cells();
+            Assert.Equal(economicBeforeOffer["Offers"] + 1m,
+                economicAfterOffer["Offers"]);
+            economicBeforeOffer.Remove("Offers");
+            economicAfterOffer.Remove("Offers");
+            Assert.Equal(economicBeforeOffer.ToArray(), economicAfterOffer.ToArray());
             Assert.NotEqual(stages[4].Sql.LedgerSha256, offerSql.LedgerSha256);
-            Assert.Equal(stages[4].Sql.Numbers.Cells().ToArray(),
-                offerSql.Numbers.Cells().ToArray());
 
             string countRef = Id();
             using (var db = Open(tenant))
