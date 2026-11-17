@@ -139,8 +139,8 @@ public sealed class RuntimeAndVaultTests
     private static HttpResponseMessage Ok(string role) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(
-            "{\\"data\\":{\\"metadata\\":{\\"version\\":1},\\"data\\":{\\"principal\\":\\""
-            + role + "\\",\\"admission\\":\\"FOUNDATION_ONLY\\"}}}",
+            "{\"data\":{\"metadata\":{\"version\":1},\"data\":{\"principal\":\""
+            + role + "\",\"admission\":\"FOUNDATION_ONLY\"}}}",
             Encoding.UTF8, "application/json")
     };
 
