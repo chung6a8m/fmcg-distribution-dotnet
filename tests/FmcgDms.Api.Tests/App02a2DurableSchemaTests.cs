@@ -202,6 +202,11 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
         var c = NewC(A, trip, p);
         Guid pReceipt = AddReceipt(dbA, p);
         Guid cReceipt = AddReceipt(dbA, c);
+        // The exact named P must not be accepted by its own OFFER actor.
+        var selfC = c with { EventId = Id(), ActorId = p.ActorId };
+        Guid selfReceipt = AddReceipt(dbA, selfC);
+        Reject(dbA, InsertResolution,
+            Resolution(A, selfC, selfReceipt, p, pReceipt), [51136]);
         var ex = Assert.Throws<SqlException>(() =>
             AddReceipt(dbA, c with { ActorId = "cashier-02" }));
         Assert.Contains(ex.Number, new[] { 2627, 2601 }); // Kind/hash not in identity key.
@@ -270,6 +275,8 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             VALUES(@caseId,@tenant,@receipt,SYSUTCDATETIME(),
                 N'MISSING_P_24H',N'Cashier supervisor review')
             """, new { caseId, tenant = A, receipt });
+        Reject(db, DispositionInsert, DispositionArgs(caseId, "maker-01",
+            "checker-01", "APPROVED_RESUME"), [51137]); // Case not yet active.
         db.Execute("""
             UPDATE dbo.App02EventProgress SET Status=N'CASE',
                 ActiveCaseId=@caseId,ReasonCode=N'MISSING_P_24H'
@@ -338,6 +345,50 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             UPDATE dbo.App02EventStatusHistory SET StatusTo=N'APPLIED'
             WHERE TenantId=@tenant AND ReceiptId=@receipt
             """, new { tenant = A, receipt }, [51120]);
+    }
+
+    [Fact]
+    public void Case_close_requires_approved_current_disposition_and_reasoned_terminal_state()
+    {
+        using var db = Open(fixture.TenantAConnectionString);
+        Guid trip = NewTrip(db, A);
+        var p = NewP(A, trip, Guid.NewGuid(), 25m);
+        var c = NewC(A, trip, p);
+        Guid receipt = AddReceipt(db, c);
+        Guid caseId = Guid.NewGuid();
+        db.Execute("""
+            INSERT dbo.App02ExceptionCase(CaseId,TenantId,ReceiptId,AsOfUtc,
+                ReasonCode,NextAction)
+            VALUES(@caseId,@tenant,@receipt,SYSUTCDATETIME(),
+                N'MISSING_P_24H',N'Cashier supervisor review')
+            """, new { caseId, tenant = A, receipt });
+        db.Execute("""
+            UPDATE dbo.App02EventProgress SET Status=N'CASE',
+                ActiveCaseId=@caseId, ReasonCode=N'MISSING_P_24H'
+            WHERE ReceiptId=@receipt
+            """, new { receipt, caseId });
+        Reject(db, """
+            UPDATE dbo.App02EventProgress SET Status=N'REJECTED',
+                ReasonCode=N'CASE_CLOSED',NextAttemptAtUtc=NULL
+            WHERE ReceiptId=@receipt
+            """, new { receipt }, [51148]);
+        db.Execute(DispositionInsert, DispositionArgs(caseId, "maker-01",
+            "checker-01", "CLOSE"));
+        Reject(db, DispositionInsert, DispositionArgs(caseId, "maker-01",
+            "checker-01", "APPROVED_RESUME"), [2601, 2627]);
+        db.Execute("""
+            UPDATE dbo.App02EventProgress SET Status=N'REJECTED',
+                ReasonCode=N'CASE_CLOSED',NextAttemptAtUtc=NULL
+            WHERE ReceiptId=@receipt
+            """, new { receipt });
+        Assert.Equal("REJECTED", db.ExecuteScalar<string>(
+            "SELECT Status FROM dbo.App02EventProgress WHERE ReceiptId=@receipt",
+            new { receipt }));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02EventStatusHistory
+            WHERE TenantId=@tenant AND ReceiptId=@receipt
+                AND StatusFrom=N'CASE' AND StatusTo=N'REJECTED'
+            """, new { tenant = A, receipt }));
     }
 
     [Fact]
@@ -432,6 +483,26 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             UPDATE dbo.BusinessSource SET SourceNumber=N'forged'
             WHERE Id=@correction
             """, new { correction }, [51133], tx);
+        // A correction must not claim a different Trip from the original.
+        // This check runs in a distinct transaction because THROW aborts it.
+    }
+
+    [Fact]
+    public void Correction_link_cannot_cross_trip_even_with_matching_tenant()
+    {
+        using var db = Open(fixture.TenantAConnectionString);
+        using var tx = db.BeginTransaction();
+        var scene = StageAcceptance(db, tx);
+        Guid otherTrip = NewTrip(db, A, tx);
+        Guid correction = NewSource(db, A, otherTrip,
+            "CASH_HANDOVER_CORRECTION", "maker-01", tx);
+        Reject(db, """
+            INSERT dbo.App02CorrectionLink
+                (TenantId,CorrectionSourceId,OriginalAcceptanceId,
+                 MakerActorId,CheckerActorId,ReasonCode,EvidenceRef)
+            VALUES(@tenant,@correction,@original,N'maker-01',N'checker-01',
+                   N'SYNTHETIC_CORRECTION',N'APP02-SCHEMA-EVIDENCE')
+            """, new { tenant = A, correction, original = scene.Acceptance }, [51132], tx);
     }
 
     private static Guid NewTrip(SqlConnection db, string tenant,

@@ -378,6 +378,12 @@ public sealed class App02a2DurableEventsSchema : Migration
                     AND LEN(LTRIM(RTRIM(ProposedResolution)))>0)
             );
 
+            -- HOLD may precede a final disposition; competing terminal
+            -- CLOSE/RESUME decisions for the same CASE are not allowed.
+            CREATE UNIQUE INDEX UX_App02Case_FinalDecision
+                ON dbo.App02CaseDisposition(TenantId,CaseId)
+                WHERE Decision IN (N'CLOSE',N'APPROVED_RESUME');
+
             -- A correction is a NEW BusinessSource, never a rewritten original.
             -- Its independent authorization/ledger execution belongs to A.3+.
             CREATE TABLE dbo.App02CorrectionLink (
@@ -430,6 +436,21 @@ public sealed class App02a2DurableEventsSchema : Migration
         }
 
         Execute.Sql("""
+            CREATE TRIGGER dbo.TR_APP02_ResolutionActorSeparation
+            ON dbo.App02ResolvedDependency AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN dbo.App02EventReceipt c ON c.TenantId=i.TenantId
+                        AND c.ReceiptId=i.CReceiptId
+                    JOIN dbo.App02EventReceipt p ON p.TenantId=i.TenantId
+                        AND p.ReceiptId=i.PReceiptId
+                    WHERE c.ActorId=p.ActorId)
+                    THROW 51136, 'APP02 cashier C actor must differ from P offer actor', 1;
+            END;
+            """);
+        Execute.Sql("""
             CREATE TRIGGER dbo.TR_APP02_CaseKind
             ON dbo.App02ExceptionCase AFTER INSERT AS
             BEGIN
@@ -455,6 +476,18 @@ public sealed class App02a2DurableEventsSchema : Migration
                         AND r.ReceiptId=c.ReceiptId
                     WHERE i.CheckerActorId=r.ActorId)
                     THROW 51131, 'APP02 Checker must differ from C actor', 1;
+                -- A disposition must not be pre-authorized or attached to a
+                -- stale/superseded case that is not currently active.
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN dbo.App02ExceptionCase c ON c.TenantId=i.TenantId
+                        AND c.CaseId=i.CaseId
+                    LEFT JOIN dbo.App02EventProgress p ON p.TenantId=c.TenantId
+                        AND p.ReceiptId=c.ReceiptId
+                    WHERE p.Status IS NULL OR p.Status<>N'CASE'
+                        OR p.ActiveCaseId IS NULL
+                        OR p.ActiveCaseId<>i.CaseId)
+                    THROW 51137, 'APP02 disposition requires active current CASE', 1;
             END;
             """);
         Execute.Sql("""
@@ -470,9 +503,13 @@ public sealed class App02a2DurableEventsSchema : Migration
                         AND a.AcceptanceId=i.OriginalAcceptanceId
                     JOIN dbo.App02EventReceipt r ON r.TenantId=a.TenantId
                         AND r.ReceiptId=a.CReceiptId
+                    JOIN dbo.CashHandoverAcceptance original
+                        ON original.TenantId=a.TenantId
+                        AND original.Id=a.AcceptanceId
                     WHERE s.SourceKind<>N'CASH_HANDOVER_CORRECTION'
+                        OR s.TripId IS NULL OR s.TripId<>original.TripId
                         OR i.CheckerActorId=r.ActorId)
-                    THROW 51132, 'APP02 correction requires new source and independent Checker', 1;
+                    THROW 51132, 'APP02 correction requires same trip, new source and independent Checker', 1;
             END;
             """);
         Execute.Sql("""
@@ -543,7 +580,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                           (d.Status IN (N'RECEIVED',N'PENDING_DEPENDENCY')
                             AND i.Status IN (N'RECEIVED',N'PENDING_DEPENDENCY',
                                              N'APPLIED',N'REJECTED',N'CASE'))
-                          OR (d.Status=N'CASE' AND i.Status=N'RECEIVED'))))
+                          OR (d.Status=N'CASE'
+                              AND i.Status IN (N'RECEIVED',N'REJECTED')))))
                     THROW 51142, 'APP02 illegal progress transition', 1;
                 -- A prior APPROVED_RESUME never approves a later CASE.
                 IF EXISTS (
@@ -588,6 +626,16 @@ public sealed class App02a2DurableEventsSchema : Migration
                                 AND z.CaseId=i.ActiveCaseId
                                 AND z.Decision=N'APPROVED_RESUME'))
                     THROW 51145, 'APP02 CASE resume requires independent approval', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d
+                      ON d.TenantId=i.TenantId AND d.ReceiptId=i.ReceiptId
+                    WHERE d.Status=N'CASE' AND i.Status=N'REJECTED'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM dbo.App02CaseDisposition z
+                            WHERE z.TenantId=i.TenantId
+                                AND z.CaseId=i.ActiveCaseId
+                                AND z.Decision=N'CLOSE'))
+                    THROW 51148, 'APP02 CASE close requires independent CLOSE disposition', 1;
                 IF EXISTS (
                     SELECT 1 FROM inserted i
                     JOIN dbo.App02EventReceipt r ON r.TenantId=i.TenantId
@@ -682,6 +730,7 @@ public sealed class App02a2DurableEventsSchema : Migration
             DROP TRIGGER IF EXISTS dbo.TR_APP02_CorrectionGuard;
             DROP TRIGGER IF EXISTS dbo.TR_APP02_CaseChecker;
             DROP TRIGGER IF EXISTS dbo.TR_APP02_CaseKind;
+            DROP TRIGGER IF EXISTS dbo.TR_APP02_ResolutionActorSeparation;
             """);
         foreach (string table in new[]
         {
