@@ -154,6 +154,14 @@ for attempt in $(seq 1 30); do
   [[ "$code" == 200 ]] && break
   sleep 2
 done
+if [[ "$code" != 200 ]]; then
+  # These workload logs use static denial codes; never print Vault audit or env.
+  dc ps --all
+  dc logs --no-color --tail=25 edge api worker 2>&1 | tail -75
+  curl --noproxy "*" --verbose --max-time 5 --cacert "$tls/ca.crt" \
+    --resolve "$PREPROD_FQDN:443:127.0.0.1" \
+    -o /dev/null "https://$PREPROD_FQDN/health/live" 2>&1 | tail -20 || true
+fi
 expect "$code" 200 HTTPS_READY
 python3 - "$ci_root/http-response.json" <<'PY'
 import json,sys
