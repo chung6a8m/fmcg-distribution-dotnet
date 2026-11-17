@@ -59,6 +59,8 @@
 | Five original production P0 gates | **NOT_VERIFIED / NON-WAIVABLE** |
 | APP-02C/D/E, production, A/B/Mixed mode admission, pilot, go-live | **NOT_AUTHORIZED** |
 
+**B.2 provisional CI-only closeout:** [evidence status and independent review handoff](../closeout/2026-11-17-app-02b2-ci-pending.md). The final source SHA and artifact digests must be recorded in the live PR body after final CI, not fabricated in this versioned roadmap.
+
 **APP-02B.2 bounded acceptance / dependency rule:** [OWN-APP02B2-01..03](../decisions/owner-app02b2-2026-11-17.md) approve only a conditional GitHub-hosted CI merge of PR #50 with [8 additional CI-B2 checks](../security/app-02b2-ci-acceptance-addendum.md). This is **not** an override of the frozen B.1 30 G-B cases, not human approval, and not actual PREPROD acceptance. Earlier Owner approval of B.3–B.9 remains PREPROD-only; no CI-only downstream verification automatically transfers from B.2. Original `PREPROD_FOUNDATION_VERIFIED` cannot be earned solely on ephemeral CI. No new Pilot/production authorization.
 
 **APP-02B.2 implementation handoff:** [draft PR #50](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/50) isolates PREPROD API/Worker, HTTPS/Caddy and scoped Vault probes with [RUNTIME-01/02 requirements](app-02b2-preprod-runtime.md). CI is not physical PREPROD evidence; RUNTIME-01/02 remain **PREPROD_NOT_VERIFIED** pending deployed Vault/network fault witnesses and independent review; no tenant business admission.

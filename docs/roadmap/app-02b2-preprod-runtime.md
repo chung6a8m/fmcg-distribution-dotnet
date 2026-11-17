@@ -39,6 +39,8 @@
 | Fault matrix expected/actual/diff, denial logs and reason codes | Signed negative execution; peer-tenant data not applicable until B.4 |
 | Operator, independent Reviewer, change/incident reference, evidence archive SHA | Distinct reviewer; any missing witness means NOT_VERIFIED |
 
+**CI-only provisional closeout:** [B.2 evidence/exception ledger](../closeout/2026-11-17-app-02b2-ci-pending.md). The operator `.env` loader is now a literal whitelist (not shell `source .env`); its unsafe input negatives run in Linux CI. Its presence does not change the Owner's GitHub-hosted-only choice.
+
 **Two independent states:** original full B.2 `PREPROD_RUNTIME_VERIFIED` still requires real operator-owned PREPROD RUNTIME-01/RUNTIME-02, independent real-environment evidence and review, and remains `NOT_VERIFIED`. The narrowly Owner-approved *source merge* may be `MERGED / EPHEMERAL_CI_RUNTIME_TESTED` only after independent fresh-context AI review and CI-B2-01..08 PASS on exact final HEAD. All B.9 G-B01..05 / 30 frozen cases remain `NOT_RUN`.
 
 **Forbidden promotion**: No real AC-11/EV-08; original production G-STOCK/G-CUT/G-IDEMP/G-LEDGER/G-INV NOT_VERIFIED; B_NO_CHANNEL BLOCKED; APP-02C/D/E, production deployment, Pilot and Go-Live NOT_AUTHORIZED. Preserve historical APP-01/02A regression artifacts and immutable \`business/\` + \`business.lock.json\`. 

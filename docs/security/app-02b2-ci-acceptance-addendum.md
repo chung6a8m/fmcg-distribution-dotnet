@@ -28,6 +28,8 @@ Every required item needs an explicit `PASS` witness on the same exact source HE
 
 At authoring, all eight rows are **REQUIRED / FINAL-HEAD ACCEPTANCE NOT_YET_ASSERTED**. Historical run #44099147282 (Linux) and #44099147291 (Windows) passed on source `99fa6fbdecd3e458b068f52518638cf60a04a1b1` **before this documentation change**; those passes are historical references only and cannot satisfy the subsequent HEAD.
 
+**Provisional documentation and dynamic lineage:** [B.2 closeout candidate](../closeout/2026-11-17-app-02b2-ci-pending.md) links historical evidence but explicitly remains PENDING. The final PR discussion/body must carry the exact latest source/CI run attempts and immutable artifact content hash after final workflow completion; a static commit cannot embed its own future CI SHA without invalidating itself.
+
 ## 3. Independent AI review handoff
 
 **Separate-context reviewer instruction** (for an independently opened review session, not to be self-satisfied by this implementing session):
