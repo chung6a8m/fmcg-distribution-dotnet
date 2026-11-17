@@ -172,6 +172,22 @@ app.MapGet("/health/ready", async (VaultAdmissionClient vault, CancellationToken
         {
             var live = await VaultIdentitySecrets.ReadAsync(builder.Configuration, ct);
             activeIdentity!.EnsureCurrent(live);
+            // A healthy Vault is not enough: live Identity sessions are validated
+            // against SQL. Never advertise readiness when that authority is down.
+            bool sqlReady;
+            try
+            {
+                await using var scope = app.Services.CreateAsyncScope();
+                var identityDb = scope.ServiceProvider.GetRequiredService<PreprodIdentityDb>();
+                sqlReady = await identityDb.Database.CanConnectAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception) { sqlReady = false; } // No connection-string detail in response/logs.
+            if (!sqlReady)
+            {
+                app.Logger.LogWarning("IDENTITY_READINESS_DENIED code=IDENTITY_SQL_UNAVAILABLE");
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
         }
         return Results.Ok(new { state = "foundation_ready", admission = "NO_GO" });
     }
