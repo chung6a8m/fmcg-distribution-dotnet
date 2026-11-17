@@ -111,7 +111,7 @@ BEGIN
         OR @TenantKey COLLATE Latin1_General_100_BIN2 LIKE N''%[^a-z0-9-]%''
         OR @RequestRef IS NULL OR LEN(TRIM(@RequestRef)) NOT BETWEEN 3 AND 160
         THROW 51402, ''TENANT_REQUEST_INVALID'', 1;
-    DECLARE @db sysname = N''FmcgPpT_'' + REPLACE(CONVERT(nvarchar(36), @TenantId), N''-'', N'''');
+    DECLARE @db sysname = N''FmcgPpT_'' + LOWER(REPLACE(CONVERT(nvarchar(36), @TenantId), N''-'', N''''));
     BEGIN TRANSACTION;
     IF EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry WITH (UPDLOCK, HOLDLOCK) WHERE TenantId=@TenantId)
     BEGIN
