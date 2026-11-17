@@ -109,6 +109,10 @@ public sealed partial class App01e2CrossCommandRaceTests
             TestContext.Current.CancellationToken))
             Assert.Equal(HttpStatusCode.Forbidden, impersonation.StatusCode);
         var pAck = await IntakeA3(sales, p);
+        using (HttpResponseMessage duplicateOffer = await sales.PostAsJsonAsync(
+            A3 + "intake", p with { EventId = "other-P-" + Id() },
+            TestContext.Current.CancellationToken))
+            Assert.Equal(HttpStatusCode.Conflict, duplicateOffer.StatusCode);
         var cAck = await IntakeA3(cashier, c);
         Assert.Equal("APPLIED", pAck.Status); // P is nonposting offer event.
         Assert.Equal("PENDING_DEPENDENCY", cAck.Status);
