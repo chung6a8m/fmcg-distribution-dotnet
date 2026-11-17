@@ -192,7 +192,7 @@ public static class IdentityHttp
             // Never set Domain: __Host- cookie must be host-only.
         });
 
-    private static void ClearCookie(HttpContext context) =>
+    internal static void ClearCookie(HttpContext context) =>
         context.Response.Cookies.Delete(CookieName, new CookieOptions
         {
             Secure = true, HttpOnly = true, SameSite = SameSiteMode.Strict,
