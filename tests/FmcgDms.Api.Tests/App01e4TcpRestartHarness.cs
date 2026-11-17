@@ -56,6 +56,10 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         start.ArgumentList.Add($"http://127.0.0.1:{port}");
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "IntegrationTest";
         start.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}";
+        // The application's default AllowedHosts permits localhost, not
+        // numeric loopback. Explicitly admit only loopback for this ephemeral
+        // child process; production HostFiltering configuration is unchanged.
+        start.Environment["AllowedHosts"] = "127.0.0.1;localhost";
         start.Environment["SyntheticAuth__Enabled"] = "true";
         start.Environment["SyntheticAuth__SigningKey"] = SqlScratchFixture.TestKey;
         start.Environment["SyntheticAuth__Issuer"] = "fmcg-synthetic-app00";
