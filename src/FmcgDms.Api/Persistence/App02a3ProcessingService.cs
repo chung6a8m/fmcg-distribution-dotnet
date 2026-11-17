@@ -32,6 +32,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
         public string? PrerequisiteEventId { get; set; }
         public string? CountEvidenceRef { get; set; }
         public string Status { get; set; } = "";
+        public Guid? ActiveCaseId { get; set; }
         public DateTime ReceivedAtUtc { get; set; }
         public byte TechnicalRetryCount { get; set; }
     }
@@ -68,7 +69,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             var c = await db.QuerySingleOrDefaultAsync<CRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.TenantId,r.ProducerId,r.EventId,r.EventKind,
                     r.ActorId,r.TripId,r.PrerequisiteProducerId,r.PrerequisiteEventId,
-                    r.CountEvidenceRef,r.ReceivedAtUtc,p.Status,p.TechnicalRetryCount
+                    r.CountEvidenceRef,r.ReceivedAtUtc,p.Status,p.ActiveCaseId,p.TechnicalRetryCount
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)
                 JOIN dbo.App02EventProgress p WITH(UPDLOCK,HOLDLOCK)
                     ON p.TenantId=r.TenantId AND p.ReceiptId=r.ReceiptId
@@ -144,7 +145,16 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             // If named P was actually RECEIVED after the original 24-hour
             // dependency deadline, the missing-P CASE cannot be bypassed
             // merely because the process was down before its safety scan.
-            if (p.ReceivedAtUtc - c.ReceivedAtUtc >= MissingDependencyWindow)
+            bool approvedLateResume = c.ActiveCaseId is Guid previousCase
+                && await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
+                    SELECT CAST(CASE WHEN EXISTS (
+                        SELECT 1 FROM dbo.App02CaseDisposition WITH(HOLDLOCK)
+                        WHERE TenantId=@Tenant AND CaseId=@Case
+                          AND Decision=N'APPROVED_RESUME')
+                      THEN 1 ELSE 0 END AS bit)
+                    """, new { Tenant = tenant, Case = c.ActiveCaseId }, tx, ct));
+            if (p.ReceivedAtUtc - c.ReceivedAtUtc >= MissingDependencyWindow
+                && !approvedLateResume)
             {
                 await OpenCase(db, tx, c, asOfUtc, "LATE_P_AFTER_24H", ct);
                 await tx.CommitAsync(ct);
