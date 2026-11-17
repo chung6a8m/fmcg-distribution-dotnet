@@ -1,6 +1,6 @@
 # APP-01E.3 — Transaction Rollback & Safe Retry Matrix
 
-**State: IMPLEMENTED / INDEPENDENT REVIEW AND EXACT-HEAD CI PENDING.** Synthetic, nonproduction, two physical nonce-owned SQL Server LocalDB tenants. No new migration, production fault endpoint, application DI switch, business policy change or runtime retries. The locked Business Baseline is unchanged. This increment **does not** claim real TCP loss, process restart, C→P/AC-11 full verification, EV/P0 or go-live.
+**State: MERGED / E3_ROLLBACK_RETRY_VERIFIED.** Independently reviewed [PR #35](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/35), source HEAD `430850e0a50289ef99ce702532778b4979f10075`, [Windows Actions #43962422877 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43962422877) **209/209 PASS, 84/84 rollback cases, 5,796/5,796 SQL cells**, TestRunId `app01e3-43962422877-2`, merge commit `d94f90ef3eea0d030bab84d2c604b87770a3fd7d`. Synthetic, nonproduction, two physical nonce-owned SQL Server LocalDB tenants. No new migration, production fault endpoint, application DI switch, business policy change or runtime retries. The locked Business Baseline is unchanged. This increment **does not** claim real TCP loss, process restart, C→P/AC-11 full verification, EV/P0 or go-live.
 
 Prerequisites: [E.1 recovery protocol](app-01e1-recovery-harness.md) and [E.2 SQL interleavings](app-01e2-cross-command-races.md). E.3 proves the before-commit failure half of the recovery contract against the real HTTP → Dapper → SQL persistence path.
 
