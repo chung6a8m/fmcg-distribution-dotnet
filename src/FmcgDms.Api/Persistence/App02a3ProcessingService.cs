@@ -42,6 +42,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
         public Guid OfferId { get; set; }
         public decimal OfferedAmount { get; set; }
         public string ActorId { get; set; } = "";
+        public DateTime ReceivedAtUtc { get; set; }
     }
 
     private sealed class CountRow
@@ -99,7 +100,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             }
 
             PRow? p = await db.QuerySingleOrDefaultAsync<PRow>(App02a3Sql.Cmd("""
-                SELECT r.ReceiptId,r.OfferId,r.OfferedAmount,r.ActorId
+                SELECT r.ReceiptId,r.OfferId,r.OfferedAmount,r.ActorId,r.ReceivedAtUtc
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)
                 JOIN dbo.App02EventProgress progress WITH(HOLDLOCK)
                     ON progress.TenantId=r.TenantId AND progress.ReceiptId=r.ReceiptId
@@ -140,6 +141,15 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
                 return "PENDING_DEPENDENCY";
             }
 
+            // If named P was actually RECEIVED after the original 24-hour
+            // dependency deadline, the missing-P CASE cannot be bypassed
+            // merely because the process was down before its safety scan.
+            if (p.ReceivedAtUtc - c.ReceivedAtUtc >= MissingDependencyWindow)
+            {
+                await OpenCase(db, tx, c, asOfUtc, "LATE_P_AFTER_24H", ct);
+                await tx.CommitAsync(ct);
+                return "CASE";
+            }
             if (p.ActorId == c.ActorId || !await RoleActive(db, tx, tenant,
                 p.ActorId, "sales", ct))
             {
@@ -310,8 +320,16 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             WHERE r.TenantId=@Tenant
               AND r.EventKind=N'CashierAcceptanceRequested'
               AND p.Status IN(N'RECEIVED',N'PENDING_DEPENDENCY')
-              AND (@Force=1 OR p.NextAttemptAtUtc IS NULL OR
-                   p.NextAttemptAtUtc<=@AsOf OR r.ReceivedAtUtc<=@Expiry)
+              AND (p.NextAttemptAtUtc IS NULL OR p.NextAttemptAtUtc<=@AsOf
+                   OR r.ReceivedAtUtc<=@Expiry
+                   OR (@Force=1 AND p.ReasonCode=N'MISSING_PREREQUISITE'
+                       AND EXISTS (
+                           SELECT 1 FROM dbo.App02EventReceipt named
+                           WHERE named.TenantId=r.TenantId
+                             AND named.ProducerId=r.PrerequisiteProducerId
+                             AND named.EventId=r.PrerequisiteEventId
+                             AND named.TripId=r.TripId
+                             AND named.EventKind=N'CashHandoverOffered')))
             ORDER BY r.ReceivedAtUtc,r.ReceiptId
             """, new { Tenant = tenant, Force = triggeredByEvent ? 1 : 0,
                 AsOf = now.UtcDateTime,
