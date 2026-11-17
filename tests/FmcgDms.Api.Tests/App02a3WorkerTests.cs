@@ -538,13 +538,30 @@ public sealed partial class App01e2CrossCommandRaceTests
                   END
                 ')
                 """);
-            DateTimeOffset t = DateTimeOffset.UtcNow;
+            // Simulate an aged C (>24h) while a temporary SQL error is
+            // retried. Both direct invocation and an event-driven sweep MUST
+            // respect its persisted future NextAttemptAtUtc, not double-spend
+            // six technical attempts on an expired receipt.
+            DateTimeOffset t = DateTimeOffset.UtcNow.AddHours(25);
             int[] minutes = [0, 1, 3, 7, 15, 31];
             for (int i = 1; i <= 6; i++)
             {
                 string state = await worker.ProcessAsync(tenant, receipt,
                     t.AddMinutes(minutes[i - 1]), TestContext.Current.CancellationToken);
                 Assert.Equal(i == 6 ? "CASE" : "RETRY_SCHEDULED", state);
+                if (i == 1)
+                {
+                    Assert.Equal("RETRY_SCHEDULED", await worker.ProcessAsync(
+                        tenant, receipt, t.AddSeconds(1),
+                        TestContext.Current.CancellationToken));
+                    await worker.SweepTenantAsync(
+                        tenant, t.AddSeconds(1), triggeredByEvent: true,
+                        TestContext.Current.CancellationToken);
+                    Assert.Equal(1, db.ExecuteScalar<int>("""
+                        SELECT TechnicalRetryCount FROM dbo.App02EventProgress
+                        WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                        """, new { Tenant = tenant, Receipt = receipt }));
+                }
             }
             var progress = db.QuerySingle<(string Status, byte Retries, string Reason)>("""
                 SELECT Status,TechnicalRetryCount,ReasonCode
