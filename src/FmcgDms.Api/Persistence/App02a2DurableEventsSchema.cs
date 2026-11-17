@@ -102,6 +102,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                 NextAttemptAtUtc datetime2(7) NULL,
                 LastAttemptAtUtc datetime2(7) NULL,
                 ReasonCode nvarchar(64) NULL,
+                -- After resume, retain the prior case ID to fence new cases.
+                ActiveCaseId uniqueidentifier NULL,
                 StateChangedAtUtc datetime2(7) NOT NULL
                     CONSTRAINT DF_App02Progress_Changed DEFAULT (SYSUTCDATETIME()),
                 RowVersion rowversion NOT NULL,
@@ -112,6 +114,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                     Status IN (N'RECEIVED',N'PENDING_DEPENDENCY',
                                N'APPLIED',N'REJECTED',N'CASE')),
                 CONSTRAINT CK_App02Progress_Retry CHECK (TechnicalRetryCount<=6),
+                CONSTRAINT CK_App02Progress_ActiveCase CHECK (
+                    Status<>N'CASE' OR ActiveCaseId IS NOT NULL),
                 CONSTRAINT CK_App02Progress_Reason CHECK (
                     (Status IN (N'CASE',N'REJECTED') AND ReasonCode IS NOT NULL)
                     OR (Status NOT IN (N'CASE',N'REJECTED'))),
@@ -297,6 +301,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                     CONSTRAINT DF_App02Case_Opened DEFAULT (SYSUTCDATETIME()),
                 RowVersion rowversion NOT NULL,
                 CONSTRAINT UQ_App02Case_TenantId UNIQUE (TenantId,CaseId),
+                CONSTRAINT UQ_App02Case_BoundReceipt UNIQUE
+                    (TenantId,CaseId,ReceiptId),
                 CONSTRAINT FK_App02Case_CReceipt FOREIGN KEY (TenantId,ReceiptId)
                     REFERENCES dbo.App02EventReceipt (TenantId,ReceiptId),
                 CONSTRAINT CK_App02Case_Owner CHECK (
@@ -306,6 +312,11 @@ public sealed class App02a2DurableEventsSchema : Migration
             );
             CREATE INDEX IX_App02Case_Queue
                 ON dbo.App02ExceptionCase(TenantId,ReceiptId,OpenedAtUtc);
+            ALTER TABLE dbo.App02EventProgress ADD
+                CONSTRAINT FK_App02Progress_ActiveCase FOREIGN KEY
+                    (TenantId,ActiveCaseId,ReceiptId)
+                    REFERENCES dbo.App02ExceptionCase
+                        (TenantId,CaseId,ReceiptId);
 
             CREATE TABLE dbo.App02CaseDisposition (
                 DispositionId uniqueidentifier NOT NULL
@@ -501,6 +512,25 @@ public sealed class App02a2DurableEventsSchema : Migration
                                              N'APPLIED',N'REJECTED',N'CASE'))
                           OR (d.Status=N'CASE' AND i.Status=N'RECEIVED'))))
                     THROW 51142, 'APP02 illegal progress transition', 1;
+                -- A prior APPROVED_RESUME never approves a later CASE.
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN deleted d ON d.TenantId=i.TenantId
+                        AND d.ReceiptId=i.ReceiptId
+                    WHERE (
+                        i.ActiveCaseId<>d.ActiveCaseId
+                        OR (i.ActiveCaseId IS NULL AND d.ActiveCaseId IS NOT NULL)
+                        OR (i.ActiveCaseId IS NOT NULL AND d.ActiveCaseId IS NULL))
+                      AND NOT (d.Status<>N'CASE' AND i.Status=N'CASE'
+                          AND i.ActiveCaseId IS NOT NULL))
+                    THROW 51147, 'APP02 active CASE identity may change only on new CASE', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN deleted d ON d.TenantId=i.TenantId
+                        AND d.ReceiptId=i.ReceiptId
+                    WHERE i.Status=N'CASE' AND d.Status<>N'CASE'
+                        AND i.ActiveCaseId=d.ActiveCaseId)
+                    THROW 51147, 'APP02 new CASE must use fresh identity', 1;
                 IF EXISTS (
                     SELECT 1 FROM inserted i
                     JOIN dbo.App02EventReceipt r ON r.TenantId=i.TenantId
@@ -512,7 +542,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                     SELECT 1 FROM inserted i
                     WHERE i.Status=N'CASE' AND NOT EXISTS (
                         SELECT 1 FROM dbo.App02ExceptionCase c
-                        WHERE c.TenantId=i.TenantId AND c.ReceiptId=i.ReceiptId))
+                        WHERE c.TenantId=i.TenantId AND c.ReceiptId=i.ReceiptId
+                            AND c.CaseId=i.ActiveCaseId))
                     THROW 51144, 'APP02 CASE requires durable owned case', 1;
                 IF EXISTS (
                     SELECT 1 FROM inserted i JOIN deleted d
@@ -520,9 +551,8 @@ public sealed class App02a2DurableEventsSchema : Migration
                     WHERE d.Status=N'CASE' AND i.Status=N'RECEIVED'
                         AND NOT EXISTS (
                             SELECT 1 FROM dbo.App02CaseDisposition z
-                            JOIN dbo.App02ExceptionCase c ON c.TenantId=z.TenantId
-                                AND c.CaseId=z.CaseId
-                            WHERE c.TenantId=i.TenantId AND c.ReceiptId=i.ReceiptId
+                            WHERE z.TenantId=i.TenantId
+                                AND z.CaseId=i.ActiveCaseId
                                 AND z.Decision=N'APPROVED_RESUME'))
                     THROW 51145, 'APP02 CASE resume requires independent approval', 1;
                 IF EXISTS (
@@ -621,6 +651,7 @@ public sealed class App02a2DurableEventsSchema : Migration
         })
             Execute.Sql($"DROP TRIGGER IF EXISTS dbo.TR_APP02_{table}_Immutable;");
         Execute.Sql("""
+            ALTER TABLE dbo.App02EventProgress DROP CONSTRAINT FK_App02Progress_ActiveCase;
             DROP TABLE dbo.App02CorrectionLink;
             DROP TABLE dbo.App02CaseDisposition;
             DROP TABLE dbo.App02ExceptionCase;

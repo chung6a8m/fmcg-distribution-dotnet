@@ -254,7 +254,7 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
         Reject(db, """
             UPDATE dbo.App02EventProgress SET Status=N'CASE', ReasonCode=N'MISSING_P_24H'
             WHERE ReceiptId=@receipt
-            """, new { receipt }, [51144]); // No silent/ownerless CASE.
+            """, new { receipt }, [547, 51144]); // No active CASE witness.
 
         Guid caseId = Guid.NewGuid();
         db.Execute("""
@@ -265,9 +265,9 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
             """, new { caseId, tenant = A, receipt });
         db.Execute("""
             UPDATE dbo.App02EventProgress SET Status=N'CASE',
-                ReasonCode=N'MISSING_P_24H'
+                ActiveCaseId=@caseId,ReasonCode=N'MISSING_P_24H'
             WHERE ReceiptId=@receipt
-            """, new { receipt });
+            """, new { receipt, caseId });
         Reject(db, DispositionInsert, DispositionArgs(caseId, "maker-01", "maker-01",
             "APPROVED_RESUME"), [547]);
         Reject(db, DispositionInsert, DispositionArgs(caseId, "maker-01", "cashier-01",
@@ -301,6 +301,28 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
         Assert.Equal("RECEIVED", db.ExecuteScalar<string>(
             "SELECT Status FROM dbo.App02EventProgress WHERE ReceiptId=@receipt",
             new { receipt }));
+        // The current CASE, not an old approved CASE, owns resume authority.
+        Guid laterCase = Guid.NewGuid();
+        db.Execute("""
+            INSERT dbo.App02ExceptionCase(CaseId,TenantId,ReceiptId,AsOfUtc,
+                ReasonCode,NextAction)
+            VALUES(@laterCase,@tenant,@receipt,SYSUTCDATETIME(),
+                N'MISSING_P_24H',N'Fresh cashier supervisor review')
+            """, new { laterCase, tenant = A, receipt });
+        Reject(db, """
+            UPDATE dbo.App02EventProgress SET Status=N'CASE',
+                ReasonCode=N'MISSING_P_24H'
+            WHERE ReceiptId=@receipt
+            """, new { receipt }, [51147]);
+        db.Execute("""
+            UPDATE dbo.App02EventProgress SET Status=N'CASE',
+                ActiveCaseId=@laterCase,ReasonCode=N'MISSING_P_24H'
+            WHERE ReceiptId=@receipt
+            """, new { receipt, laterCase });
+        Reject(db, """
+            UPDATE dbo.App02EventProgress SET Status=N'RECEIVED',ReasonCode=NULL
+            WHERE ReceiptId=@receipt
+            """, new { receipt }, [51145]);
     }
 
     [Fact]
