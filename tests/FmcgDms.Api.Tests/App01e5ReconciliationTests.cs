@@ -429,7 +429,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             await Capture(1);
             // Ignore only the newly persisted REJECTED command identity:
             // every other row in every user table must remain unchanged.
-            rejectedExcludedBeforeSha = (await FullSql(tenant, b31.CommandId)).Sha256;
+            rejectedExcludedBeforeSha = (await FullSql(tenant, E5Producer, b31.CommandId)).Sha256;
             var rejected = await Send(sales, B + "preflight-b-sale", b31);
             Assert.Equal(HttpStatusCode.OK, rejected.HttpStatus);
             Assert.Equal("REJECTED", rejected.Outcome.Status);
@@ -437,7 +437,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             Assert.Equal("B_QUOTA_INSUFFICIENT", rejected.Outcome.ReasonCode);
             Assert.Null(rejected.Outcome.SourceId);
             await Capture(2);
-            rejectedExcludedAfterSha = (await FullSql(tenant, b31.CommandId)).Sha256;
+            rejectedExcludedAfterSha = (await FullSql(tenant, E5Producer, b31.CommandId)).Sha256;
             Assert.Equal(rejectedExcludedBeforeSha, rejectedExcludedAfterSha);
             Assert.Equal(stages[1].Sql.LedgerSha256, stages[2].Sql.LedgerSha256);
             Assert.Equal(stages[1].Sql.Numbers.Cells().ToArray(),
