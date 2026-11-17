@@ -180,8 +180,12 @@ public sealed class App02a3EventIntakeService(
                             ON cmd.TenantId=s.TenantId AND cmd.Id=s.BusinessCommandId
                         WHERE o.TenantId=@Tenant AND o.Id=@OfferId
                           AND o.TripId=@Trip AND o.OfferedAmount=@Amount
-                          AND o.OfferedBy=@Actor AND s.SourceKind=N'CASH_HANDOVER_OFFER'
-                          AND s.ActorId=@Actor AND cmd.Status=N'APPLIED'
+                          AND o.OfferedBy COLLATE Latin1_General_100_BIN2
+                              = @Actor COLLATE Latin1_General_100_BIN2
+                          AND s.SourceKind=N'CASH_HANDOVER_OFFER'
+                          AND s.ActorId COLLATE Latin1_General_100_BIN2
+                              = @Actor COLLATE Latin1_General_100_BIN2
+                          AND cmd.Status=N'APPLIED'
                           AND cmd.OutcomeCode=N'CASH_HANDOVER_OFFERED'
                     ) THEN 1 ELSE 0 END AS bit)
                     """, new { Tenant = tenant, input.OfferId,
@@ -256,7 +260,9 @@ public sealed class App02a3EventIntakeService(
                 LEFT JOIN dbo.App02AcceptanceApplication a
                     ON a.TenantId=r.TenantId AND a.CReceiptId=r.ReceiptId
                 WHERE r.TenantId=@Tenant AND r.ProducerId=@Producer
-                    AND r.EventId=@EventId AND r.ActorId=@Actor
+                    AND r.EventId=@EventId
+                    AND r.ActorId COLLATE Latin1_General_100_BIN2
+                        = @Actor COLLATE Latin1_General_100_BIN2
                 """, new { Tenant = tenant, Producer = producer, EventId = eventId,
                     Actor = actor }, tx, ct));
             // Unknown identity or different actor must be indistinguishable.
