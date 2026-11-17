@@ -114,13 +114,28 @@ public sealed partial class App01e2CrossCommandRaceTests
             Guid c = await A4IntakeC(s);
             Assert.Equal("APPLIED", await A4Process(s, c));
             await A4Capture(s, "applied");
+            // Same event key, but different canonical CONTENT and KIND.
+            // Both requests are correctly signed/currently granted; 409 must
+            // come from immutable event identity, not an unrelated 403.
+            using var db = Open(tenant);
+            GrantRole(db, tenant, CashierActor, "sales", true);
+            using var dualRole = SqlScratchFixture.WithTenant(
+                s.Factory.CreateClient(), tenant, CashierActor, ["cashier", "sales"]);
             string immutableBefore = (await FullSql(tenant)).Sha256;
             using (HttpResponseMessage changed = await s.Cashier.PostAsJsonAsync(
                 A3 + "intake", s.C with { CountEvidenceRef = "mutated-" + Id() },
                 TestContext.Current.CancellationToken))
                 Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+            using (HttpResponseMessage kind = await dualRole.PostAsJsonAsync(
+                A3 + "intake", s.C with
+                {
+                    EventKind = App02EventCanonicalV1.OfferKind,
+                    OfferId = s.Offer, OfferedAmount = 200m,
+                    PrerequisiteProducerId = null, PrerequisiteEventId = null,
+                    CountEvidenceRef = null
+                }, TestContext.Current.CancellationToken))
+                Assert.Equal(HttpStatusCode.Conflict, kind.StatusCode);
             Assert.Equal(immutableBefore, (await FullSql(tenant)).Sha256);
-            using var db = Open(tenant);
             Assert.Equal(1, db.ExecuteScalar<int>("""
                 SELECT COUNT(*) FROM dbo.App02EventReceipt
                 WHERE TenantId=@Tenant AND ProducerId=@Producer
@@ -137,7 +152,12 @@ public sealed partial class App01e2CrossCommandRaceTests
         A4Run(tenant, "A11-06", async s =>
         {
             await A4IntakeP(s);
-            Guid first = await A4IntakeC(s);
+            using var secondCashier = Client(s.Factory, tenant, CashierActor, "cashier");
+            App02IntakeResult[] duplicates = await Task.WhenAll(
+                IntakeA3(s.Cashier, s.C), IntakeA3(secondCashier, s.C));
+            Guid first = Assert.IsType<Guid>(duplicates[0].ReceiptId);
+            Assert.Equal(first, duplicates[1].ReceiptId);
+            Assert.Equal(1, duplicates.Count(x => x.Replayed));
             Guid second = await A4IntakeC(s,
                 s.C with { EventId = "event-c-" + Id() });
             string[] outcomes = await Task.WhenAll(A4Process(s, first),
@@ -221,11 +241,21 @@ public sealed partial class App01e2CrossCommandRaceTests
             Assert.Equal("CONSUMER_COMMITTED_ACK_LOST",
                 await A4Dispatch(s, message, true));
             await A4Capture(s, "outbound-lost");
+            string outcomeUri = A3 + "outcome?producerId=" +
+                Uri.EscapeDataString(s.C.ProducerId) +
+                "&eventId=" + Uri.EscapeDataString(s.C.EventId);
+            using var unknownLookup = Client(s.Factory, tenant, CashierActor,
+                "cashier", new AfterServerAckLossHandler(A3 + "outcome"));
+            string sqlBeforeLostLookup = (await FullSql(tenant)).Sha256;
+            await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            {
+                using var _ = await unknownLookup.GetAsync(
+                    outcomeUri, TestContext.Current.CancellationToken);
+            });
             var appliedLookup = await s.Cashier.GetFromJsonAsync<App02OutcomeResult>(
-                A3 + "outcome?producerId=" + Uri.EscapeDataString(s.C.ProducerId) +
-                "&eventId=" + Uri.EscapeDataString(s.C.EventId),
-                TestContext.Current.CancellationToken);
+                outcomeUri, TestContext.Current.CancellationToken);
             Assert.Equal("APPLIED", appliedLookup?.Status);
+            Assert.Equal(sqlBeforeLostLookup, (await FullSql(tenant)).Sha256);
             Assert.Equal("ACKED", await A4Dispatch(s, message,
                 false, DateTimeOffset.UtcNow.AddMinutes(3)));
             Assert.Equal("ACKED", db.QuerySingle<string>("""
@@ -338,6 +368,22 @@ public sealed partial class App01e2CrossCommandRaceTests
             await A4IntakeP(s);
             Assert.Equal("CASE", await A4Process(s, c, expired));
             await A4Capture(s, "late-case");
+            using HttpResponseMessage hold = await s.Maker.PostAsJsonAsync(
+                A3 + "cases/propose",
+                new App02CaseProposalInput(caseId, "HOLD",
+                    "WAIT_FOR_REVIEW", "A4-HOLD-" + Id(),
+                    "Keep evidence on owned CASE"),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, hold.StatusCode);
+            Guid holdProposal = Assert.IsType<App02CaseProposalOutcome>(
+                await hold.Content.ReadFromJsonAsync<App02CaseProposalOutcome>(
+                    TestContext.Current.CancellationToken)).ProposalId;
+            using (HttpResponseMessage held = await s.Checker.PostAsync(
+                A3 + "cases/approve/" + holdProposal, null,
+                TestContext.Current.CancellationToken))
+                Assert.Equal(HttpStatusCode.OK, held.StatusCode);
+            Assert.Equal("CASE", await A4Process(s, c));
+            await A4Capture(s, "held");
             using HttpResponseMessage propose = await s.Maker.PostAsJsonAsync(
                 A3 + "cases/propose",
                 new App02CaseProposalInput(caseId, "APPROVED_RESUME",
@@ -422,6 +468,38 @@ public sealed partial class App01e2CrossCommandRaceTests
                         """, new { Tenant = tenant, Receipt = retryReceipt }));
             }
             finally { db.Execute("DROP TRIGGER IF EXISTS dbo.APP02A4_RetryFault"); }
+
+            // CLOSE is distinct from HOLD and RESUME: terminal, retained
+            // immutable case/disposition, and strictly nonposting.
+            var closure = await SetupA3(tenant, s.Setup, s.Sales);
+            var closeP = NewPEvent(closure.Scene.Trip, closure.Offer);
+            var closeC = NewCEvent(closure.Scene.Trip, closeP, closure.Count);
+            Guid closeReceipt = await A4IntakeC(s, closeC);
+            Assert.Equal("CASE", await A4Process(s, closeReceipt,
+                DateTimeOffset.UtcNow.AddHours(25)));
+            Guid closeCase = db.QuerySingle<Guid>("""
+                SELECT ActiveCaseId FROM dbo.App02EventProgress
+                WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = closeReceipt });
+            using HttpResponseMessage proposeClose = await s.Maker.PostAsJsonAsync(
+                A3 + "cases/propose",
+                new App02CaseProposalInput(closeCase, "CLOSE",
+                    "DEPENDENCY_UNRESOLVED", "A4-CLOSE-" + Id(),
+                    "Close unresolved C without posting"),
+                TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, proposeClose.StatusCode);
+            Guid closeProposal = Assert.IsType<App02CaseProposalOutcome>(
+                await proposeClose.Content.ReadFromJsonAsync<App02CaseProposalOutcome>(
+                    TestContext.Current.CancellationToken)).ProposalId;
+            using (HttpResponseMessage close = await s.Checker.PostAsync(
+                A3 + "cases/approve/" + closeProposal, null,
+                TestContext.Current.CancellationToken))
+                Assert.Equal(HttpStatusCode.OK, close.StatusCode);
+            Assert.Equal("REJECTED", db.QuerySingle<string>("""
+                SELECT Status FROM dbo.App02EventProgress
+                WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = closeReceipt }));
+            await A4Capture(s, "closed", closure.Scene.Trip);
         });
 
     [Theory]
