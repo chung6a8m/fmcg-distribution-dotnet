@@ -329,6 +329,24 @@ public sealed partial class App01e2CrossCommandRaceTests
         Func<A4Session, Task> scenario)
     {
         string peer = tenant == "tenant-a" ? "tenant-b" : "tenant-a";
+        // A11-09 starts a real hosted worker that legitimately services BOTH
+        // tenants. Quiesce unrelated peer work from earlier tests BEFORE the
+        // oracle baseline so it cannot be mistaken for leakage by this Trip.
+        // The strict opposite-DB full-table no-write assertion remains active
+        // over the complete scenario itself.
+        if (group == "A11-09")
+        {
+            using var maintenance = fixture.CreateFactory();
+            using var scope = maintenance.Services.CreateScope();
+            await scope.ServiceProvider
+                .GetRequiredService<App02a3ProcessingService>()
+                .SweepTenantAsync(peer, DateTimeOffset.UtcNow, true,
+                    TestContext.Current.CancellationToken);
+            await scope.ServiceProvider
+                .GetRequiredService<App02a3OutboxService>()
+                .SweepTenantAsync(peer, DateTimeOffset.UtcNow,
+                    TestContext.Current.CancellationToken);
+        }
         FullSqlState peerBefore = await FullSql(peer);
         byte[] fixtureBytes = File.ReadAllBytes(A4FixturePath());
         var report = new A4Report
