@@ -32,7 +32,6 @@ public sealed class App01e4OutcomeLookupService(TenantConnections connections)
 
     public static bool ValidIdentity(string? key) =>
         !string.IsNullOrWhiteSpace(key) && key.Length <= 128
-        && string.Equals(key, key.Trim(), StringComparison.Ordinal)
         && !key.Any(char.IsControl);
 
     public async Task<BusinessCommandRecovery> LookupAsync(
@@ -51,7 +50,7 @@ public sealed class App01e4OutcomeLookupService(TenantConnections connections)
         string tenant = SyntheticAuth.GetTenantId(principal);
         string actor = principal.FindFirst("actor_id")?.Value
             ?? throw new UnauthorizedAccessException("Bound synthetic actor required.");
-        if (!ValidIdentity(actor)
+        if (!ValidIdentity(actor) || actor != actor.Trim()
             || !string.Equals(actor, principal.FindFirst("sub")?.Value, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Bound synthetic actor is invalid.");
 
