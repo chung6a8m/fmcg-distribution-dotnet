@@ -430,4 +430,68 @@ public sealed partial class App01e2CrossCommandRaceTests
             WHERE TenantId=@Tenant AND ProposalId=@Proposal
             """, new { Tenant = tenant, Proposal = proposal }));
     }
+
+    [Fact]
+    public async Task App02a3_actual_OS_restart_recovers_SQL_pending_C_after_late_P_wakeup()
+    {
+        const string tenant = "tenant-a";
+        using var setupHost = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(setupHost.CreateClient(), tenant);
+        using var setupSales = Client(setupHost, tenant, SalesActor, "sales");
+        var scene = await SetupA3(tenant, setup, setupSales);
+        var p = NewPEvent(scene.Scene.Trip, scene.Offer);
+        var c = NewCEvent(scene.Scene.Trip, p, scene.Count);
+        using var peer = Open("tenant-b");
+        int peerBefore = peer.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.App02EventReceipt");
+        int originalPid;
+        Guid cReceipt;
+        await using (var before = await App01e4ApiProcess.StartAsync(
+            fixture, TestContext.Current.CancellationToken, app02WorkerEnabled: false))
+        {
+            originalPid = before.Pid;
+            using var cashier = before.Client(tenant, CashierActor, "cashier");
+            cReceipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+            using var db = Open(tenant);
+            Assert.Equal("PENDING_DEPENDENCY", db.QuerySingle<string>("""
+                SELECT Status FROM dbo.App02EventProgress
+                WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = cReceipt }));
+        }
+        // A new executable process uses the same nonce-owned SQL database,
+        // not an in-memory TestServer state or static C# fixture.
+        await using (var after = await App01e4ApiProcess.StartAsync(
+            fixture, TestContext.Current.CancellationToken, app02WorkerEnabled: true))
+        {
+            Assert.NotEqual(originalPid, after.Pid);
+            using var sales = after.Client(tenant, SalesActor, "sales");
+            await IntakeA3(sales, p); // P receipt COMMIT wakes new worker.
+            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(25);
+            bool appliedAndAcked = false;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                using var db = Open(tenant);
+                appliedAndAcked = db.ExecuteScalar<int>("""
+                    SELECT COUNT(*) FROM dbo.App02EventProgress progress
+                    JOIN dbo.App02AcceptanceApplication app
+                        ON app.TenantId=progress.TenantId
+                        AND app.CReceiptId=progress.ReceiptId
+                    JOIN dbo.App02OutboxDelivery delivery
+                        ON delivery.TenantId=app.TenantId
+                        AND delivery.MessageId=app.MessageId
+                    JOIN dbo.App02SyntheticConsumerInbox consumer
+                        ON consumer.TenantId=delivery.TenantId
+                        AND consumer.MessageId=delivery.MessageId
+                    WHERE progress.TenantId=@Tenant AND progress.ReceiptId=@Receipt
+                        AND progress.Status=N'APPLIED' AND delivery.Status=N'ACKED'
+                    """, new { Tenant = tenant, Receipt = cReceipt }) == 1;
+                if (appliedAndAcked) break;
+                await Task.Delay(150, TestContext.Current.CancellationToken);
+            }
+            Assert.True(appliedAndAcked,
+                "A fresh real Kestrel PID must recover durable C+P into exact APP01D posting and consumer ACK.");
+        }
+        Assert.Equal(peerBefore, peer.ExecuteScalar<int>(
+            "SELECT COUNT(*) FROM dbo.App02EventReceipt"));
+    }
 }
