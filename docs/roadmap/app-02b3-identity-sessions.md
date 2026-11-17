@@ -26,21 +26,23 @@
 
 ## CI acceptance matrix (this increment)
 
-| Case | Test witness | Status before final-HEAD CI |
+| Case | Test witness | Code-only CI result at source `fa20b95` |
 |---|---|---|
-| CI-B3-01 | Identity password hash, disabled user, invalid credentials, no plaintext stored | PENDING |
-| CI-B3-02 | Signed issuer/audience/key/expiry/jti/sid validation, no tenant grants | PENDING |
-| CI-B3-03 | 256-bit opaque token, hash at rest, one-time atomic rotation and replay family revoke | PENDING |
-| CI-B3-04 | Logout, revoke-all, security-stamp changes, actor/session mixing denied | PENDING |
-| CI-B3-05 | SameSite/Secure/HttpOnly host-only cookie, HTTPS Origin/CSRF negatives | PENDING |
-| CI-B3-06 | Vault-only secret bootstrap, missing/unscoped secret fail-closed, strict TLS connection; live key/SQL mismatch must deny | PENDING |
-| CI-B3-07 | B.2 inert/no-go, worker secret isolation, business/admin/synthetic routes stay blocked | PENDING |
-| CI-B3-08 | B.2 Linux/Windows and APP-01E.5/APP-02A.4 regression, exact final HEAD and independent review | PENDING |
+| CI-B3-01 | Identity password hash, disabled user, invalid credentials, no plaintext stored | CI_TESTED / NOT_PREPROD |
+| CI-B3-02 | Signed issuer/audience/key/expiry/jti/sid validation, no tenant grants | CI_TESTED / NOT_PREPROD |
+| CI-B3-03 | 256-bit opaque token, hash at rest, one-time atomic rotation and replay family revoke | CI_TESTED / NOT_PREPROD |
+| CI-B3-04 | Logout, revoke-all, security-stamp changes, actor/session mixing denied | CI_TESTED / NOT_PREPROD |
+| CI-B3-05 | SameSite/Secure/HttpOnly host-only cookie, HTTPS Origin/CSRF negatives | CI_TESTED / NOT_PREPROD |
+| CI-B3-06 | Vault-only secret bootstrap, missing/unscoped secret fail-closed, strict TLS connection; live key/SQL mismatch must deny | CI_TESTED / NOT_PREPROD |
+| CI-B3-07 | B.2 inert/no-go, worker secret isolation, business/admin/synthetic routes stay blocked | CI_TESTED / NOT_PREPROD |
+| CI-B3-08 | B.2 Linux/Windows and APP-01E.5/APP-02A.4 regression, exact final HEAD and independent review | CI_TESTED / NOT_PREPROD |
 
 **Merge discipline (new Owner decision, 17/11/2026):** [OWN-APP02B3-CI-01](../decisions/owner-app02b3-code-only-2026-11-17.md) explicitly authorizes **CI-only code merge** after independent final-diff review, zero blocking source findings, both B.3 jobs Linux and Windows SQL CI PASS, B.2 Linux and APP-00A Windows regression PASS at the same final source HEAD, artifact provenance, and immutable Business Baseline. It does **not** approve production/PREPROD deployment, privileged access, real G-B gates or external effects.
 
 ## Independent review remediation and still-open gates
 
-Original review HEAD **94bc46f** had missing MFA denial, SQL readiness and tests. The branch now includes fail-closed MFA, SQL readiness, redacted replay logging, ASP.NET Core TestServer JWT/Origin/cookie HTTP negatives, versioned operator-source SQL migration, and a Windows CI SQL Server two-client race/replay witness. **All code changes still need final-source CI verification and technical re-review**. Owner has separately authorized bounded **code-only merge**; it does not earn real PREPROD evidence. Physical debt is tracked in [#52](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/52) [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) [#54](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/54) [#55](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/55) [#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/56). No claim of operator-owned PREPROD, B.4 real provisioning, B.5 epoch, B.7 restore, B.8 immutable audit, G-B01..05 or production gate acceptance.
+Original review HEAD **94bc46f** had missing MFA denial, SQL readiness and tests. The branch now includes fail-closed MFA, SQL readiness, redacted replay logging, ASP.NET Core TestServer JWT/Origin/cookie HTTP negatives, versioned operator-source SQL migration, and a Windows CI SQL Server two-client race/replay witness. **Final-source CI and technical re-review are now completed** on source `fa20b95fc7c7fba7776273038c4f406b8d2e3154`, squash-merged `aa1659738da657960fdad84c6742896a2599cae5`, under the Owner's code-only exception ([closeout](../closeout/2026-11-17-app-02b3-ci-only.md)). Owner has separately authorized bounded **code-only merge**; it does not earn real PREPROD evidence. Physical debt is tracked in [#52](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/52) [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) [#54](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/54) [#55](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/55) [#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/56). No claim of operator-owned PREPROD, B.4 real provisioning, B.5 epoch, B.7 restore, B.8 immutable audit, G-B01..05 or production gate acceptance.
 
 **CI-only acceptance:** Full B.3 workflow must PASS both Linux TestServer and Windows LocalDB SQL-engine jobs, plus B.2 Linux ephemeral and APP-00A Windows regressions. SQL witness must bind TestRunId, source SHA, schema version, independent two-client SQL result and marker NOT_PREPROD. The Owner's code-only exception cannot override a failing test, missing artifact, changed HEAD, or blocking security defect.
+
+**Post-merge evidence:** 4/4 GitHub-hosted jobs PASS: B.3 Linux HTTP 16/16 plus B.2 regressions 30/30, B.3 Windows SQL Server LocalDB 2/2 with migration + concurrency/race witness ([workflow #44129747602](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44129747602)); B.2 Linux ephemeral Docker/TLS/Vault [#44129747566](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44129747566); Windows APP-00A 296/296 and A11 1440/1440 SQL cells, browser/PWA [#44129747610](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44129747610). **All are CI-only.** Physical PREPROD issues #52–#56 remain open and B.1 G-B01..05/30 NOT_VERIFIED.
