@@ -85,10 +85,15 @@ if (identityEnabled)
         if (!await db.Database.CanConnectAsync())
             throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_UNAVAILABLE");
         var count = await db.Database.SqlQueryRaw<int>(
-            "SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name IN ('AspNetUsers','PreprodLoginSessions','PreprodRefreshGrants')")
+            "SELECT COUNT(*) AS [Value] FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND name IN ('AspNetUsers','AspNetRoles','AspNetUserRoles','AspNetUserClaims','AspNetUserLogins','AspNetUserTokens','AspNetRoleClaims','PreprodLoginSessions','PreprodRefreshGrants')")
             .SingleAsync();
-        if (count != 3)
+        if (count != 9)
             throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_UNAVAILABLE");
+        var version = await db.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS [Value] FROM dbo.__PreprodIdentitySchemaHistory WHERE SchemaVersion = {0}",
+            PreprodIdentitySchemaContract.Version).SingleAsync();
+        if (version != 1)
+            throw new IdentityStartupDeniedException("IDENTITY_SCHEMA_VERSION_DENIED");
     }
     catch (Exception)
     {
