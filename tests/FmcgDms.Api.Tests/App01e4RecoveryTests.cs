@@ -212,7 +212,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             await Assert.ThrowsAsync<HttpRequestException>(() =>
                 Send(lostClient, req.Path, req.Payload));
             transport = await reset;
-            Assert.True(transport.StartsWith("HTTP/1.1 200", StringComparison.Ordinal));
+            Assert.StartsWith("HTTP/1.1 200", transport);
         }
 
         SqlAudit sql = Audit(tenant, req.Payload);
@@ -365,10 +365,10 @@ public sealed partial class App01e2CrossCommandRaceTests
         Unknown(await Lookup(owner, command));
 
         using var anonymous = factory.CreateClient();
-        using var unauthorized = await anonymous.GetAsync(LookupPath(command));
+        using var unauthorized = await anonymous.GetAsync(LookupPath(command), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
         using var auditor = Client(factory, tenant, WarehouseActor, "auditor");
-        using var forbidden = await auditor.GetAsync(LookupPath(command));
+        using var forbidden = await auditor.GetAsync(LookupPath(command), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
         foreach (string path in new[]
@@ -379,7 +379,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             RecoveryRoute + "?producerId=" + new string('x', 129) + "&commandId=y"
         })
         {
-            using var invalid = await owner.GetAsync(path);
+            using var invalid = await owner.GetAsync(path, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         }
 
@@ -389,7 +389,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         Guid row = Guid.NewGuid();
         await using (var db = new SqlConnection(Connection(tenant)))
         {
-            await db.OpenAsync();
+            await db.OpenAsync(TestContext.Current.CancellationToken);
             await db.ExecuteAsync("""
                 INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
                     PayloadHashVersion,PayloadHash,ActorId,Status)
@@ -397,7 +397,7 @@ public sealed partial class App01e2CrossCommandRaceTests
                     CONVERT(binary(32),HASHBYTES('SHA2_256',N'e4-nonterminal')),
                     @Actor,N'RECEIVED')
                 """, new { Id = row, Tenant = tenant, Producer = E4Producer,
-                    Command = key, Actor = WarehouseActor });
+                    Command = key, Actor = WarehouseActor }, commandTimeout: 30);
         }
         try
         {
@@ -415,12 +415,12 @@ public sealed partial class App01e2CrossCommandRaceTests
 
         using var disabled = fixture.CreateFactory(syntheticEnabled: false);
         using var disabledClient = disabled.CreateClient();
-        using var absent = await disabledClient.GetAsync(LookupPath(command));
+        using var absent = await disabledClient.GetAsync(LookupPath(command), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
         using var production = fixture.CreateFactory(syntheticEnabled: false,
             environment: "Production");
         using var prodClient = production.CreateClient();
-        using var notMapped = await prodClient.GetAsync(LookupPath(command));
+        using var notMapped = await prodClient.GetAsync(LookupPath(command), TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, notMapped.StatusCode);
     }
 }
