@@ -89,7 +89,7 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
 if ($physical[0] -ceq $physical[1] -or
     $physical[0].Substring(0, $physical[0].Length - 1) -cne
       $physical[1].Substring(0, $physical[1].Length - 1) -or
-    $groupCount -ne 24 -or $checkpointCount -ne 56 -or $cellCount -ne 1344) {
-    throw "A4 requires 24 groups, 56 checkpoints and 1344 physical SQL cells, observed $groupCount/$checkpointCount/$cellCount"
+    $groupCount -ne 24 -or $checkpointCount -ne 60 -or $cellCount -ne 1440) {
+    throw "A4 requires 24 groups, 60 checkpoints and 1440 physical SQL cells, observed $groupCount/$checkpointCount/$cellCount"
 }
-Write-Host "APP-02A.4 PASS: 24/24 per-tenant groups, 56/56 checkpoints, 1344/1344 SQL cells, peer full-table digest stable, TestRunId=$id, source HEAD=$source"
+Write-Host "APP-02A.4 PASS: 24/24 per-tenant groups, 60/60 checkpoints, 1440/1440 SQL cells, peer full-table digest stable, TestRunId=$id, source HEAD=$source"
