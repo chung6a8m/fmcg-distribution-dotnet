@@ -51,7 +51,7 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
         $r.FirstProcessId -eq $r.SecondProcessId) {
       throw "E.4 report lacks actual transport loss or distinct process restart: $name"
     }
-    foreach ($hidden in @($r.OtherActorLookup,$r.OtherTenantLookup)) {
+    foreach ($hidden in @($r.OtherActorLookup,$r.OtherTenantLookup,$r.CaseChangedActorLookup,$r.CaseChangedProducerLookup)) {
       if ($hidden.State -cne 'UNKNOWN' -or $hidden.ReasonCode -cne 'NOT_FOUND' -or
           $null -ne $hidden.SourceId -or $null -ne $hidden.Status -or
           $null -ne $hidden.OutcomeCode) {
