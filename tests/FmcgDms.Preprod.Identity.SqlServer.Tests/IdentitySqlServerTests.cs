@@ -83,8 +83,8 @@ public sealed class IdentitySqlServerTests
             var b = Rotate(clientB.ServiceProvider);
             barrier.SetResult();
             var outcome = await Task.WhenAll(a, b);
-            Assert.Single(outcome.Where(x => x is not null));
-            Assert.Single(outcome.Where(x => x is null));
+            Assert.Single(outcome, x => x is not null);
+            Assert.Single(outcome, x => x is null);
 
             var winner = outcome.Single(x => x is not null)!;
             // Independently observed raw SQL state, never the service's own "PASS".
@@ -179,8 +179,8 @@ public sealed class IdentitySqlServerTests
     private static string ReadMigration()
     {
         var assembly = typeof(PreprodIdentityDb).Assembly;
-        var name = Assert.Single(assembly.GetManifestResourceNames()
-            .Where(x => x.EndsWith("20261117_001_identity_control_plane.sql", StringComparison.Ordinal)));
+        var name = Assert.Single(assembly.GetManifestResourceNames(),
+            x => x.EndsWith("20261117_001_identity_control_plane.sql", StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
