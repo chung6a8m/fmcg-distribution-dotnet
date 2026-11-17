@@ -10,6 +10,7 @@
 - Refresh: 32 CSPRNG bytes base64url, SHA256 hex digest only at rest; 7-day technical TTL. Per-session family; rotation consumes the old grant and inserts successor in one Serializable SQL transaction. Reuse of a consumed grant commits session revocation+epoch bump **before** denial. Logout, revoke-all, account disable and security stamp change invalidate current access. No token values in logs or metrics.
 - OIDC-ready stable `PreprodUser.Id`, `ExternalIssuer`/`ExternalSubject` unique mapping fields. No OIDC provider selected and no external subject auto-provisioning. `System Administrator` is not a tenant business principal.
 - Key and SQL connection material are retrieved at startup **only from Vault KV-v2** `preprod/data/identity/api` using the API workload token. Worker has no read permission. Neither key nor password appears in Compose environment or source; lack of Vault/key/schema/SQL stops activation.
+- Identity routes re-probe the runtime Vault grant and current Identity KV-v2 secret before every request; key/version/SQL binding changes fail closed with HTTP 503 until an approved process reload. `/health/ready` also rejects changed/missing Identity secrets. HTTPS + cert-validated private control SQL required; no `TrustServerCertificate` or encryption downgrade. A global 20/minute in-memory auth budget and 8-KiB request-body ceiling are **PREPROD guards**, not an external WAF/DoS guarantee.
 - B.2 API and Worker remain `FOUNDATION_ONLY / NO_GO`. Identity endpoints are opt-in via **nonsecret** `PREPROD_IDENTITY_ENABLED=true` plus `Identity:Scope=AUTH_ONLY`; if false, routes remain 404. The Caddy allowlist adds only five `/auth/*` routes, never business/admin/synthetic. No automatic schema creation at API boot.
 
 ## Required dependencies and honest limitations
@@ -29,7 +30,7 @@
 | CI-B3-03 | 256-bit opaque token, hash at rest, one-time atomic rotation and replay family revoke | PENDING |
 | CI-B3-04 | Logout, revoke-all, security-stamp changes, actor/session mixing denied | PENDING |
 | CI-B3-05 | SameSite/Secure/HttpOnly host-only cookie, HTTPS Origin/CSRF negatives | PENDING |
-| CI-B3-06 | Vault-only secret bootstrap, missing/unscoped secret fail-closed, no hardcoded key | PENDING |
+| CI-B3-06 | Vault-only secret bootstrap, missing/unscoped secret fail-closed, strict TLS connection; live key/SQL mismatch must deny | PENDING |
 | CI-B3-07 | B.2 inert/no-go, worker secret isolation, business/admin/synthetic routes stay blocked | PENDING |
 | CI-B3-08 | B.2 Linux/Windows and APP-01E.5/APP-02A.4 regression, exact final HEAD and independent review | PENDING |
 

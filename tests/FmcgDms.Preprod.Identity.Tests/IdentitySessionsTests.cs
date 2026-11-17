@@ -140,6 +140,24 @@ public sealed class IdentitySessionsTests
             }, out _));
     }
 
+    [Fact]
+    public void Rotated_or_revoked_Vault_key_and_sql_binding_fail_closed()
+    {
+        var current = new Keys(
+            "Server=control.private;Database=fmcg_identity;Encrypt=True;TrustServerCertificate=False",
+            RandomNumberGenerator.GetBytes(64), "key-a",
+            "https://preprod.example.invalid", "fmcg-preprod-identity");
+        current.Validate();
+        current.EnsureCurrent(current);
+        Assert.Throws<IdentityStartupDeniedException>(() =>
+            current.EnsureCurrent(current with { KeyId = "key-b" }));
+        Assert.Throws<IdentityStartupDeniedException>(() =>
+            current.EnsureCurrent(current with { SigningKey = RandomNumberGenerator.GetBytes(64) }));
+        Assert.Throws<IdentityStartupDeniedException>(() =>
+            current.EnsureCurrent(current with { SqlConnectionString =
+                "Server=peer.private;Database=fmcg_identity;Encrypt=True;TrustServerCertificate=False" }));
+    }
+
     [Theory]
     [InlineData(null, false)]
     [InlineData("https://preprod.example.invalid", true)]
@@ -165,6 +183,12 @@ public sealed class IdentitySessionsTests
             new Keys("Server=private", new byte[32], "v1", "https://issuer.invalid", "preprod").Validate());
         Assert.Throws<IdentityStartupDeniedException>(() =>
             new Keys("Server=private", new byte[64], "v1", "http://issuer.invalid", "preprod").Validate());
+        Assert.Throws<IdentityStartupDeniedException>(() =>
+            new Keys("Server=private;Database=identity;Encrypt=False", new byte[64],
+                "v1", "https://issuer.invalid", "preprod").Validate());
+        Assert.Throws<IdentityStartupDeniedException>(() =>
+            new Keys("Server=private;Database=identity;Encrypt=True;TrustServerCertificate=True",
+                new byte[64], "v1", "https://issuer.invalid", "preprod").Validate());
     }
 
     private static JwtSecurityToken Jwt(string token) => new JwtSecurityTokenHandler().ReadJwtToken(token);

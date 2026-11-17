@@ -3,6 +3,8 @@ using FmcgDms.Preprod.Runtime;
 using FmcgDms.Preprod.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 // Intentionally a NEW binary: there is no SyntheticAuth, LocalDB, business
@@ -23,13 +25,25 @@ catch (RuntimeDeniedException denied)
 // Identity is independent of the synthetic API and is opt-in only after a
 // scoped Vault secret and separately provisioned control-plane DB exist.
 bool identityEnabled = builder.Configuration.GetValue<bool>("Identity:Enabled");
+IdentityOptions? activeIdentity = null;
 if (identityEnabled)
 {
     try
     {
-        var identitySecrets = await VaultIdentitySecrets.ReadAsync(builder.Configuration,
+        activeIdentity = await VaultIdentitySecrets.ReadAsync(builder.Configuration,
             CancellationToken.None);
-        builder.Services.AddPreprodIdentity(identitySecrets);
+        builder.Services.AddPreprodIdentity(activeIdentity);
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddFixedWindowLimiter("preprod-auth", limit =>
+            {
+                limit.PermitLimit = 20; // global PREPROD auth budget, not a production/WAF substitute
+                limit.Window = TimeSpan.FromMinutes(1);
+                limit.QueueLimit = 0;
+                limit.AutoReplenishment = true;
+            });
+        });
     }
     catch (IdentityStartupDeniedException denied)
     {
@@ -108,6 +122,41 @@ app.Use(async (ctx, next) =>
 
 if (identityEnabled)
 {
+    app.UseRouting();
+    app.UseRateLimiter();
+    app.Use(async (ctx, next) =>
+    {
+        if (ctx.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase))
+        {
+            const long maxBodySize = 8 * 1024;
+            if (ctx.Request.ContentLength > maxBodySize)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+                return;
+            }
+            var maxBody = ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();
+            if (maxBody is { IsReadOnly: false })
+                maxBody.MaxRequestBodySize = maxBodySize;
+            try
+            {
+                // Vault token is re-read from its read-only file on every request.
+                // Revoked/rotated Identity secret => deny further issuance until
+                // operator-approved reload, never fall back to cached key.
+                await app.Services.GetRequiredService<VaultAdmissionClient>()
+                    .ValidateAsync(ctx.RequestAborted);
+                var liveIdentity = await VaultIdentitySecrets.ReadAsync(
+                    builder.Configuration, ctx.RequestAborted);
+                activeIdentity!.EnsureCurrent(liveIdentity);
+            }
+            catch (Exception ex) when (ex is RuntimeDeniedException or IdentityStartupDeniedException)
+            {
+                app.Logger.LogWarning("IDENTITY_REQUEST_DENIED code=VAULT_AUTHORITY_UNAVAILABLE");
+                ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+        }
+        await next(ctx);
+    });
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapIdentityOnly();
@@ -119,9 +168,14 @@ app.MapGet("/health/ready", async (VaultAdmissionClient vault, CancellationToken
     try
     {
         await vault.ValidateAsync(ct);
+        if (identityEnabled)
+        {
+            var live = await VaultIdentitySecrets.ReadAsync(builder.Configuration, ct);
+            activeIdentity!.EnsureCurrent(live);
+        }
         return Results.Ok(new { state = "foundation_ready", admission = "NO_GO" });
     }
-    catch (RuntimeDeniedException)
+    catch (Exception ex) when (ex is RuntimeDeniedException or IdentityStartupDeniedException)
     {
         app.Logger.LogWarning("RUNTIME_REQUEST_DENIED code=VAULT_READINESS");
         return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);

@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using Microsoft.Data.SqlClient;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 
@@ -98,5 +100,30 @@ public sealed record IdentityOptions(string SqlConnectionString, byte[] SigningK
             || SqlConnectionString.Contains("AttachDbFilename", StringComparison.OrdinalIgnoreCase)
             || SqlConnectionString.Contains("LocalDB", StringComparison.OrdinalIgnoreCase))
             throw new IdentityStartupDeniedException("IDENTITY_SECRET_INVALID");
+
+        SqlConnectionStringBuilder parsed;
+        try { parsed = new SqlConnectionStringBuilder(SqlConnectionString); }
+        catch (ArgumentException) { throw new IdentityStartupDeniedException("IDENTITY_SECRET_INVALID"); }
+        if (parsed.TrustServerCertificate
+            || parsed.Encrypt == SqlConnectionEncryptOption.Optional
+            || string.IsNullOrWhiteSpace(parsed.DataSource)
+            || string.IsNullOrWhiteSpace(parsed.InitialCatalog)
+            || parsed.InitialCatalog.Equals("master", StringComparison.OrdinalIgnoreCase)
+            || parsed.InitialCatalog.Equals("tempdb", StringComparison.OrdinalIgnoreCase)
+            || parsed.InitialCatalog.Equals("model", StringComparison.OrdinalIgnoreCase)
+            || parsed.InitialCatalog.Equals("msdb", StringComparison.OrdinalIgnoreCase))
+            throw new IdentityStartupDeniedException("IDENTITY_SQL_TLS_OR_DB_INVALID");
+    }
+
+    public void EnsureCurrent(IdentityOptions observed)
+    {
+        // Fail closed on Vault key, audience, issuer, SQL binding or kid changes.
+        // Compare key material in fixed time and never print the values.
+        if (!CryptographicOperations.FixedTimeEquals(SigningKey, observed.SigningKey)
+            || !string.Equals(KeyId, observed.KeyId, StringComparison.Ordinal)
+            || !string.Equals(Issuer, observed.Issuer, StringComparison.Ordinal)
+            || !string.Equals(Audience, observed.Audience, StringComparison.Ordinal)
+            || !string.Equals(SqlConnectionString, observed.SqlConnectionString, StringComparison.Ordinal))
+            throw new IdentityStartupDeniedException("IDENTITY_SECRET_CHANGED_RELOAD_REQUIRED");
     }
 }

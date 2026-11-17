@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -91,7 +92,7 @@ public static class IdentityHttp
     {
         // B.3 does not expose registration, tenant selection, roles, approval,
         // business actions, or any privileged Control Plane API.
-        var auth = endpoints.MapGroup("/auth");
+        var auth = endpoints.MapGroup("/auth").RequireRateLimiting("preprod-auth");
         auth.MapPost("/login", async (HttpContext ctx, LoginInput request,
             IdentitySessionService sessions, CancellationToken ct) =>
         {
