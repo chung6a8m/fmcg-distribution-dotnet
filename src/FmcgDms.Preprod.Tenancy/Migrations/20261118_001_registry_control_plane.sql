@@ -359,6 +359,34 @@ BEGIN
     COMMIT TRANSACTION;
 END;');
 
+
+    EXEC(N'
+CREATE PROCEDURE dbo.cp_GetTenant @TenantId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND
+        (CanRequest=1 OR CanApprove=1 OR CanProvision=1 OR CanVerify=1 OR CanSuspend=1))
+        THROW 51401, ''TENANT_OPERATOR_DENIED'', 1;
+    SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,
+        RowVer,OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc
+    FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
+END;');
+    EXEC(N'
+CREATE PROCEDURE dbo.cp_GetPeerForVerification @TenantId uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND CanVerify=1)
+        THROW 51401, ''TENANT_VERIFIER_OPERATOR_DENIED'', 1;
+    SELECT TOP (1) DatabaseName
+    FROM dbo.PreprodTenantRegistry
+    WHERE TenantId<>@TenantId AND State IN (''VERIFYING'',''ACTIVE'',''SUSPENDED'')
+    ORDER BY TenantId;
+END;');
+
         INSERT dbo.__PreprodTenantRegistrySchemaHistory (SchemaVersion,AppliedUtc)
             VALUES(N'B4_20261118_001',SYSUTCDATETIME());
     END;
@@ -368,7 +396,7 @@ END;');
        OR (SELECT COUNT(*) FROM sys.procedures WHERE schema_id=SCHEMA_ID(N'dbo')
         AND name IN (N'cp_RequestTenant',N'cp_ApproveTenant',N'cp_ClaimProvision',
                      N'cp_CompleteProvision',N'cp_FailProvision',N'cp_RecordVerification',
-                     N'cp_TenantTransition'))<>7
+                     N'cp_TenantTransition',N'cp_GetTenant',N'cp_GetPeerForVerification'))<>9
        OR NOT EXISTS (SELECT 1 FROM sys.columns
             WHERE object_id=OBJECT_ID(N'dbo.PreprodTenantRegistry') AND name=N'RowVer')
         THROW 51400,'TENANT_REGISTRY_SCHEMA_DRIFT_DENIED',1;

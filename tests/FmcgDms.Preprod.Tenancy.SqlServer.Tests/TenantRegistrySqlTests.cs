@@ -17,7 +17,7 @@ public sealed class TenantRegistrySqlTests
         await using var f=await B4SqlFixture.CreateAsync(ct);
         Assert.Equal(1,Convert.ToInt32(await f.ScalarAsync(f.Control,
             "SELECT COUNT(*) FROM dbo.__PreprodTenantRegistrySchemaHistory WHERE SchemaVersion=N'B4_20261118_001'",ct)));
-        Assert.Equal(7,Convert.ToInt32(await f.ScalarAsync(f.Control,
+        Assert.Equal(9,Convert.ToInt32(await f.ScalarAsync(f.Control,
             "SELECT COUNT(*) FROM sys.procedures WHERE schema_id=SCHEMA_ID(N'dbo') AND name LIKE 'cp_%'",ct)));
         await f.ExecAsync(f.Control,
             "UPDATE dbo.__PreprodTenantRegistrySchemaHistory SET SchemaVersion=N'UNKNOWN'",ct);
@@ -148,6 +148,14 @@ public sealed class TenantRegistrySqlTests
             $"SELECT COUNT_BIG(*) FROM [{b.DatabaseName}].dbo.__PreprodTenantBinding",ct));
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
             "SELECT COUNT_BIG(*) FROM dbo.PreprodTenantRegistry",ct));
+        // A role can retrieve its registered tenant through a guarded
+        // ownership-chained procedure while direct SELECT remains DENIED.
+        await f.RunAsAsync(f.Requester,
+            "EXEC dbo.cp_GetTenant @TenantId=@id",ct,
+            new SqlParameter("@id",tenantA));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
+            "EXEC dbo.cp_GetPeerForVerification @TenantId=@id",ct,
+            new SqlParameter("@id",tenantA)));
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
             $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
 

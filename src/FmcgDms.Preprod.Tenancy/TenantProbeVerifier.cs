@@ -33,11 +33,10 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         await using var registryDb=new SqlConnection(registry.ConnectionString);
         await registryDb.OpenAsync(ct);
         string? peer;
-        await using(var lookup=new SqlCommand(
-            @"SELECT TOP(1) DatabaseName FROM dbo.PreprodTenantRegistry
-              WHERE TenantId<>@tenant AND State IN ('VERIFYING','ACTIVE','SUSPENDED') ORDER BY TenantId",registryDb))
+        await using(var lookup=new SqlCommand("dbo.cp_GetPeerForVerification",registryDb)
+            {CommandType=CommandType.StoredProcedure})
         {
-            lookup.Parameters.AddWithValue("@tenant",tenantId);
+            lookup.Parameters.AddWithValue("@TenantId",tenantId);
             peer=(string?)await lookup.ExecuteScalarAsync(ct);
         }
         // A second physical tenant is required for meaningful negative probes.

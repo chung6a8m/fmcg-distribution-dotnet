@@ -33,11 +33,9 @@ public sealed class TenantRegistrySql(string connectionString)
     {
         await using var db = new SqlConnection(ConnectionString);
         await db.OpenAsync(ct);
-        await using var c = new SqlCommand(
-            @"SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,
-                     State,RowVer,OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc
-              FROM dbo.PreprodTenantRegistry WHERE TenantId=@tenant", db);
-        c.Parameters.Add(new SqlParameter("@tenant", SqlDbType.UniqueIdentifier) { Value=id });
+        await using var c = new SqlCommand("dbo.cp_GetTenant", db)
+            { CommandType = CommandType.StoredProcedure };
+        c.Parameters.Add(new SqlParameter("@TenantId", SqlDbType.UniqueIdentifier) { Value=id });
         await using var rd = await c.ExecuteReaderAsync(ct);
         return await rd.ReadAsync(ct) ? Read(rd) : null;
     }
