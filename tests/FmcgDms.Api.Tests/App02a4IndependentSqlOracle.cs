@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Dapper;
 using FmcgDms.Api.Persistence;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace FmcgDms.Api.Tests;
@@ -417,8 +418,10 @@ public sealed partial class App01e2CrossCommandRaceTests
     }
 
     private static async Task A4IntakeP(A4Session s,
-        App02EventInput? p = null) =>
-        _ = await IntakeA3(s.Sales, p ?? s.P);
+        App02EventInput? p = null)
+    {
+        await IntakeA3(s.Sales, p ?? s.P);
+    }
 
     private static async Task<string> A4Process(A4Session s, Guid receipt,
         DateTimeOffset? now = null)
