@@ -369,7 +369,45 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
                 LeaseOwner=NULL,LeaseExpiresAtUtc=NULL,AckAtUtc=SYSUTCDATETIME()
             WHERE MessageId=@message
             """, new { message = scene.Message }, [51153], tx);
-        tx.Rollback(); // A failing trigger may already have aborted the transaction.
+        // Disposing the SQL transaction rolls back this negative guard probe.
+    }
+
+    [Fact]
+    public void Consumer_hash_mismatch_is_rejected_before_receipt_ack()
+    {
+        using var db = Open(fixture.TenantAConnectionString);
+        using var tx = db.BeginTransaction();
+        var scene = StageAcceptance(db, tx);
+        byte[] forgedHash = (byte[])scene.Hash.Clone();
+        forgedHash[0] ^= 0xff;
+        Reject(db, """
+            INSERT dbo.App02SyntheticConsumerInbox
+                (TenantId,MessageId,ConsumerReceiptId,PayloadVersion,PayloadHash)
+            VALUES(@tenant,@message,@receipt,1,@hash)
+            """, new { tenant = A, message = scene.Message,
+                receipt = Guid.NewGuid(), hash = forgedHash }, [547], tx);
+    }
+
+    [Fact]
+    public void Corrections_require_new_source_and_immutable_authorization_lineage()
+    {
+        using var db = Open(fixture.TenantAConnectionString);
+        using var tx = db.BeginTransaction();
+        var scene = StageAcceptance(db, tx);
+        Guid correction = NewSource(db, A, scene.Trip,
+            "CASH_HANDOVER_CORRECTION", "maker-01", tx);
+        db.Execute("""
+            INSERT dbo.App02CorrectionLink
+                (TenantId,CorrectionSourceId,OriginalAcceptanceId,
+                 MakerActorId,CheckerActorId,ReasonCode,EvidenceRef)
+            VALUES(@tenant,@correction,@original,N'maker-01',N'checker-01',
+                   N'SYNTHETIC_CORRECTION',N'APP02-SCHEMA-EVIDENCE')
+            """, new { tenant = A, correction, original = scene.Acceptance }, tx);
+        Assert.NotEqual(scene.Acceptance, correction);
+        Reject(db, """
+            UPDATE dbo.BusinessSource SET SourceNumber=N'forged'
+            WHERE Id=@correction
+            """, new { correction }, [51133], tx);
     }
 
     private static Guid NewTrip(SqlConnection db, string tenant,
