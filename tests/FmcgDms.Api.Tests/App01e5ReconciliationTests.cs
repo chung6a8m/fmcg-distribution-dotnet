@@ -39,6 +39,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         decimal Actual, decimal Difference, bool Match);
     private sealed record E5Checkpoint(int Row, string Step, SqlSnapshot Sql,
         FullSqlState Full, E5SqlFacts Facts, E5Equation[] Equations);
+    private sealed record E5ReplayWitness(string Path, string CommandId, string Sha256);
     private sealed class E5SqlFacts
     {
         public string PersistedStep { get; set; } = "";
@@ -373,9 +374,20 @@ public sealed partial class App01e2CrossCommandRaceTests
         string? finalReplaySha = null;
         string otherTenant = tenant == "tenant-a" ? "tenant-b" : "tenant-a";
         string? rejectedId = null;
+        string? rejectedExcludedBeforeSha = null;
+        string? rejectedExcludedAfterSha = null;
+        string? peerDatabase = null;
+        string? peerBeforeSha = null;
+        string? peerAfterSha = null;
+        var replayWitnesses = new List<E5ReplayWitness>(7);
         Scene scene;
         try
         {
+            // Prove the opposite physical database has zero writes, not just
+            // zero E.5 command IDs.
+            var peerBefore = await FullSql(otherTenant);
+            peerDatabase = peerBefore.Database;
+            peerBeforeSha = peerBefore.Sha256;
             using var factory = fixture.CreateFactory();
             using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
             using var warehouse = Client(factory, tenant, WarehouseActor, "warehouse");
@@ -415,6 +427,9 @@ public sealed partial class App01e2CrossCommandRaceTests
             var load = new LoadManifestCommand(E5Producer, Id(), Id(), scene.Manifest);
             await Apply(warehouse, B + "load-manifest", load, "MANIFEST_LOADED");
             await Capture(1);
+            // Ignore only the newly persisted REJECTED command identity:
+            // every other row in every user table must remain unchanged.
+            rejectedExcludedBeforeSha = (await FullSql(tenant, b31.CommandId)).Sha256;
             var rejected = await Send(sales, B + "preflight-b-sale", b31);
             Assert.Equal(HttpStatusCode.OK, rejected.HttpStatus);
             Assert.Equal("REJECTED", rejected.Outcome.Status);
@@ -422,6 +437,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             Assert.Equal("B_QUOTA_INSUFFICIENT", rejected.Outcome.ReasonCode);
             Assert.Null(rejected.Outcome.SourceId);
             await Capture(2);
+            rejectedExcludedAfterSha = (await FullSql(tenant, b31.CommandId)).Sha256;
+            Assert.Equal(rejectedExcludedBeforeSha, rejectedExcludedAfterSha);
             Assert.Equal(stages[1].Sql.LedgerSha256, stages[2].Sql.LedgerSha256);
             Assert.Equal(stages[1].Sql.Numbers.Cells().ToArray(),
                 stages[2].Sql.Numbers.Cells().ToArray());
@@ -488,6 +505,10 @@ public sealed partial class App01e2CrossCommandRaceTests
                 var replay = await Send(client, path, command);
                 Assert.Equal(HttpStatusCode.OK, replay.HttpStatus);
                 Assert.True(replay.Outcome.Replayed);
+                var afterEachReplay = (await FullSql(tenant)).Sha256;
+                Assert.Equal(stages[6].Full.Sha256, afterEachReplay);
+                replayWitnesses.Add(new E5ReplayWitness(path, command.CommandId,
+                    afterEachReplay));
             }
             var conflict = await Send(sales, D + "offer-cash-handover",
                 offer with { OfferedAmount = 190m });
@@ -511,6 +532,8 @@ public sealed partial class App01e2CrossCommandRaceTests
                 """, new { OtherTenant = otherTenant, Producer = E5Producer,
                     Ids = new[] { load.CommandId, b31.CommandId, b20.CommandId,
                         a25.CommandId, offer.CommandId, accept.CommandId, unload.CommandId } }));
+            peerAfterSha = (await FullSql(otherTenant)).Sha256;
+            Assert.Equal(peerBeforeSha, peerAfterSha);
         }
         catch (Exception ex)
         {
@@ -525,6 +548,11 @@ public sealed partial class App01e2CrossCommandRaceTests
                 Schema = "APP01E5_RECONCILIATION_V1",
                 Status = failure is null && stages.Count == 7 && cells.Count == 91
                     && cells.All(x => x.Match) && allEquations.All(x => x.Match)
+                    && rejectedExcludedBeforeSha is not null
+                    && rejectedExcludedBeforeSha == rejectedExcludedAfterSha
+                    && peerBeforeSha is not null && peerBeforeSha == peerAfterSha
+                    && replayWitnesses.Count == 7
+                    && replayWitnesses.All(x => x.Sha256 == finalReplaySha)
                     && finalReplaySha == stages.LastOrDefault()?.Full.Sha256
                     ? "PASS" : "FAIL",
                 Failure = failure,
@@ -537,6 +565,12 @@ public sealed partial class App01e2CrossCommandRaceTests
                 ProducerId = E5Producer,
                 RejectCommandId = rejectedId,
                 OracleSha256 = oracle.Sha256,
+                PeerDatabase = peerDatabase,
+                PeerBeforeSha256 = peerBeforeSha,
+                PeerAfterSha256 = peerAfterSha,
+                RejectedExcludedBeforeSha256 = rejectedExcludedBeforeSha,
+                RejectedExcludedAfterSha256 = rejectedExcludedAfterSha,
+                ReplayWitnesses = replayWitnesses,
                 ExpectedCells = 91,
                 CheckedCells = cells.Count,
                 MatchedCells = cells.Count(x => x.Match),

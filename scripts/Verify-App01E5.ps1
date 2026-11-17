@@ -18,12 +18,22 @@ $steps = @('T0','T1_LOAD','T2_REJECT','T3_B20','T4_A25','T5_HANDOVER','T6_RETURN
 $sources = @(4,5,5,6,7,9,10)
 $lines = @(4,6,6,7,8,10,12)
 $effects = @(3,7,7,14,18,20,25)
+$replayPaths = @(
+  '/api/synthetic/app01b/commands/load-manifest',
+  '/api/synthetic/app01b/commands/preflight-b-sale',
+  '/api/synthetic/app01c/commands/post-b-sale-delivery-receipt',
+  '/api/synthetic/app01c/commands/post-a-partial-delivery',
+  '/api/synthetic/app01d/commands/offer-cash-handover',
+  '/api/synthetic/app01d/commands/accept-cash-handover',
+  '/api/synthetic/app01d/commands/unload-trip-remainder'
+)
 if ($oracle.status -cne 'MODEL_ONLY' -or $oracle.unit -cne 'SYNTHETIC_UNITLESS' -or
     $oracle.invoiceEligible -ne $false -or
     (@($oracle.cols) -join '|') -cne ($fields -join '|') -or @($oracle.steps).Count -ne 7) {
   throw 'APP-01E.5 locked oracle schema or status changed'
 }
 $databases = @()
+$nonces = @()
 $cellTotal = 0
 $equationTotal = 0
 foreach ($tenant in @('tenant-a','tenant-b')) {
@@ -47,6 +57,29 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
     throw "APP-01E.5 report schema/provenance/cardinality mismatch $name"
   }
   $databases += $r.Database
+  $nonce = [regex]::Match($r.Database, "^Fmcg_App00_([a-f0-9]{32})_$slot$").Groups[1].Value
+  $nonces += $nonce
+  $peerSlot = if ($slot -ceq 'A') { 'B' } else { 'A' }
+  $peerExpected = "Fmcg_App00_${nonce}_$peerSlot"
+  if ($r.PeerDatabase -cne $peerExpected -or
+      $r.PeerBeforeSha256 -cnotmatch '^[A-F0-9]{64}$' -or
+      $r.PeerBeforeSha256 -cne $r.PeerAfterSha256 -or
+      $r.RejectedExcludedBeforeSha256 -cnotmatch '^[A-F0-9]{64}$' -or
+      $r.RejectedExcludedBeforeSha256 -cne $r.RejectedExcludedAfterSha256) {
+    throw "E.5 rejected-command all-table exclusion or opposite physical tenant mutated $name"
+  }
+  $replays = @($r.ReplayWitnesses)
+  if ($replays.Count -ne 7 -or
+      @($replays | Select-Object -ExpandProperty CommandId -Unique).Count -ne 7) {
+    throw "E.5 requires seven distinct same-identity replay witnesses $name"
+  }
+  for ($k = 0; $k -lt 7; $k++) {
+    if ($replays[$k].Path -cne $replayPaths[$k] -or
+        $replays[$k].CommandId -cnotmatch '^[a-f0-9]{32}$' -or
+        $replays[$k].Sha256 -cne $r.Stages[6].Full.Sha256) {
+      throw "E.5 replay wrote SQL or endpoint/command witness malformed $name replay $k"
+    }
+  }
   for ($i = 0; $i -lt 7; $i++) {
     $s = $r.Stages[$i]
     $f = $s.Facts
@@ -172,7 +205,8 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
   }
   Write-Host "APP-01E.5 ${name}: 91/91 SQL oracle cells; 259/259 independent reconciliation equations; replay fingerprint stable"
 }
-if ($databases[0] -ceq $databases[1] -or $cellTotal -ne 182 -or $equationTotal -ne 518) {
+if ($databases[0] -ceq $databases[1] -or $nonces[0] -cne $nonces[1] -or
+    $cellTotal -ne 182 -or $equationTotal -ne 518) {
   throw "E.5 two physical tenants, 182 cells or 518 equations not independently proven"
 }
 Write-Host "APP-01E.5 PASS: two nonce-owned LocalDB tenants, 182/182 oracle cells, 518/518 SQL reconciliation equations; source HEAD $sourceHead"

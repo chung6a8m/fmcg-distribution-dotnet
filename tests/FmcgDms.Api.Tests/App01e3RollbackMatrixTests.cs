@@ -92,7 +92,7 @@ public sealed partial class App01e2CrossCommandRaceTests
     // an orphan, a changed amount, a torn stock movement or a frozen price.
     private sealed record FullSqlState(string Database, int Tables, int Rows, string Sha256);
 
-    private async Task<FullSqlState> FullSql(string tenant)
+    private async Task<FullSqlState> FullSql(string tenant, string? ignoredCommandId = null)
     {
         await using var db = await App01e3SqlFault.OpenOwnedScratchAsync(Connection(tenant), tenant);
         string database = await db.QuerySingleAsync<string>("SELECT DB_NAME()");
@@ -114,10 +114,15 @@ public sealed partial class App01e2CrossCommandRaceTests
         {
             string identifier = name.Replace("]", "]]", StringComparison.Ordinal);
             string literal = name.Replace("'", "''", StringComparison.Ordinal);
+            // Durable terminal rejection may add only its own command row.
+            // Filtering that identity proves all other user rows are untouched.
+            string excludedCommand = name == "BusinessCommand" && ignoredCommandId is not null
+                ? " WHERE CommandId <> @IgnoredCommandId" : "";
             return $"SELECT N'{literal}' AS TableName, " +
-                $"(SELECT * FROM dbo.[{identifier}] FOR JSON PATH, INCLUDE_NULL_VALUES) AS RowsJson";
+                $"(SELECT * FROM dbo.[{identifier}]{excludedCommand} FOR JSON PATH, INCLUDE_NULL_VALUES) AS RowsJson";
         }));
-        var data = (await db.QueryAsync<SqlJsonTable>(batch)).ToArray();
+        var data = (await db.QueryAsync<SqlJsonTable>(batch,
+            new { IgnoredCommandId = ignoredCommandId })).ToArray();
         Assert.Equal(names.Length, data.Length);
         var sb = new StringBuilder();
         int rowCount = 0;
