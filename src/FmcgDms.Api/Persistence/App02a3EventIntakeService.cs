@@ -54,6 +54,17 @@ internal static class App02a3Sql
     // NOT exposed as a request-supplied tenant credential. This identity is
     // constructed solely inside the configured dev/test worker from its fixed
     // tenant catalog and still passes the nonce/LocalDB binding guard.
+    public static string Producer(ClaimsPrincipal principal)
+    {
+        string? producer = principal.FindFirst("producer_id")?.Value;
+        if (producer is null || producer.Length is < 1 or > 128
+            || !char.IsAsciiLetterOrDigit(producer[0])
+            || producer.Any(c => !(char.IsAsciiLetterOrDigit(c)
+                || c is '.' or '_' or ':' or '-')))
+            throw new UnauthorizedAccessException("Signed producer identity required.");
+        return producer;
+    }
+
     public static ClaimsPrincipal WorkerPrincipal(string tenant)
     {
         if (tenant is not ("tenant-a" or "tenant-b"))
@@ -105,6 +116,9 @@ public sealed class App02a3EventIntakeService(
     {
         string tenant = App02a3Sql.Tenant(principal);
         string actor = App02a3Sql.Actor(principal);
+        if (!string.Equals(input.ProducerId,
+            App02a3Sql.Producer(principal), StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Event producer must match signed principal.");
         string requiredRole = input.EventKind switch
         {
             App02EventCanonicalV1.OfferKind => "sales",
@@ -133,7 +147,7 @@ public sealed class App02a3EventIntakeService(
             await App02a3Sql.RequireRole(db, tx, tenant, actor, requiredRole, ct);
 
             var saved = await db.QuerySingleOrDefaultAsync<ReceiptRow>(App02a3Sql.Cmd("""
-                SELECT r.ReceiptId,r.PayloadVersion,r.PayloadHash,p.Status
+                SELECT r.ReceiptId,r.ActorId,r.PayloadVersion,r.PayloadHash,p.Status
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)
                 JOIN dbo.App02EventProgress p ON p.TenantId=r.TenantId
                     AND p.ReceiptId=r.ReceiptId
@@ -142,6 +156,8 @@ public sealed class App02a3EventIntakeService(
                 """, new { Tenant = tenant, Producer = input.ProducerId, input.EventId }, tx, ct));
             if (saved is not null)
             {
+                if (!string.Equals(saved.ActorId, actor, StringComparison.Ordinal))
+                    throw new UnauthorizedAccessException("Event identity belongs to another actor.");
                 if (saved.PayloadVersion != App02EventCanonicalV1.Version ||
                     !CryptographicOperations.FixedTimeEquals(saved.PayloadHash, hash))
                 {
@@ -215,6 +231,9 @@ public sealed class App02a3EventIntakeService(
     {
         string tenant = App02a3Sql.Tenant(principal);
         string actor = App02a3Sql.Actor(principal);
+        if (!string.Equals(producer,
+            App02a3Sql.Producer(principal), StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Outcome producer must match signed principal.");
         // Canonical input identity grammar, not an unvalidated SQL lookup.
         if (producer.Length is < 1 or > 128 || eventId.Length is < 1 or > 128
             || producer.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or ':' or '-'))
@@ -260,6 +279,7 @@ public sealed class App02a3EventIntakeService(
     private sealed class ReceiptRow
     {
         public Guid ReceiptId { get; set; }
+        public string ActorId { get; set; } = "";
         public short PayloadVersion { get; set; }
         public byte[] PayloadHash { get; set; } = [];
         public string Status { get; set; } = "";
