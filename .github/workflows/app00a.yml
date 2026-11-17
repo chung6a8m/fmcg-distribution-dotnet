@@ -71,7 +71,9 @@ jobs:
           APP01E4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01E5_TEST_RUN_ID: app01e5-${{ github.run_id }}-${{ github.run_attempt }}
           APP01E5_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 247 -- --report-trx --coverage --coverage-output-format cobertura
+          APP02A2_TEST_RUN_ID: app02a2-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02A2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 258 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -200,6 +202,18 @@ jobs:
             "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
             Set-Content -Path TestResults/APP-01E5-TestRunId.txt -Encoding utf8
           Write-Host "APP-01E.5 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-02A.2 two-tenant schema TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app02a2-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          @("TestRunId=$id", "SourceHeadSha=$sourceHead", "WorkflowSha=$env:GITHUB_SHA",
+            "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
+            Set-Content -Path TestResults/APP-02A2-TestRunId.txt -Encoding utf8
+          Write-Host "APP-02A.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
