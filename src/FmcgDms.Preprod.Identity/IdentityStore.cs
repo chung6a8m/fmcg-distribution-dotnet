@@ -4,6 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FmcgDms.Preprod.Identity;
 
+// This version is an operator-applied, reviewed SQL script, NEVER an API boot migration.
+public static class PreprodIdentitySchemaContract
+{
+    public const string Version = "B3_20261117_001";
+}
+
 // Control-plane identity data only. No tenant DB bindings or business privileges.
 public sealed class PreprodUser : IdentityUser<Guid>
 {
