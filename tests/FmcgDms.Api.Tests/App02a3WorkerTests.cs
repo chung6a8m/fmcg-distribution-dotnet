@@ -142,14 +142,17 @@ public sealed partial class App01e2CrossCommandRaceTests
             WHERE TenantId=@Tenant AND OfferId=@Offer
             """, new { Tenant = tenant, Offer = s.Offer }));
 
-        DateTimeOffset at = DateTimeOffset.UtcNow;
-        Assert.Equal("CONSUMER_COMMITTED_ACK_LOST",
-            await outbound.DispatchOneAsync(tenant, at,
-                stopAfterConsumerCommit: true, TestContext.Current.CancellationToken));
+        // The SQL fixture is shared by prior tests within the same tenant:
+        // target THIS committed C message, not the oldest unrelated outbox.
         var message = db.QuerySingle<Guid>("""
             SELECT MessageId FROM dbo.App02AcceptanceApplication
             WHERE TenantId=@Tenant AND CReceiptId=@Receipt
             """, new { Tenant = tenant, Receipt = cReceipt });
+        DateTimeOffset at = DateTimeOffset.UtcNow;
+        Assert.Equal("CONSUMER_COMMITTED_ACK_LOST",
+            await outbound.DispatchOneAsync(tenant, at,
+                stopAfterConsumerCommit: true, TestContext.Current.CancellationToken,
+                onlyMessageId: message));
         Assert.Equal(1, db.ExecuteScalar<int>("""
             SELECT COUNT(*) FROM dbo.App02SyntheticConsumerInbox
             WHERE TenantId=@Tenant AND MessageId=@Message
@@ -160,7 +163,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             """, new { Tenant = tenant, Message = message }));
         Assert.Equal("ACKED", await outbound.DispatchOneAsync(tenant,
             at.AddMinutes(3), stopAfterConsumerCommit: false,
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken, onlyMessageId: message));
         Assert.Equal("ACKED", db.QuerySingle<string>("""
             SELECT Status FROM dbo.App02OutboxDelivery
             WHERE TenantId=@Tenant AND MessageId=@Message
