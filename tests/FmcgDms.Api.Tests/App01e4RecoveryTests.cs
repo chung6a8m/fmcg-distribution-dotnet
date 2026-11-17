@@ -25,7 +25,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         foreach (string scenario in new[]
         {
             "reserve", "quota", "confirm", "credit", "manifest", "b20", "a25",
-            "offer", "accept", "unload", "reject"
+            "offer", "accept", "unload", "reject", "b31"
         })
         {
             yield return ["tenant-a", scenario];
@@ -60,6 +60,15 @@ public sealed partial class App01e2CrossCommandRaceTests
     private async Task<Request> E4Request(TestApiFactory factory,
         HttpClient setup, string tenant, string scenario, Scene scene)
     {
+        if (scenario == "b31")
+        {
+            await Prepare(setup, tenant, scene, load: true);
+            return Req(B + "preflight-b-sale",
+                new PreflightBSaleCommand(E4Producer, Id(), Id(),
+                    scene.Trip, scene.Sku, 31m, 15m, 465m),
+                "sales", SalesActor, "", 0, 0);
+        }
+
         Request original = await E3Request(factory, setup, tenant,
             scenario == "reject" ? "quota" : scenario, scene);
         IApp01aCommand payload = E4Identity(original.Payload);
@@ -108,8 +117,9 @@ public sealed partial class App01e2CrossCommandRaceTests
         if (req.SourceKind.Length == 0)
         {
             Assert.Equal("REJECTED", result.Status);
-            Assert.Equal("REJECTED", result.OutcomeCode);
-            Assert.Equal("QUANTITY_INVALID", result.ReasonCode);
+            bool isQuotaPreflight = req.Payload is PreflightBSaleCommand;
+            Assert.Equal(isQuotaPreflight ? "REJECTED_QUOTA" : "REJECTED", result.OutcomeCode);
+            Assert.Equal(isQuotaPreflight ? "B_QUOTA_INSUFFICIENT" : "QUANTITY_INVALID", result.ReasonCode);
             Assert.Null(result.SourceId);
             Assert.Null(sql.SourceNumber);
             Assert.Equal(0, sql.Lines);

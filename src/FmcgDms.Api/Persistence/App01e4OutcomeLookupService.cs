@@ -87,12 +87,14 @@ public sealed class App01e4OutcomeLookupService(TenantConnections connections)
         // Do not claim a terminal outcome from partial/corrupt rows, including
         // a purported APPLIED with a missing or duplicated source. A valid
         // REJECTED is a durable terminal record with no business source.
+        // T2 B31 preflight persists REJECTED_QUOTA, also a terminal rejection.
         bool terminal = row.CompletedAtUtc.HasValue
             && (row.Status == "APPLIED" && row.SourceCount == 1
                     && row.SourceId.HasValue && !string.IsNullOrEmpty(row.OutcomeCode)
                     && row.ReasonCode is null
                 || row.Status == "REJECTED" && row.SourceCount == 0
-                    && row.SourceId is null && row.OutcomeCode == "REJECTED"
+                    && row.SourceId is null
+                    && (row.OutcomeCode is "REJECTED" or "REJECTED_QUOTA")
                     && !string.IsNullOrWhiteSpace(row.ReasonCode));
         return terminal
             ? new BusinessCommandRecovery("COMPLETED", row.Status, row.OutcomeCode,
