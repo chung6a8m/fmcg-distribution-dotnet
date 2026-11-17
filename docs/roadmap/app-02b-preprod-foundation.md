@@ -1,6 +1,6 @@
 # APP-02B — PREPROD Production-grade Foundation: implementation and independent gates
 
-**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10) / NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
+**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10) / B.1 CONTRACT_APPROVED (DOCS_ONLY) / B.2–B.9 NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
 
 ## 1. Starting baseline and frozen boundaries
 
@@ -13,7 +13,7 @@
 
 | Increment / PR | Delivery scope and expected evidence | Exit state after its own independent final-HEAD gate |
 |---|---|---|
-| **APP-02B.1** — Architecture & Security Contract | Deployment/trust-boundary diagrams, API/Worker/Control Plane and Vault threat model, tenant identity and provisioning state machine, token/key/backup/retention boundaries, prioritized negative/fault/restore matrices, precise test fixtures/ownership and explicit PREPROD-only guard. Review target RPO<=15m/RTO<=4h; don't invent legal retention or real credit thresholds. | `CONTRACT_APPROVED` (docs only), otherwise blocked |
+| **[APP-02B.1](app-02b1-architecture-security-contract.md)** — Architecture & Security Contract | Deployment/trust-boundary diagrams, API/Worker/Control Plane and Vault threat model, tenant identity and provisioning state machine, token/key/backup/retention boundaries, prioritized negative/fault/restore matrices, precise test fixtures/ownership and explicit PREPROD-only guard. Review target RPO<=15m/RTO<=4h; don't invent legal retention or real credit thresholds. [Threat model](../security/app-02b1-threat-model.md); [30-case evidence matrix](../security/app-02b1-acceptance-evidence.md). | `CONTRACT_APPROVED` (docs only), otherwise blocked |
 | **APP-02B.2** — PREPROD Runtime & Secrets Foundation | Reproducible Linux Docker Compose deployment with API and Worker split, HTTPS reverse proxy, private SQL, separated Vault-equivalent trust boundary, least-privilege identities/secret access, TLS failures and rotation/fail-closed probes; no reachable synthetic-only privileged endpoints. | `PREPROD_RUNTIME_VERIFIED` with deployment, network and secret-negative evidence |
 | **APP-02B.3** — Identity & Sessions | ASP.NET Core Identity, JWT access validation, opaque refresh-token hashing/rotation/reuse detection/revoke, HttpOnly/Secure refresh cookie, OIDC-ready separation; real PREPROD identities, no synthetic JWT role escalation; signed/current actor/tenant lookup. | `IDENTITY_VERIFIED` with negative JWT/replay/session tests |
 | **APP-02B.4** — Tenant Registry & Provisioning | Admin approval, control-plane registry, database-per-tenant create/bind/migrate with idempotent retries, pre-activation schema/isolation/auth/health checks, suspension/reactivation and audited nondeleting decommission; cross-tenant and partial-fault negatives. | `TENANT_LIFECYCLE_VERIFIED` |
@@ -35,7 +35,7 @@
 | **G-B04 — Operations & Audit** | Tamper-evident audit, correlated span/log/metric, alert trigger/reception and escalation evidence, retention/legal hold behavior | Missing/falsified lineage detectable; failed alert/incident handoff visible; no unauthorized purge, no automatic TTL loss of APP-02A durable records | **NOT_RUN** |
 | **G-B05 — Independent Final-HEAD Acceptance** | Review on exact final source HEAD, final CI PASS with 0 failed/skipped required tests, two physical tenant reports, TestRunId and artifact/source lineage; original regression suites remain green | Mutated expected/witness/peer state causes hard FAIL; no PASS from API self-attestation or superseded HEAD; unresolved blocking findings prevent merge | **NOT_RUN** |
 
-**No predeclared passing numbers:** Freeze concrete scenario count, expected fields, timing tolerances, fault injection/mutation sentinels and evidence paths at B.1 and implementation handoffs. No test/CI success is implied by this roadmap.
+**Frozen B.1 design obligations (not executed):** [B.1 evidence contract](../security/app-02b1-acceptance-evidence.md) specifies **30 minimum named acceptance cases** (6 per G-B01..05), independent expected/actual/difference/peer fingerprints, fixture ownership, mutation negatives, recovery witness/LSN protocol and RPO<=15m/RTO<=4h measurement. B.2..B.9 must freeze implementation-specific fault tolerances and artifacts at their own handoffs; **all 30 cases and five gates are NOT_RUN**. No actual success is implied.
 
 ## 4. Non-negotiable cross-cutting failure modes
 
@@ -51,13 +51,14 @@
 | Item | Status at decision closeout |
 |---|---|
 | OWN-APP02B-01..10 | **OWNER_APPROVED (10/10)** — scope only |
-| APP-02B.1..B.9 implementation | **OWNER_AUTHORIZED_IN_PREPROD / NOT_IMPLEMENTED** |
+| APP-02B.1..B.9 runtime implementation | **OWNER_AUTHORIZED_IN_PREPROD / NOT_IMPLEMENTED** |
+| APP-02B.1 docs-only design contract | **CONTRACT_APPROVED / DOCS_ONLY** — independent review and final-HEAD CI; no PREPROD gate evidence |
 | G-B01..G-B05 | **NOT_RUN / NOT_VERIFIED** |
 | Potential final label `PREPROD_FOUNDATION_VERIFIED` | **CONDITIONAL, NOT_EARNED** |
 | Full real-environment AC-11, actual EV-08, EV-01..15 | **NOT_VERIFIED** |
 | Five original production P0 gates | **NOT_VERIFIED / NON-WAIVABLE** |
 | APP-02C/D/E, production, A/B/Mixed mode admission, pilot, go-live | **NOT_AUTHORIZED** |
 
-**Next implementation work (separate PR): APP-02B.1** — document trust boundaries, threat model, identity/tenant/provisioning contracts, security and recovery test matrix, RPO/RTO measurement protocol, legal-retention decision dependencies and exact acceptance evidence; request independent review and final-head CI before subsequent B.2 work.
+**APP-02B.1 design closeout: CONTRACT_APPROVED (DOCS_ONLY)** after independent review and final-HEAD CI, [PR #49](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/49) / [closeout](../closeout/2026-11-17-app-02b1.md). The [architecture contract](app-02b1-architecture-security-contract.md), [threat model](../security/app-02b1-threat-model.md) and [30-case matrix](../security/app-02b1-acceptance-evidence.md) freeze future obligations, **not implementation or gates**. **APP-02B.2 — PREPROD Runtime & Secrets Foundation is next, NOT_IMPLEMENTED**.
 
 References: [APP-02 roadmap](app-02.md) · [Owner decisions](../decisions/owner-app02b-2026-11-17.md) · [Business constraints](../../business/constraints.md) · [AC-01/04/11/13/16](../../business/acceptance.md) · [previous synthetic evidence](../closeout/2026-11-17-app-02a4.md).
