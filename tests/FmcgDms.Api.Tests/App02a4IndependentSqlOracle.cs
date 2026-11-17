@@ -233,6 +233,10 @@ public sealed partial class App01e2CrossCommandRaceTests
               (SELECT COUNT(*) FROM dbo.App02AcceptanceApplication a
                 LEFT JOIN dbo.App02ResolvedDependency d
                   ON d.TenantId=a.TenantId AND d.CReceiptId=a.CReceiptId
+                LEFT JOIN dbo.App02EventReceipt c
+                  ON c.TenantId=a.TenantId AND c.ReceiptId=a.CReceiptId
+                LEFT JOIN dbo.App02EventReceipt p
+                  ON p.TenantId=d.TenantId AND p.ReceiptId=d.PReceiptId
                 LEFT JOIN dbo.CashHandoverAcceptance acc
                   ON acc.TenantId=a.TenantId AND acc.Id=a.AcceptanceId
                 LEFT JOIN dbo.BusinessSourceLine sl
@@ -244,13 +248,30 @@ public sealed partial class App01e2CrossCommandRaceTests
                 LEFT JOIN dbo.App02OutboxDelivery delivery
                   ON delivery.TenantId=m.TenantId AND delivery.MessageId=m.MessageId
                 WHERE a.TenantId=@Tenant AND a.TripId=@Trip
-                  AND (d.CReceiptId IS NULL OR acc.Id IS NULL
+                  AND (d.CReceiptId IS NULL OR c.ReceiptId IS NULL
+                    OR p.ReceiptId IS NULL OR acc.Id IS NULL
+                    OR d.PReceiptId<>a.PReceiptId OR d.OfferId<>a.OfferId
+                    OR d.TripId<>a.TripId OR d.CActorId<>a.CActorId
+                    OR d.CountEvidenceRef<>a.CountEvidenceRef
+                    OR p.EventKind<>N'CashHandoverOffered'
+                    OR c.EventKind<>N'CashierAcceptanceRequested'
+                    OR p.TripId<>a.TripId OR c.TripId<>a.TripId
+                    OR p.OfferId<>a.OfferId
+                    OR p.OfferedAmount<>acc.AcceptedAmount
+                    OR c.PrerequisiteProducerId<>p.ProducerId
+                    OR c.PrerequisiteEventId<>p.EventId
+                    OR c.CountEvidenceRef<>a.CountEvidenceRef
+                    OR c.ActorId<>a.CActorId
+                    OR p.PayloadVersion<>1 OR c.PayloadVersion<>1
+                    OR p.PayloadHash<>HASHBYTES('SHA2_256',p.CanonicalBytes)
+                    OR c.PayloadHash<>HASHBYTES('SHA2_256',c.CanonicalBytes)
                     OR acc.OfferId<>a.OfferId OR acc.EvidenceRef<>a.CountEvidenceRef
                     OR acc.AcceptedBy<>a.CActorId OR acc.AcceptedAmount<>200
                     OR src.Id IS NULL OR src.SourceKind<>N'CASH_HANDOVER_ACCEPT'
                     OR src.TripId<>a.TripId OR src.ActorId<>a.CActorId
                     OR m.MessageId IS NULL OR m.CReceiptId<>a.CReceiptId
                     OR m.AcceptanceId<>a.AcceptanceId
+                    OR m.MessageKind<>N'CashHandoverAcceptanceApplied'
                     OR m.PayloadVersion<>1 OR m.PayloadHash<>
                        HASHBYTES('SHA2_256',m.CanonicalBytes)
                     OR delivery.MessageId IS NULL))
@@ -268,6 +289,13 @@ public sealed partial class App01e2CrossCommandRaceTests
                     OR i.PayloadHash<>(SELECT m.PayloadHash
                        FROM dbo.App02OutboxMessage m
                        WHERE m.TenantId=i.TenantId AND m.MessageId=i.MessageId)))
+              +
+              -- Recompute hashes independently even for a pending C/P; the
+              -- applied-only lineage query above cannot see pending receipts.
+              (SELECT COUNT(*) FROM dbo.App02EventReceipt r
+                WHERE r.TenantId=@Tenant AND r.TripId=@Trip
+                  AND (r.PayloadVersion<>1 OR r.PayloadHash<>
+                    HASHBYTES('SHA2_256',r.CanonicalBytes)))
               +
               (SELECT COUNT(*) FROM dbo.App02EventProgress progress
                 JOIN dbo.App02EventReceipt r
