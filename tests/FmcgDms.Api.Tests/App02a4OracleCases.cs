@@ -10,6 +10,28 @@ namespace FmcgDms.Api.Tests;
 
 public sealed partial class App01e2CrossCommandRaceTests
 {
+    // APP-01E.1 only suppresses POST ACK. A.4 additionally needs the
+    // read-only GET business-outcome ACK-loss boundary after SQL COMMIT.
+    private sealed class A4GetAckLossHandler(string targetPath) : DelegatingHandler
+    {
+        private int remaining = 1;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = await base.SendAsync(
+                request, cancellationToken);
+            if (request.Method == HttpMethod.Get
+                && string.Equals(request.RequestUri?.AbsolutePath, targetPath,
+                    StringComparison.Ordinal)
+                && Interlocked.Exchange(ref remaining, 0) == 1)
+            {
+                response.Dispose();
+                throw new HttpRequestException("APP02A4_OUTCOME_ACK_LOST_AFTER_SQL_READ");
+            }
+            return response;
+        }
+    }
     [Theory]
     [InlineData("tenant-a")]
     [InlineData("tenant-b")]
@@ -245,7 +267,7 @@ public sealed partial class App01e2CrossCommandRaceTests
                 Uri.EscapeDataString(s.C.ProducerId) +
                 "&eventId=" + Uri.EscapeDataString(s.C.EventId);
             using var unknownLookup = Client(s.Factory, tenant, CashierActor,
-                "cashier", new AfterServerAckLossHandler(A3 + "outcome"));
+                "cashier", new A4GetAckLossHandler(A3 + "outcome"));
             string sqlBeforeLostLookup = (await FullSql(tenant)).Sha256;
             await Assert.ThrowsAsync<HttpRequestException>(async () =>
             {
