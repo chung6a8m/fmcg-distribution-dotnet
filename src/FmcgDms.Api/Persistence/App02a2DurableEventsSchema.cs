@@ -19,6 +19,10 @@ public sealed class App02a2DurableEventsSchema : Migration
                 CONSTRAINT UQ_APP02_AcceptanceBound
                 UNIQUE (TenantId,Id,OfferId,TripId,EvidenceRef,AcceptedBy);
 
+            ALTER TABLE dbo.CashHandoverOffer ADD
+                CONSTRAINT UQ_APP02_OfferActor
+                UNIQUE (TenantId,Id,TripId,OfferedAmount,OfferedBy);
+
             CREATE TABLE dbo.App02EventReceipt (
                 ReceiptId uniqueidentifier NOT NULL
                     CONSTRAINT PK_App02EventReceipt PRIMARY KEY,
@@ -56,9 +60,9 @@ public sealed class App02a2DurableEventsSchema : Migration
                     REFERENCES dbo.Trip (TenantId,Id),
                 -- NULL composite FK on C: no phantom P is manufactured.
                 CONSTRAINT FK_App02Receipt_RealOffer FOREIGN KEY
-                    (TenantId,OfferId,TripId,OfferedAmount)
+                    (TenantId,OfferId,TripId,OfferedAmount,ActorId)
                     REFERENCES dbo.CashHandoverOffer
-                        (TenantId,Id,TripId,OfferedAmount),
+                        (TenantId,Id,TripId,OfferedAmount,OfferedBy),
                 CONSTRAINT CK_App02Receipt_Identity CHECK (
                     LEN(LTRIM(RTRIM(ProducerId)))>0
                     AND LEN(LTRIM(RTRIM(EventId)))>0
@@ -629,6 +633,8 @@ public sealed class App02a2DurableEventsSchema : Migration
             DROP TABLE dbo.App02EventReceipt;
             ALTER TABLE dbo.CashHandoverAcceptance
                 DROP CONSTRAINT UQ_APP02_AcceptanceBound;
+            ALTER TABLE dbo.CashHandoverOffer
+                DROP CONSTRAINT UQ_APP02_OfferActor;
             """);
     }
 }
