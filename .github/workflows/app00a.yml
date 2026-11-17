@@ -255,7 +255,7 @@ jobs:
           $id = "app02a4-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           @("TestRunId=$id", "SourceHeadSha=$source", "WorkflowSha=$env:GITHUB_SHA",
             "AcceptanceScope=APP-02A.4_SYNTHETIC_NONPRODUCTION",
-            "OracleGroups=12x2", "ExpectedCheckpoints=56", "ExpectedSqlCells=1344",
+            "OracleGroups=12x2", "ExpectedCheckpoints=60", "ExpectedSqlCells=1440",
             "ActualEV08=NOT_VERIFIED", "ProductionP0=NOT_VERIFIED",
             "OwnerAuthorizationAPP02B_E=NOT_AUTHORIZED") |
             Set-Content -Path TestResults/APP-02A4-TestRunId.txt -Encoding utf8
