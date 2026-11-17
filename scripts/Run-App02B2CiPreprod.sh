@@ -63,6 +63,8 @@ chmod 0600 "$tls/vault.key"
 # inmem storage and 1/1 unseal are CI-only fixtures, never a hosting pattern.
 dc config --quiet
 dc pull vault >/dev/null
+# Needed for unseal over verified HTTPS stdin: no key may reach the CLI argv.
+docker pull curlimages/curl:8.12.1 >/dev/null
 # Match the real Vault image's nonroot primary GID, not an assumed UID/GID.
 vault_gid="$(docker run --rm --entrypoint id hashicorp/vault:1.21.4 -g)"
 sudo chgrp "$vault_gid" "$tls/vault.key"
@@ -84,42 +86,47 @@ fi
 root_token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root_token"])' <<< "$init_json")"
 unseal_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["unseal_keys_b64"][0])' <<< "$init_json")"
 unset init_json
-dc exec -T vault vault operator unseal "$unseal_key" >/dev/null
+# The Vault CLI rejects unseal keys from a non-TTY stdin; use the TLS
+# sys/unseal API instead, piping the key as request JSON (not process argv).
+printf '{"key":"%s"}' "$unseal_key" |
+  docker run --rm -i --network fmcg-preprod-b2_outbound \
+    -v "$tls/ca.crt:/run/ca.crt:ro" curlimages/curl:8.12.1 \
+    --noproxy "*" --fail --silent --show-error --cacert /run/ca.crt \
+    -H 'Content-Type: application/json' --data-binary @- \
+    https://vault.private.example.invalid:8200/v1/sys/unseal |
+  python3 -c 'import json,sys; assert json.load(sys.stdin)["sealed"] is False'
 unset unseal_key
-admin() { dc exec -T -e "VAULT_TOKEN=$root_token" vault vault "$@"; }
+# Never put the root token in docker exec -e or on its argv. Pass one secret
+# line over a private stdin pipe; the Vault CLI sees it only inside the
+# isolated ephemeral container after the read, not in Docker exec metadata.
+admin() {
+  printf '%s\n' "$root_token" |
+    dc exec -T vault sh -c 'IFS= read -r VAULT_TOKEN || exit 1; export VAULT_TOKEN; exec vault "$@"' vault "$@"
+}
 admin audit enable file file_path=/tmp/ci-audit.jsonl >/dev/null
 admin secrets enable -path=preprod kv-v2 >/dev/null
 admin policy write ci-app02b2-api /vault/policies/api.hcl >/dev/null
 admin policy write ci-app02b2-worker /vault/policies/worker.hcl >/dev/null
 admin kv put preprod/runtime/api principal=api admission=FOUNDATION_ONLY >/dev/null
 admin kv put preprod/runtime/worker principal=worker admission=FOUNDATION_ONLY >/dev/null
-new_token() {
+new_token_pair() {
   local policy="$1" json
   json="$(admin token create -orphan -policy="$policy" -ttl=30m -format=json)"
-  python3 -c 'import json,sys; print(json.load(sys.stdin)["auth"]["client_token"])' <<< "$json"
+  # Token accessor can revoke a token without putting the bearer token on
+  # the host or container process command line.
+  python3 -c 'import json,sys; a=json.load(sys.stdin)["auth"]; print(a["client_token"],a["accessor"])' <<< "$json"
 }
-api_token="$(new_token ci-app02b2-api)"
-worker_token="$(new_token ci-app02b2-worker)"
+read -r api_token api_accessor <<< "$(new_token_pair ci-app02b2-api)"
+read -r worker_token worker_accessor <<< "$(new_token_pair ci-app02b2-worker)"
 [[ "$api_token" != "$worker_token" ]] || deny duplicate_workload_token
 printf '%s\n' "$api_token" > "$VAULT_API_TOKEN_FILE"
 printf '%s\n' "$worker_token" > "$VAULT_WORKER_TOKEN_FILE"
 sudo chgrp 1654 "$VAULT_API_TOKEN_FILE" "$VAULT_WORKER_TOKEN_FILE"
 chmod 0640 "$VAULT_API_TOKEN_FILE" "$VAULT_WORKER_TOKEN_FILE"
 
-# Browserless independent curl container uses a real HTTPS Vault endpoint
-# and the actual mounted workload token; never echoes the token or raw JSON.
-docker pull curlimages/curl:8.12.1 >/dev/null
-vault_http() {
-  local identity="$1" path="$2"
-  docker run --rm --user 1654:1654 --network fmcg-preprod-b2_outbound \
-    -v "$tls/ca.crt:/run/ca.crt:ro" \
-    -v "$tokens/$identity.token:/run/token:ro" \
-    --entrypoint sh curlimages/curl:8.12.1 -c \
-    'token=$(cat /run/token); curl --noproxy "*" -fsS --cacert /run/ca.crt \
-       -H "X-Vault-Token: $token" -o /dev/null -w "%{http_code}" \
-       "https://vault.private.example.invalid:8200/v1/$1" || true' \
-    -- "$path"
-}
+# Browserless, least-privileged probe containers use the HTTPS Vault endpoint.
+# Workload tokens are read from their mounted files and passed to curl through
+# curl's stdin config (not via curl argv or printed into CI logs).
 # No -f for 403 checks; a 403 is an EXPECTED negative HTTP result.
 vault_http_status() {
   local identity="$1" path="$2"
@@ -127,8 +134,9 @@ vault_http_status() {
     -v "$tls/ca.crt:/run/ca.crt:ro" \
     -v "$tokens/$identity.token:/run/token:ro" \
     --entrypoint sh curlimages/curl:8.12.1 -c \
-    'token=$(cat /run/token); curl --noproxy "*" -sS --cacert /run/ca.crt \
-       -H "X-Vault-Token: $token" -o /dev/null -w "%{http_code}" \
+    'token=$(cat /run/token); printf "header = \"X-Vault-Token: %s\"\n" "$token" | \
+     curl --config - --noproxy "*" -sS --cacert /run/ca.crt \
+       -o /dev/null -w "%{http_code}" \
        "https://vault.private.example.invalid:8200/v1/$1"' \
     -- "$path"
 }
@@ -200,19 +208,19 @@ fi
 echo "CI_PREPROD_CASE_PASS INVALID_TLS_CA_DENY"
 
 # Runtime token rotation without restarting API; existing bind inode retains content.
-api_token2="$(new_token ci-app02b2-api)"
+read -r api_token2 api_accessor2 <<< "$(new_token_pair ci-app02b2-api)"
 printf '%s\n' "$api_token2" > "$VAULT_API_TOKEN_FILE"
 expect "$(https_status /health/ready)" 200 API_TOKEN_ROTATION_HEALTHY
-admin token revoke "$api_token" >/dev/null
+admin token revoke -accessor "$api_accessor" >/dev/null
 expect "$(https_status /health/ready)" 200 OLD_API_TOKEN_REVOKED_NEW_OK
-admin token revoke "$api_token2" >/dev/null
+admin token revoke -accessor "$api_accessor2" >/dev/null
 expect "$(https_status /health/ready)" 503 REVOKED_API_HEALTH_DENY
 
 # Disable restart to observe Worker fail-closed stop instead of restart loops.
 worker_id="$(dc ps -q worker)"
 [[ -n "$worker_id" ]] || deny missing_worker_container
 docker update --restart=no "$worker_id" >/dev/null
-admin token revoke "$worker_token" >/dev/null
+admin token revoke -accessor "$worker_accessor" >/dev/null
 stopped=false
 for attempt in $(seq 1 45); do
   if [[ "$(docker inspect "$worker_id" --format '{{.State.Running}}')" == false ]]; then
@@ -230,7 +238,7 @@ dc exec -T vault cat /tmp/ci-audit.jsonl |
   python3 scripts/Check-App02B2CiVaultAudit.py > "$ci_root/vault-audit-summary.json"
 
 # Recover API availability with a fresh policy-scoped token, then inject Vault outage.
-api_token3="$(new_token ci-app02b2-api)"
+read -r api_token3 api_accessor3 <<< "$(new_token_pair ci-app02b2-api)"
 printf '%s\n' "$api_token3" > "$VAULT_API_TOKEN_FILE"
 expect "$(https_status /health/ready)" 200 API_RECOVERED_WITH_NEW_SCOPED_TOKEN
 dc stop vault >/dev/null
@@ -272,4 +280,4 @@ path.with_suffix(".json.sha256").write_text(
 PY
 echo "CI_EPHEMERAL_PREPROD_PASS RUNTIME01_CI RUNTIME02_CI real_preprod=NOT_VERIFIED"
 # No root/unseal/workload tokens or raw Vault audit stream in artifacts.
-unset root_token api_token api_token2 api_token3 worker_token
+unset root_token api_token api_token2 api_token3 worker_token api_accessor api_accessor2 api_accessor3 worker_accessor
