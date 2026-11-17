@@ -16,8 +16,8 @@ public sealed class App02a3RuntimeSchema : Migration
         Execute.Sql("""
             CREATE TABLE dbo.App02ActorRoleGrant (
                 TenantId nvarchar(64) NOT NULL,
-                ActorId nvarchar(128) NOT NULL,
-                RoleCode nvarchar(32) NOT NULL,
+                ActorId nvarchar(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+                RoleCode nvarchar(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
                 IsActive bit NOT NULL,
                 ChangedBy nvarchar(128) NOT NULL,
                 ChangedAtUtc datetime2(7) NOT NULL
@@ -38,8 +38,8 @@ public sealed class App02a3RuntimeSchema : Migration
                 HistoryId uniqueidentifier NOT NULL
                     CONSTRAINT PK_App02ActorRoleHistory PRIMARY KEY,
                 TenantId nvarchar(64) NOT NULL,
-                ActorId nvarchar(128) NOT NULL,
-                RoleCode nvarchar(32) NOT NULL,
+                ActorId nvarchar(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+                RoleCode nvarchar(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
                 PreviousActive bit NULL,
                 CurrentActive bit NOT NULL,
                 ChangedBy nvarchar(128) NOT NULL,
