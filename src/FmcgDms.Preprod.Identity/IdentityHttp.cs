@@ -18,11 +18,17 @@ public static class IdentityHttp
     private const string CookieName = "__Host-fmcg-preprod-refresh";
 
     public static void AddPreprodIdentity(this IServiceCollection services, IdentityOptions identity)
+        => services.AddPreprodIdentity(identity, options => options.UseSqlServer(identity.SqlConnectionString));
+
+    // Tests supply a disposable SQL/SQLite store at composition time. Production
+    // always uses the validated, Vault-sourced SQL Server connection string.
+    internal static void AddPreprodIdentity(this IServiceCollection services, IdentityOptions identity,
+        Action<DbContextOptionsBuilder> configureStore)
     {
         identity.Validate();
         services.AddSingleton(identity);
         services.AddSingleton(TimeProvider.System);
-        services.AddDbContext<PreprodIdentityDb>(o => o.UseSqlServer(identity.SqlConnectionString));
+        services.AddDbContext<PreprodIdentityDb>(configureStore);
         services.AddIdentityCore<PreprodUser>(o =>
         {
             o.User.RequireUniqueEmail = false;
