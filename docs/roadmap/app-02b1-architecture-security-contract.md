@@ -1,6 +1,6 @@
 # APP-02B.1 — Architecture & Security Contract (PREPROD only)
 
-**Contract state: REVIEW_PENDING / NOT_YET_APPROVED (2026-11-17).** Owner authorization is **10/10 OWNER_APPROVED** under [OWN-APP02B-01..10](../decisions/owner-app02b-2026-11-17.md). This is a **docs-only design increment**, not a deployed or verified security control. APP-02B.1 may reach **CONTRACT_APPROVED** only after independent security/design review with no blocking findings and a PASS on the exact final PR source HEAD. The complete APP-02B program remains **NOT_IMPLEMENTED / G-B01..05 NOT_RUN** until separately evidenced. Related: [APP-02B roadmap](app-02b-preprod-foundation.md), [threat model](../security/app-02b1-threat-model.md) and [30-case acceptance/evidence contract](../security/app-02b1-acceptance-evidence.md).
+**Contract state: CONTRACT_APPROVED (DOCS_ONLY, 2026-11-17).** Owner authorization is **10/10 OWNER_APPROVED** under [OWN-APP02B-01..10](../decisions/owner-app02b-2026-11-17.md). This is a **docs-only design increment**, not a deployed or verified security control. The B.1 design contract passed independent documentation/security review with the reactivation-fencing finding addressed and exact final-HEAD CI required before merge ([closeout](../closeout/2026-11-17-app-02b1.md)). Approval of the contract is **not** verification of any implemented security control. The complete APP-02B program remains **NOT_IMPLEMENTED / G-B01..05 NOT_RUN** until separately evidenced. Related: [APP-02B roadmap](app-02b-preprod-foundation.md), [threat model](../security/app-02b1-threat-model.md) and [30-case acceptance/evidence contract](../security/app-02b1-acceptance-evidence.md).
 
 ## 1. Authority, inheritance and explicit non-goals
 
@@ -72,11 +72,13 @@ stateDiagram-v2
   APPROVED --> PROVISIONING: idempotency key + lease
   PROVISIONING --> VERIFYING: create + migrate completed
   PROVISIONING --> FAILED_RETRYABLE: bounded error
-  VERIFYING --> ACTIVE: all independent gates passed
-  VERIFYING --> FAILED_RETRYABLE: a gate failed
-  FAILED_RETRYABLE --> PROVISIONING: same idempotency key, retry
+  VERIFYING --> ACTIVE: initial activation gates and fence PASS
+  VERIFYING --> FAILED_RETRYABLE: initial verification failed
+  FAILED_RETRYABLE --> PROVISIONING: same key, initial provisioning retry only
   ACTIVE --> SUSPENDED: security/admin fence
-  SUSPENDED --> VERIFYING: reactivation approval
+  SUSPENDED --> REACTIVATION_VERIFYING: fresh approved action, retain suspension fence
+  REACTIVATION_VERIFYING --> ACTIVE: current gates and binding/epoch CAS PASS
+  REACTIVATION_VERIFYING --> SUSPENDED: any failed check, revoke race or unavailable fence
   ACTIVE --> DECOMMISSIONING: approved retained shutdown
   SUSPENDED --> DECOMMISSIONING: approved retained shutdown
   DECOMMISSIONING --> DECOMMISSIONED: signed/audited archive
@@ -88,8 +90,10 @@ stateDiagram-v2
 | Provision/migrate | Registry-scoped operation Id + target binding; private administrative SQL credential; migration ledger replay safe; exclusive lease; cannot choose arbitrary DB from request | FAILED_RETRYABLE, **not ACTIVE**, no routable tenant DB |
 | Verify → ACTIVE | Check DB identity/tenant binding/schema hash, access-denied cross-tenant probe, role/epoch authority, secret scope, connectivity, health and audit sink; persist activation evidence and version | stays VERIFYING/FAILED_RETRYABLE |
 | ACTIVE → SUSPENDED | Write authoritative lifecycle/epoch fence **before** acknowledging suspend; stop new API writes, Worker claims and replays; record in-flight disposition | no claims of successful suspend before fence commit |
-| SUSPENDED → VERIFYING → ACTIVE | New admin-approved verification; current authority and restored-fence comparison; no direct suspended → active shortcut | remain SUSPENDED if any evidence missing |
+| SUSPENDED → REACTIVATION_VERIFYING → ACTIVE | Fresh authorized admin approval; preserve the SUSPENDED deny fence throughout verification; compare-and-swap current lifecycle/epoch/binding at the final activation decision only after independent isolation, authorization and health checks | Any failed/missing check, revoked authority or CAS conflict returns to **SUSPENDED**, non-routable; no transition into initial PROVISIONING/FAILED_RETRYABLE |
 | ACTIVE/SUSPENDED → DECOMMISSIONED | Approved and audited freeze, preserve immutable sources, outbox/inbox/CASE and legal holds; archive/recoverability plan, **never automatic SQL deletion** | DECOMMISSIONING/CASE, no silent purge |
+
+**Reactivation safety invariant (F-01):** `REACTIVATION_VERIFYING` is never routable and cannot claim Worker leases, even when its SQL database is healthy. Initial `VERIFYING → FAILED_RETRYABLE → PROVISIONING` is **only** for never-active first-time provisioning. A reactivation failure or concurrent suspension/revocation must preserve the authoritative SUSPENDED epoch/fence and require a fresh approved attempt; no retry path may silently reset it. B.4/B.5 must implement and independently fault-test the final compare-and-swap, including concurrent revoke and stale Registry/SQL state.
 
 **Binding:** TenantId maps to exactly one registered physical database in an audited, versioned Registry; resource and ActorId bindings must match the registry at every transaction. Guard both ends (Registry mapping and tenant DB binding marker), prevent DNS/connection-string injection and peer swap. Database-per-tenant is not sufficient alone: enforce least-privilege SQL logins, no shared business writer token, query/metadata isolation and tenant-aware backup/restore controls.
 
@@ -124,4 +128,4 @@ stateDiagram-v2
 
 B.1's **exit checklist** is: diagrams and trust boundaries reviewed; each threat mapped to owned controls and negative cases; tenant/identity/policy/restore contracts unambiguous and fail closed; exactly **30 named minimum acceptance cases** with fixture ownership and witnesses; pending product/operator/legal decisions visibly unapproved; unchanged Business Baseline and synthetic isolation; independently reviewed docs + current source HEAD Windows CI (historical regression only). **B.1 approval is not G-B01..05 PASS.** If a blocking finding appears or HEAD changes, repeat review and relevant CI.
 
-**Current status:** B.1 contract is on a review branch; not merged or independently accepted. B.2 must not be presented as implementation-ready evidence until B.1 closeout. Original G-STOCK/G-CUT/G-IDEMP/G-LEDGER/G-INV and real AC-11/EV-08 remain NOT_VERIFIED; PREPROD_FOUNDATION_VERIFIED remains NOT_EARNED.
+**Closeout:** B.1 contract **CONTRACT_APPROVED (docs only)** after independent review of the final source and PASS of the same source HEAD's CI ([PR #49](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/49), [closeout](../closeout/2026-11-17-app-02b1.md)). B.2 is the next separately authorized increment, but is **NOT_IMPLEMENTED** and still requires its own review, PREPROD evidence and gates. Original G-STOCK/G-CUT/G-IDEMP/G-LEDGER/G-INV and real AC-11/EV-08 remain NOT_VERIFIED; PREPROD_FOUNDATION_VERIFIED remains NOT_EARNED.

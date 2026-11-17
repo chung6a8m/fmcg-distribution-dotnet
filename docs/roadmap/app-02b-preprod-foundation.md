@@ -1,6 +1,6 @@
 # APP-02B — PREPROD Production-grade Foundation: implementation and independent gates
 
-**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10) / B.1 CONTRACT_REVIEW_PENDING (DOCS_ONLY) / B.2–B.9 NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
+**State as of 2026-11-17: OWNER_APPROVED (OWN-APP02B-01..10) / B.1 CONTRACT_APPROVED (DOCS_ONLY) / B.2–B.9 NOT_IMPLEMENTED / G-B01..G-B05 NOT_RUN.** The nine APP-02B increments are authorized **solely in PREPROD/nonproduction**, not as production deployment, A/B/Mixed mode admission, real business posting, pilot, or tenant go-live. [Decision register](../decisions/owner-app02b-2026-11-17.md) · [APP-02 program roadmap](app-02.md).
 
 ## 1. Starting baseline and frozen boundaries
 
@@ -52,13 +52,13 @@
 |---|---|
 | OWN-APP02B-01..10 | **OWNER_APPROVED (10/10)** — scope only |
 | APP-02B.1..B.9 runtime implementation | **OWNER_AUTHORIZED_IN_PREPROD / NOT_IMPLEMENTED** |
-| APP-02B.1 docs-only design contract | **CONTRACT_REVIEW_PENDING / NOT_YET_APPROVED** — no PREPROD gate evidence |
+| APP-02B.1 docs-only design contract | **CONTRACT_APPROVED / DOCS_ONLY** — independent review and final-HEAD CI; no PREPROD gate evidence |
 | G-B01..G-B05 | **NOT_RUN / NOT_VERIFIED** |
 | Potential final label `PREPROD_FOUNDATION_VERIFIED` | **CONDITIONAL, NOT_EARNED** |
 | Full real-environment AC-11, actual EV-08, EV-01..15 | **NOT_VERIFIED** |
 | Five original production P0 gates | **NOT_VERIFIED / NON-WAIVABLE** |
 | APP-02C/D/E, production, A/B/Mixed mode admission, pilot, go-live | **NOT_AUTHORIZED** |
 
-**Current separate PR handoff: APP-02B.1 docs-only architecture/security contract, [threat model](../security/app-02b1-threat-model.md) and [30-case independent acceptance matrix](../security/app-02b1-acceptance-evidence.md) are documented for independent security review and final-HEAD CI. B.1 is not yet CONTRACT_APPROVED; B.2 implementation must wait for its reviewed closeout.**
+**APP-02B.1 design closeout: CONTRACT_APPROVED (DOCS_ONLY)** after independent review and final-HEAD CI, [PR #49](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/49) / [closeout](../closeout/2026-11-17-app-02b1.md). The [architecture contract](app-02b1-architecture-security-contract.md), [threat model](../security/app-02b1-threat-model.md) and [30-case matrix](../security/app-02b1-acceptance-evidence.md) freeze future obligations, **not implementation or gates**. **APP-02B.2 — PREPROD Runtime & Secrets Foundation is next, NOT_IMPLEMENTED**.
 
 References: [APP-02 roadmap](app-02.md) · [Owner decisions](../decisions/owner-app02b-2026-11-17.md) · [Business constraints](../../business/constraints.md) · [AC-01/04/11/13/16](../../business/acceptance.md) · [previous synthetic evidence](../closeout/2026-11-17-app-02a4.md).
