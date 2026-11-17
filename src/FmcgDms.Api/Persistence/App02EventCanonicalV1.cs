@@ -43,9 +43,12 @@ public static class App02EventCanonicalV1
 
         bool offer = value.EventKind == OfferKind;
         bool acceptance = value.EventKind == AcceptanceKind;
+        const decimal maxSqlAmount = 999999999999999.9999m;
         if ((!offer && !acceptance)
-            || (offer && ((value.OfferId is null || value.OfferId == Guid.Empty)
+            || (offer && (value.OfferId is null || value.OfferId == Guid.Empty
                 || value.OfferedAmount is null or <= 0
+                || value.OfferedAmount > maxSqlAmount
+                || decimal.Round(value.OfferedAmount.Value, 4) != value.OfferedAmount.Value
                 || value.PrerequisiteProducerId is not null
                 || value.PrerequisiteEventId is not null
                 || value.CountEvidenceRef is not null))

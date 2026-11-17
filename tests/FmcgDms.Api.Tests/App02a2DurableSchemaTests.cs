@@ -78,6 +78,10 @@ public sealed class App02a2DurableSchemaTests(SqlScratchFixture fixture)
         Assert.Throws<ArgumentException>(() =>
             App02EventCanonicalV1.Encode(p with { OfferedAmount = 0m }));
         Assert.Throws<ArgumentException>(() =>
+            App02EventCanonicalV1.Encode(p with { OfferedAmount = 1.00001m }));
+        Assert.Throws<ArgumentException>(() =>
+            App02EventCanonicalV1.Encode(p with { OfferedAmount = 1000000000000000.0000m }));
+        Assert.Throws<ArgumentException>(() =>
             App02EventCanonicalV1.Encode(c with { EventKind = "UNKNOWN" }));
         Assert.Throws<ArgumentException>(() =>
             App02EventCanonicalV1.Encode(c with { TenantId = "arbitrary-db" }));
