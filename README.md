@@ -4,11 +4,11 @@
 
 The `business/` snapshot is complete and read-only. Verify its exact tree against `business.lock.json` before changing application code. No fork/submodule/runtime dependency to the SQL or canonical repositories.
 
-## APP-02B — 10/10 Owner Decisions APPROVED (PREPROD only; no implementation yet)
+## APP-02B — 10/10 Owner Decisions APPROVED (PREPROD only; B.1 contract under review)
 
 On 17 November 2026 the Owner approved [OWN-APP02B-01..10](docs/decisions/owner-app02b-2026-11-17.md) for a **production-grade foundation in PREPROD only**: Linux VPS/VM + Docker Compose, split API/Worker, private SQL database-per-tenant, ASP.NET Core Identity/JWT+refresh, admin-approved tenant provisioning, RBAC/permission revocation epochs, versioned Maker/Checker policy registry, Vault-equivalent secrets management, **target** RPO<=15m/RTO<=4h controlled PITR, immutable audit/OpenTelemetry/incident runbooks. The [APP-02B roadmap](docs/roadmap/app-02b-preprod-foundation.md) authorizes **B.1–B.9 as nine independent PRs** and specifies gates **G-B01..G-B05** with independent review and exact final-HEAD CI.
 
-**State: OWNER_APPROVED (10/10) / IMPLEMENTATION_NOT_VERIFIED / G-B01..05 NOT_RUN.** `PREPROD_FOUNDATION_VERIFIED` is conditional on B.9 passing all five gates. **Next is APP-02B.1 architecture and security contract in its own PR**, not production deployment. APP-02C–E, actual EV-08/real AC-11, production P0, real business posting, Pilot and Go-Live remain independently unverified or unauthorized as applicable. Preserve the immutable `business/` and `business.lock.json`, historical synthetic-only guards, no offline writes and blocked B_NO_CHANNEL.
+**State: OWNER_APPROVED (10/10) / IMPLEMENTATION_NOT_VERIFIED / G-B01..05 NOT_RUN.** `PREPROD_FOUNDATION_VERIFIED` is conditional on B.9 passing all five gates. **APP-02B.1 architecture/security contract is documented for independent review in its own PR** ([design](docs/roadmap/app-02b1-architecture-security-contract.md), [threat model](docs/security/app-02b1-threat-model.md), [30-case evidence matrix](docs/security/app-02b1-acceptance-evidence.md)); **CONTRACT_REVIEW_PENDING**, not production deployment or B.2 runtime verification. APP-02C–E, actual EV-08/real AC-11, production P0, real business posting, Pilot and Go-Live remain independently unverified or unauthorized as applicable. Preserve the immutable `business/` and `business.lock.json`, historical synthetic-only guards, no offline writes and blocked B_NO_CHANNEL.
 
 ## APP-00A — Foundation
 
