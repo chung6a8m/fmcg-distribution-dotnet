@@ -169,7 +169,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal(result.ReasonCode, replay.Outcome.ReasonCode);
         Assert.Equal(result.SourceId, replay.Outcome.SourceId);
         Assert.Equal(fingerprint.Sha256, (await FullSql(tenant)).Sha256);
-        Assert.Equal(committed.Numbers.Cells(), ReadSql(tenant, scene).Numbers.Cells());
+        Assert.Equal(committed.Numbers.Cells().ToArray(), ReadSql(tenant, scene).Numbers.Cells().ToArray());
     }
 
     /// <summary>
@@ -212,7 +212,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             await Assert.ThrowsAsync<HttpRequestException>(() =>
                 Send(lostClient, req.Path, req.Payload));
             transport = await reset;
-            Assert.StartsWith("HTTP/1.1 200", transport, StringComparison.Ordinal);
+            Assert.True(transport.StartsWith("HTTP/1.1 200", StringComparison.Ordinal));
         }
 
         SqlAudit sql = Audit(tenant, req.Payload);
@@ -263,8 +263,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             Assert.Equal(fullCommitted.Sha256, fullConflicted.Sha256);
         }
         Assert.NotEqual(firstPid, secondPid);
-        Assert.Equal(committed.Numbers.Cells(), replayed.Numbers.Cells());
-        Assert.Equal(committed.Numbers.Cells(), conflicted.Numbers.Cells());
+        Assert.Equal(committed.Numbers.Cells().ToArray(), replayed.Numbers.Cells().ToArray());
+        Assert.Equal(committed.Numbers.Cells().ToArray(), conflicted.Numbers.Cells().ToArray());
         Assert.Equal(committed.LedgerSha256, replayed.LedgerSha256);
         Assert.Equal(committed.LedgerSha256, conflicted.LedgerSha256);
         WriteE4Evidence(tenant, scenario, req, sql, recovered, hiddenActor,
