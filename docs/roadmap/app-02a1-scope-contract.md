@@ -14,7 +14,7 @@ APP-01E proved bounded synthetic command rollback/retry, two-client contention, 
 |---|---|---|---|
 | **OWN-APP02-01** | Authorize APP-02A.1–A.4 synthetic-only first, and independently gate APP-02B–E? | **Authorize a separate nonproduction AC-11 slice first**; all production work requires additional Owner decision | **APP-02 remains NOT_AUTHORIZED** until explicitly accepted |
 | **OWN-APP02-02** | What do C and P concretely represent (event kind, origin, order, producer, source, dependency cardinality)? | Do **not** infer from short letters or substitute APP-01 command replay; bind business source event IDs and permitted dependency order | Cannot freeze event schema / expected oracle |
-| **OWN-APP02-03** | Event identity, actor/tenant ownership, payload normalization and hash version? | Preserve APP-01 canonical tenant+producer+ID uniqueness where semantically compatible; separate consumer receipt ID from business source ID | Cannot define durable conflict/replay correctness |
+| **OWN-APP02-03** | Event identity, actor/tenant ownership, payload normalization and hash version? | Propose unique `(server-bound TenantId, ProducerId, EventId)` in the approved namespace **without PayloadHash in the unique key**; store canonical hash/algorithm version as immutable conflict witnesses, and keep receipt ID separate from business source ID | Cannot define durable conflict/replay correctness |
 | **OWN-APP02-04** | When is a receipt ACK permitted? How do RECEIVED, PENDING, APPLIED, REJECTED, UNKNOWN and CASE differ? | ACK only after durable intake COMMIT; APPLIED only after source/effect COMMIT; no UNKNOWN→REJECTED inference | Cannot implement retry or outcome lookup safely |
 | **OWN-APP02-05** | Missing P/expired dependency, timeout, retry budget, retention and case owner? | Fail closed; keep pending/case durably, observable with asOf/next action; no silent TTL-drop | Cannot implement recovery, DLQ or retention |
 | **OWN-APP02-06** | Conflict, dead-letter/case closure and manual correction authorization? | No automatic effect rewrite; maker/checker or audited correction as business requires; immutable lineage | Cannot automate reconciliation of exceptional state |
@@ -34,7 +34,7 @@ Potential lifecycle: `RECEIVED` (durably accepted but not business-posted) → `
 ### Invariants
 
 1. **One identity, one normalized payload, one outcome:** replay of identical identity/content returns the saved state; changed content under that identity produces conflict with **zero added effects**. No hidden new event identity on timeout.
-2. **Dependency before effect:** C with missing/wrong-tenant/not-yet-durable P may be safely retained pending, but cannot post an APP-01 source/ledger effect early. When P becomes valid, processing C is resumed idempotently.
+2. **Dependency before effect:** C with absent/not-yet-durable P is retained pending without early APP-01 source/ledger effects. A P belonging to another tenant must **never** satisfy C or be disclosed through lookup/status/error details. A malformed or forbidden reference must fail closed as a reasoned rejection or owned case under the approved policy; opaque missing/foreign references must be handled without an existence oracle. Only a valid same-tenant P permits idempotent resumption.
 3. **Atomic business apply:** any source, rights/stock/AR/cash/ledger effects and durable completion mark must commit atomically. Rollback means no partial economic or identity state except a separately committed intake/pending record allowed by the frozen contract.
 4. **Tenant/actor isolation:** both intake, dependency lookup, consumption and outcome reads are tenant/actor scoped. Opposite physical tenant is unchanged after any local journey.
 5. **Crash-safe replay:** ack loss, server/worker restart or 2-worker SQL contention cannot drop the accepted C or post twice. Application recovery reads durable SQL state, not just HTTP responses or in-memory flags.
@@ -43,7 +43,7 @@ Potential lifecycle: `RECEIVED` (durably accepted but not business-posted) → `
 
 ### Candidate physical design for A.2 (NOT IMPLEMENTED)
 
-- Durable inbox **receipt** keyed by canonical event identity/hash, tenant-bound actor/source lineage and monotonic state history (or auditable transition records).
+- Durable inbox **receipt** uniquely keyed by the approved canonical event identity (candidate: server-bound tenant + producer + event ID within a fixed namespace), **not identity plus payload hash**. Persist normalized payload hash and hash/version as immutable columns for same-key replay/conflict detection, plus tenant-bound actor/source lineage and auditable transitions. Same key with changed payload must not insert a second receipt.
 - Explicit dependency edge(s) with P identity and guarded tenant semantics; independent constraint prevents C/P cross-tenant joins and unexpected cycle paths if the approved model allows multiple edges.
 - Transactional outbox record tied to committed domain source, with durable delivery attempt/ACK state; outbound processing is separate from primary business source posting.
 - Recovery/case journal for terminal policy rejection, unresolved dependency, retry disposition, case ownership and source-linked correction.
@@ -57,7 +57,7 @@ These are conceptual entities, not table names, a migration list or an instructi
 |---|---|---|---|
 | A11-01 | P committed, C follows | P and C source/line/dependency lineage, one C economic effect | Duplicate C effect |
 | A11-02 | C accepted before P | C durable `PENDING_DEPENDENCY`, no premature source posting; exactly one apply after P | C dropped or applied early |
-| A11-03 | P absent / invalid / wrong tenant | Pending or reasoned terminal state per approved policy; no cross-tenant read/write | Guessing P, effect in peer tenant |
+| A11-03 | P absent / invalid / wrong tenant | Durable pending for unresolved P; reasoned rejection/case for invalid or forbidden references under approved policy; no peer-tenant dependency resolution, existence disclosure, read or write | Guessing P, cross-tenant effect or leaking whether foreign P exists |
 | A11-04 | Same producer+event ID, same payload | Stable receipt/outcome/hash and invariant all-user-table fingerprint on replay where applicable | New source/ledger rows |
 | A11-05 | Same identity, changed payload/kind | Conflict with old outcome and unchanged user-table digest | Changed committed source/effect |
 | A11-06 | Two consumers race on pending C/P | Observed SQL contention/ordered recovery, one posted effect | Lost C, duplicate apply, deadlock masking |
