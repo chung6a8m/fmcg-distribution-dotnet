@@ -38,6 +38,25 @@ public sealed class IdentitySessionsTests
     }
 
     [Fact]
+    public async Task Mfa_enabled_user_cannot_use_password_only_login_or_existing_session()
+    {
+        await using var env = await Fixture.CreateAsync();
+        var initial = (await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken))!;
+        Assert.True(await env.Sessions.ValidateAccessAsync(Principal(initial.AccessToken), TestContext.Current.CancellationToken));
+        var originalStamp = await env.Users.GetSecurityStampAsync(env.User);
+
+        // Simulate an administrator requiring MFA while preserving the existing
+        // security stamp: the B.3 password-only flow MUST NOT silently bypass it.
+        env.User.TwoFactorEnabled = true;
+        Assert.True((await env.Users.UpdateAsync(env.User)).Succeeded);
+        Assert.Equal(originalStamp, await env.Users.GetSecurityStampAsync(env.User));
+
+        Assert.Null(await env.Sessions.LoginAsync("operator", Password, TestContext.Current.CancellationToken));
+        Assert.False(await env.Sessions.ValidateAccessAsync(Principal(initial.AccessToken), TestContext.Current.CancellationToken));
+        Assert.Null(await env.Sessions.RotateAsync(initial.RefreshToken, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Refresh_reuse_revokes_family_and_all_issued_access()
     {
         await using var env = await Fixture.CreateAsync();
@@ -172,6 +191,32 @@ public sealed class IdentitySessionsTests
         context.Request.Host = new HostString("preprod.example.invalid");
         if (origin is not null) context.Request.Headers["Origin"] = origin;
         Assert.Equal(expected, IdentityHttp.ValidOrigin(context));
+    }
+
+    [Fact]
+    public void Refresh_cookie_is_host_only_secure_httponly_strict_and_revocable()
+    {
+        var ctx = new DefaultHttpContext();
+        IdentityHttp.SetCookie(ctx, "nonsecret-unit-test-value");
+        var header = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        Assert.StartsWith("__host-fmcg-preprod-refresh=", header);
+        Assert.Contains("; path=/", header);
+        Assert.Contains("; secure", header);
+        Assert.Contains("; httponly", header);
+        Assert.Contains("; samesite=strict", header);
+        Assert.Contains("max-age=", header);
+        Assert.DoesNotContain("domain=", header);
+
+        ctx.Response.Headers.Remove("Set-Cookie");
+        IdentityHttp.ClearCookie(ctx);
+        var cleared = ctx.Response.Headers.SetCookie.ToString().ToLowerInvariant();
+        Assert.StartsWith("__host-fmcg-preprod-refresh=", cleared);
+        Assert.Contains("; path=/", cleared);
+        Assert.Contains("; secure", cleared);
+        Assert.Contains("; httponly", cleared);
+        Assert.Contains("; samesite=strict", cleared);
+        Assert.Contains("max-age=0", cleared);
+        Assert.DoesNotContain("domain=", cleared);
     }
 
     [Fact]
