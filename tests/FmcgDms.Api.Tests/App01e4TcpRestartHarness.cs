@@ -31,7 +31,11 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
             root = Directory.GetParent(root)?.FullName;
         if (root is null) throw new InvalidOperationException("E.4 cannot locate solution root.");
 
-        string project = Path.Combine(root, "src", "FmcgDms.Api", "FmcgDms.Api.csproj");
+        string projectDir = Path.Combine(root, "src", "FmcgDms.Api");
+        string assembly = Path.Combine(projectDir, "bin", "Release", "net10.0", "FmcgDms.Api.dll");
+        if (!File.Exists(assembly))
+            throw new FileNotFoundException("APP-01E.4 requires the pre-built Release HTTP host.", assembly);
+
         var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
         int port = ((IPEndPoint)reservation.LocalEndpoint).Port;
@@ -39,13 +43,17 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
 
         var start = new ProcessStartInfo("dotnet")
         {
-            Arguments = $"run --no-build --no-launch-profile -c Release --project \"{project}\"",
-            WorkingDirectory = root,
+            WorkingDirectory = projectDir,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        // Direct DLL execution avoids dotnet-run's URL/launch-profile resolution.
+        // Explicit --urls is authoritative even when runner-level URL variables exist.
+        start.ArgumentList.Add(assembly);
+        start.ArgumentList.Add("--urls");
+        start.ArgumentList.Add($"http://127.0.0.1:{port}");
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "IntegrationTest";
         start.Environment["ASPNETCORE_URLS"] = $"http://127.0.0.1:{port}";
         start.Environment["SyntheticAuth__Enabled"] = "true";
@@ -59,8 +67,8 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         Process process = Process.Start(start)
             ?? throw new InvalidOperationException("Could not launch APP-01E.4 Kestrel process.");
         // Drain pipes; a blocked stdout/stderr pipe must not hang the API.
-        _ = process.StandardOutput.ReadToEndAsync();
-        _ = process.StandardError.ReadToEndAsync();
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
         var host = new App01e4ApiProcess(process, port);
         try
         {
@@ -86,10 +94,17 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
             }
             throw new TimeoutException("APP-01E.4 Kestrel child readiness timed out.");
         }
-        catch
+        catch (Exception ex)
         {
             await host.DisposeAsync();
-            throw;
+            // Preserve bounded Kestrel startup diagnostics when readiness fails:
+            // a connection refusal is not enough to diagnose the actual host bind.
+            string output = stdout.IsCompletedSuccessfully ? stdout.Result : "(stdout unavailable)";
+            string error = stderr.IsCompletedSuccessfully ? stderr.Result : "(stderr unavailable)";
+            static string Tail(string value) => value.Length > 1200 ? value[^1200..] : value;
+            throw new InvalidOperationException(
+                $"APP-01E.4 Kestrel readiness failed on port {port}; " +
+                $"stdout={Tail(output)}; stderr={Tail(error)}", ex);
         }
     }
 
