@@ -27,6 +27,20 @@ jobs:
           dotnet test tests/FmcgDms.Preprod.Runtime.Tests/FmcgDms.Preprod.Runtime.Tests.csproj -c Release -- --report-trx
       - name: Verify private network and workload secret boundaries
         run: python3 tools/verify_preprod_runtime.py
+      - name: Lint operator probe and validate Caddy TLS routing (CI fixture only)
+        run: |
+          bash -n scripts/Collect-App02B2PreprodEvidence.sh
+          python3 -m py_compile tools/verify_preprod_runtime.py
+          mkdir -p "$RUNNER_TEMP/app02b2-caddy"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj '/CN=preprod.example.invalid' \
+            -keyout "$RUNNER_TEMP/app02b2-caddy/tls.key" \
+            -out "$RUNNER_TEMP/app02b2-caddy/tls.crt" >/dev/null 2>&1
+          docker run --rm -e PREPROD_FQDN=preprod.example.invalid \
+            -v "$PWD/deploy/preprod/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.key:/run/certs/tls.key:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.crt:/run/certs/tls.crt:ro" \
+            caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Compile Docker API image
         run: docker compose -f deploy/preprod/compose.yaml build api
         env:
