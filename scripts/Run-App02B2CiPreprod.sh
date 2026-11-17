@@ -111,7 +111,7 @@ chmod 0640 "$VAULT_API_TOKEN_FILE" "$VAULT_WORKER_TOKEN_FILE"
 docker pull curlimages/curl:8.12.1 >/dev/null
 vault_http() {
   local identity="$1" path="$2"
-  docker run --rm --network fmcg-preprod-b2_outbound \
+  docker run --rm --user 1654:1654 --network fmcg-preprod-b2_outbound \
     -v "$tls/ca.crt:/run/ca.crt:ro" \
     -v "$tokens/$identity.token:/run/token:ro" \
     --entrypoint sh curlimages/curl:8.12.1 -c \
@@ -123,7 +123,7 @@ vault_http() {
 # No -f for 403 checks; a 403 is an EXPECTED negative HTTP result.
 vault_http_status() {
   local identity="$1" path="$2"
-  docker run --rm --network fmcg-preprod-b2_outbound \
+  docker run --rm --user 1654:1654 --network fmcg-preprod-b2_outbound \
     -v "$tls/ca.crt:/run/ca.crt:ro" \
     -v "$tokens/$identity.token:/run/token:ro" \
     --entrypoint sh curlimages/curl:8.12.1 -c \
