@@ -20,7 +20,7 @@ try
     TenantOperatorAdmission.ValidateVaultAnchor(
         Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address);
     var vault=new VaultTenantOperatorSecrets(address ?? "");
-    var secrets=await vault.ReadOperatorAsync(CancellationToken.None);
+    var secrets=await vault.ReadOperatorAsync(command,CancellationToken.None);
     TenantOperatorAdmission.Validate(Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
         address,secrets.RegistryConnection,command=="provision"?secrets.MasterConnection:null);
     var registry=new TenantRegistrySql(secrets.RegistryConnection);
@@ -40,7 +40,7 @@ try
                 .ProvisionAsync(tenantId,CancellationToken.None);
             break;
         case "verify":
-            var scoped=await vault.ReadProbeAsync(tenantId,CancellationToken.None);
+            var scoped=await vault.ReadProbeAsync(command,tenantId,CancellationToken.None);
             result=await new TenantProbeVerifier(registry)
                 .VerifyAsync(tenantId,scoped,CancellationToken.None);
             break;

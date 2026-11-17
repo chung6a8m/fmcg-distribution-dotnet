@@ -102,4 +102,29 @@ public sealed class TenantSafetyTests
         finally { File.Delete(file); }
     }
 
+
+    [Theory]
+    [InlineData("request","requester")]
+    [InlineData("approve","approver")]
+    [InlineData("activate","approver")]
+    [InlineData("start-reactivation","approver")]
+    [InlineData("provision","provisioner")]
+    [InlineData("verify","verifier")]
+    [InlineData("suspend","security")]
+    [InlineData("revoke","security")]
+    [InlineData("complete-decommission","verifier")]
+    public void Vault_operator_roles_are_fixed_and_separated(string action,string role)
+    {
+        Assert.Equal(role,VaultTenantOperatorSecrets.SecretRoleForCommand(action));
+    }
+
+    [Fact]
+    public void Unknown_or_client_selected_vault_role_is_denied()
+    {
+        Assert.Throws<TenantLifecycleDeniedException>(()=>
+            VaultTenantOperatorSecrets.SecretRoleForCommand("../operator"));
+        Assert.Throws<TenantLifecycleDeniedException>(()=>
+            VaultTenantOperatorSecrets.SecretRoleForCommand("tenant-provisioning/provisioner"));
+    }
+
 }

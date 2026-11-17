@@ -13,19 +13,36 @@ public sealed class VaultTenantOperatorSecrets(string address,
     string tokenFile="/run/secrets/vault_tenant_provisioning_token",
     HttpMessageHandler? testHandler=null)
 {
-    public async Task<TenantOperatorSecrets> ReadOperatorAsync(CancellationToken ct)
+    // These fixed paths are governed by distinct Vault token ACL policies.
+    // Never let a caller supply arbitrary KV-v2 path or SQL principal.
+    public static string SecretRoleForCommand(string command) => command switch
     {
-        using var doc=await ReadAsync("tenant-provisioning/operator",ct);
+        "request" => "requester",
+        "approve" or "activate" or "start-reactivation" or "decommission" => "approver",
+        "provision" => "provisioner",
+        "verify" or "abort-reactivation" or "complete-decommission" => "verifier",
+        "suspend" or "revoke" => "security",
+        _ => throw new TenantLifecycleDeniedException("TENANT_OPERATOR_ROLE_INVALID")
+    };
+
+    public async Task<TenantOperatorSecrets> ReadOperatorAsync(string command,CancellationToken ct)
+    {
+        string role=SecretRoleForCommand(command);
+        using var doc=await ReadAsync("tenant-provisioning/"+role,ct);
         var data=doc.RootElement.GetProperty("data").GetProperty("data");
         var registry=data.GetProperty("registryConnectionString").GetString() ?? "";
         var master=data.TryGetProperty("masterConnectionString",out var m)?m.GetString():null;
-        if(string.IsNullOrWhiteSpace(registry))
-            throw new TenantLifecycleDeniedException("TENANT_OPERATOR_SECRET_INVALID");
+        if(string.IsNullOrWhiteSpace(registry)
+            || role=="provisioner" && string.IsNullOrWhiteSpace(master)
+            || role!="provisioner" && !string.IsNullOrEmpty(master))
+            throw new TenantLifecycleDeniedException("TENANT_OPERATOR_SECRET_ROLE_MISMATCH");
         return new TenantOperatorSecrets(registry,master);
     }
 
-    public async Task<string> ReadProbeAsync(Guid tenant,CancellationToken ct)
+    public async Task<string> ReadProbeAsync(string command, Guid tenant,CancellationToken ct)
     {
+        if(SecretRoleForCommand(command)!="verifier" || command!="verify")
+            throw new TenantLifecycleDeniedException("TENANT_PROBE_ROLE_DENIED");
         if(tenant==Guid.Empty) throw new TenantLifecycleDeniedException("TENANT_PROBE_INVALID");
         using var doc=await ReadAsync("tenant-provisioning/probe/"+tenant.ToString("N"),ct);
         var connection=doc.RootElement.GetProperty("data").GetProperty("data")
