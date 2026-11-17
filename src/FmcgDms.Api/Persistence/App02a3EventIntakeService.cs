@@ -193,6 +193,21 @@ public sealed class App02a3EventIntakeService(
                         Actor = actor }, tx, ct));
                 if (!sourceCommitted)
                     throw new App02InvalidEventException("P_OFFER_NOT_COMMITTED");
+
+                // A real APP-01D OFFER may be registered as one named P
+                // only. The A.2 filtered unique index is the final guard,
+                // but return a durable no-effect 409 instead of allowing
+                // a second event identity to surface as an unhandled 500.
+                Guid? boundP = await db.QuerySingleOrDefaultAsync<Guid?>(
+                    App02a3Sql.Cmd("""
+                    SELECT ReceiptId FROM dbo.App02EventReceipt WITH(UPDLOCK,HOLDLOCK)
+                    WHERE TenantId=@Tenant AND OfferId=@Offer
+                    """, new { Tenant = tenant, Offer = input.OfferId }, tx, ct));
+                if (boundP.HasValue)
+                {
+                    await tx.RollbackAsync(ct);
+                    return new("NONE", "CONFLICT", "OFFER_ALREADY_REGISTERED", null, false);
+                }
             }
             Guid receipt = Guid.NewGuid();
             await db.ExecuteAsync(App02a3Sql.Cmd("""
