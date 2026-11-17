@@ -3,12 +3,17 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $fixturePath = 'tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json'
 $expected = Get-Content $fixturePath -Raw | ConvertFrom-Json
+# Raw checkout hash is used ONLY to bind C# SQL reports for this run.
+# GitHub Windows checkout may convert LF to CRLF, so independently pin the
+# canonical Git-blob text normalized to LF, not platform-specific disk bytes.
 $expectedHash = (Get-FileHash $fixturePath -Algorithm SHA256).Hash
-# Approved independent numeric oracle: changing the fixture requires review
-# and an explicit new frozen hash, not a silently recomputed self-certification.
+$normalizedFixture = (Get-Content $fixturePath -Raw -Encoding utf8).Replace("`r`n", "`n")
+$normalizedFixtureHash = [Convert]::ToHexString(
+    [Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($normalizedFixture)))
 $frozenFixtureHash = '8A38FEF7EA95156A4C0DD6282BE99F47840B0FAD8086813151AF70B0D9E7E7A1'
-if ($expectedHash -cne $frozenFixtureHash) {
-    throw "A4 independently frozen expected fixture SHA drift: $expectedHash"
+if ($normalizedFixtureHash -cne $frozenFixtureHash) {
+    throw "A4 canonical LF frozen fixture SHA drift: $normalizedFixtureHash"
 }
 function Test-A4Cell {
     param($Cell, [string]$Metric, [decimal]$Expected)
