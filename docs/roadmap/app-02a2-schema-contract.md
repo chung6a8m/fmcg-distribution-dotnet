@@ -1,6 +1,6 @@
 # APP-02A.2 — Durable event Inbox/Outbox schema and canonical-v1 contract
 
-**Contract candidate (17 November 2026): SYNTHETIC_NONPRODUCTION / A.2 only.** Parent: [APP-02A.1](app-02a1-scope-contract.md); [eight Owner decisions](../decisions/owner-app02-2026-11-17.md); [APP-02 roadmap](app-02.md). Independent design review, fresh/replay SQL verification, exact PR HEAD CI are required before declaring A.2 verified. This is NOT AC11_SYNTHETIC_VERIFIED; APP-02B–E, EV-08 actual and all production P0/pilot gates remain out of scope.
+**MERGED / SYNTHETIC_SCHEMA_VERIFIED (17 November 2026): SYNTHETIC_NONPRODUCTION / A.2 only.** [PR #42](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/42) was independently reviewed and merged: source `ec33f996b96e378a42a67cc4a76f8601e59d91dc`, [final-head Windows CI #44035792370 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44035792370) SUCCESS (258/258, zero skipped), merge `30a9e639a43f0ef464991cea8d5f5a940df4ffae`. [Closeout](../closeout/2026-11-17-app-02a2.md). Parent: [APP-02A.1](app-02a1-scope-contract.md); [eight Owner decisions](../decisions/owner-app02-2026-11-17.md); [APP-02 roadmap](app-02.md). This is NOT AC11_SYNTHETIC_VERIFIED; APP-02B–E, EV-08 actual and all production P0/pilot gates remain out of scope.
 
 ## 1. Canonical event-v1 bytes (freeze for A.2 review)
 
