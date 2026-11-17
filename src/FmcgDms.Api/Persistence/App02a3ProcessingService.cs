@@ -120,7 +120,8 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
                 JOIN dbo.CashHandoverOffer o WITH(HOLDLOCK)
                     ON o.TenantId=r.TenantId AND o.Id=r.OfferId
                     AND o.TripId=r.TripId AND o.OfferedAmount=r.OfferedAmount
-                    AND o.OfferedBy=r.ActorId
+                    AND o.OfferedBy COLLATE Latin1_General_100_BIN2
+                        = r.ActorId COLLATE Latin1_General_100_BIN2
                 JOIN dbo.BusinessSource s WITH(HOLDLOCK)
                     ON s.TenantId=o.TenantId AND s.Id=o.Id
                     AND s.SourceKind=N'CASH_HANDOVER_OFFER'
