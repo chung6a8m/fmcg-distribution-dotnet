@@ -9,6 +9,16 @@ namespace FmcgDms.Preprod.Runtime;
 /// </summary>
 public static class PreprodStartupGuard
 {
+    public static void ValidateHostVariables(string role, string? dotnetEnvironment,
+        string? aspnetcoreEnvironment)
+    {
+        if (dotnetEnvironment != "Preprod"
+            || role == "api" && aspnetcoreEnvironment != "Preprod"
+            || role == "worker" && aspnetcoreEnvironment is not null
+                && aspnetcoreEnvironment != "Preprod")
+            throw new RuntimeDeniedException("ENVIRONMENT_MISMATCH");
+    }
+
     public static void Validate(IConfiguration config, string environment, string role)
     {
         if (environment != "Preprod" || config["Runtime:Environment"] != "Preprod")

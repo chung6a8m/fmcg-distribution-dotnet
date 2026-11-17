@@ -36,7 +36,7 @@ spoofed="$(curl -fsS --max-time 10 -H 'X-Forwarded-Proto: http' \
 [[ "$ready" == "$spoofed" ]] || { echo "PREPROD_FAIL proxy header override"; exit 1; }
 
 deny_case() {
-  local label="$1"; shift
+  local label="$1" reason="$2"; shift 2
   local output status
   set +e
   output="$(timeout 30s "$@" 2>&1)"
@@ -44,16 +44,16 @@ deny_case() {
   set -e
   [[ "$status" -ne 0 && "$status" -ne 124 ]] || {
     echo "PREPROD_FAIL $label returned success or timeout"; exit 1; }
-  printf '%s' "$output" | grep -q 'RUNTIME_' || {
+  printf '%s' "$output" | grep -Fq "RUNTIME_START_DENIED code=$reason" || {
     echo "PREPROD_FAIL $label no static denial"; exit 1; }
   # Never store raw subprocess logs, token strings or environment dumps.
   echo "PREPROD_NEGATIVE_PASS $label"
 }
-deny_case synthetic_auth docker compose run --rm --no-deps -e SyntheticAuth__Enabled=true api
-deny_case synthetic_worker docker compose run --rm --no-deps -e App02Worker__Enabled=true worker
-deny_case dev_key docker compose run --rm --no-deps -e SyntheticAuth__SigningKey=DEV_KEY_FORBIDDEN api
-deny_case mode_mismatch docker compose run --rm --no-deps -e Runtime__Mode=Production api
-deny_case wrong_vault_role env "VAULT_API_TOKEN_FILE=$VAULT_WORKER_TOKEN_FILE" \
+deny_case synthetic_auth SYNTHETIC_OR_DIRECT_DB_FORBIDDEN docker compose run --rm --no-deps -e SyntheticAuth__Enabled=true api
+deny_case synthetic_worker SYNTHETIC_OR_DIRECT_DB_FORBIDDEN docker compose run --rm --no-deps -e App02Worker__Enabled=true worker
+deny_case dev_key SYNTHETIC_OR_DIRECT_DB_FORBIDDEN docker compose run --rm --no-deps -e SyntheticAuth__SigningKey=DEV_KEY_FORBIDDEN api
+deny_case mode_mismatch MODE_NOT_AUTHORIZED docker compose run --rm --no-deps -e Runtime__Mode=Production api
+deny_case wrong_vault_role VAULT_ACCESS_DENIED env "VAULT_API_TOKEN_FILE=$VAULT_WORKER_TOKEN_FILE" \
   docker compose run --rm --no-deps api
 
 peer_code="$(docker run --rm --network fmcg-preprod-b2_private \

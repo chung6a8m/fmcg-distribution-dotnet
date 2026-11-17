@@ -4,7 +4,18 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 var builder = Host.CreateApplicationBuilder(args);
-PreprodStartupGuard.Validate(builder.Configuration, builder.Environment.EnvironmentName, "worker");
+try
+{
+    PreprodStartupGuard.ValidateHostVariables("worker",
+        Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
+        Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"));
+    PreprodStartupGuard.Validate(builder.Configuration, builder.Environment.EnvironmentName, "worker");
+}
+catch (RuntimeDeniedException denied)
+{
+    Console.Error.WriteLine("RUNTIME_START_DENIED code=" + denied.ReasonCode);
+    throw;
+}
 var vault = new VaultAdmissionClient(builder.Configuration, "worker");
 try
 {

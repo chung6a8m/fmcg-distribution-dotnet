@@ -51,6 +51,27 @@ public sealed class RuntimeAndVaultTests
                 PreprodStartupGuard.Validate(Settings("worker"), "Preprod", "api")).ReasonCode);
     }
 
+    [Theory]
+    [InlineData("api", "Preprod", "Development")]
+    [InlineData("api", "Development", "Preprod")]
+    [InlineData("api", null, "Preprod")]
+    [InlineData("worker", "Production", null)]
+    [InlineData("worker", "Preprod", "Development")]
+    public void Runtime01_rejects_ambiguous_host_environment_variables(
+        string role, string? dotnet, string? aspnet)
+    {
+        var ex = Assert.Throws<RuntimeDeniedException>(() =>
+            PreprodStartupGuard.ValidateHostVariables(role, dotnet, aspnet));
+        Assert.Equal("ENVIRONMENT_MISMATCH", ex.ReasonCode);
+    }
+
+    [Fact]
+    public void Runtime01_accepts_consistent_preprod_host_variables()
+    {
+        PreprodStartupGuard.ValidateHostVariables("api", "Preprod", "Preprod");
+        PreprodStartupGuard.ValidateHostVariables("worker", "Preprod", null);
+    }
+
     [Fact]
     public void Runtime02_forged_headers_do_not_turn_direct_access_into_proxy()
     {

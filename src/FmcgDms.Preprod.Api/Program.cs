@@ -5,7 +5,18 @@ using Microsoft.AspNetCore.HttpOverrides;
 var builder = WebApplication.CreateBuilder(args);
 // Intentionally a NEW binary: there is no SyntheticAuth, LocalDB, business
 // handler, tenant connection resolver, posting route or synthetic Worker here.
-PreprodStartupGuard.Validate(builder.Configuration, builder.Environment.EnvironmentName, "api");
+try
+{
+    PreprodStartupGuard.ValidateHostVariables("api",
+        Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
+        Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"));
+    PreprodStartupGuard.Validate(builder.Configuration, builder.Environment.EnvironmentName, "api");
+}
+catch (RuntimeDeniedException denied)
+{
+    Console.Error.WriteLine("RUNTIME_START_DENIED code=" + denied.ReasonCode);
+    throw;
+}
 
 var trustedProxy = IPAddress.Parse(builder.Configuration["Runtime:TrustedProxyIp"]!);
 var publicHost = builder.Configuration["Runtime:PublicHost"]!;

@@ -14,7 +14,7 @@
 
 | Case | Required PREPROD fault/negative | Expected / independent witness | Current |
 |---|---|---|---|
-| RUNTIME-01.A | Wrong environment/mode/role; dev signing key; synthetic auth or synthetic worker enabled | Startup nonzero, static redacted reason, no public synthetic endpoint | PREPROD NOT_RUN |
+| RUNTIME-01.A | Wrong or conflicting DOTNET/ASPNETCORE environment/mode/role; dev signing key; synthetic auth or synthetic worker enabled | Startup nonzero, static redacted reason, no public synthetic endpoint | PREPROD NOT_RUN |
 | RUNTIME-01.B | Non-TLS/invalid Vault endpoint or Vault down; token missing/revoked | Startup nonzero or readiness 503, Worker ceases any processing | PREPROD NOT_RUN |
 | RUNTIME-01.C | Published API/Worker/SQL/Vault port, invalid TLS, missing proxy, host socket bypass | Public scan/config rejects; only HTTPS/443, no management routes | PREPROD NOT_RUN |
 | RUNTIME-02.A | Forged forwarded headers, wrong public Host or direct private API | 403/404; external and nonproxy private observer, no privilege | PREPROD NOT_RUN |
