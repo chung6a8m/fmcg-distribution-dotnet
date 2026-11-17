@@ -26,7 +26,8 @@ public sealed class App02a3OutboxService(TenantConnections connections)
     }
 
     public async Task<string> DispatchOneAsync(string tenant, DateTimeOffset asOfUtc,
-        bool stopAfterConsumerCommit, CancellationToken ct)
+        bool stopAfterConsumerCommit, CancellationToken ct,
+        Guid? onlyMessageId = null)
     {
         var identity = App02a3Sql.WorkerPrincipal(tenant);
         Guid message;
@@ -49,11 +50,13 @@ public sealed class App02a3OutboxService(TenantConnections connections)
                     JOIN dbo.App02OutboxMessage m WITH(HOLDLOCK)
                         ON m.TenantId=d.TenantId AND m.MessageId=d.MessageId
                     WHERE d.TenantId=@Tenant AND d.AttemptCount<6
+                      AND (@OnlyMessage IS NULL OR d.MessageId=@OnlyMessage)
                       AND ((d.Status=N'PENDING'
                            AND (d.NextAttemptAtUtc IS NULL OR d.NextAttemptAtUtc<=@AsOf))
                        OR (d.Status=N'LEASED' AND d.LeaseExpiresAtUtc<=@AsOf))
                     ORDER BY m.CreatedAtUtc,d.MessageId
-                    """, new { Tenant = tenant, AsOf = asOfUtc.UtcDateTime }, lease, ct));
+                    """, new { Tenant = tenant, AsOf = asOfUtc.UtcDateTime,
+                        OnlyMessage = onlyMessageId }, lease, ct));
                 if (row is null)
                 {
                     // A last attempt with an expired lease becomes observable
