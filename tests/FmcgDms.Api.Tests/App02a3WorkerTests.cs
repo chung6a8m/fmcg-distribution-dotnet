@@ -349,4 +349,85 @@ public sealed partial class App01e2CrossCommandRaceTests
             WHERE TenantId=@Tenant AND CReceiptId=@Receipt
             """, new { Tenant = tenant, Receipt = receipt }));
     }
+
+    [Fact]
+    public async Task App02a3_correction_requires_two_actors_and_never_mutates_posted_money()
+    {
+        const string tenant = "tenant-a";
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        using var maker = Client(factory, tenant, "a3-maker", "cashier_supervisor");
+        using var checker = Client(factory, tenant, "a3-checker", "case_checker");
+        var scene = await SetupA3(tenant, setup, sales);
+        var p = NewPEvent(scene.Scene.Trip, scene.Offer);
+        var c = NewCEvent(scene.Scene.Trip, p, scene.Count);
+        await IntakeA3(sales, p);
+        Guid receipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        Assert.Equal("APPLIED", await worker.ProcessAsync(tenant, receipt,
+            DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        using var db = Open(tenant);
+        Guid acceptance = db.QuerySingle<Guid>("""
+            SELECT AcceptanceId FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt });
+        int effectsBefore = db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.LedgerEffect e
+            JOIN dbo.CashHandoverAcceptance a
+                ON a.TenantId=e.TenantId AND a.SourceLineId=e.BusinessSourceLineId
+            WHERE a.TenantId=@Tenant AND a.Id=@Acceptance
+            """, new { Tenant = tenant, Acceptance = acceptance });
+        Assert.Equal(2, effectsBefore);
+
+        using HttpResponseMessage proposed = await maker.PostAsJsonAsync(
+            A3 + "corrections/propose",
+            new App02CorrectionProposalInput(acceptance, "AUDIT_ANNOTATION",
+                "CORR-EVIDENCE-" + Id(), "Nonfinancial evidence correction"),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, proposed.StatusCode);
+        Guid proposal = Assert.IsType<App02CorrectionProposalOutcome>(
+            await proposed.Content.ReadFromJsonAsync<App02CorrectionProposalOutcome>(
+                TestContext.Current.CancellationToken)).ProposalId;
+        using HttpResponseMessage selfApproval = await maker.PostAsync(
+            A3 + "corrections/approve/" + proposal, content: null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, selfApproval.StatusCode);
+        using HttpResponseMessage approved = await checker.PostAsync(
+            A3 + "corrections/approve/" + proposal, content: null,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+        var outcome = Assert.IsType<App02CorrectionOutcome>(
+            await approved.Content.ReadFromJsonAsync<App02CorrectionOutcome>(
+                TestContext.Current.CancellationToken));
+        Assert.Equal("CORRECTION_AUDIT_RECORDED", outcome.Status);
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02CorrectionLink
+            WHERE TenantId=@Tenant AND OriginalAcceptanceId=@Acceptance
+              AND CorrectionSourceId=@Source
+            """, new { Tenant = tenant, Acceptance = acceptance,
+                Source = outcome.CorrectionSourceId }));
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.LedgerEffect e
+            JOIN dbo.BusinessSourceLine sl ON sl.TenantId=e.TenantId
+                AND sl.Id=e.BusinessSourceLineId
+            WHERE sl.TenantId=@Tenant AND sl.BusinessSourceId=@Source
+            """, new { Tenant = tenant, Source = outcome.CorrectionSourceId }));
+        Assert.Equal(effectsBefore, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.LedgerEffect e
+            JOIN dbo.CashHandoverAcceptance a
+                ON a.TenantId=e.TenantId AND a.SourceLineId=e.BusinessSourceLineId
+            WHERE a.TenantId=@Tenant AND a.Id=@Acceptance
+            """, new { Tenant = tenant, Acceptance = acceptance }));
+        Assert.Throws<SqlException>(() => db.Execute("""
+            UPDATE dbo.BusinessSource SET SourceNumber=N'FORBIDDEN'
+            WHERE TenantId=@Tenant AND Id=@Source
+            """, new { Tenant = tenant, Source = outcome.CorrectionSourceId }));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02CorrectionApproval
+            WHERE TenantId=@Tenant AND ProposalId=@Proposal
+            """, new { Tenant = tenant, Proposal = proposal }));
+    }
 }
