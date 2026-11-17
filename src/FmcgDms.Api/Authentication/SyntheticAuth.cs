@@ -80,6 +80,11 @@ public static class SyntheticAuth
                 .RequireClaim("synthetic_role", "cashier"));
             options.AddPolicy("SyntheticAudit", p => p.RequireAuthenticatedUser()
                 .RequireClaim("synthetic_role", "auditor"));
+            options.AddPolicy("SyntheticCommandRecovery", p => p.RequireAuthenticatedUser()
+                .RequireAssertion(context =>
+                    context.User.HasClaim("synthetic_role", "warehouse")
+                    || context.User.HasClaim("synthetic_role", "sales")
+                    || context.User.HasClaim("synthetic_role", "cashier")));
         });
     }
 
