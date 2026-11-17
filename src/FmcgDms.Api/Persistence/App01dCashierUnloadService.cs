@@ -342,7 +342,7 @@ public sealed class App01dCashierUnloadService(TenantConnections connections)
         return BusinessCommandOutcome.Applied("CASH_HANDOVER_OFFERED", source);
     }
 
-    private static async Task<BusinessCommandOutcome> AcceptAsync(
+    internal static async Task<BusinessCommandOutcome> AcceptAsync(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
         Guid commandId, AcceptCashHandoverCommand req, CancellationToken ct)
     {

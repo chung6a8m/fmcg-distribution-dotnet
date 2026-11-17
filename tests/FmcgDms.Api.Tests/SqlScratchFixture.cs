@@ -93,6 +93,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
         {
             ["iss"] = "fmcg-synthetic-app00", ["aud"] = "fmcg-synthetic-app00",
             ["sub"] = subject ?? actor, ["actor_id"] = actor,
+            ["producer_id"] = actor, // signed synthetic test producer bound to actor
             ["synthetic_role"] = roles,
             ["tenant_id"] = tenantId, ["iat"] = now, ["nbf"] = now - 1, ["exp"] = now + 900
         }));
