@@ -145,7 +145,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             // If named P was actually RECEIVED after the original 24-hour
             // dependency deadline, the missing-P CASE cannot be bypassed
             // merely because the process was down before its safety scan.
-            bool approvedLateResume = c.ActiveCaseId is Guid previousCase
+            bool approvedLateResume = c.ActiveCaseId.HasValue
                 && await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
                     SELECT CAST(CASE WHEN EXISTS (
                         SELECT 1 FROM dbo.App02CaseDisposition WITH(HOLDLOCK)
