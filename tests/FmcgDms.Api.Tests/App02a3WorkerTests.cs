@@ -1,0 +1,347 @@
+using System.Net;
+using System.Net.Http.Json;
+using Dapper;
+using FmcgDms.Api.Persistence;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace FmcgDms.Api.Tests;
+
+/// <summary>
+/// APP-02A.3 runtime regressions only. APP-02A.4 owns the independent
+/// A11-01..12 expected/actual SQL oracle; these tests are NOT its substitute.
+/// </summary>
+public sealed partial class App01e2CrossCommandRaceTests
+{
+    private const string A3 = "/api/synthetic/app02/events/";
+
+    private static void GrantRole(SqlConnection db, string tenant, string actor,
+        string role, bool active = true)
+    {
+        db.Execute("""
+            IF EXISTS(SELECT 1 FROM dbo.App02ActorRoleGrant
+                WHERE TenantId=@Tenant AND ActorId=@Actor AND RoleCode=@Role)
+                UPDATE dbo.App02ActorRoleGrant SET IsActive=@Active,
+                    ChangedBy=N'app02-fixture',ChangedAtUtc=SYSUTCDATETIME()
+                WHERE TenantId=@Tenant AND ActorId=@Actor AND RoleCode=@Role
+            ELSE
+                INSERT dbo.App02ActorRoleGrant(
+                    TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                VALUES(@Tenant,@Actor,@Role,@Active,N'app02-fixture')
+            """, new { Tenant = tenant, Actor = actor, Role = role, Active = active });
+    }
+
+    private async Task<(Scene Scene, Guid Offer, string Count)> SetupA3(
+        string tenant, HttpClient setup, HttpClient sales)
+    {
+        var scene = Seed(tenant);
+        await Prepare(setup, tenant, scene, load: true);
+        await Apply(sales, C + "post-b-sale-delivery-receipt",
+            B20(scene, CashWitness(tenant, scene)), "B_SALE_DELIVERY_POSTED");
+        var offer = await Apply(sales, D + "offer-cash-handover",
+            new OfferCashHandoverCommand(Producer, Id(), Id(), scene.Trip, 200m),
+            "CASH_HANDOVER_OFFERED");
+        string count = Id();
+        using var db = Open(tenant);
+        db.Execute("""
+            INSERT dbo.CashierCountEvidence(
+                TenantId,EvidenceRef,TripId,CountedAmount,
+                CountedBy,VerificationStatus,CountedAtUtc)
+            VALUES(@Tenant,@Count,@Trip,200,@Actor,N'VERIFIED',SYSUTCDATETIME())
+            """, new { Tenant = tenant, Count = count, scene.Trip,
+                Actor = CashierActor });
+        GrantRole(db, tenant, SalesActor, "sales");
+        GrantRole(db, tenant, CashierActor, "cashier");
+        GrantRole(db, tenant, "a3-maker", "cashier_supervisor");
+        GrantRole(db, tenant, "a3-checker", "case_checker");
+        return (scene, Assert.IsType<Guid>(offer.SourceId), count);
+    }
+
+    private static App02EventInput NewPEvent(Guid trip, Guid offer) =>
+        new("sales-terminal-" + Id(), "event-p-" + Id(),
+            App02EventCanonicalV1.OfferKind, trip, offer, 200m,
+            null, null, null, DateTimeOffset.UtcNow);
+
+    private static App02EventInput NewCEvent(Guid trip, App02EventInput p, string count) =>
+        new("cashier-terminal-" + Id(), "event-c-" + Id(),
+            App02EventCanonicalV1.AcceptanceKind, trip, null, null,
+            p.ProducerId, p.EventId, count, DateTimeOffset.UtcNow);
+
+    private static async Task<App02IntakeResult> IntakeA3(
+        HttpClient client, App02EventInput input)
+    {
+        using HttpResponseMessage response =
+            await client.PostAsJsonAsync(A3 + "intake", input);
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        App02IntakeResult? result =
+            await response.Content.ReadFromJsonAsync<App02IntakeResult>();
+        Assert.Equal("RECEIVED_COMMITTED", result?.Ack);
+        return Assert.IsType<App02IntakeResult>(result);
+    }
+
+    [Theory]
+    [InlineData("tenant-a")]
+    [InlineData("tenant-b")]
+    public async Task App02a3_named_P_then_C_is_atomic_idempotent_and_consumer_ack_recovers(
+        string tenant)
+    {
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        var s = await SetupA3(tenant, setup, sales);
+        App02EventInput p = NewPEvent(s.Scene.Trip, s.Offer);
+        App02EventInput c = NewCEvent(s.Scene.Trip, p, s.Count);
+        var pAck = await IntakeA3(sales, p);
+        var cAck = await IntakeA3(cashier, c);
+        Assert.Equal("APPLIED", pAck.Status); // P is nonposting offer event.
+        Assert.Equal("PENDING_DEPENDENCY", cAck.Status);
+        Guid cReceipt = Assert.IsType<Guid>(cAck.ReceiptId);
+
+        using var scope = factory.Services.CreateScope();
+        var processor = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        var outbound = scope.ServiceProvider.GetRequiredService<App02a3OutboxService>();
+        Assert.Equal("APPLIED", await processor.ProcessAsync(
+            tenant, cReceipt, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        Assert.Equal("APPLIED", await processor.ProcessAsync(
+            tenant, cReceipt, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+
+        using var db = Open(tenant);
+        Guid acceptance = db.QuerySingle<Guid>("""
+            SELECT AcceptanceId FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = cReceipt });
+        Guid sourceLine = db.QuerySingle<Guid>("""
+            SELECT SourceLineId FROM dbo.CashHandoverAcceptance
+            WHERE TenantId=@Tenant AND Id=@Acceptance
+            """, new { Tenant = tenant, Acceptance = acceptance });
+        var legs = db.Query<(string EffectKey, decimal AmountDelta)>("""
+            SELECT EffectKey,AmountDelta FROM dbo.LedgerEffect
+            WHERE TenantId=@Tenant AND BusinessSourceLineId=@SourceLine
+            ORDER BY EffectKey
+            """, new { Tenant = tenant, SourceLine = sourceLine }).ToArray();
+        Assert.Equal(2, legs.Length);
+        Assert.Contains(legs, x => x.EffectKey == "CUSTODY-OUT" && x.AmountDelta == -200m);
+        Assert.Contains(legs, x => x.EffectKey == "FUND-IN" && x.AmountDelta == 200m);
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02OutboxMessage
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = cReceipt }));
+
+        var replay = await IntakeA3(cashier, c);
+        Assert.True(replay.Replayed);
+        Assert.Equal(cReceipt, replay.ReceiptId);
+        Assert.Equal("APPLIED", replay.Status);
+        using (HttpResponseMessage changed = await cashier.PostAsJsonAsync(
+            A3 + "intake", c with { CountEvidenceRef = "changed-" + Id() }))
+            Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.CashHandoverAcceptance
+            WHERE TenantId=@Tenant AND OfferId=@Offer
+            """, new { Tenant = tenant, Offer = s.Offer }));
+
+        DateTimeOffset at = DateTimeOffset.UtcNow;
+        Assert.Equal("CONSUMER_COMMITTED_ACK_LOST",
+            await outbound.DispatchOneAsync(tenant, at,
+                stopAfterConsumerCommit: true, TestContext.Current.CancellationToken));
+        var message = db.QuerySingle<Guid>("""
+            SELECT MessageId FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = cReceipt });
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02SyntheticConsumerInbox
+            WHERE TenantId=@Tenant AND MessageId=@Message
+            """, new { Tenant = tenant, Message = message }));
+        Assert.Equal("LEASED", db.QuerySingle<string>("""
+            SELECT Status FROM dbo.App02OutboxDelivery
+            WHERE TenantId=@Tenant AND MessageId=@Message
+            """, new { Tenant = tenant, Message = message }));
+        Assert.Equal("ACKED", await outbound.DispatchOneAsync(tenant,
+            at.AddMinutes(3), stopAfterConsumerCommit: false,
+            TestContext.Current.CancellationToken));
+        Assert.Equal("ACKED", db.QuerySingle<string>("""
+            SELECT Status FROM dbo.App02OutboxDelivery
+            WHERE TenantId=@Tenant AND MessageId=@Message
+            """, new { Tenant = tenant, Message = message }));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02SyntheticConsumerInbox
+            WHERE TenantId=@Tenant AND MessageId=@Message
+            """, new { Tenant = tenant, Message = message }));
+    }
+
+    [Theory]
+    [InlineData("tenant-a")]
+    [InlineData("tenant-b")]
+    public async Task App02a3_C_before_P_waits_then_CASE_requires_independent_checker_resume(
+        string tenant)
+    {
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        using var maker = Client(factory, tenant, "a3-maker", "cashier_supervisor");
+        using var checker = Client(factory, tenant, "a3-checker", "case_checker");
+        var s = await SetupA3(tenant, setup, sales);
+        App02EventInput p = NewPEvent(s.Scene.Trip, s.Offer);
+        App02EventInput c = NewCEvent(s.Scene.Trip, p, s.Count);
+        var cAck = await IntakeA3(cashier, c);
+        Guid receipt = Assert.IsType<Guid>(cAck.ReceiptId);
+
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        Assert.Equal("PENDING_DEPENDENCY", await worker.ProcessAsync(
+            tenant, receipt, DateTimeOffset.UtcNow, TestContext.Current.CancellationToken));
+        using var db = Open(tenant);
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt }));
+        Assert.Equal("CASE", await worker.ProcessAsync(tenant, receipt,
+            DateTimeOffset.UtcNow.AddHours(25), TestContext.Current.CancellationToken));
+        Guid caseId = db.QuerySingle<Guid>("""
+            SELECT ActiveCaseId FROM dbo.App02EventProgress
+            WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt });
+        await IntakeA3(sales, p);
+        Assert.Equal("CASE", await worker.ProcessAsync(
+            tenant, receipt, DateTimeOffset.UtcNow.AddHours(25),
+            TestContext.Current.CancellationToken));
+
+        using (HttpResponseMessage proposed = await maker.PostAsJsonAsync(
+            A3 + "cases/propose", new App02CaseProposalInput(
+                caseId, "APPROVED_RESUME", "P_ARRIVED",
+                "CASE-COUNT-" + Id(), "Revalidate exact named P and count")))
+        {
+            Assert.Equal(HttpStatusCode.OK, proposed.StatusCode);
+            var proposal = await proposed.Content.ReadFromJsonAsync<App02CaseProposalOutcome>();
+            Guid proposalId = Assert.IsType<App02CaseProposalOutcome>(proposal).ProposalId;
+            using HttpResponseMessage denied = await maker.PostAsync(
+                A3 + "cases/approve/" + proposalId, content: null);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using HttpResponseMessage approved = await checker.PostAsync(
+                A3 + "cases/approve/" + proposalId, content: null);
+            Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
+            var disposition = await approved.Content.ReadFromJsonAsync<App02CaseApprovalOutcome>();
+            Assert.Equal("RECEIVED", disposition?.Status);
+        }
+        Assert.Equal("APPLIED", await worker.ProcessAsync(
+            tenant, receipt, DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt }));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02CaseDisposition
+            WHERE TenantId=@Tenant AND CaseId=@Case AND Decision=N'APPROVED_RESUME'
+            """, new { Tenant = tenant, Case = caseId }));
+    }
+
+    [Fact]
+    public async Task App02a3_two_workers_and_tenant_role_revocation_fail_closed()
+    {
+        const string tenant = "tenant-a";
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        var s = await SetupA3(tenant, setup, sales);
+        App02EventInput p = NewPEvent(s.Scene.Trip, s.Offer);
+        App02EventInput c = NewCEvent(s.Scene.Trip, p, s.Count);
+        await IntakeA3(sales, p);
+        Guid receipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        string[] states = await Task.WhenAll(
+            worker.ProcessAsync(tenant, receipt, DateTimeOffset.UtcNow,
+                TestContext.Current.CancellationToken),
+            worker.ProcessAsync(tenant, receipt, DateTimeOffset.UtcNow,
+                TestContext.Current.CancellationToken));
+        Assert.All(states, x => Assert.Equal("APPLIED", x));
+        using var db = Open(tenant);
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.CashHandoverAcceptance
+            WHERE TenantId=@Tenant AND OfferId=@Offer
+            """, new { Tenant = tenant, Offer = s.Offer }));
+
+        // New C, revoked current grant (old signed cashier JWT still valid).
+        var p2 = NewPEvent(s.Scene.Trip, s.Offer);
+        var c2 = NewCEvent(s.Scene.Trip, p2, "never-used-" + Id());
+        Guid receipt2 = Assert.IsType<Guid>((await IntakeA3(cashier, c2)).ReceiptId);
+        GrantRole(db, tenant, CashierActor, "cashier", false);
+        Assert.Equal("CASE", await worker.ProcessAsync(
+            tenant, receipt2, DateTimeOffset.UtcNow,
+            TestContext.Current.CancellationToken));
+        using HttpResponseMessage denied = await cashier.PostAsJsonAsync(A3 + "intake",
+            c2 with { EventId = "new-" + Id() });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        Assert.Equal(0, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt2 }));
+        GrantRole(db, tenant, CashierActor, "cashier", true);
+    }
+
+    [Fact]
+    public async Task App02a3_precommit_ledger_fault_rolls_back_and_retry_posts_once()
+    {
+        const string tenant = "tenant-b";
+        using var factory = fixture.CreateFactory();
+        using var setup = SqlScratchFixture.WithTenant(factory.CreateClient(), tenant);
+        using var sales = Client(factory, tenant, SalesActor, "sales");
+        using var cashier = Client(factory, tenant, CashierActor, "cashier");
+        var s = await SetupA3(tenant, setup, sales);
+        App02EventInput p = NewPEvent(s.Scene.Trip, s.Offer);
+        App02EventInput c = NewCEvent(s.Scene.Trip, p, s.Count);
+        await IntakeA3(sales, p);
+        Guid receipt = Assert.IsType<Guid>((await IntakeA3(cashier, c)).ReceiptId);
+        using var scope = factory.Services.CreateScope();
+        var worker = scope.ServiceProvider.GetRequiredService<App02a3ProcessingService>();
+        using var db = Open(tenant);
+        try
+        {
+            db.Execute("""
+                EXEC(N'
+                  CREATE TRIGGER dbo.APP02A3_TestFault ON dbo.LedgerEffect AFTER INSERT AS
+                  BEGIN
+                    IF EXISTS (
+                      SELECT 1 FROM inserted i
+                      JOIN dbo.BusinessSourceLine sl ON sl.TenantId=i.TenantId
+                        AND sl.Id=i.BusinessSourceLineId
+                      JOIN dbo.BusinessSource bs ON bs.TenantId=sl.TenantId
+                        AND bs.Id=sl.BusinessSourceId
+                      WHERE bs.SourceKind=N''CASH_HANDOVER_ACCEPT''
+                        AND bs.SourceNumber LIKE N''APP02:%'')
+                    THROW 51220, ''APP02 synthetic precommit ledger fault'', 1;
+                  END
+                ')
+                """);
+            Assert.Equal("RETRY_SCHEDULED", await worker.ProcessAsync(
+                tenant, receipt, DateTimeOffset.UtcNow,
+                TestContext.Current.CancellationToken));
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+                WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt }));
+            Assert.Equal(0, db.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02OutboxMessage
+                WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt }));
+            Assert.Equal(1, db.ExecuteScalar<int>("""
+                SELECT TechnicalRetryCount FROM dbo.App02EventProgress
+                WHERE TenantId=@Tenant AND ReceiptId=@Receipt
+                """, new { Tenant = tenant, Receipt = receipt }));
+        }
+        finally
+        {
+            db.Execute("DROP TRIGGER IF EXISTS dbo.APP02A3_TestFault");
+        }
+        Assert.Equal("APPLIED", await worker.ProcessAsync(
+            tenant, receipt, DateTimeOffset.UtcNow.AddMinutes(1),
+            TestContext.Current.CancellationToken));
+        Assert.Equal(1, db.ExecuteScalar<int>("""
+            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication
+            WHERE TenantId=@Tenant AND CReceiptId=@Receipt
+            """, new { Tenant = tenant, Receipt = receipt }));
+    }
+}
