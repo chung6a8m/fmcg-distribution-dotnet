@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01E.2 races + E.1/D/C.4/B.3 regressions
+      - name: Two-tenant LocalDB APP-01E.3 rollback matrix + E.2/E.1/D/C.4/B.3 regressions
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -65,7 +65,9 @@ jobs:
           APP01E1_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP01E2_TEST_RUN_ID: app01e2-${{ github.run_id }}-${{ github.run_attempt }}
           APP01E2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 124 -- --report-trx --coverage --coverage-output-format cobertura
+          APP01E3_TEST_RUN_ID: app01e3-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01E3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 209 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -158,6 +160,18 @@ jobs:
             "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
             Set-Content -Path TestResults/APP-01E2-TestRunId.txt -Encoding utf8
           Write-Host "APP-01E.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-01E.3 TestRunId and exact source HEAD
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app01e3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          @("TestRunId=$id", "SourceHeadSha=$sourceHead", "WorkflowSha=$env:GITHUB_SHA",
+            "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
+            Set-Content -Path TestResults/APP-01E3-TestRunId.txt -Encoding utf8
+          Write-Host "APP-01E.3 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -611,6 +625,12 @@ jobs:
             }
           }
           if ($total -ne 368) { throw "Expected 368 physical E.2 SQL cells, got $total" }
+      - name: Fail closed on APP-01E.3 rollback and safe retry SQL matrix
+        env:
+          APP01E3_TEST_RUN_ID: app01e3-${{ github.run_id }}-${{ github.run_attempt }}
+          APP01E3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: pwsh
+        run: ./scripts/Verify-App01E3.ps1
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |

@@ -1,6 +1,6 @@
 # APP-01E.2 — Cross-command two-client races (synthetic only)
 
-**Base:** independently reviewed APP-01E.1 merged in [PR #33](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/33), `main` `cc3f3d38f1ee1341e544824fc35c33d335f421e2`. **Status: IMPLEMENTED / INDEPENDENT_REVIEW_AND_EXACT_HEAD_CI_PENDING.** No production authorization or business policy modification.
+**Base:** independently reviewed APP-01E.1 merged in [PR #33](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/33), `main` `cc3f3d38f1ee1341e544824fc35c33d335f421e2`. **Status: MERGED / E2_RACES_VERIFIED** after independent [PR #34](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/34) review; exact source HEAD `37906d6b7c69fd195cf45c7ca2c755ec2ad3edeb`, [Windows CI #43956610679](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43956610679) SUCCESS 124/124 tests, 16 reports/368 SQL cells, TestRunId `app01e2-43956610679-1`. E.3–E.5 remain separate/unverified. No production authorization or business policy modification.
 
 Read-only canonical contract: [APP-01E.1 recovery specification](app-01e1-recovery-harness.md) and `business/reference-data/expected-results/golden-oracles.json`. Locked `business/` and `business.lock.json` are unchanged. Synthetic unit `SYNTHETIC_UNITLESS`, `invoiceEligible=false`.
 
