@@ -87,7 +87,7 @@ unset init_json
 dc exec -T vault vault operator unseal "$unseal_key" >/dev/null
 unset unseal_key
 admin() { dc exec -T -e "VAULT_TOKEN=$root_token" vault vault "$@"; }
-admin audit enable file file_path=/vault/logs/ci-audit.jsonl >/dev/null
+admin audit enable file file_path=/tmp/ci-audit.jsonl >/dev/null
 admin secrets enable -path=preprod kv-v2 >/dev/null
 admin policy write ci-app02b2-api /vault/policies/api.hcl >/dev/null
 admin policy write ci-app02b2-worker /vault/policies/worker.hcl >/dev/null
@@ -213,7 +213,7 @@ exit_code="$(docker inspect "$worker_id" --format '{{.State.ExitCode}}')"
 echo "CI_PREPROD_CASE_PASS REVOKED_WORKER_STOP exit=nonzero"
 
 # Use independent Vault audit bytes, never upload raw audit lines or token material.
-dc exec -T vault cat /vault/logs/ci-audit.jsonl |
+dc exec -T vault cat /tmp/ci-audit.jsonl |
   python3 scripts/Check-App02B2CiVaultAudit.py > "$ci_root/vault-audit-summary.json"
 
 # Recover API availability with a fresh policy-scoped token, then inject Vault outage.

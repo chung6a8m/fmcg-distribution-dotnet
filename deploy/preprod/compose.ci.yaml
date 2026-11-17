@@ -22,7 +22,7 @@ services:
         aliases: [vault.private.example.invalid]
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
       # /vault/logs uses the image-owned anonymous volume and is deleted
       # with docker compose down -v; no host port or persistent audit store.
     cap_drop: [ALL]
