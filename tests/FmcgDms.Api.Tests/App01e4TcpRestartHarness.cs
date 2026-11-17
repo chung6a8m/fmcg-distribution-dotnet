@@ -77,7 +77,7 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
                 BaseAddress = host.BaseAddress, Timeout = TimeSpan.FromSeconds(3)
             };
             using var ready = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            ready.CancelAfter(TimeSpan.FromSeconds(45));
+            ready.CancelAfter(TimeSpan.FromSeconds(20));
             while (!ready.Token.IsCancellationRequested)
             {
                 if (process.HasExited)
