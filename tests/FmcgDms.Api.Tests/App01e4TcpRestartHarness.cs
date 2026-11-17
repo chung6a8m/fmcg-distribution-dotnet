@@ -24,7 +24,7 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
     }
 
     public static async Task<App01e4ApiProcess> StartAsync(
-        SqlScratchFixture fixture, CancellationToken ct)
+        SqlScratchFixture fixture, CancellationToken ct, bool app02WorkerEnabled = false)
     {
         string? root = AppContext.BaseDirectory;
         while (root is not null && !File.Exists(Path.Combine(root, "FmcgDms.slnx")))
@@ -61,6 +61,7 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         // child process; production HostFiltering configuration is unchanged.
         start.Environment["AllowedHosts"] = "127.0.0.1;localhost";
         start.Environment["SyntheticAuth__Enabled"] = "true";
+        start.Environment["App02Worker__Enabled"] = app02WorkerEnabled ? "true" : "false";
         start.Environment["SyntheticAuth__SigningKey"] = SqlScratchFixture.TestKey;
         start.Environment["SyntheticAuth__Issuer"] = "fmcg-synthetic-app00";
         start.Environment["SyntheticAuth__Audience"] = "fmcg-synthetic-app00";
