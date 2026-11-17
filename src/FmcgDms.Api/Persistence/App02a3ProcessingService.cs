@@ -32,6 +32,8 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
         public string? PrerequisiteEventId { get; set; }
         public string? CountEvidenceRef { get; set; }
         public string Status { get; set; } = "";
+        public string? ReasonCode { get; set; }
+        public DateTime? NextAttemptAtUtc { get; set; }
         public Guid? ActiveCaseId { get; set; }
         public DateTime ReceivedAtUtc { get; set; }
         public byte TechnicalRetryCount { get; set; }
@@ -69,7 +71,8 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             var c = await db.QuerySingleOrDefaultAsync<CRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.TenantId,r.ProducerId,r.EventId,r.EventKind,
                     r.ActorId,r.TripId,r.PrerequisiteProducerId,r.PrerequisiteEventId,
-                    r.CountEvidenceRef,r.ReceivedAtUtc,p.Status,p.ActiveCaseId,p.TechnicalRetryCount
+                    r.CountEvidenceRef,r.ReceivedAtUtc,p.Status,p.ReasonCode,
+                    p.NextAttemptAtUtc,p.ActiveCaseId,p.TechnicalRetryCount
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)
                 JOIN dbo.App02EventProgress p WITH(UPDLOCK,HOLDLOCK)
                     ON p.TenantId=r.TenantId AND p.ReceiptId=r.ReceiptId
@@ -85,6 +88,15 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             {
                 await tx.CommitAsync(ct);
                 return c.Status;
+            }
+            // The direct processor is also due-fenced; a concurrent wake-up or
+            // an aged receipt must never bypass exponential technical backoff.
+            if (c.ReasonCode == "TECHNICAL_RETRY"
+                && (c.NextAttemptAtUtc is null
+                    || c.NextAttemptAtUtc.Value > asOfUtc.UtcDateTime))
+            {
+                await tx.CommitAsync(ct);
+                return "RETRY_SCHEDULED";
             }
 
             // Serialize with APP-01C T3/T4 and APP-01D T5/T6 as well as the
@@ -330,16 +342,20 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
             WHERE r.TenantId=@Tenant
               AND r.EventKind=N'CashierAcceptanceRequested'
               AND p.Status IN(N'RECEIVED',N'PENDING_DEPENDENCY')
-              AND (p.NextAttemptAtUtc IS NULL OR p.NextAttemptAtUtc<=@AsOf
-                   OR r.ReceivedAtUtc<=@Expiry
-                   OR (@Force=1 AND p.ReasonCode=N'MISSING_PREREQUISITE'
-                       AND EXISTS (
-                           SELECT 1 FROM dbo.App02EventReceipt named
-                           WHERE named.TenantId=r.TenantId
-                             AND named.ProducerId=r.PrerequisiteProducerId
-                             AND named.EventId=r.PrerequisiteEventId
-                             AND named.TripId=r.TripId
-                             AND named.EventKind=N'CashHandoverOffered')))
+              AND ((p.ReasonCode=N'TECHNICAL_RETRY'
+                      AND p.NextAttemptAtUtc IS NOT NULL
+                      AND p.NextAttemptAtUtc<=@AsOf)
+                  OR ((p.ReasonCode IS NULL OR p.ReasonCode<>N'TECHNICAL_RETRY')
+                     AND (p.NextAttemptAtUtc IS NULL OR p.NextAttemptAtUtc<=@AsOf
+                       OR r.ReceivedAtUtc<=@Expiry
+                       OR (@Force=1 AND p.ReasonCode=N'MISSING_PREREQUISITE'
+                           AND EXISTS (
+                             SELECT 1 FROM dbo.App02EventReceipt named
+                             WHERE named.TenantId=r.TenantId
+                               AND named.ProducerId=r.PrerequisiteProducerId
+                               AND named.EventId=r.PrerequisiteEventId
+                               AND named.TripId=r.TripId
+                               AND named.EventKind=N'CashHandoverOffered')))))
             ORDER BY r.ReceivedAtUtc,r.ReceiptId
             """, new { Tenant = tenant, Force = triggeredByEvent ? 1 : 0,
                 AsOf = now.UtcDateTime,
