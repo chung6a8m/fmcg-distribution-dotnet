@@ -71,7 +71,13 @@ for attempt in $(seq 1 30); do
     -key-shares=1 -key-threshold=1 -format=json 2>/dev/null)"; then break; fi
   sleep 1
 done
-[[ -n "$init_json" ]] || deny vault_init_unavailable
+if [[ -z "$init_json" ]]; then
+  # Vault has not been initialized, so logs cannot include issued tokens.
+  # Emit only bounded server startup diagnostics, never env/config dumps.
+  dc ps vault
+  dc logs --no-color --tail=25 vault 2>&1 | tail -25
+  deny vault_init_unavailable
+fi
 root_token="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["root_token"])' <<< "$init_json")"
 unseal_key="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["unseal_keys_b64"][0])' <<< "$init_json")"
 unset init_json
