@@ -7,7 +7,7 @@
 `GET /api/synthetic/app01e/commands/outcome?producerId=...&commandId=...`
 
 - Exists **only** when `SyntheticAuth:Enabled` is true in `Development`/`IntegrationTest`. Reads the server-routed, nonce-marked, tenant-bound LocalDB directly through `TenantConnections.OpenSyntheticScratchAsync`. Never accepts tenant/database/actor in request parameters.
-- Requires validated synthetic JWT and a warehouse/sales/cashier role; auditor-only and anonymous requests fail authorization. SQL lookup requires exact **(JWT TenantId, JWT ActorId, ProducerId, CommandId)**. Other actor or tenant receives the same `UNKNOWN/NOT_FOUND` as a missing identity, with no source/outcome data.
+- Requires validated synthetic JWT and a warehouse/sales/cashier role; auditor-only and anonymous requests fail authorization. SQL lookup requires exact **(JWT TenantId, JWT ActorId, ProducerId, CommandId)** with byte-exact actor/command identity comparisons even under case-insensitive SQL collation. Other actor or tenant receives the same `UNKNOWN/NOT_FOUND` as a missing identity, with no source/outcome data.
 - Successful response is HTTP 200 with `BusinessCommandRecovery`:
   - `State=COMPLETED`, `Status=APPLIED|REJECTED`, exact persisted `OutcomeCode`, `ReasonCode` and nullable `SourceId`.
   - `State=UNKNOWN`, all terminal fields null; `ReasonCode=NOT_FOUND` when no visible row, or `NOT_FINAL` if a visible row is incomplete/inconsistent. **Neither UNKNOWN answer means a command was rejected or safely absent**. A concurrent in-flight command may not yet have committed.
