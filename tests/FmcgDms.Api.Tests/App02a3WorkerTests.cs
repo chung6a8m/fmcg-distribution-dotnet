@@ -99,6 +99,15 @@ public sealed partial class App01e2CrossCommandRaceTests
             A3 + "intake", p with { ProducerId = "forged-" + Id() },
             TestContext.Current.CancellationToken))
             Assert.Equal(HttpStatusCode.Forbidden, spoof.StatusCode);
+        // Current-role grant and source/owner identity are binary-sensitive:
+        // a separately signed "E2-SALES" actor must not inherit "e2-sales"
+        // current permissions in a case-insensitive SQL Server database.
+        using var alternateCase = Client(factory, tenant,
+            SalesActor.ToUpperInvariant(), "sales");
+        using (HttpResponseMessage impersonation = await alternateCase.PostAsJsonAsync(
+            A3 + "intake", p with { ProducerId = SalesActor.ToUpperInvariant() },
+            TestContext.Current.CancellationToken))
+            Assert.Equal(HttpStatusCode.Forbidden, impersonation.StatusCode);
         var pAck = await IntakeA3(sales, p);
         var cAck = await IntakeA3(cashier, c);
         Assert.Equal("APPLIED", pAck.Status); // P is nonposting offer event.
