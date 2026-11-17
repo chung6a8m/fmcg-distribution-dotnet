@@ -220,7 +220,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         FullSqlState fullCommitted = await FullSql(tenant);
         Assert.NotEqual(fullBefore.Sha256, fullCommitted.Sha256);
 
-        BusinessCommandRecovery recovered, hiddenActor, hiddenTenant;
+        BusinessCommandRecovery recovered, hiddenActor, hiddenTenant, caseChangedActor, caseChangedProducer;
         Reply replay, conflict;
         FullSqlState fullReplayed, fullConflicted;
         SqlSnapshot replayed, conflicted;
@@ -237,6 +237,25 @@ public sealed partial class App01e2CrossCommandRaceTests
             using var otherActor = second.Client(tenant, "e4-unrelated-actor", req.Role);
             hiddenActor = await Lookup(otherActor, req.Payload);
             Unknown(hiddenActor);
+            using var changedActor = second.Client(tenant, req.Actor.ToUpperInvariant(), req.Role);
+            caseChangedActor = await Lookup(changedActor, req.Payload);
+            Unknown(caseChangedActor);
+            caseChangedProducer = await Lookup(owner,
+                E4Identity(req.Payload) switch
+                {
+                    ReserveAStockCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    GrantBQuotaCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    ConfirmAOrderCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    GrantBCreditCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    LoadManifestCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    PostBSaleDeliveryReceiptCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    PostAPartialDeliveryCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    OfferCashHandoverCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    AcceptCashHandoverCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    UnloadTripRemainderCommand x => x with { ProducerId = E4Producer.ToUpperInvariant() },
+                    _ => throw new InvalidOperationException()
+                });
+            Unknown(caseChangedProducer);
             using var otherTenant = second.Client(
                 tenant == "tenant-a" ? "tenant-b" : "tenant-a", req.Actor, req.Role);
             hiddenTenant = await Lookup(otherTenant, req.Payload);
@@ -268,7 +287,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal(committed.LedgerSha256, replayed.LedgerSha256);
         Assert.Equal(committed.LedgerSha256, conflicted.LedgerSha256);
         WriteE4Evidence(tenant, scenario, req, sql, recovered, hiddenActor,
-            hiddenTenant, transport, firstPid, secondPid,
+            hiddenTenant, caseChangedActor, caseChangedProducer,
+            transport, firstPid, secondPid,
             fullBefore, fullCommitted, fullReplayed, fullConflicted,
             before, committed, replayed, conflicted, replay, conflict);
     }
@@ -276,7 +296,8 @@ public sealed partial class App01e2CrossCommandRaceTests
     private static void WriteE4Evidence(
         string tenant, string scenario, Request req, SqlAudit sql,
         BusinessCommandRecovery recovered, BusinessCommandRecovery hiddenActor,
-        BusinessCommandRecovery hiddenTenant, string transport, int firstPid, int secondPid,
+        BusinessCommandRecovery hiddenTenant, BusinessCommandRecovery caseChangedActor,
+        BusinessCommandRecovery caseChangedProducer, string transport, int firstPid, int secondPid,
         FullSqlState before, FullSqlState committed, FullSqlState replayed,
         FullSqlState conflicted, SqlSnapshot initial, SqlSnapshot posted,
         SqlSnapshot replaySql, SqlSnapshot conflictSql, Reply replay, Reply conflict)
@@ -296,6 +317,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             && recovered.Status == sql.Status
             && recovered.SourceId == sql.SourceId
             && hiddenActor.State == "UNKNOWN" && hiddenTenant.State == "UNKNOWN"
+            && caseChangedActor.State == "UNKNOWN"
+            && caseChangedProducer.State == "UNKNOWN"
             && replay.Outcome.Replayed && conflict.HttpStatus == HttpStatusCode.Conflict;
         var report = new
         {
@@ -314,6 +337,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             FirstProcessId = firstPid, SecondProcessId = secondPid,
             OutcomeLookup = recovered, OtherActorLookup = hiddenActor,
             OtherTenantLookup = hiddenTenant,
+            CaseChangedActorLookup = caseChangedActor,
+            CaseChangedProducerLookup = caseChangedProducer,
             Sql = sql, Initial = initial, Posted = posted,
             ReplaySql = replaySql, ConflictSql = conflictSql,
             Before = before, Committed = committed, Replayed = replayed, Conflicted = conflicted,
