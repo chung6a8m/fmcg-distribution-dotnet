@@ -308,11 +308,15 @@ public sealed partial class App01e2CrossCommandRaceTests
                 A3 + "outcome?producerId=" + Uri.EscapeDataString(s.C.ProducerId) +
                 "&eventId=" + Uri.EscapeDataString(s.C.EventId),
                 TestContext.Current.CancellationToken);
-            Assert.NotEqual(HttpStatusCode.OK, lookup.StatusCode == HttpStatusCode.OK
-                ? (await lookup.Content.ReadFromJsonAsync<App02OutcomeResult>(
-                    TestContext.Current.CancellationToken))?.Status == "UNKNOWN"
-                    ? HttpStatusCode.NotFound : HttpStatusCode.OK
-                : lookup.StatusCode);
+            if (lookup.StatusCode == HttpStatusCode.OK)
+            {
+                var opaque = await lookup.Content.ReadFromJsonAsync<App02OutcomeResult>(
+                    TestContext.Current.CancellationToken);
+                Assert.Equal("UNKNOWN", opaque?.Status);
+                Assert.Null(opaque?.ReceiptId);
+            }
+            else
+                Assert.Equal(HttpStatusCode.Forbidden, lookup.StatusCode);
             await A4Capture(s, "revoked");
         });
 
