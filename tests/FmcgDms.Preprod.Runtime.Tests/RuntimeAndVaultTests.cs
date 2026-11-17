@@ -29,6 +29,8 @@ public sealed class RuntimeAndVaultTests
     [InlineData("Runtime:TenantRoutingEnabled", "true", "TENANT_ADMISSION_NOT_IMPLEMENTED")]
     [InlineData("Vault:Address", "http://vault.private:8200", "VAULT_TLS_REQUIRED")]
     [InlineData("Vault:Address", "https://localhost:8200", "VAULT_TLS_REQUIRED")]
+    [InlineData("Vault:Address", "https://8.8.8.8:8200", "VAULT_TLS_REQUIRED")]
+    [InlineData("Vault:Address", "https://[2001:4860:4860::8888]:8200", "VAULT_TLS_REQUIRED")]
     [InlineData("Vault:ProbePath", "preprod/data/runtime/worker", "VAULT_SCOPE_INVALID")]
     [InlineData("Runtime:TrustedProxyIp", "0.0.0.0", "PROXY_TRUST_INVALID")]
     [InlineData("Runtime:TrustedProxyIp", "8.8.8.8", "PROXY_TRUST_INVALID")]

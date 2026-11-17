@@ -50,7 +50,10 @@ public static class PreprodStartupGuard
             || uri.Scheme != Uri.UriSchemeHttps || uri.UserInfo.Length != 0
             || uri.Query.Length != 0 || uri.Fragment.Length != 0
             || uri.AbsolutePath != "/" || uri.Host == "localhost"
-            || IPAddress.TryParse(uri.Host, out var hostIp) && IPAddress.IsLoopback(hostIp!))
+            // Numeric endpoints must be private IPv4; private DNS requires
+            // independent host/egress verification in real PREPROD.
+            || IPAddress.TryParse(uri.Host, out var hostIp)
+                && !IsPrivateIpv4(hostIp))
             Deny("VAULT_TLS_REQUIRED");
 
         string expected = role == "api" ? "preprod/data/runtime/api" : "preprod/data/runtime/worker";
