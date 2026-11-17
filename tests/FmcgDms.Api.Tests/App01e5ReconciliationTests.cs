@@ -49,6 +49,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         public decimal OpeningCost { get; set; }
         public decimal IssuedQty { get; set; }
         public decimal IssuedCost { get; set; }
+        public decimal AStockIssuedQty { get; set; }
+        public decimal BStockIssuedQty { get; set; }
         public decimal SaleQty { get; set; }
         public decimal ArAOutstanding { get; set; }
         public decimal ArBOutstanding { get; set; }
@@ -153,6 +155,12 @@ public sealed partial class App01e2CrossCommandRaceTests
               (SELECT COALESCE(SUM(i.CostAmount),0) FROM dbo.DeliveryStockIssue i
                 JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
                 WHERE d.TenantId=@Tenant AND d.TripId=@Trip) IssuedCost,
+              (SELECT COALESCE(SUM(i.BaseQuantity),0) FROM dbo.DeliveryStockIssue i
+                JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND d.RightKind='A') AStockIssuedQty,
+              (SELECT COALESCE(SUM(i.BaseQuantity),0) FROM dbo.DeliveryStockIssue i
+                JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND d.RightKind='B') BStockIssuedQty,
               (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery
                 WHERE TenantId=@Tenant AND TripId=@Trip) SaleQty,
               (SELECT COALESCE(SUM(r.OutstandingAmount),0) FROM dbo.ReceivableOpenItem r
@@ -166,8 +174,16 @@ public sealed partial class App01e2CrossCommandRaceTests
               (SELECT COALESCE(SUM(a.AppliedAmount),0) FROM dbo.ReceiptAllocation a
                 JOIN dbo.CashReceipt r ON r.TenantId=a.TenantId AND r.Id=a.CashReceiptId
                 WHERE r.TenantId=@Tenant AND r.TripId=@Trip) CashAllocated,
-              (SELECT COALESCE(SUM(AcceptedAmount),0) FROM dbo.CashHandoverAcceptance
-                WHERE TenantId=@Tenant AND TripId=@Trip) HandoverAccepted,
+              (SELECT COALESCE(SUM(a.AcceptedAmount),0)
+                FROM dbo.CashHandoverAcceptance a
+                JOIN dbo.CashHandoverOffer o ON o.TenantId=a.TenantId
+                  AND o.Id=a.OfferId AND o.TripId=a.TripId
+                  AND o.OfferedAmount=a.AcceptedAmount AND o.OfferedBy<>a.AcceptedBy
+                JOIN dbo.CashierCountEvidence w ON w.TenantId=a.TenantId
+                  AND w.EvidenceRef=a.EvidenceRef AND w.TripId=a.TripId
+                  AND w.CountedAmount=a.AcceptedAmount AND w.CountedBy=a.AcceptedBy
+                  AND w.VerificationStatus=N'VERIFIED'
+                WHERE a.TenantId=@Tenant AND a.TripId=@Trip) HandoverAccepted,
               (SELECT COALESCE(SUM(GrantedBaseQuantity),0) FROM dbo.StockRight
                 WHERE TenantId=@Tenant AND TripId=@Trip AND RightKind='A') GrantedA,
               (SELECT COALESCE(SUM(GrantedBaseQuantity),0) FROM dbo.StockRight
@@ -275,10 +291,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Eq("fund=verified-acceptance", f.HandoverAccepted, n.Fund);
         Eq("credit-grant=source-consumption", f.SourceCreditConsumed, f.CreditConsumed);
         Eq("B-ar=consumed-credit", f.CreditConsumed, n.ArB);
-        Eq("A-consumed=issued-A", f.ConsumedA,
-            row < 4 ? 0m : 25m);
-        Eq("B-consumed=issued-B", f.ConsumedB,
-            row < 3 ? 0m : 20m);
+        Eq("A-consumed=issued-A", f.AStockIssuedQty, f.ConsumedA);
+        Eq("B-consumed=issued-B", f.BStockIssuedQty, f.ConsumedB);
         Eq("pool=granted-released", f.GrantedA + f.GrantedB - f.ReleasedB,
             n.PoolAllocated);
         Eq("A-held=granted-consumed", f.GrantedA - f.ConsumedA, f.AHeld);
