@@ -183,7 +183,7 @@ public static class IdentityHttp
             && context.Request.IsHttps;
     }
 
-    private static void SetCookie(HttpContext context, string token) =>
+    internal static void SetCookie(HttpContext context, string token) =>
         context.Response.Cookies.Append(CookieName, token, new CookieOptions
         {
             HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict,
