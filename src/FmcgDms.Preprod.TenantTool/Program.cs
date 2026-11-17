@@ -16,6 +16,9 @@ try
         throw new TenantLifecycleDeniedException("TENANT_OPERATOR_COMMAND_INVALID");
 
     var address=Environment.GetEnvironmentVariable("APP02B4_VAULT_ADDR");
+    // Fail closed before opening the privileged Vault token file or making HTTP.
+    TenantOperatorAdmission.ValidateVaultAnchor(
+        Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address);
     var vault=new VaultTenantOperatorSecrets(address ?? "");
     var secrets=await vault.ReadOperatorAsync(CancellationToken.None);
     TenantOperatorAdmission.Validate(Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),

@@ -10,6 +10,29 @@ namespace FmcgDms.Preprod.Tenancy;
 /// </summary>
 public static class TenantOperatorAdmission
 {
+
+    /// <summary>
+    /// Called BEFORE Vault token-file access. The endpoint must match a
+    /// read-only independently approved operator trust anchor; an environment
+    /// variable cannot redirect the Vault token to an attacker-owned host.
+    /// </summary>
+    public static void ValidateVaultAnchor(string? environment, string? vaultAddress,
+        string approvedEndpointFile="/run/secrets/b4_approved_vault_endpoint")
+    {
+        if(environment!="Preprod" || !Uri.TryCreate(vaultAddress,UriKind.Absolute,out var uri)
+            || uri.Scheme!="https" || uri.UserInfo.Length>0 || uri.Query.Length>0
+            || uri.Fragment.Length>0 || uri.AbsolutePath!="/"
+            || uri.Host.Equals("localhost",StringComparison.OrdinalIgnoreCase)
+            || IPAddress.TryParse(uri.Host,out var address) && !IsPrivateIpv4(address))
+            throw new TenantLifecycleDeniedException("TENANT_OPERATOR_VAULT_ENDPOINT_DENIED");
+        string expected;
+        try {expected=File.ReadAllText(approvedEndpointFile).Trim();}
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
+        {throw new TenantLifecycleDeniedException("TENANT_OPERATOR_VAULT_PIN_MISSING");}
+        if(!string.Equals(uri.AbsoluteUri,expected,StringComparison.Ordinal))
+            throw new TenantLifecycleDeniedException("TENANT_OPERATOR_VAULT_PIN_MISMATCH");
+    }
+
     public static void Validate(string? environment, string? vaultAddress,
         string registryConnection, string? masterConnection=null)
     {

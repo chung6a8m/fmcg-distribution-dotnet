@@ -79,4 +79,27 @@ public sealed class TenantSafetyTests
             await new TenantProbeVerifier(registry)
                 .VerifyAsync(Guid.NewGuid(),"",TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public void Vault_endpoint_is_pinned_before_any_operator_token_is_read()
+    {
+        var file=Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(file,"https://vault.internal.example/");
+            TenantOperatorAdmission.ValidateVaultAnchor(
+                "Preprod","https://vault.internal.example",file);
+            Assert.Throws<TenantLifecycleDeniedException>(()=>
+                TenantOperatorAdmission.ValidateVaultAnchor(
+                    "Preprod","https://attacker.example",file));
+            Assert.Throws<TenantLifecycleDeniedException>(()=>
+                TenantOperatorAdmission.ValidateVaultAnchor(
+                    "Production","https://vault.internal.example",file));
+            Assert.Throws<TenantLifecycleDeniedException>(()=>
+                TenantOperatorAdmission.ValidateVaultAnchor(
+                    "Preprod","http://vault.internal.example",file));
+        }
+        finally { File.Delete(file); }
+    }
+
 }
