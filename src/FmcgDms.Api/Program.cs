@@ -15,6 +15,7 @@ builder.Services.AddScoped<App01c2BPostingService>();
 builder.Services.AddScoped<App01c3APostingService>();
 builder.Services.AddScoped<App01dCashierUnloadService>();
 builder.Services.AddScoped<App01a3AuditService>();
+builder.Services.AddScoped<App01e4OutcomeLookupService>();
 
 var app = builder.Build();
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
@@ -139,6 +140,21 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App01dCashierUnloadService service, CancellationToken ct) =>
         ToCommandHttp(await service.UnloadTripRemainderAsync(user, input, ct)))
         .RequireAuthorization("SyntheticWarehouse");
+
+    // APP-01E.4: read-only, owner-scoped durable outcome recovery.
+    // UNKNOWN is not a rejected command; retry only with the original identity.
+    app.MapGet("/api/synthetic/app01e/commands/outcome", async (
+        HttpContext context, ClaimsPrincipal user,
+        App01e4OutcomeLookupService recovery, CancellationToken ct) =>
+    {
+        var producers = context.Request.Query["producerId"];
+        var commands = context.Request.Query["commandId"];
+        if (producers.Count != 1 || commands.Count != 1
+            || !App01e4OutcomeLookupService.ValidIdentity(producers[0])
+            || !App01e4OutcomeLookupService.ValidIdentity(commands[0]))
+            return Results.BadRequest(new { error = "COMMAND_IDENTITY_INVALID" });
+        return Results.Ok(await recovery.LookupAsync(user, producers[0]!, commands[0]!, ct));
+    }).RequireAuthorization("SyntheticCommandRecovery");
 
     // Explicit UTC cutoff; server-resolved tenant only. Reads never select a
     // target tenant/database by query string, header or body.
