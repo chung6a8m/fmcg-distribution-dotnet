@@ -153,6 +153,13 @@ sudo chgrp "$caddy_gid" "$tls/edge.key"
 chmod 0640 "$tls/edge.key"
 # Compose base images were previously built; overlay mounts ephemeral trust root.
 dc up -d --no-build api worker edge >/dev/null
+# F-02: inspect ACTUAL running-container host binds, not only Compose YAML.
+# Never upload raw docker inspect JSON: it may include env/mount metadata.
+docker inspect "$(dc ps -q vault)" "$(dc ps -q api)" \
+  "$(dc ps -q worker)" "$(dc ps -q edge)" |
+  python3 scripts/Check-App02B2CiPorts.py > "$ci_root/runtime-ports-summary.json"
+echo "CI_PREPROD_CASE_PASS RUNTIME_HOST_PORTS_LOOPBACK_ONLY; 2/2 mutations rejected"
+
 https_status() {
   local path="$1"
   curl --noproxy "*" --silent --show-error --max-time 8 \
@@ -245,6 +252,7 @@ dc stop vault >/dev/null
 expect "$(https_status /health/ready)" 503 VAULT_OUTAGE_HEALTH_DENY
 
 export B2_AUDIT_SUMMARY="$ci_root/vault-audit-summary.json"
+export B2_PORTS_SUMMARY="$ci_root/runtime-ports-summary.json"
 export B2_REPORT="$repo/TestResults/APP-02B2-CI-EPHEMERAL-PREPROD.json"
 export B2_API_IMAGE="$(docker image inspect fmcg-preprod-b2-api --format '{{.Id}}')"
 export B2_WORKER_IMAGE="$(docker image inspect fmcg-preprod-b2-worker --format '{{.Id}}')"
@@ -267,6 +275,7 @@ report={
  "RUNTIME01_CI":"PASS_REAL_CONTAINER_TLS_STARTUP_PORTS_AND_FAIL_CLOSED",
  "RUNTIME02_CI":"PASS_REAL_VAULT_ACL_403_AUDIT_ROTATION_REVOKE_AND_PROXY",
  "DenialAudit":e,
+ "RuntimeHostPorts":json.loads(pathlib.Path(os.environ["B2_PORTS_SUMMARY"]).read_text()),
  "RealPREPROD_R01_R02":"NOT_VERIFIED",
  "ExternalObserver":"NOT_RUN",
  "IndependentSecurityReviewer":"NOT_ASSIGNED",
