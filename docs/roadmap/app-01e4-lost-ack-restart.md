@@ -1,6 +1,6 @@
 # APP-01E.4 — Lost ACK, Outcome Lookup & Process Restart Recovery
 
-**State: IMPLEMENTED / INDEPENDENT REVIEW AND EXACT-HEAD WINDOWS CI PENDING.** Synthetic/nonproduction only. This is an isolated increment after [E.3 merged PR #35](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/35), not approval for production offline writes, real cash/invoices, full AC-11/C→P, EV/P0 or go-live. No migration, business rule change, production fault switch or locked Business Baseline modification.
+**State: MERGED / E4_DURABLE_RECOVERY_VERIFIED.** Synthetic/nonproduction only. This is an isolated increment after [E.3 merged PR #35](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/35), not approval for production offline writes, real cash/invoices, full AC-11/C→P, EV/P0 or go-live. No migration, business rule change, production fault switch or locked Business Baseline modification.
 
 ## Durable protocol and HTTP surface
 
@@ -38,4 +38,10 @@
 - New cases: **35** (24 TestServer + 10 real-process + 1 negative), raising Windows MTP/`dotnet test` floor from **209 to 244**. No failed/skipped tests. Preserve E.3 84 fault reports/5,796 cells, E.2 16 SQL races/368 cells, E.1 six harness reports/60 cells, B.3/C.4/D 39/65/91 per-tenant oracle, business lock, xUnit v3/MTP/TRX/Cobertura, frontend/PWA and Playwright 100%-only Owner exception.
 - Mark `E4_DURABLE_RECOVERY_VERIFIED` **only after** independent review, exact final source-HEAD Windows CI evidence (record both PR source HEAD and GitHub workflow's synthetic merge SHA), then guarded merge. Any source change invalidates prior CI/review claims.
 
-**Next:** APP-01E.5 independent cross-transaction reconciliation and closeout. No C→P, production B, real cashier/payment, legal invoices, offline writes or EV/P0 authorization is implied.
+## Independent review, final-HEAD CI and merge closeout (2026-11-17)
+
+- [PR #36](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/36): independent review on the final source HEAD; P1 durable T2 B31 terminal-rejection finding fixed in commit `8d1207b`, reviewed final HEAD `09f40d259b9c65a2e9789382fc888c3c87bc723a`. No remaining review blockers.
+- [Windows Actions #43996586107](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/43996586107), attempt 1, source HEAD `09f40d259b9c65a2e9789382fc888c3c87bc723a`: **244/244 PASS, 0 skipped/failed**, 24 TestServer cases, **10/10 real TCP RST/distinct OS process restart reports and 460/460 SQL cells**. E.3 84/84 and 5,796/5,796, E.2 16/368, E.1 six/60 and B.3/C.4/D oracle retained. Business lock, frontend/PWA and 100%-scale Playwright PASS.
+- Guarded squash merge to `main` commit [`4b32fac3aec5cd1aa99de057484c354e32cd267e`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/4b32fac3aec5cd1aa99de057484c354e32cd267e). The PR source HEAD and Actions synthetic merge SHA are different provenance; do not substitute the latter for the former.
+
+APP-01E.5 is now [the next independently gated reconciliation increment](app-01e5-reconciliation-closeout.md). E.4 closeout does not grant full AC-11/C→P, real payments, production B, invoices, offline business writes, EV/P0 or go-live authorization.
