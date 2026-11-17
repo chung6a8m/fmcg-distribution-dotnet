@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
 namespace FmcgDms.Preprod.Identity;
@@ -19,7 +20,7 @@ public sealed record IssuedCredentials(string AccessToken, string RefreshToken,
 /// </summary>
 public sealed class IdentitySessionService(
     PreprodIdentityDb db, UserManager<PreprodUser> users, IdentityOptions keys,
-    TimeProvider clock)
+    TimeProvider clock, ILogger<IdentitySessionService> logger)
 {
     public static string HashRefresh(string raw) =>
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(raw)));
@@ -33,7 +34,7 @@ public sealed class IdentitySessionService(
         if (username.Length is < 1 or > 256 || password.Length is < 1 or > 4096)
             return null;
         var user = await users.FindByNameAsync(username);
-        if (user is null || user.Disabled || await users.IsLockedOutAsync(user))
+        if (user is null || user.Disabled || user.TwoFactorEnabled || await users.IsLockedOutAsync(user))
             return null;
         if (!await users.CheckPasswordAsync(user, password))
         {
@@ -89,11 +90,13 @@ public sealed class IdentitySessionService(
             {
                 await RevokeSessionRowAsync(session.Id, now, ct);
                 await tx.CommitAsync(ct);
+                // B.8 will supply the immutable audit sink. Never emit the raw grant or digest.
+                logger.LogWarning("IDENTITY_REFRESH_REUSE_REVOKED reason=CONSUMED_GRANT");
             }
             return null;
         }
         var user = await users.FindByIdAsync(session.UserId.ToString());
-        if (user is null || user.Disabled || await users.IsLockedOutAsync(user)
+        if (user is null || user.Disabled || user.TwoFactorEnabled || await users.IsLockedOutAsync(user)
             || !string.Equals(await users.GetSecurityStampAsync(user), session.SecurityStamp,
                 StringComparison.Ordinal))
         {
@@ -128,12 +131,12 @@ public sealed class IdentitySessionService(
             .Select(x => new
             {
                 x.UserId, x.RevokedUtc, x.Epoch, SessionStamp = x.SecurityStamp,
-                x.User.Disabled, UserStamp = x.User.SecurityStamp,
+                x.User.Disabled, x.User.TwoFactorEnabled, UserStamp = x.User.SecurityStamp,
                 x.User.LockoutEnd, x.User.LockoutEnabled
             })
             .SingleOrDefaultAsync(ct);
         return state is not null && state.RevokedUtc is null && state.UserId == actor
-            && state.Epoch == epoch && !state.Disabled
+            && state.Epoch == epoch && !state.Disabled && !state.TwoFactorEnabled
             && string.Equals(state.SessionStamp, state.UserStamp, StringComparison.Ordinal)
             && (!state.LockoutEnabled || state.LockoutEnd is null || state.LockoutEnd <= clock.GetUtcNow());
     }
