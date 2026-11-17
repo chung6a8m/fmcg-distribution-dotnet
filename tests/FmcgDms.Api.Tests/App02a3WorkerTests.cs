@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Dapper;
 using FmcgDms.Api.Persistence;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace FmcgDms.Api.Tests;
