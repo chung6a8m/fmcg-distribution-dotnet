@@ -46,7 +46,7 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
-      - name: Two-tenant LocalDB APP-01E.5 independent reconciliation + E.4/E.3/E.2/E.1/D/C.4/B.3 regressions
+      - name: Two-tenant LocalDB A11-01..12 independent SQL oracle + APP-01E.5/AC-03 regressions
         env:
           APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
           APP01B3_TEST_RUN_ID: app01b3-${{ github.run_id }}-${{ github.run_attempt }}
@@ -75,7 +75,9 @@ jobs:
           APP02A2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP02A3_TEST_RUN_ID: app02a3-${{ github.run_id }}-${{ github.run_attempt }}
           APP02A3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 272 -- --report-trx --coverage --coverage-output-format cobertura
+          APP02A4_TEST_RUN_ID: app02a4-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02A4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 296 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -240,10 +242,23 @@ jobs:
             "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "TotalTests=$total", "PassedTests=$passed", "FailedTests=$failed",
             "NotExecutedTests=$notExecuted", "AcceptanceScope=APP-02A.3_SYNTHETIC_NONPRODUCTION",
-            "A11IndependentOracle=NOT_RUN", "ActualEV08=NOT_VERIFIED",
+            "A11IndependentOracle=SEPARATE_APP02A4_GATE", "ActualEV08=NOT_VERIFIED",
             "ProductionP0=NOT_VERIFIED") |
             Set-Content -Path TestResults/APP-02A3-TestRunId.txt -Encoding utf8
           Write-Host "APP-02A.3 TestRunId=$id; SourceHead=$sourceHead; total=$total passed=$passed failed=$failed skipped=$notExecuted"
+      - name: Record APP-02A.4 source, workflow and independent verification scope
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $source = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($source)) { $source = $env:GITHUB_SHA }
+          $id = "app02a4-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          @("TestRunId=$id", "SourceHeadSha=$source", "WorkflowSha=$env:GITHUB_SHA",
+            "AcceptanceScope=APP-02A.4_SYNTHETIC_NONPRODUCTION",
+            "OracleGroups=12x2", "ExpectedCheckpoints=56", "ExpectedSqlCells=1344",
+            "ActualEV08=NOT_VERIFIED", "ProductionP0=NOT_VERIFIED",
+            "OwnerAuthorizationAPP02B_E=NOT_AUTHORIZED") |
+            Set-Content -Path TestResults/APP-02A4-TestRunId.txt -Encoding utf8
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
@@ -714,6 +729,11 @@ jobs:
           APP01E5_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: pwsh
         run: ./scripts/Verify-App01E5.ps1
+      - name: Fail closed on APP-02A.4 12x2 independent physical SQL oracle, source and outbox reconciliation
+        env:
+          APP02A4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: pwsh
+        run: ./scripts/Verify-App02A4.ps1
       - name: Verify MTP test evidence exists
         shell: pwsh
         run: |
