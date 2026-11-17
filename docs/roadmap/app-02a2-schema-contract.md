@@ -1,0 +1,40 @@
+# APP-02A.2 — Durable event Inbox/Outbox schema and canonical-v1 contract
+
+**Contract candidate (17 November 2026): SYNTHETIC_NONPRODUCTION / A.2 only.** Parent: [APP-02A.1](app-02a1-scope-contract.md); [eight Owner decisions](../decisions/owner-app02-2026-11-17.md); [APP-02 roadmap](app-02.md). Independent design review, fresh/replay SQL verification, exact PR HEAD CI are required before declaring A.2 verified. This is NOT AC11_SYNTHETIC_VERIFIED; APP-02B–E, EV-08 actual and all production P0/pilot gates remain out of scope.
+
+## 1. Canonical event-v1 bytes (freeze for A.2 review)
+
+Canonical serialization is a **single compact RFC 8259 JSON object encoded as UTF-8 without BOM**, with property order exactly: `v`, `tenantId`, `producerId`, `eventId`, `kind`, `actorId`, `tripId`, `offerId`, `offeredAmount`, `prerequisiteProducerId`, `prerequisiteEventId`, `countEvidenceRef`, `occurredAtUtc`. Names are case-sensitive; there are no spaces or trailing newline. `v` is JSON integer `1`; all other non-null values are JSON strings; absent optional values are literal JSON `null`, never missing fields. SHA-256 is computed over those exact UTF-8 bytes; persist `PayloadVersion=1` and binary(32) digest, **outside** the event identity key.
+
+Synthetic-v1 identifiers are 1–128 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`, with no trim or case folding. Tenant is the server-resolved `tenant-a` or `tenant-b` (not an untrusted payload route). Trip and Offer GUIDs are lowercase 32-digit N format. Offered amount is positive decimal(19,4), represented as an invariant **JSON string** without trailing zeros (`250.5000` → `"250.5"`; no exponent/float). `occurredAtUtc` is UTC with exactly 7 fractional digits and trailing Z; offset-bearing times are converted to UTC before serializing. Strings use System.Text.Json's `UnsafeRelaxedJsonEscaping` RFC 8259 escaping; emit no arbitrary JSON extension fields. Authentication binds `ActorId`; on apply/resume A.3 must recheck current rights. Event-v1 permits only the two exact kind strings below.
+
+P = `CashHandoverOffered`: `offerId` and `offeredAmount` required, prerequisite IDs/count evidence null. These correspond to **committed APP-01D CashHandoverOffer.Id = BusinessSource.Id**, which references the existing APP-01 BusinessCommand; P is nonposting. C = `CashierAcceptanceRequested`: `offerId` and `offeredAmount` null, `prerequisiteProducerId` and `prerequisiteEventId` stable and non-null, `countEvidenceRef` non-null. C-before-P is allowed as an inbox receipt, **without a phantom P or foreign tenant lookup**. Its later resolution must bind the actual P identity, trip, APP-01D offer and the independently verified count evidence, not merely a matching trip/amount.
+
+Two **independently calculated Python hashlib.sha256** golden fixtures; the .NET serializer must exactly match these bytes/hashes (a changed field order or timestamp precision is a version change):
+
+**P fixture (376 UTF-8 bytes, SHA-256 `4cbe2696d5997c838e93f419c534bf0c30ee06d975ffc311ded074c6c6c70ad2`):**
+~~~json
+{"v":1,"tenantId":"tenant-a","producerId":"sales-terminal-01","eventId":"evt-p-0001","kind":"CashHandoverOffered","actorId":"sales-01","tripId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","offerId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","offeredAmount":"250.5","prerequisiteProducerId":null,"prerequisiteEventId":null,"countEvidenceRef":null,"occurredAtUtc":"2026-11-17T03:00:00.0000000Z"}
+~~~
+
+**C fixture (385 UTF-8 bytes, SHA-256 `b4d9e353c632f72eb464ab6c2f606b8c1f93fd9821246cb3de74883661d9b9ce`):**
+~~~json
+{"v":1,"tenantId":"tenant-a","producerId":"cashier-terminal-01","eventId":"evt-c-0001","kind":"CashierAcceptanceRequested","actorId":"cashier-01","tripId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","offerId":null,"offeredAmount":null,"prerequisiteProducerId":"sales-terminal-01","prerequisiteEventId":"evt-p-0001","countEvidenceRef":"COUNT-0001","occurredAtUtc":"2026-11-17T03:00:01.0000000Z"}
+~~~
+
+At A.2 the SQL `HASHBYTES('SHA2_256',CanonicalBytes)` check verifies an immutable stored byte/hash pair but does **not** independently parse/validate the envelope's field correspondence; the future authenticated A.3 intake service must regenerate canonical bytes from validated, server-derived fields before first durable insert. No API endpoint/ACK is implemented in A.2.
+
+## 2. Schema constraints and lineage
+
+- `App02EventReceipt`: immutable receipt, distinct `ReceiptId`, stable unique `(TenantId,ProducerId,EventId)` independent of hash/kind, version/hash/bytes, actor, trip and P/C-specific shape. Same key/new hash must eventually be a 409 response by A.3, not an upsert; the database must reject a second row. P has a composite foreign key to a **real same-tenant APP-01D OFFER source**. C may be received before P.
+- `App02EventProgress`: mutable bounded state/retry record separate from immutable envelope; `RECEIVED`, `PENDING_DEPENDENCY`, `APPLIED`, `REJECTED`, `CASE`; never a persisted `UNKNOWN`. No direct terminal reopening, no C APPLIED without linked application+outbox, no CASE auto-resume without an approved maker/checker disposition. Timing/role decisions belong to A.3.
+- `App02ResolvedDependency`: append-only C→named P edge using composite tenant/receipt/P producer/P event/FK plus trip/APP-01D offer correlation. No FK on unresolved C: this is essential to C-before-P. Multiple pending C references may exist, but only **one successful application per P/offer**.
+- `App02AcceptanceApplication`: append-only link to the **existing** APP-01D `CashHandoverAcceptance` (itself the BusinessSource), exact C actor/count reference and P offer, unique C, P and Offer. APP-01D already enforces one acceptance per OFFER, one per count witness, immutable source and no OFFER ledger. A.3 must create APP-01D source, custody/fund ledger, this link, outbox and APPLIED marker in **one SQL transaction**.
+- `App02OutboxMessage` + `App02OutboxDelivery` + `App02SyntheticConsumerInbox`: immutable, source-linked outbound content with stable MessageId and SHA-256/version; mutable delivery lease/retry/ACK state separately; append-only synthetic consumer receipt with composite FK on MessageId, version and hash. ACK requires existing committed inbox witness. SQL state alone is **not** an external provider/invoice/accounting outcome.
+- `App02ExceptionCase`, `App02CaseDisposition`, `App02CorrectionLink`: durable immutable case/approval/correction lineage; maker/checker distinct, checker cannot be the initiating C actor. Resume only from CASE after approved disposition; pending dependency scan = 15 minutes, six **technical** attempts, missing P at 24 hours → owned CASE; late P cannot auto-apply. A.3 owns clock, queue, rights, source and count revalidation. No TTL/delete/production retention default.
+
+All new tenant-owned rows use composite same-tenant FKs and/or the immutable `AppTenantBinding`, with separate physical nonce-protected LocalDBs. No new ledger, duplicated cash count, production connector or cross-tenant routing.
+
+## 3. Migration and independent acceptance gates
+
+A.2 only: fresh migration and repeat `ScratchMigrator.Migrate` on both tenant-a and tenant-b physical DBs; VersionInfo exactly once; verify schema names, unique keys, SHA/version, P→offer FK, C-before-P receipt, C→correct-P resolution, immutable source/history, illegal transitions, maker/checker, consumer hash/ACK and peer-tenant negative writes. Observe zero APP-02 business application/ledger/outbox effects when only receipts are staged. SQL fault/restart/outbound delivery and all A11-01..12 full scenarios are **A.3/A.4**, not claimed by these schema tests. Preserve APP-01E.5/AC-03 and frontend/PWA/Playwright CI, immutable `business/` + `business.lock.json`, `SYNTHETIC_UNITLESS`, `invoiceEligible=false`, no offline business writes or B_NO_CHANNEL enablement. Record exact final source HEAD, CI URL, review and findings before merge.
