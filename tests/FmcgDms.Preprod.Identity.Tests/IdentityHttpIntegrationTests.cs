@@ -150,7 +150,7 @@ public sealed class IdentityHttpIntegrationTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        public required TestServer Server { get; init; }
+        public required WebApplication Application { get; init; }
         public required HttpClient Client { get; init; }
         public required SqliteConnection Connection { get; init; }
         public required Keys Keys { get; init; }
@@ -163,28 +163,24 @@ public sealed class IdentityHttpIntegrationTests
                 "Server=control.private;Database=ci_identity;Encrypt=True;TrustServerCertificate=False",
                 RandomNumberGenerator.GetBytes(64), "ci-key-v1",
                 Origin, "fmcg-preprod-identity");
-            var server = new TestServer(new WebHostBuilder()
-                .ConfigureServices(services =>
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseTestServer();
+            builder.Services.AddPreprodIdentity(keys, opt => opt.UseSqlite(connection));
+            builder.Services.AddRateLimiter(limiter =>
+                limiter.AddFixedWindowLimiter("preprod-auth", policy =>
                 {
-                    services.AddRouting();
-                    services.AddPreprodIdentity(keys, opt => opt.UseSqlite(connection));
-                    services.AddRateLimiter(limiter =>
-                        limiter.AddFixedWindowLimiter("preprod-auth", policy =>
-                        {
-                            policy.PermitLimit = 1000;
-                            policy.Window = TimeSpan.FromMinutes(1);
-                            policy.QueueLimit = 0;
-                        }));
-                })
-                .Configure(app =>
-                {
-                    app.UseRouting();
-                    app.UseRateLimiter();
-                    app.UseAuthentication();
-                    app.UseAuthorization();
-                    app.UseEndpoints(endpoints => endpoints.MapIdentityOnly());
+                    policy.PermitLimit = 1000;
+                    policy.Window = TimeSpan.FromMinutes(1);
+                    policy.QueueLimit = 0;
                 }));
-            using (var scope = server.Services.CreateScope())
+            var app = builder.Build();
+            app.UseRouting();
+            app.UseRateLimiter();
+            app.UseAuthentication();
+            app.UseAuthorization();
+            app.MapIdentityOnly();
+            await app.StartAsync(TestContext.Current.CancellationToken);
+            using (var scope = app.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<PreprodIdentityDb>();
                 await db.Database.EnsureCreatedAsync(TestContext.Current.CancellationToken);
@@ -196,9 +192,9 @@ public sealed class IdentityHttpIntegrationTests
                 };
                 Assert.True((await users.CreateAsync(user, Password)).Succeeded);
             }
-            var client = server.CreateClient();
+            var client = app.GetTestClient();
             client.BaseAddress = new Uri(Origin);
-            return new Fixture { Server = server, Client = client, Connection = connection, Keys = keys };
+            return new Fixture { Application = app, Client = client, Connection = connection, Keys = keys };
         }
 
         public async Task<HttpResponseMessage> Post(
@@ -221,7 +217,7 @@ public sealed class IdentityHttpIntegrationTests
         public async ValueTask DisposeAsync()
         {
             Client.Dispose();
-            Server.Dispose();
+            await Application.DisposeAsync();
             await Connection.DisposeAsync();
         }
     }
