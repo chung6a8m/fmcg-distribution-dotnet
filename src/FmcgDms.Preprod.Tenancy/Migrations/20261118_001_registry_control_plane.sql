@@ -233,7 +233,7 @@ BEGIN
     UPDATE dbo.PreprodTenantRegistry SET State=''FAILED_RETRYABLE'', LeaseToken=NULL,
         LeaseUntilUtc=NULL,UpdatedUtc=SYSUTCDATETIME()
     WHERE TenantId=@TenantId AND State=''PROVISIONING'' AND LeaseToken=@LeaseToken
-        AND ProvisionedBy=@actor;
+        AND ProvisionedBy=@actor AND LeaseUntilUtc>SYSUTCDATETIME();
     IF @@ROWCOUNT<>1 THROW 51409, ''TENANT_FAILURE_FENCED'', 1;
     INSERT dbo.PreprodTenantLifecycleEvents(TenantId,ActionCode,FromState,ToState,ActorLogin,
         OperationId,SecurityEpoch,BindingId,EvidenceRef)

@@ -112,6 +112,11 @@ public sealed class TenantRegistrySqlTests
         await f.ExecAsync(f.Control,
             "UPDATE dbo.PreprodTenantRegistry SET LeaseUntilUtc=DATEADD(minute,-1,SYSUTCDATETIME()) WHERE TenantId=@id",
             ct,new SqlParameter("@id",tenantA));
+        // Expiration fences failure reporting too, not only successful completion.
+        // A delayed worker must not reset state before the next lease takeover.
+        await Assert.ThrowsAsync<SqlException>(()=>registry.FailAsync(
+            tenantA,lease,"EXPIRED_LEASE",ct));
+        Assert.Equal("PROVISIONING",(await registry.GetAsync(tenantA,ct))!.State);
         var takeover=Guid.NewGuid();
         var second=await registry.ClaimAsync(tenantA,takeover,ct);
         Assert.Equal(first.OperationId,second.OperationId);
