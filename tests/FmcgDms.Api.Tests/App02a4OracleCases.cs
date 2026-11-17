@@ -74,12 +74,36 @@ public sealed partial class App01e2CrossCommandRaceTests
     [Theory]
     [InlineData("tenant-a")]
     [InlineData("tenant-b")]
-    public Task App02a4_A11_03_missing_invalid_or_foreign_P_is_opaque_and_aged_CASE(string tenant) =>
-        A4Run(tenant, "A11-03", async s =>
+    public async Task App02a4_A11_03_missing_invalid_or_foreign_P_is_opaque_and_aged_CASE(string tenant)
+    {
+        // Create a REAL, durably committed P in the opposite physical tenant
+        // before A4Run captures the peer DB SHA.  A synthetic unknown ID would
+        // only exercise missing-P, not the foreign-P non-disclosure boundary.
+        string peer = tenant == "tenant-a" ? "tenant-b" : "tenant-a";
+        App02EventInput peerP;
+        using (var peerFactory = fixture.CreateFactory())
         {
-            // C carries a stable absent/foreign prerequisite identity. There
-            // is no cross-DB resolver and no phantom offer-acceptance.
-            var foreign = s.C with { PrerequisiteEventId = "foreign-P-" + Id() };
+            using var setup = SqlScratchFixture.WithTenant(peerFactory.CreateClient(), peer);
+            using var sales = Client(peerFactory, peer, SalesActor, "sales");
+            var peerScene = await SetupA3(peer, setup, sales);
+            peerP = NewPEvent(peerScene.Scene.Trip, peerScene.Offer);
+            await IntakeA3(sales, peerP);
+            using var peerDb = Open(peer);
+            Assert.Equal(1, peerDb.ExecuteScalar<int>("""
+                SELECT COUNT(*) FROM dbo.App02EventReceipt
+                WHERE TenantId=@Tenant AND ProducerId=@Producer AND EventId=@Event
+                  AND EventKind=N'CashHandoverOffered'
+                """, new { Tenant = peer, Producer = peerP.ProducerId, Event = peerP.EventId }));
+        }
+        await A4Run(tenant, "A11-03", async s =>
+        {
+            // The referenced P exists only in the opposite physical DB.
+            // Its identity remains opaque: C stays pending, then owned CASE.
+            var foreign = s.C with
+            {
+                PrerequisiteProducerId = peerP.ProducerId,
+                PrerequisiteEventId = peerP.EventId
+            };
             Guid c = await A4IntakeC(s, foreign);
             await A4Capture(s, "pending");
             using (HttpResponseMessage bad = await s.Cashier.PostAsJsonAsync(
@@ -98,6 +122,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             Assert.Equal("CASHIER_SUPERVISION", caseWitness.OwnerQueue);
             Assert.False(string.IsNullOrWhiteSpace(caseWitness.NextAction));
         });
+    }
 
     [Theory]
     [InlineData("tenant-a")]
