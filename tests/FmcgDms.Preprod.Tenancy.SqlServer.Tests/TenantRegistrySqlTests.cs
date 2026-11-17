@@ -108,7 +108,16 @@ public sealed class TenantRegistrySqlTests
         var first=await registry.ClaimAsync(tenantA,lease,ct);
         Assert.NotNull(first.OperationId);
         await Assert.ThrowsAsync<SqlException>(()=>registry.ClaimAsync(tenantA,Guid.NewGuid(),ct));
-        await registry.FailAsync(tenantA,lease,"TEST_RETRY",ct);
+        // A stale worker must not commit after a newly acquired lease.
+        await f.ExecAsync(f.Control,
+            "UPDATE dbo.PreprodTenantRegistry SET LeaseUntilUtc=DATEADD(minute,-1,SYSUTCDATETIME()) WHERE TenantId=@id",
+            ct,new SqlParameter("@id",tenantA));
+        var takeover=Guid.NewGuid();
+        var second=await registry.ClaimAsync(tenantA,takeover,ct);
+        Assert.Equal(first.OperationId,second.OperationId);
+        await Assert.ThrowsAsync<SqlException>(()=>registry.CompleteAsync(tenantA,lease,ct));
+        await Assert.ThrowsAsync<SqlException>(()=>registry.FailAsync(tenantA,lease,"STALE_LEASE",ct));
+        await registry.FailAsync(tenantA,takeover,"TEST_RETRY",ct);
         var expectedOperation=first.OperationId;
 
         f.TrackDb(TenantRegistryEntry.ExpectedDatabase(tenantA));
@@ -129,6 +138,19 @@ public sealed class TenantRegistrySqlTests
             await peer.OpenAsync(ct);
             Assert.False(await SqlTenantProvisioner.HasApprovedMarkerAsync(peer,a,ct));
         }
+        // SQL impersonation proves a scoped A principal can read A but cannot
+        // SELECT peer B or control-plane rows or UPDATE its own marker.
+        await f.ExecAsync(f.Connection(a.DatabaseName),
+            $"CREATE USER [{f.Requester}] FOR LOGIN [{f.Requester}]; GRANT SELECT ON dbo.__PreprodTenantBinding TO [{f.Requester}];",ct);
+        await f.RunAsAsync(f.Requester,
+            $"SELECT COUNT_BIG(*) FROM [{a.DatabaseName}].dbo.__PreprodTenantBinding",ct);
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
+            $"SELECT COUNT_BIG(*) FROM [{b.DatabaseName}].dbo.__PreprodTenantBinding",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
+            "SELECT COUNT_BIG(*) FROM dbo.PreprodTenantRegistry",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Requester,
+            $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
+
         await Assert.ThrowsAsync<SqlException>(()=>Transition(f.Checker,tenantA,"ACTIVATE",a.RowVersion));
         await RecordVerification(a);
         var verifiedA=(await registry.GetAsync(tenantA,ct))!;

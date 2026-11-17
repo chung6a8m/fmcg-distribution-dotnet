@@ -30,7 +30,7 @@
 | Test ID | Observable check | Required evidence class |
 |---|---|---|
 | CI-B4-01 | Registry migration first apply/replay/unknown-version/partial/system DB denial | Disposable Windows SQL Server LocalDB |
-| CI-B4-02 | Distinct two-tenant physical DB IDs, marker and separate binding identity, wrong peer marker denied | Independent SQL readback |
+| CI-B4-02 | Two physical DB IDs, marker/binding, wrong peer marker denied; real SQL Server-scoped login reads A but cannot SELECT B/control or UPDATE A marker | Independent SQL permission-denial readback |
 | CI-B4-03 | Requested state and request idempotency; requestor cannot self-approve | SQL principal impersonation / ledger |
 | CI-B4-04 | Claim lease collisions, stable OperationId after failed retry, nonroutability | SQL row + event history |
 | CI-B4-05 | No ACTIVE without verifier witness and final CAS | SQL readback |

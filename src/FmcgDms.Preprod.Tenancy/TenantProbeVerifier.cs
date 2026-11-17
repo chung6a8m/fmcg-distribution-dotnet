@@ -35,7 +35,7 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         string? peer;
         await using(var lookup=new SqlCommand(
             @"SELECT TOP(1) DatabaseName FROM dbo.PreprodTenantRegistry
-              WHERE TenantId<>@tenant AND State NOT IN ('REJECTED','REQUESTED','APPROVED') ORDER BY TenantId",registryDb))
+              WHERE TenantId<>@tenant AND State IN ('VERIFYING','ACTIVE','SUSPENDED') ORDER BY TenantId",registryDb))
         {
             lookup.Parameters.AddWithValue("@tenant",tenantId);
             peer=(string?)await lookup.ExecuteScalarAsync(ct);
@@ -43,6 +43,13 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         // A second physical tenant is required for meaningful negative probes.
         if(peer is null || peer==entry.DatabaseName)
             throw new TenantLifecycleDeniedException("TENANT_PEER_PROBE_MISSING");
+        // Denied SQL access is not isolation proof if the peer DB is absent.
+        await using(var exists = new SqlCommand("SELECT DB_ID(@peer)",registryDb))
+        {
+            exists.Parameters.AddWithValue("@peer",peer);
+            if(await exists.ExecuteScalarAsync(ct) is DBNull or null)
+                throw new TenantLifecycleDeniedException("TENANT_PHYSICAL_PEER_MISSING");
+        }
 
         await using var own=new SqlConnection(probeCs.ConnectionString);
         await own.OpenAsync(ct);
