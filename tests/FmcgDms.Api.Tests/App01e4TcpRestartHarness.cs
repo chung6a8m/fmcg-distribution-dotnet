@@ -32,7 +32,7 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         if (root is null) throw new InvalidOperationException("E.4 cannot locate solution root.");
 
         string project = Path.Combine(root, "src", "FmcgDms.Api", "FmcgDms.Api.csproj");
-        using var reservation = new TcpListener(IPAddress.Loopback, 0);
+        var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
         int port = ((IPEndPoint)reservation.LocalEndpoint).Port;
         reservation.Stop();
