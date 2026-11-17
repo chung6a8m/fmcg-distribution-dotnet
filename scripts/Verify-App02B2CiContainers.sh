@@ -6,8 +6,8 @@ set -euo pipefail
 : "${TLS_CERT_FILE:=/tmp/ci-unmounted.crt}" "${TLS_KEY_FILE:=/tmp/ci-unmounted.key}"
 : "${VAULT_API_TOKEN_FILE:=/tmp/ci-unmounted-api.token}"
 : "${VAULT_WORKER_TOKEN_FILE:=/tmp/ci-unmounted-worker.token}"
-api="$(docker compose -f deploy/preprod/compose.yaml images -q api)"
-worker="$(docker compose -f deploy/preprod/compose.yaml images -q worker)"
+api="$(docker image inspect fmcg-preprod-b2-api --format '{{.Id}}' 2>/dev/null || true)"
+worker="$(docker image inspect fmcg-preprod-b2-worker --format '{{.Id}}' 2>/dev/null || true)"
 [[ -n "$api" && -n "$worker" ]] || { echo "RUNTIME_CI_FAIL missing image"; exit 1; }
 deny() {
   local role="$1" assignment="$2" expected="$3" image="$api"
