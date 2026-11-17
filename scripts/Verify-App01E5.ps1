@@ -170,7 +170,7 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
       $r.ReplayFullSqlSha256 -cne $r.Stages[6].Full.Sha256) {
     throw "E.5 T2 nonposting, T5/T6 financial immutability or replay full SQL mismatch $name"
   }
-  Write-Host "APP-01E.5 $name: 91/91 SQL oracle cells; 259/259 independent reconciliation equations; replay fingerprint stable"
+  Write-Host "APP-01E.5 ${name}: 91/91 SQL oracle cells; 259/259 independent reconciliation equations; replay fingerprint stable"
 }
 if ($databases[0] -ceq $databases[1] -or $cellTotal -ne 182 -or $equationTotal -ne 518) {
   throw "E.5 two physical tenants, 182 cells or 518 equations not independently proven"
