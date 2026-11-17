@@ -2,9 +2,11 @@
 # APP-02B.2 operator-only PREPROD probe, never a GitHub-hosted CI job.
 # Collects mechanical negatives only. Independent network/Vault audit still required.
 set -euo pipefail
-cd "$(dirname "$0")/../deploy/preprod"
+repo="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+cd "$repo/deploy/preprod"
 [[ -f .env ]] || { echo "PREPROD_DENY host .env missing"; exit 2; }
-set -a; source .env; set +a
+# Source only the repository-owned loader, never execute host .env as shell code.
+source "$repo/scripts/Load-App02B2Env.sh" .env
 : "$PREPROD_FQDN" "$VAULT_API_TOKEN_FILE" "$VAULT_WORKER_TOKEN_FILE"
 [[ "$PREPROD_FQDN" != *.invalid && "$PREPROD_FQDN" != localhost ]] || {
   echo "PREPROD_DENY placeholder DNS"; exit 2; }

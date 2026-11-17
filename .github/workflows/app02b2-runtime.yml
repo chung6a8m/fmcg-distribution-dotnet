@@ -30,6 +30,9 @@ jobs:
       - name: Lint operator probe and validate Caddy TLS routing (CI fixture only)
         run: |
           bash -n scripts/Collect-App02B2PreprodEvidence.sh
+          bash -n scripts/Load-App02B2Env.sh
+          bash -n tests/app02b2-env-parser.test.sh
+          bash tests/app02b2-env-parser.test.sh
           bash -n scripts/Run-App02B2CiPreprod.sh
           python3 -m py_compile scripts/Check-App02B2CiVaultAudit.py
           python3 -m py_compile tools/verify_preprod_runtime.py
