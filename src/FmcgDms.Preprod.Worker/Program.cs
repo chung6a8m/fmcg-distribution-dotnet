@@ -54,6 +54,8 @@ internal sealed class FoundationWorker(
                 catch (RuntimeDeniedException denied)
                 {
                     logger.LogCritical("RUNTIME_STOP_DENIED code={ReasonCode}", denied.ReasonCode);
+                    // A revoked workload must not appear to Docker as a clean exit.
+                    Environment.ExitCode = 78;
                     throw new InvalidOperationException("Worker security admission revoked.");
                 }
             }
