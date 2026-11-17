@@ -124,7 +124,7 @@ foreach ($tenant in @('tenant-a','tenant-b')) {
         $total++
       }
     }
-    Write-Host "APP-01E.4 $name: SQL 46/46, TCP RST + process restart, durable outcome recovered ($id)"
+    Write-Host "APP-01E.4 ${name}: SQL 46/46, TCP RST + process restart, durable outcome recovered ($id)"
   }
 }
 if ($total -ne 460) { throw "Expected 460 real SQL E.4 cells; saw $total" }
