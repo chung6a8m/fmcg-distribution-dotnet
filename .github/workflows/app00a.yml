@@ -73,7 +73,9 @@ jobs:
           APP01E5_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP02A2_TEST_RUN_ID: app02a2-${{ github.run_id }}-${{ github.run_attempt }}
           APP02A2_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 258 -- --report-trx --coverage --coverage-output-format cobertura
+          APP02A3_TEST_RUN_ID: app02a3-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02A3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 272 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -214,6 +216,34 @@ jobs:
             "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID") |
             Set-Content -Path TestResults/APP-02A2-TestRunId.txt -Encoding utf8
           Write-Host "APP-02A.2 TestRunId=$id; SourceHead=$sourceHead; WorkflowSha=$env:GITHUB_SHA"
+      - name: Record APP-02A.3 worker/recovery TestRunId and enforce final-head test count
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $id = "app02a3-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $sourceHead = '${{ github.event.pull_request.head.sha }}'
+          if ([string]::IsNullOrWhiteSpace($sourceHead)) { $sourceHead = $env:GITHUB_SHA }
+          $trx = @(Get-ChildItem -Path TestResults -Recurse -File -Filter '*.trx')
+          if ($trx.Count -ne 1) { throw "APP-02A.3 requires exactly one MTP TRX report, found $($trx.Count)" }
+          [xml]$result = Get-Content -Path $trx[0].FullName -Raw
+          $counter = $result.SelectSingleNode("//*[local-name()='Counters']")
+          if ($null -eq $counter) { throw 'APP-02A.3 missing TRX Counters' }
+          $total = [int]$counter.GetAttribute('total')
+          $passed = [int]$counter.GetAttribute('passed')
+          $failed = [int]$counter.GetAttribute('failed')
+          $notExecuted = [int]$counter.GetAttribute('notExecuted')
+          if ($total -lt 272 -or $passed -ne $total -or $failed -ne 0 -or $notExecuted -ne 0) {
+            throw "APP-02A.3 TestRunId=$id fails 272+ / zero-failure / zero-skip gate: total=$total passed=$passed failed=$failed skipped=$notExecuted"
+          }
+          @("TestRunId=$id", "SourceHeadSha=$sourceHead",
+            "WorkflowSha=$env:GITHUB_SHA",
+            "RunUrl=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "TotalTests=$total", "PassedTests=$passed", "FailedTests=$failed",
+            "NotExecutedTests=$notExecuted", "AcceptanceScope=APP-02A.3_SYNTHETIC_NONPRODUCTION",
+            "A11IndependentOracle=NOT_RUN", "ActualEV08=NOT_VERIFIED",
+            "ProductionP0=NOT_VERIFIED") |
+            Set-Content -Path TestResults/APP-02A3-TestRunId.txt -Encoding utf8
+          Write-Host "APP-02A.3 TestRunId=$id; SourceHead=$sourceHead; total=$total passed=$passed failed=$failed skipped=$notExecuted"
       - name: Fail closed on APP-01B.3 SQL oracle actual/diff
         shell: pwsh
         run: |
