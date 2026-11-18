@@ -98,12 +98,15 @@ public sealed class SqlTenantFinalizer(TenantRegistrySql registry,string finaliz
                 release.Parameters.AddWithValue("@name",resource);
                 await release.ExecuteNonQueryAsync(CancellationToken.None);
             }
-            // Must still hold current lease + epoch/binding; a concurrent revoke,
-            // expired token or changed owner denies SQL completion (not a PASS).
-            await registry.CompleteFinalizationAsync(tenantId,token,
-                claim.FinalizationOperationId.Value,claim.BindingId,claim.SecurityEpoch,ct);
-            return await registry.GetAsync(tenantId,ct)
+            // This is NOT completion. The independent DBA-scoped retirement
+            // operator must revoke TAKE OWNERSHIP and IMPERSONATE, retire the
+            // finalizer login and kill active SQL sessions before it can commit
+            // FINALIZING -> VERIFYING. No post-transfer self-attestation.
+            var pending=await registry.GetAsync(tenantId,ct)
                 ?? throw new TenantLifecycleDeniedException("TENANT_FINALIZER_READBACK_DENIED");
+            if(pending.State!="FINALIZING" || pending.FinalizationLeaseToken!=token)
+                throw new TenantLifecycleDeniedException("TENANT_FINALIZER_LEASE_SUPERSEDED");
+            return pending;
         }
         catch
         {

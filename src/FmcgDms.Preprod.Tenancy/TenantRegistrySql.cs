@@ -10,10 +10,12 @@ public sealed record TenantRegistryEntry(
     long SecurityEpoch, string State, byte[] RowVersion, Guid? OperationId,
     Guid? LeaseToken, DateTime? LeaseUntilUtc, string? VerifiedBy, DateTime? VerifiedUtc,
     string? ApprovedOwnerLogin=null,string? ApprovedProvisionerLogin=null,
-    string? ApprovedFinalizerLogin=null,Guid? FinalizationOperationId=null,
+    string? ApprovedFinalizerLogin=null,string? ApprovedRetirerLogin=null,
+    Guid? FinalizationOperationId=null,
     Guid? FinalizationLeaseToken=null,DateTime? FinalizationLeaseUntilUtc=null,
     string? FinalizedBy=null,DateTime? FinalizedUtc=null,
-    long? FinalizedEpoch=null,Guid? FinalizedBindingId=null)
+    long? FinalizedEpoch=null,Guid? FinalizedBindingId=null,
+    string? FinalizerRetiredBy=null,DateTime? FinalizerRetiredUtc=null)
 {
     public bool IsRoutable => State == "ACTIVE";
     public static string ExpectedDatabase(Guid id) => "FmcgPpT_" + id.ToString("N");
@@ -63,12 +65,14 @@ public sealed class TenantRegistrySql(string connectionString)
     }
 
     public async Task<TenantRegistryEntry> ApproveAsync(Guid id, string changeRef,
-        string approvedOwnerLogin,string provisionerLogin,string finalizerLogin,CancellationToken ct)
+        string approvedOwnerLogin,string provisionerLogin,string finalizerLogin,
+        string retirerLogin,CancellationToken ct)
     {
         await ExecuteAsync("dbo.cp_ApproveTenant", ct,
             Param("@TenantId", id), Param("@ApprovalRef", changeRef),
             Param("@ApprovedOwnerLogin", approvedOwnerLogin),
-            Param("@ProvisionerLogin", provisionerLogin),Param("@FinalizerLogin",finalizerLogin));
+            Param("@ProvisionerLogin", provisionerLogin),Param("@FinalizerLogin",finalizerLogin),
+            Param("@RetirerLogin",retirerLogin));
         return await RequiredAsync(id, ct);
     }
 
@@ -175,11 +179,14 @@ public sealed class TenantRegistrySql(string connectionString)
             rd.IsDBNull(12)?null:rd.GetString(12),
             rd.IsDBNull(13)?null:rd.GetString(13),
             rd.IsDBNull(14)?null:rd.GetString(14),
-            rd.IsDBNull(15)?null:rd.GetGuid(15),
+            rd.IsDBNull(15)?null:rd.GetString(15),
             rd.IsDBNull(16)?null:rd.GetGuid(16),
-            rd.IsDBNull(17)?null:rd.GetDateTime(17),
-            rd.IsDBNull(18)?null:rd.GetString(18),
-            rd.IsDBNull(19)?null:rd.GetDateTime(19),
-            rd.IsDBNull(20)?null:rd.GetInt64(20),
-            rd.IsDBNull(21)?null:rd.GetGuid(21));
+            rd.IsDBNull(17)?null:rd.GetGuid(17),
+            rd.IsDBNull(18)?null:rd.GetDateTime(18),
+            rd.IsDBNull(19)?null:rd.GetString(19),
+            rd.IsDBNull(20)?null:rd.GetDateTime(20),
+            rd.IsDBNull(21)?null:rd.GetInt64(21),
+            rd.IsDBNull(22)?null:rd.GetGuid(22),
+            rd.IsDBNull(23)?null:rd.GetString(23),
+            rd.IsDBNull(24)?null:rd.GetDateTime(24));
 }
