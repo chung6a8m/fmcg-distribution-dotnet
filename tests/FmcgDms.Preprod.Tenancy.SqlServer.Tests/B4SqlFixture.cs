@@ -131,11 +131,15 @@ internal sealed class B4SqlFixture : IAsyncDisposable
     }
 
     public Task RunAsAsync(string login,string invocation,CancellationToken ct,
-        params SqlParameter[] parameters)
+        params SqlParameter[] parameters) =>
+        RunAsFromAsync(login,Control,invocation,ct,parameters);
+
+    public Task RunAsFromAsync(string login,string connectionString,string invocation,
+        CancellationToken ct,params SqlParameter[] parameters)
     {
         if(!logins.Contains(login)) throw new InvalidOperationException("Unknown CI actor");
         var sql=$"EXECUTE AS LOGIN=N'{login}'; BEGIN TRY {invocation}; REVERT; END TRY BEGIN CATCH REVERT; THROW; END CATCH;";
-        return ExecAsync(Control,sql,ct,parameters);
+        return ExecAsync(connectionString,sql,ct,parameters);
     }
 
     public async Task ExecAsync(string conn,string sql,CancellationToken ct,

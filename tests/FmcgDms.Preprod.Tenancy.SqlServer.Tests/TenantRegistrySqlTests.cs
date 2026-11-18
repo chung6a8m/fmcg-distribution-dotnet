@@ -182,10 +182,12 @@ public sealed class TenantRegistrySqlTests
         Assert.Equal(expectedOwnerSid,ownerSid);
         // The actual non-sysadmin CREATE ANY DATABASE principal now loses dbo.
         // Prove it cannot SELECT or UPDATE its formerly owned database.
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(ddlLogin,
-            $"SELECT COUNT_BIG(*) FROM [{a.DatabaseName}].dbo.__PreprodTenantBinding",ct));
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(ddlLogin,
-            $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(ddlLogin,
+            f.Connection(a.DatabaseName),
+            $"SELECT COUNT_BIG(*) FROM dbo.__PreprodTenantBinding",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(ddlLogin,
+            f.Connection(a.DatabaseName),
+            $"UPDATE dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
         var wrongOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
             verifier.VerifyAsync(tenantA,
                 new TenantVerifierProbeSecrets(f.Connection(a.DatabaseName),
@@ -193,14 +195,18 @@ public sealed class TenantRegistrySqlTests
         Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",wrongOwner.Code);
         // The test login can access own marker read-only; cannot access peer,
         // control, or change marker. All proofs execute under EXECUTE AS LOGIN.
-        await f.RunAsAsync(probeA,
-            $"SELECT COUNT_BIG(*) FROM [{a.DatabaseName}].dbo.__PreprodTenantBinding",ct);
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
+        await f.RunAsFromAsync(probeA,f.Connection(a.DatabaseName),
+            "SELECT COUNT_BIG(*) FROM dbo.__PreprodTenantBinding",ct);
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(probeA,
+            f.Connection(a.DatabaseName),
             $"SELECT COUNT_BIG(*) FROM [{b.DatabaseName}].dbo.__PreprodTenantBinding",ct));
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
-            "SELECT COUNT_BIG(*) FROM dbo.PreprodTenantRegistry",ct));
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
-            $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
+        var cpName=new SqlConnectionStringBuilder(f.Control).InitialCatalog;
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(probeA,
+            f.Connection(a.DatabaseName),
+            $"SELECT COUNT_BIG(*) FROM [{cpName}].dbo.PreprodTenantRegistry",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(probeA,
+            f.Connection(a.DatabaseName),
+            "UPDATE dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
         // SQL impersonation proves a scoped A principal can read A but cannot
         // SELECT peer B or control-plane rows or UPDATE its own marker.
         await f.ExecAsync(f.Connection(a.DatabaseName),
