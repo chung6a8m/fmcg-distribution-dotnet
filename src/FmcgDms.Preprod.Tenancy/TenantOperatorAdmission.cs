@@ -57,6 +57,20 @@ public static class TenantOperatorAdmission
         }
     }
 
+    public static void ValidateFinalizer(string? environment,string? vaultAddress,
+        string registryConnection,string masterConnection)
+    {
+        Validate(environment,vaultAddress,registryConnection);
+        var registry=Parse(registryConnection);
+        var master=Parse(masterConnection);
+        if(!master.InitialCatalog.Equals("master",StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(master.DataSource,registry.DataSource,StringComparison.OrdinalIgnoreCase)
+            || master.IntegratedSecurity!=registry.IntegratedSecurity
+            || !master.IntegratedSecurity &&
+                !string.Equals(master.UserID,registry.UserID,StringComparison.OrdinalIgnoreCase))
+            throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SQL_SCOPE_DENIED");
+    }
+
     private static SqlConnectionStringBuilder Parse(string connection)
     {
         SqlConnectionStringBuilder cs;

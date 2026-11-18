@@ -22,6 +22,7 @@ public sealed class VaultTenantOperatorSecrets(string address,
         "request" => "requester",
         "approve" or "activate" or "start-reactivation" or "decommission" => "approver",
         "provision" => "provisioner",
+        "finalize" => "finalizer",
         "verify" or "abort-reactivation" or "complete-decommission" => "verifier",
         "suspend" or "revoke" => "security",
         _ => throw new TenantLifecycleDeniedException("TENANT_OPERATOR_ROLE_INVALID")
@@ -30,6 +31,8 @@ public sealed class VaultTenantOperatorSecrets(string address,
     public async Task<TenantOperatorSecrets> ReadOperatorAsync(string command,CancellationToken ct)
     {
         string role=SecretRoleForCommand(command);
+        if(role=="finalizer")
+            throw new TenantLifecycleDeniedException("TENANT_FINALIZER_TENANT_SCOPE_REQUIRED");
         using var doc=await ReadAsync("tenant-provisioning/"+role,ct);
         var data=doc.RootElement.GetProperty("data").GetProperty("data");
         var registry=data.GetProperty("registryConnectionString").GetString() ?? "";
@@ -38,6 +41,22 @@ public sealed class VaultTenantOperatorSecrets(string address,
             || role=="provisioner" && string.IsNullOrWhiteSpace(master)
             || role!="provisioner" && !string.IsNullOrEmpty(master))
             throw new TenantLifecycleDeniedException("TENANT_OPERATOR_SECRET_ROLE_MISMATCH");
+        return new TenantOperatorSecrets(registry,master);
+    }
+
+    /// <summary>
+    /// Only an exact approved per-tenant Vault path can yield finalizer credentials.
+    /// Never use a shared "finalizer" secret or an unbounded wildcard policy.
+    /// </summary>
+    public async Task<TenantOperatorSecrets> ReadFinalizerAsync(Guid tenant,CancellationToken ct)
+    {
+        if(tenant==Guid.Empty) throw new TenantLifecycleDeniedException("TENANT_FINALIZER_TENANT_INVALID");
+        using var doc=await ReadAsync("tenant-provisioning/finalizer/"+tenant.ToString("N"),ct);
+        var data=doc.RootElement.GetProperty("data").GetProperty("data");
+        var registry=data.GetProperty("registryConnectionString").GetString();
+        var master=data.GetProperty("masterConnectionString").GetString();
+        if(string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(master))
+            throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
         return new TenantOperatorSecrets(registry,master);
     }
 

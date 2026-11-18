@@ -9,8 +9,8 @@ try
     string command=args[0];
     bool withRef=command is "start-reactivation" or "decommission"
         or "complete-decommission";
-    if(args.Length!=(command=="request"?4:command=="approve"?5:withRef?3:2)
-        || command is not ("request" or "approve" or "provision" or "verify"
+    if(args.Length!=(command=="request"?4:command=="approve"?6:withRef?3:2)
+        || command is not ("request" or "approve" or "provision" or "finalize" or "verify"
             or "activate" or "suspend" or "revoke" or "start-reactivation"
             or "abort-reactivation" or "decommission" or "complete-decommission"))
         throw new TenantLifecycleDeniedException("TENANT_OPERATOR_COMMAND_INVALID");
@@ -20,8 +20,19 @@ try
     TenantOperatorAdmission.ValidateVaultAnchor(
         Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address);
     var vault=new VaultTenantOperatorSecrets(address ?? "");
-    var secrets=await vault.ReadOperatorAsync(command,CancellationToken.None);
-    TenantOperatorAdmission.Validate(Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
+    var secrets=command=="finalize"
+        ? await vault.ReadFinalizerAsync(tenantId,CancellationToken.None)
+        : await vault.ReadOperatorAsync(command,CancellationToken.None);
+    if(command=="finalize")
+    {
+        if(secrets.MasterConnection is null)
+            throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
+        TenantOperatorAdmission.ValidateFinalizer(
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address,
+            secrets.RegistryConnection,secrets.MasterConnection);
+    }
+    else TenantOperatorAdmission.Validate(
+        Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
         address,secrets.RegistryConnection,command=="provision"?secrets.MasterConnection:null);
     var registry=new TenantRegistrySql(secrets.RegistryConnection);
     TenantRegistryEntry result;
@@ -31,13 +42,19 @@ try
             result=await registry.RequestAsync(tenantId,args[2],args[3],CancellationToken.None);
             break;
         case "approve":
-            result=await registry.ApproveAsync(tenantId,args[2],args[3],args[4],CancellationToken.None);
+            result=await registry.ApproveAsync(tenantId,args[2],args[3],args[4],args[5],CancellationToken.None);
             break;
         case "provision":
             if(secrets.MasterConnection is null)
                 throw new TenantLifecycleDeniedException("TENANT_DDL_PRINCIPAL_UNAVAILABLE");
             result=await new SqlTenantProvisioner(registry,secrets.MasterConnection)
                 .ProvisionAsync(tenantId,CancellationToken.None);
+            break;
+        case "finalize":
+            if(secrets.MasterConnection is null)
+                throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
+            result=await new SqlTenantFinalizer(registry,secrets.MasterConnection)
+                .FinalizeAsync(tenantId,CancellationToken.None);
             break;
         case "verify":
             var scoped=await vault.ReadProbeAsync(command,tenantId,CancellationToken.None);
