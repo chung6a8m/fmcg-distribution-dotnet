@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace FmcgDms.Preprod.Recovery;
 
-public enum B7OutcomeState { Committed, IndependentlyProvenNotSent, Unknown }
+public enum B7OutcomeState { Unknown = 0, Committed = 1, IndependentlyProvenNotSent = 2 }
 
 public sealed record B7ExternalOutcome(Guid SourceId, Guid MessageId,
     B7OutcomeState State, int ObservedEffectCount, bool IndependentReceiverJournalVerified);
@@ -18,7 +18,7 @@ public sealed record B7RestoreContext(
     bool RestoreKeySeparatelyAuthorized, bool ReconciledInboxOutboxSourcesAndCases,
     bool IndependentExternalOutcomeJournalOnline,
     string PeerBeforeSha256, string PeerAfterSha256, Guid PeerDatabaseBefore,
-    Guid PeerDatabaseAfter, string ImplementerIdentity, string IndependentReviewerIdentity,
+    Guid PeerDatabaseAfter, Guid ImplementerIdentity, Guid IndependentReviewerIdentity,
     IReadOnlyList<B7ExternalOutcome> Outcomes);
 
 public sealed record B7RestoreInspection(bool ReadyForSeparatePhysicalReview,
@@ -59,8 +59,8 @@ public static class B7SafeRestore
             !Hash.IsMatch(p.PeerBeforeSha256 ?? "") ||
             !string.Equals(p.PeerBeforeSha256, p.PeerAfterSha256, StringComparison.OrdinalIgnoreCase))
             Deny("PEER_DATABASE_CHANGED_OR_NOT_OBSERVED");
-        if (string.IsNullOrWhiteSpace(p.ImplementerIdentity) ||
-            string.IsNullOrWhiteSpace(p.IndependentReviewerIdentity) ||
+        if (p.ImplementerIdentity == Guid.Empty ||
+            p.IndependentReviewerIdentity == Guid.Empty ||
             p.ImplementerIdentity == p.IndependentReviewerIdentity)
             Deny("INDEPENDENT_REVIEWER_REQUIRED");
         if (!p.ReconciledInboxOutboxSourcesAndCases || !p.IndependentExternalOutcomeJournalOnline ||

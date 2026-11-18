@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace FmcgDms.Preprod.Recovery;
 
 /// <summary>B.7 operator evidence, never a backup scheduler, key provider or business admission API.</summary>
-public enum B7BackupKind { Full, Differential, Log }
+public enum B7BackupKind { Unknown = 0, Full = 1, Differential = 2, Log = 3 }
 
 public sealed record B7BackupPiece(
     Guid BackupId, string DatabaseName, Guid DatabaseId, Guid RecoveryForkId,
@@ -54,7 +54,8 @@ public static class B7BackupChain
         var pieces = inventory.Pieces.OrderBy(p => p.FinishUtc).ToArray();
         foreach (var p in pieces)
         {
-            if (p.BackupId == Guid.Empty || p.DatabaseName != inventory.DatabaseName ||
+            if (p.Kind == B7BackupKind.Unknown || !Enum.IsDefined(p.Kind) ||
+                p.BackupId == Guid.Empty || p.DatabaseName != inventory.DatabaseName ||
                 p.DatabaseId != inventory.DatabaseId || p.RecoveryForkId == Guid.Empty ||
                 p.FinishUtc.Kind != DateTimeKind.Utc || p.FinishUtc > inventory.ObservationUtc ||
                 p.FirstLsn < 0 || p.LastLsn <= p.FirstLsn)

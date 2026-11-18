@@ -42,7 +42,7 @@ public sealed class B7RecoverySafetyTests
         return new(tenant, tenant, "FmcgPpT_" + tenant.ToString("N"),
             "FmcgPpT_" + tenant.ToString("N"), binding, binding, 8, 8,
             12, 10, true, true, true, true, true, true, true, true, true,
-            Hash, Hash, peer, peer, "operator", "independent-security-reviewer",
+            Hash, Hash, peer, peer, Guid.NewGuid(), Guid.NewGuid(),
             [new(Guid.NewGuid(), Guid.NewGuid(), B7OutcomeState.Committed, 1, true)]);
     }
 
@@ -81,6 +81,9 @@ public sealed class B7RecoverySafetyTests
         var result = B7SafeRestore.Inspect(HealthyRestore());
         Assert.True(result.ReadyForSeparatePhysicalReview, string.Join(",", result.Denials));
         Assert.False(result.PermitsTenantActivation);
+        Assert.Contains("SOURCE_OR_RECEIVER_WITNESS_MISSING",
+            B7SafeRestore.Inspect(HealthyRestore() with
+                { Outcomes = [new(Guid.NewGuid(), Guid.NewGuid(), default, 1, false)] }).Denials);
     }
 
     [Fact]
@@ -100,7 +103,7 @@ public sealed class B7RecoverySafetyTests
         Assert.Contains("CURRENT_VAULT_AND_RESTORE_KEY_REQUIRED",
             B7SafeRestore.Inspect(original with { RestoreKeySeparatelyAuthorized = false }).Denials);
         Assert.Contains("INDEPENDENT_REVIEWER_REQUIRED",
-            B7SafeRestore.Inspect(original with { IndependentReviewerIdentity = "operator" }).Denials);
+            B7SafeRestore.Inspect(original with { IndependentReviewerIdentity = original.ImplementerIdentity }).Denials);
     }
 
     [Fact]

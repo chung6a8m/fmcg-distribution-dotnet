@@ -70,6 +70,37 @@ jobs:
               (Resolve-Path $p).Path, [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -ne 0) { throw "B7_POWERSHELL_PARSE_FAILED: $p $($errors[0])" }
           }
+      - name: Exercise operator plan-only and fault-deny paths (no SQL writes)
+        shell: pwsh
+        run: |
+          $tenant=[guid]::NewGuid()
+          $root='C:\approved\b7-stage'
+          $db='FmcgPpT_' + $tenant.ToString('N')
+          $leaf=$db+'_Full_20261118T000000Z_'+([guid]::NewGuid().ToString('N'))+'.bak'
+          $arguments=@{
+            TenantId=$tenant; Kind='Full'; SqlInstance='sql.private.invalid'
+            ApprovedSqlInstance='sql.private.invalid'
+            ApprovedSqlServerName='approved-sql'
+            SqlServerStageFile=$root+'\'+$leaf
+            ApprovedStagingDirectory=$root
+            EncryptionCertificate='PreprodBackupCertV1'
+            ApprovedChangeRef='CI-PLAN-ONLY'
+          }
+          $plan=@(& ./scripts/Invoke-App02B7Backup.ps1 @arguments)
+          if ($plan.Count -ne 1 -or $plan[0] -notlike 'B7_PLAN_ONLY*') {
+            throw 'B7_DEFAULT_PLAN_ONLY_FAILED'
+          }
+          $arguments.SqlServerStageFile='C:\Windows\Temp\'+$leaf
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_STAGE_NOT_IN_APPROVED_DIRECTORY') }
+          if (!$denied) { throw 'B7_OUT_OF_ROOT_STAGE_WAS_NOT_DENIED' }
+          $arguments.SqlServerStageFile=$root+'\'+$leaf
+          $arguments.ApprovedSqlInstance='sql.other.invalid'
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_APPROVED_PRIVATE_SQL_TARGET_REQUIRED') }
+          if (!$denied) { throw 'B7_SQL_TARGET_SWAP_WAS_NOT_DENIED' }
       - name: Confirm exact source HEAD and disposable LocalDB
         shell: pwsh
         env:
