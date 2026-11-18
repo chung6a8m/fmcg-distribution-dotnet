@@ -79,6 +79,12 @@ jobs:
               $e.PhysicalTenantDatabases -ne 2 -or
               !$e.IndependentFenceDatabase -or !$e.DifferentDatabaseIds -or
               !$e.CrossTenantDenied -or !$e.WrongBindingDenied -or
+              !$e.ValidAContextWrongPhysicalTargetDenied -or
+              !$e.RuntimeDirectPeerWriteDenied -or !$e.RegistryDatabaseMismatchDenied -or
+              [string]::IsNullOrWhiteSpace($e.TenantSqlHashBefore) -or
+              $e.TenantSqlHashBefore -cne $e.TenantSqlHashAfter -or
+              [string]::IsNullOrWhiteSpace($e.PeerSqlHashBefore) -or
+              $e.PeerSqlHashBefore -cne $e.PeerSqlHashAfter -or
               !$e.MakerCheckerDenied -or !$e.SessionUnavailableDenied -or
               !$e.RuntimeDirectSqlReadDenied -or !$e.RevokeWaitedForProtectedCommit -or
               !$e.StaleAuthorityDenied -or !$e.SuspendedTenantDenied -or

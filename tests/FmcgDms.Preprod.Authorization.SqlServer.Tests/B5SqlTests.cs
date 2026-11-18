@@ -26,7 +26,7 @@ public sealed class B5SqlTests
             bindingA, 1, 1, 1, 0, "tenant.write", "stock:ci-only");
         var b = a with { TenantId = f.TenantB, ResourceTenantId = f.TenantB,
             BindingId = bindingB };
-        var fence = new SqlAuthorizationFence(f.FenceConnection)
+        var fence = new SqlAuthorizationFence(f.FenceConnection, f.TenantADatabase)
         {
             InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
         };
@@ -36,6 +36,25 @@ public sealed class B5SqlTests
         Assert.Equal(1, await fence.ExecuteAsync(a, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         Assert.Equal(1, await f.CountAsync(f.TenantADatabase, ct));
+
+        // Valid A actor/permission but malicious B SQL target must fail;
+        // prove the same login cannot bypass the fence by executing direct B DML.
+        var aHashBefore = await f.TenantSqlHashAsync(f.TenantADatabase, ct);
+        var peerHashBefore = await f.TenantSqlHashAsync(f.TenantBDatabase, ct);
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
+            a, guard, (db, tx, token) => f.WriteAsync(db, tx, f.TenantBDatabase, token), ct));
+        await f.AssertRuntimePeerWriteDeniedAsync(ct);
+        var aHashAfter = await f.TenantSqlHashAsync(f.TenantADatabase, ct);
+        var peerHashAfter = await f.TenantSqlHashAsync(f.TenantBDatabase, ct);
+        Assert.Equal(aHashBefore, aHashAfter);
+        Assert.Equal(peerHashBefore, peerHashAfter);
+
+        var mismatchedTarget = new SqlAuthorizationFence(f.FenceConnection, f.TenantBDatabase)
+        {
+            InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
+        };
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => mismatchedTarget.ExecuteAsync(
+            a, guard, (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
 
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
             b, guard, (db, tx, token) => f.WriteAsync(db, tx, f.TenantBDatabase, token), ct));
@@ -115,6 +134,10 @@ public sealed class B5SqlTests
             PhysicalTenantDatabases = 2, IndependentFenceDatabase = true,
             DifferentDatabaseIds = await f.DifferentDatabaseIdsAsync(ct),
             CrossTenantDenied = true, WrongBindingDenied = true, MakerCheckerDenied = true,
+            ValidAContextWrongPhysicalTargetDenied = true,
+            RuntimeDirectPeerWriteDenied = true, RegistryDatabaseMismatchDenied = true,
+            TenantSqlHashBefore = aHashBefore, TenantSqlHashAfter = aHashAfter,
+            PeerSqlHashBefore = peerHashBefore, PeerSqlHashAfter = peerHashAfter,
             SessionUnavailableDenied = true, RuntimeDirectSqlReadDenied = true,
             RevokeWaitedForProtectedCommit = true, StaleAuthorityDenied = true,
             SuspendedTenantDenied = true, TenantAEffects = 2, PeerTenantEffects = 0,
@@ -134,7 +157,7 @@ public sealed class B5SqlTests
         var bindingA = Guid.NewGuid();
         await f.SeedAsync(actor, session, Guid.NewGuid(), bindingA, Guid.NewGuid(), ct);
         var guard = new SqlControlPlaneGuards(f.IdentityDatabase, f.RegistryDatabase);
-        var fence = new SqlAuthorizationFence(f.FenceConnection)
+        var fence = new SqlAuthorizationFence(f.FenceConnection, f.TenantADatabase)
         {
             InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
         };
@@ -282,7 +305,9 @@ public sealed class B5SqlTests
                 await f.RunAsync(f.Connection(database),
                     "CREATE TABLE dbo.B5WriteWitness(Id bigint IDENTITY(1,1) PRIMARY KEY);" +
                     "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
-                    "GRANT INSERT ON dbo.B5WriteWitness TO [" + f.RuntimeLogin + "];", ct);
+                    (database == f.TenantADatabase
+                        ? "GRANT INSERT ON dbo.B5WriteWitness TO [" + f.RuntimeLogin + "];"
+                        : ""), ct);
             return f;
         }
 
@@ -386,7 +411,7 @@ public sealed class B5SqlTests
                 P("@SessionEpoch",a.SessionEpoch));
             await UnroledDeniedAsync(RegistryDatabase,"dbo.b5_AssertCurrentTenant",ct,
                 P("@TenantId",a.TenantId),P("@BindingId",a.BindingId),
-                P("@RegistryEpoch",a.RegistryEpoch));
+                P("@RegistryEpoch",a.RegistryEpoch),P("@TenantDatabaseName",TenantADatabase));
         }
 
         private async Task UnroledDeniedAsync(string dbName,string procedure,CancellationToken ct,
@@ -434,6 +459,29 @@ public sealed class B5SqlTests
             await using var cmd = new SqlCommand(
                 "EXECUTE AS LOGIN=N'" + login + "'", db);
             await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+
+        public async Task<string> TenantSqlHashAsync(string database, CancellationToken ct)
+        {
+            if (database != TenantADatabase && database != TenantBDatabase)
+                throw new InvalidOperationException("Unapproved CI SQL hash target");
+            var serialized = Convert.ToString(await ScalarAsync(Connection(database),
+                "SELECT ISNULL((SELECT Id FROM dbo.B5WriteWitness ORDER BY Id FOR JSON PATH),N'[]')",ct))
+                ?? "[]";
+            return Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(serialized)));
+        }
+
+        public async Task AssertRuntimePeerWriteDeniedAsync(CancellationToken ct)
+        {
+            await using var db = new SqlConnection(FenceConnection);
+            await db.OpenAsync(ct);
+            await ImpersonateAsync(db, RuntimeLogin, ct);
+            await using var tx = (SqlTransaction)await db.BeginTransactionAsync(
+                IsolationLevel.Serializable, ct);
+            var denied = await Assert.ThrowsAsync<SqlException>(() =>
+                WriteAsync(db, tx, TenantBDatabase, ct));
+            Assert.Contains("permission", denied.Message, StringComparison.OrdinalIgnoreCase);
         }
 
         public async Task<int> CountAsync(string db, CancellationToken ct) =>

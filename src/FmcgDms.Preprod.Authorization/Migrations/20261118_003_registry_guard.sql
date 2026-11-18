@@ -28,15 +28,18 @@ BEGIN TRY
        THROW 51640,N'B5_REGISTRY_PARTIAL_DENIED',1;
     CREATE ROLE b5_registry_runtime;
     EXEC(N'CREATE PROCEDURE dbo.b5_AssertCurrentTenant
- @TenantId uniqueidentifier,@BindingId uniqueidentifier,@RegistryEpoch bigint
+ @TenantId uniqueidentifier,@BindingId uniqueidentifier,@RegistryEpoch bigint,
+ @TenantDatabaseName sysname
 AS
 BEGIN
  SET NOCOUNT ON;
  IF @@TRANCOUNT < 1 OR ISNULL(IS_ROLEMEMBER(N''b5_registry_runtime''),0)<>1
      THROW 51640,N''B5_REGISTRY_PRINCIPAL_DENIED'',1;
  IF @TenantId IS NULL OR @BindingId IS NULL OR @RegistryEpoch < 1
+     OR NULLIF(LTRIM(RTRIM(@TenantDatabaseName)),N'''') IS NULL
      OR NOT EXISTS(SELECT 1 FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
          WHERE TenantId=@TenantId AND BindingId=@BindingId
+           AND DatabaseName=@TenantDatabaseName
            AND SecurityEpoch=@RegistryEpoch AND State=''ACTIVE'')
      THROW 51641,N''B5_REGISTRY_STALE_OR_DISABLED'',1;
 END');

@@ -43,8 +43,9 @@ public sealed class AuthorizationDeniedException(string code) : Exception(code)
 /// The protected workload remains disabled in PREPROD until B.4 / B.3 / B.7
 /// authoritative integration and physical operator acceptance.
 /// </summary>
-public sealed class SqlAuthorizationFence(string fenceConnectionString)
+public sealed class SqlAuthorizationFence(string fenceConnectionString, string approvedTenantDatabase)
 {
+    private readonly string tenantDatabase = SqlControlPlaneGuards.ValidateApprovedDatabase(approvedTenantDatabase);
     // TEST ONLY: disposable LocalDB login to verify real SQL permission checks.
     internal Func<SqlConnection, CancellationToken, Task>? InitializeCiSession { get; init; }
 
@@ -74,7 +75,7 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString)
             // instance stored procedures INSIDE the protected transaction.
             // An independent revoke of B.3 or B.4 blocks until this COMMIT.
             await controlAuthority.AssertCurrentAsync(
-                connection, transaction, authority, cancellationToken);
+                connection, transaction, authority, tenantDatabase, cancellationToken);
             await using var command = new SqlCommand("dbo.b5_AssertAuthority",
                 connection, transaction) { CommandType = CommandType.StoredProcedure, CommandTimeout = 15 };
             command.Parameters.AddRange(

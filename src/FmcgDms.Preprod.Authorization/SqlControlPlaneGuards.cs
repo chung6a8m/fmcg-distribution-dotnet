@@ -24,7 +24,7 @@ public sealed class SqlControlPlaneGuards
     }
 
     public async Task AssertCurrentAsync(SqlConnection connection, SqlTransaction transaction,
-        AuthorizationContext authority, CancellationToken cancellationToken)
+        AuthorizationContext authority, string tenantDatabase, CancellationToken cancellationToken)
     {
         if (transaction.Connection != connection)
             throw new AuthorizationDeniedException("B5_CONNECTION_MISMATCH");
@@ -36,7 +36,8 @@ public sealed class SqlControlPlaneGuards
             registry.Parameters.AddRange([
                 SqlAuthorizationFence.Parameter("@TenantId", authority.TenantId),
                 SqlAuthorizationFence.Parameter("@BindingId", authority.BindingId),
-                SqlAuthorizationFence.Parameter("@RegistryEpoch", authority.RegistryEpoch)
+                SqlAuthorizationFence.Parameter("@RegistryEpoch", authority.RegistryEpoch),
+                SqlAuthorizationFence.Parameter("@TenantDatabaseName", ValidateApprovedDatabase(tenantDatabase))
             ]);
             await registry.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -54,7 +55,7 @@ public sealed class SqlControlPlaneGuards
         await identity.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static string QuoteApprovedDb(string? db)
+    internal static string ValidateApprovedDatabase(string? db)
     {
         if (string.IsNullOrWhiteSpace(db) || db.Length > 128 ||
             !char.IsAsciiLetter(db[0]) ||
@@ -62,6 +63,9 @@ public sealed class SqlControlPlaneGuards
             new[] { "master", "model", "msdb", "tempdb" }
                 .Contains(db, StringComparer.OrdinalIgnoreCase))
             throw new AuthorizationDeniedException("B5_CONTROL_DB_DENIED");
-        return "[" + db + "]";
+        return db;
     }
+
+    private static string QuoteApprovedDb(string? db) =>
+        "[" + ValidateApprovedDatabase(db) + "]";
 }

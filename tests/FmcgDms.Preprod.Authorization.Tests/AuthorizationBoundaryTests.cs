@@ -61,7 +61,8 @@ public sealed class AuthorizationBoundaryTests
     {
         var authority = Own();
         var fence = new SqlAuthorizationFence(
-            "Server=(localdb)\\MSSQLLocalDB;Database=B5NeverCreated;Integrated Security=true");
+            "Server=(localdb)\\MSSQLLocalDB;Database=B5NeverCreated;Integrated Security=true",
+            "FmcgB5TenA_ci");
         var guards = new SqlControlPlaneGuards("FmcgB5Identity_ci", "FmcgB5Registry_ci");
         var error = await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
             fence.ExecuteAsync(authority, guards,
