@@ -116,3 +116,7 @@ For **source-only** C-B4-02, substitute two *separate review passes* by the sole
 | Actual physical PREPROD G-B01..05 | `NOT_RUN / NOT_VERIFIED` |
 
 The solo authorization **does not equal** `SOLO_ACCEPT_CODE_BOUNDARY`: only the Owner's later documented inspection and acceptance of the *final* code/evidence may use that verdict. If a frozen B.1 physical test still demands genuinely independent personnel, disclose the deviation and seek separate explicit acceptance for that *physical* gate; never label a solo witness as independent human or physical PREPROD PASS. No merge while #59, #60 technical findings or any required CI gate remains open.
+
+## Solo-source review output / newer bounded merge policy
+
+The Owner's newer [DEBT-01](../decisions/owner-app02b4-bounded-security-debt-merge-2026-11-18.md) and [solo technical review](app-02b4-solo-source-review-disposition-2026-11-18.md) define separate DBA and Security source-code inspection passes by one Owner acting in multiple capacities. The older independent-human fields above remain historical, **not mandatory additional GitHub accounts** for code-only PR #58. Actual PREPROD SQL effective grants/role inheritance and independent physical B.1 witnesses remain `NOT_VERIFIED`. The source review is assistant/tool-assisted, not two humans and not a personally executed SQL environment inspection. #59 HIGH security debt remains open and APP-00A full audit remains FAIL; never misreport otherwise.

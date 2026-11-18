@@ -57,3 +57,7 @@ No production/pilot/tenant-business routing/APP-02C/D/E authorization results fr
 | Physical PREPROD and frozen G-B01..05/30 | `NOT_VERIFIED` |
 
 **Historical preservation:** Earlier decisions, reviews, PR comments, and the originally drafted independent-human DBA/Security acceptance document are retained as historical evidence. This addendum is the **newer controlling Owner staffing disposition** for B.4 source-only work, not a rewrite of past events or tests.
+
+## Later Owner directive for bounded source integration
+
+The Owner subsequently requested PR #58 merge with unresolved items tracked as debt; see [OWN-APP02B4-DEBT-01](owner-app02b4-bounded-security-debt-merge-2026-11-18.md). Source code review may use documented solo Owner DBA/Security responsibility and separate technical inspection passes, with an explicit independence deviation. This does not transform an AI-assisted review into a second human signature, turn #59 full npm audit FAIL into PASS or authorize physical PREPROD.
