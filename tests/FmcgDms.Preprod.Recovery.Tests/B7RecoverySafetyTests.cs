@@ -128,6 +128,9 @@ public sealed class B7RecoverySafetyTests
             B7SafeRestore.Inspect(original with { Outcomes = [committed with { ObservedEffectCount = 2 }] }).Denials);
         Assert.Contains("DUPLICATE_MESSAGE_ID",
             B7SafeRestore.Inspect(original with { Outcomes = [committed, committed] }).Denials);
+        Assert.Contains("SOURCE_ID_MESSAGE_ID_CONFLICT",
+            B7SafeRestore.Inspect(original with { Outcomes = [committed,
+                committed with { MessageId = Guid.NewGuid() }] }).Denials);
         Assert.Contains("SOURCE_OR_RECEIVER_WITNESS_MISSING",
             B7SafeRestore.Inspect(original with { Outcomes = [committed with { IndependentReceiverJournalVerified = false }] }).Denials);
         Assert.False(B7SafeRestore.Inspect(original with { Outcomes = [unknown] }).PermitsTenantActivation);
