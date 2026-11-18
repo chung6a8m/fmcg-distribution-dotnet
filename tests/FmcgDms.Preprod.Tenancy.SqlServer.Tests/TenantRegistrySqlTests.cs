@@ -54,8 +54,8 @@ public sealed class TenantRegistrySqlTests
         var ddlProfile=Convert.ToString(await f.ScalarAsLoginAsync(ddlLogin,
             @"SELECT CONCAT(COALESCE(CONVERT(varchar(5),IS_SRVROLEMEMBER('sysadmin')),'null'),
                     '|',COALESCE(CONVERT(varchar(5),IS_SRVROLEMEMBER('dbcreator')),'null'),
-                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,'SERVER','ALTER ANY DATABASE')),'null'),
-                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,'SERVER','CONTROL SERVER')),'null'))",ct));
+                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,NULL,'ALTER ANY DATABASE')),'null'),
+                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,NULL,'CONTROL SERVER')),'null'))",ct));
         Assert.Equal("0|0|0|0",ddlProfile);
         var provisioner=new SqlTenantProvisioner(registry,f.Master)
         {
