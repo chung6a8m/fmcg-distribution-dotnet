@@ -99,6 +99,9 @@ BEGIN TRY
             CONSTRAINT CK_B6Effective CHECK(EffectiveFromUtc<EffectiveUntilUtc),
             CONSTRAINT CK_B6SourceVersion CHECK(SourceVersion>=1)
         );
+        -- A source revision cannot be re-used with another ProposalId to evade replay.
+        CREATE UNIQUE INDEX UX_B6PolicyProposal_SourceRevision
+          ON dbo.B6PolicyProposal(TenantId,PolicyCode,Tier,SourceId,SourceVersion);
         CREATE TABLE dbo.B6PolicyApproval
         (
             TenantId uniqueidentifier NOT NULL,
@@ -272,6 +275,7 @@ BEGIN
   IF @gate<0 THROW 52633,N''B6_POLICY_LOCK_DENIED'',1;
   IF EXISTS(SELECT 1 FROM dbo.B6PolicySnapshot WITH(UPDLOCK,HOLDLOCK)
       WHERE TenantId=@TenantId AND PolicyCode=@code AND Tier=@tier
+        AND (@tier=''L1'' OR CaseId=@case)
         AND EffectiveFromUtc<@until AND EffectiveUntilUtc>@from)
     THROW 52634,N''B6_OVERLAPPING_VERSION_DENIED'',1;
   INSERT dbo.B6PolicyApproval(TenantId,ProposalId,CheckerLogin,SourceHash)
@@ -298,7 +302,8 @@ END');
 
         EXEC(N'CREATE PROCEDURE dbo.b6_ResolveCurrent
 @TenantId uniqueidentifier, @PolicyCode nvarchar(96),
-@ExpectedProposalId uniqueidentifier, @ExpectedSourceHash binary(32)
+@ExpectedProposalId uniqueidentifier, @ExpectedSourceHash binary(32),
+@ExpectedCaseId uniqueidentifier=NULL
 AS
 BEGIN
  SET NOCOUNT ON;
@@ -307,6 +312,7 @@ BEGIN
        WHERE TenantId=@TenantId AND LoginName=SUSER_SNAME()
          AND Enabled=1 AND CanResolve=1)
     OR @ExpectedProposalId IS NULL OR @ExpectedSourceHash IS NULL
+    OR @ExpectedCaseId=''00000000-0000-0000-0000-000000000000''
     THROW 52640,N''B6_RESOLVE_AUTHORITY_DENIED'',1;
  DECLARE @now datetime2(7)=SYSUTCDATETIME(), @chosen uniqueidentifier,
    @hash binary(32), @value decimal(19,4), @tier char(2), @version bigint,
@@ -317,6 +323,7 @@ BEGIN
    @from=EffectiveFromUtc,@until=EffectiveUntilUtc
  FROM dbo.B6PolicySnapshot WITH(HOLDLOCK)
  WHERE TenantId=@TenantId AND PolicyCode=@PolicyCode
+   AND (Tier=''L1'' OR (Tier=''L2'' AND CaseId=@ExpectedCaseId))
    AND EffectiveFromUtc<=@now AND @now<EffectiveUntilUtc
  ORDER BY CASE WHEN Tier=''L2'' THEN 0 ELSE 1 END, EffectiveFromUtc DESC;
  IF @chosen IS NULL OR @chosen<>@ExpectedProposalId
@@ -348,6 +355,9 @@ END');
        OR OBJECT_ID(N'dbo.B6PolicyProposal',N'U') IS NULL
        OR OBJECT_ID(N'dbo.B6PolicyApproval',N'U') IS NULL
        OR OBJECT_ID(N'dbo.B6PolicySnapshot',N'U') IS NULL
+       OR NOT EXISTS(SELECT 1 FROM sys.indexes
+         WHERE object_id=OBJECT_ID(N'dbo.B6PolicyProposal',N'U')
+           AND name=N'UX_B6PolicyProposal_SourceRevision' AND is_unique=1 AND is_disabled=0)
        OR OBJECT_ID(N'dbo.b6_OpenCase',N'P') IS NULL
        OR OBJECT_ID(N'dbo.b6_ApproveCase',N'P') IS NULL
        OR OBJECT_ID(N'dbo.b6_Propose',N'P') IS NULL
