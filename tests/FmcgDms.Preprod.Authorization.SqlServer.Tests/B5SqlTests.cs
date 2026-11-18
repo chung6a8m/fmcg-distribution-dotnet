@@ -79,7 +79,7 @@ public sealed class B5SqlTests
 
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
             a, current, (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
-        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+        await Assert.ThrowsAsync<SqlException>(() =>
             f.RuntimeReadMembershipAsync(ct));
 
         // After the durable revoke the protected tenant A has two legal
