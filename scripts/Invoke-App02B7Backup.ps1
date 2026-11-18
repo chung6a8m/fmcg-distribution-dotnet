@@ -3,6 +3,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][guid]$TenantId,
+    [Parameter(Mandatory)][guid]$ApprovedBindingId,
+    [Parameter(Mandatory)][long]$ApprovedBindingVersion,
     [Parameter(Mandatory)][ValidateSet('Full','Differential','Log')][string]$Kind,
     [Parameter(Mandatory)][string]$SqlInstance,
     [Parameter(Mandatory)][string]$ApprovedSqlInstance,
@@ -15,6 +17,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($TenantId -eq [guid]::Empty) { throw 'B7_TENANT_REQUIRED' }
+if ($ApprovedBindingId -eq [guid]::Empty -or $ApprovedBindingVersion -lt 1) { throw 'B7_EXACT_APPROVED_BINDING_REQUIRED' }
 if ([string]::IsNullOrWhiteSpace($ApprovedChangeRef) -or $ApprovedChangeRef.Length -gt 160) {
     throw 'B7_CHANGE_APPROVAL_REQUIRED'
 }
@@ -55,6 +58,8 @@ $escapedPath = $SqlServerStageFile.Replace("'", "''")
 $cert = "[$EncryptionCertificate]"
 $requiredName = $ApprovedSqlServerName.Replace("'", "''")
 $tenantText = $TenantId.ToString()
+$bindingText = $ApprovedBindingId.ToString()
+$bindingVersionText = $ApprovedBindingVersion.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 $backupSql = switch ($Kind) {
     'Full' { "BACKUP DATABASE [$db] TO DISK = N'$escapedPath' WITH INIT, CHECKSUM, COMPRESSION, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $cert);" }
     'Differential' { "BACKUP DATABASE [$db] TO DISK = N'$escapedPath' WITH DIFFERENTIAL, INIT, CHECKSUM, COMPRESSION, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $cert);" }
@@ -71,13 +76,26 @@ IF NOT EXISTS (SELECT 1 FROM [$db].sys.tables
     WHERE name=N'__PreprodTenantBinding' AND schema_id=SCHEMA_ID(N'dbo'))
     THROW 61703, 'B7_TENANT_BINDING_MARKER_MISSING', 1;
 IF (SELECT COUNT_BIG(*) FROM [$db].dbo.__PreprodTenantBinding
-    WHERE TenantId='$tenantText' AND BindingId IS NOT NULL AND BindingVersion>=1)<>1
+    WHERE TenantId='$tenantText' AND BindingId='$bindingText' AND BindingVersion=$bindingVersionText)<>1
     OR (SELECT COUNT_BIG(*) FROM [$db].dbo.__PreprodTenantBinding)<>1
     THROW 61704, 'B7_TENANT_BINDING_MISMATCH', 1;
 IF NOT EXISTS (SELECT 1 FROM master.sys.certificates WHERE name=N'$EncryptionCertificate')
     THROW 61705, 'B7_ENCRYPTION_CERTIFICATE_MISSING', 1;
+-- Prevent concurrent overwrite and reject any existing SQL-side backup medium.
+DECLARE @b7StageLock int;
+EXEC @b7StageLock = master.sys.sp_getapplock
+    @Resource=N'B7_BACKUP_STAGE_$db', @LockMode='Exclusive',
+    @LockOwner='Session', @LockTimeout=0;
+IF @b7StageLock < 0 THROW 61706, 'B7_BACKUP_STAGE_ALREADY_LOCKED', 1;
+IF EXISTS (SELECT 1 FROM sys.dm_os_file_exists(N'$escapedPath')
+           WHERE file_exists=1 OR file_is_directory=1)
+    THROW 61707, 'B7_STAGE_FILE_ALREADY_EXISTS', 1;
+IF NOT EXISTS (SELECT 1 FROM sys.dm_os_file_exists(N'$escapedPath')
+               WHERE parent_directory_exists=1)
+    THROW 61708, 'B7_STAGE_DIRECTORY_MISSING', 1;
 $backupSql
 RESTORE VERIFYONLY FROM DISK = N'$escapedPath' WITH CHECKSUM;
+EXEC master.sys.sp_releaseapplock @Resource=N'B7_BACKUP_STAGE_$db', @LockOwner='Session';
 "@
 if (!$Execute) {
     Write-Output "B7_PLAN_ONLY tenant=$db kind=$Kind change=$ApprovedChangeRef; NO_SQL_EXECUTION"
@@ -89,53 +107,6 @@ $path = Join-Path ([System.IO.Path]::GetTempPath()) ('b7-'+[guid]::NewGuid().ToS
 try {
     [System.IO.File]::WriteAllText($path, $sql, [System.Text.UTF8Encoding]::new($false))
     & sqlcmd -S $SqlInstance -E -N -b -V 16 -i $path
-    if ($LASTEXITCODE -ne 0) { throw 'B7_BACKUP_FAILED_DENY_OFFHOST_COMPLETION' }
-    Write-Output "B7_SQL_ENCRYPTED_STAGING_ONLY tenant=$db kind=$Kind; OFFHOST_AND_RESTORE_PROOF_NOT_VERIFIED"
-} finally {
-    Remove-Item $path -Force -ErrorAction SilentlyContinue
-}
-
-if ($leaf -cnotmatch $leafPattern) {
-    throw 'B7_UNIQUE_BACKUP_OBJECT_NAME_REQUIRED'
-}
-$escapedPath = $SqlServerStageFile.Replace("'", "''")
-$cert = "[$EncryptionCertificate]"
-$requiredName = $ApprovedSqlServerName.Replace("'", "''")
-$tenantText = $TenantId.ToString()
-$backupSql = switch ($Kind) {
-    'Full' { "BACKUP DATABASE [$db] TO DISK = N'$escapedPath' WITH INIT, CHECKSUM, COMPRESSION, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $cert);" }
-    'Differential' { "BACKUP DATABASE [$db] TO DISK = N'$escapedPath' WITH DIFFERENTIAL, INIT, CHECKSUM, COMPRESSION, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $cert);" }
-    'Log' { "BACKUP LOG [$db] TO DISK = N'$escapedPath' WITH INIT, CHECKSUM, COMPRESSION, ENCRYPTION (ALGORITHM = AES_256, SERVER CERTIFICATE = $cert);" }
-}
-$sql = @"
-SET NOCOUNT ON;
-IF CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)) <> N'$requiredName'
-    THROW 61701, 'B7_WRONG_SQL_SERVER', 1;
-IF DB_ID(N'$db') IS NULL OR
-    (SELECT recovery_model_desc FROM sys.databases WHERE name=N'$db') <> 'FULL'
-    THROW 61702, 'B7_FULL_RECOVERY_OR_DATABASE_REQUIRED', 1;
-IF NOT EXISTS (SELECT 1 FROM [$db].sys.tables
-    WHERE name=N'__PreprodTenantBinding' AND schema_id=SCHEMA_ID(N'dbo'))
-    THROW 61703, 'B7_TENANT_BINDING_MARKER_MISSING', 1;
-IF (SELECT COUNT_BIG(*) FROM [$db].dbo.__PreprodTenantBinding
-    WHERE TenantId='$tenantText' AND BindingId IS NOT NULL AND BindingVersion>=1)<>1
-    OR (SELECT COUNT_BIG(*) FROM [$db].dbo.__PreprodTenantBinding)<>1
-    THROW 61704, 'B7_TENANT_BINDING_MISMATCH', 1;
-IF NOT EXISTS (SELECT 1 FROM master.sys.certificates WHERE name=N'$EncryptionCertificate')
-    THROW 61705, 'B7_ENCRYPTION_CERTIFICATE_MISSING', 1;
-$backupSql
-RESTORE VERIFYONLY FROM DISK = N'$escapedPath' WITH CHECKSUM;
-"@
-if (!$Execute) {
-    Write-Output "B7_PLAN_ONLY tenant=$db kind=$Kind change=$ApprovedChangeRef; NO_SQL_EXECUTION"
-    return
-}
-# An approved, authenticated, independently authorized SQL operator runs this
-# on a controlled host. No SQL password or Vault token is read from arguments.
-$path = Join-Path ([System.IO.Path]::GetTempPath()) ('b7-'+[guid]::NewGuid().ToString('N')+'.sql')
-try {
-    [System.IO.File]::WriteAllText($path, $sql, [System.Text.UTF8Encoding]::new($false))
-    & sqlcmd -S $SqlInstance -E -b -V 16 -i $path
     if ($LASTEXITCODE -ne 0) { throw 'B7_BACKUP_FAILED_DENY_OFFHOST_COMPLETION' }
     Write-Output "B7_SQL_ENCRYPTED_STAGING_ONLY tenant=$db kind=$Kind; OFFHOST_AND_RESTORE_PROOF_NOT_VERIFIED"
 } finally {
