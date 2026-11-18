@@ -37,9 +37,8 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
             await using(var permission=new SqlCommand(@"SELECT CASE WHEN
                 IS_SRVROLEMEMBER('sysadmin')=0
                 AND IS_SRVROLEMEMBER('dbcreator')=0
-                AND HAS_PERMS_BY_NAME(NULL,'SERVER','CREATE ANY DATABASE')=1
-                AND HAS_PERMS_BY_NAME(NULL,'SERVER','ALTER ANY DATABASE')=0
-                AND HAS_PERMS_BY_NAME(NULL,'SERVER','CONTROL SERVER')=0
+                AND COALESCE(HAS_PERMS_BY_NAME(NULL,'SERVER','ALTER ANY DATABASE'),1)=0
+                AND COALESCE(HAS_PERMS_BY_NAME(NULL,'SERVER','CONTROL SERVER'),1)=0
                 THEN 1 ELSE 0 END",master))
             {
                 if(Convert.ToInt32(await permission.ExecuteScalarAsync(ct) ?? 0)!=1)
