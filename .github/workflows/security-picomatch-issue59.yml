@@ -34,3 +34,28 @@ jobs:
         run: npm audit --omit=dev --audit-level=low
       - name: Full-tree audit (moderate and above, no exclusion)
         run: npm audit --audit-level=moderate
+
+  candidate-metadata-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Query exact patched-fork registry provenance (no install)
+        shell: bash
+        run: |
+          mkdir -p TestResults
+          npm view '@rootio/picomatch@4.0.7-root.io.1' name version dist.integrity dist.tarball --json             > TestResults/rootio-picomatch-metadata.json
+          npm view '@ryotsu/picomatch@4.0.7-a' name version dist.integrity dist.tarball --json             > TestResults/ryotsu-picomatch-metadata.json
+          test -s TestResults/rootio-picomatch-metadata.json
+          test -s TestResults/ryotsu-picomatch-metadata.json
+          printf '%s\n' 'Candidate metadata only; PATCHED_SOURCE_NOT_REVIEWED'             'NO_LOCKFILE_CHANGE' 'FULL_NPM_AUDIT_STILL_REQUIRED'             > TestResults/ACCEPTANCE-NOT-VERIFIED.txt
+      - name: Upload candidate availability metadata (not signoff)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: issue59-candidate-registry-metadata-only
+          path: TestResults/
+          if-no-files-found: warn
