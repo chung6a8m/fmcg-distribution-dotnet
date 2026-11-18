@@ -205,6 +205,16 @@ public sealed class TenantRegistrySqlTests
             new SqlParameter("@row",SqlDbType.Binary,8){Value=a.RowVersion},
             new SqlParameter("@binding",a.BindingId),
             new SqlParameter("@hash",SqlDbType.Binary,32){Value=SHA256.HashData([1,2,3,4])}));
+        // A finalizer approved for tenant A must not own/change tenant B,
+        // including attempts made outside the Control Plane stored procedure.
+        var peerOwnerBefore=(byte[])(await f.ScalarAsync(f.Master,
+            "SELECT owner_sid FROM sys.databases WHERE name=@name",ct,
+            new SqlParameter("@name",b.DatabaseName)))!;
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsFromAsync(finalizerA,f.Master,
+            $"ALTER AUTHORIZATION ON DATABASE::[{b.DatabaseName}] TO [{ownerA}]",ct));
+        Assert.Equal(peerOwnerBefore,(byte[])(await f.ScalarAsync(f.Master,
+            "SELECT owner_sid FROM sys.databases WHERE name=@name",ct,
+            new SqlParameter("@name",b.DatabaseName)))!);
         // A finalizer approved for tenant A must NOT be able to claim tenant B.
         await Assert.ThrowsAsync<SqlException>(()=>
             finalizerRegistryA.ClaimFinalizationAsync(tenantB,Guid.NewGuid(),ct));
@@ -376,7 +386,8 @@ public sealed class TenantRegistrySqlTests
             SameOperationRetry=true,PeerBindingDenied=true,
             OwnerTransferEnforced=true,OwnerSidMatchesApproved=true,
             SqlOwnerApprovalImmutable=true,DirectForgedOwnerWitnessDenied=true,
-            ScopedFinalizerAutomation=true,FinalizerLeaseCollisionDenied=true,
+            ScopedFinalizerAutomation=true,FinalizerDirectPeerDdlDenied=true,
+            FinalizerLeaseCollisionDenied=true,
             FinalizerStableOperationRetry=true,FinalizerPeerClaimDenied=true,
             FinalizerStaleCompletionDenied=true,FinalizerRevokeDuringClaimDenied=true,
             SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,

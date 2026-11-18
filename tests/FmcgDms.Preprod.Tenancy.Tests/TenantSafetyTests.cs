@@ -55,6 +55,22 @@ public sealed class TenantSafetyTests
     }
 
     [Fact]
+    public void Finalizer_admission_requires_its_own_pinned_sql_identity_and_master_target()
+    {
+        const string registry="Server=sql.internal;Database=control;Encrypt=True;TrustServerCertificate=False;User Id=b4final;Password=example-only";
+        const string master="Server=sql.internal;Database=master;Encrypt=True;TrustServerCertificate=False;User Id=b4final;Password=example-only";
+        TenantOperatorAdmission.ValidateFinalizer("Preprod","https://vault.internal.example",registry,master);
+        Assert.Throws<TenantLifecycleDeniedException>(()=>
+            TenantOperatorAdmission.ValidateFinalizer("Production","https://vault.internal.example",registry,master));
+        Assert.Throws<TenantLifecycleDeniedException>(()=>
+            TenantOperatorAdmission.ValidateFinalizer("Preprod","https://vault.internal.example",registry,
+                master.Replace("b4final","other-sql-login")));
+        Assert.Throws<TenantLifecycleDeniedException>(()=>
+            TenantOperatorAdmission.ValidateFinalizer("Preprod","https://vault.internal.example",registry,
+                master.Replace("Server=sql.internal","Server=peer.internal")));
+    }
+
+    [Fact]
     public void Non_active_registry_states_are_always_non_routable()
     {
         foreach(var state in new[]{"REQUESTED","APPROVED","PROVISIONING","FAILED_RETRYABLE",
