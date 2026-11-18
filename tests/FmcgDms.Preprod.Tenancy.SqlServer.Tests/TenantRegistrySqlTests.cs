@@ -155,6 +155,23 @@ public sealed class TenantRegistrySqlTests
         await RequestApprove(tenantA,"tenant-ci-a",ownerA,finalizerA,retirerA);
         await RequestApprove(tenantB,"tenant-ci-b",ownerB,finalizerB,retirerB);
         await RequestApprove(orphan,"tenant-ci-orphan",ownerOrphan,finalizerOrphan,retirerOrphan);
+        // An approved per-tenant finalizer/retirer/owner login must never be
+        // silently rebound to a second physical tenant.
+        var duplicateTenant=Guid.NewGuid();
+        var reqRef="CI-ISOLATED-"+duplicateTenant.ToString("N");
+        await f.RunAsAsync(f.Requester,
+            "EXEC dbo.cp_RequestTenant @TenantId=@id,@TenantKey=@key,@RequestRef=@ref",ct,
+            new SqlParameter("@id",duplicateTenant),
+            new SqlParameter("@key","unique-ci-finalizer"),
+            new SqlParameter("@ref",reqRef));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
+            "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner,@FinalizerLogin=@finalizer,@RetirerLogin=@retirer",ct,
+            new SqlParameter("@id",duplicateTenant),
+            new SqlParameter("@ref","CHG-REUSE-DENIED"),
+            new SqlParameter("@owner",ownerA),
+            new SqlParameter("@provisioner",ddlLogin),
+            new SqlParameter("@finalizer",finalizerA),
+            new SqlParameter("@retirer",retirerA)));
         // Owner/DDL identities are immutable approval content: an idempotent
         // replay with changed owner may not silently rewrite SQL authority.
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
@@ -448,7 +465,8 @@ public sealed class TenantRegistrySqlTests
             FinalizerLeaseCollisionDenied=true,
             FinalizerStableOperationRetry=true,FinalizerPeerClaimDenied=true,
             FinalizerStaleCompletionDenied=true,FinalizerRevokeDuringClaimDenied=true,
-            IndependentDbaRetirement=true,RetirementLostAckRecovery=true,
+            IndependentDbaRetirement=true,FinalizerCredentialUniqueAcrossTenants=true,
+            RetirementLostAckRecovery=true,
             FinalizerSelfCompletionDenied=true,
             FinalizerLoginDisabled=true,FinalizerDbUserRemoved=true,
             FinalizerImpersonationRevoked=true,FinalizerPostTransferRetakeDenied=true,

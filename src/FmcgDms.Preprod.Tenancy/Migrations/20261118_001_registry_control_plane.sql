@@ -93,6 +93,19 @@ BEGIN TRY
             ('REQUESTED','APPROVED','REJECTED','PROVISIONING','FAILED_RETRYABLE','VERIFYING',
              'FINALIZING','ACTIVE','SUSPENDED','REACTIVATION_VERIFYING','DECOMMISSIONING','DECOMMISSIONED'))
     );
+    -- A finalizer and its retiring DBA credential are bound to EXACTLY ONE
+    -- tenant; sharing either SQL login across tenants would let privilege
+    -- retirement of tenant A strand or expose tenant B.
+    CREATE UNIQUE INDEX UX_PreprodTenantRegistry_OwnerLogin
+        ON dbo.PreprodTenantRegistry(ApprovedOwnerLogin)
+        WHERE ApprovedOwnerLogin IS NOT NULL;
+    CREATE UNIQUE INDEX UX_PreprodTenantRegistry_FinalizerLogin
+        ON dbo.PreprodTenantRegistry(ApprovedFinalizerLogin)
+        WHERE ApprovedFinalizerLogin IS NOT NULL;
+    CREATE UNIQUE INDEX UX_PreprodTenantRegistry_RetirerLogin
+        ON dbo.PreprodTenantRegistry(ApprovedRetirerLogin)
+        WHERE ApprovedRetirerLogin IS NOT NULL;
+
     CREATE TABLE dbo.PreprodTenantLifecycleEvents
     (
         EventNo bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_PreprodTenantLifecycleEvents PRIMARY KEY,

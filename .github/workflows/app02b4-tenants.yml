@@ -90,7 +90,8 @@ jobs:
               !$e.FinalizerLeaseCollisionDenied -or
               !$e.FinalizerStableOperationRetry -or !$e.FinalizerPeerClaimDenied -or
               !$e.FinalizerStaleCompletionDenied -or !$e.FinalizerRevokeDuringClaimDenied -or
-              !$e.IndependentDbaRetirement -or !$e.RetirementLostAckRecovery -or
+              !$e.IndependentDbaRetirement -or !$e.FinalizerCredentialUniqueAcrossTenants -or
+              !$e.RetirementLostAckRecovery -or
               !$e.FinalizerSelfCompletionDenied -or
               !$e.FinalizerLoginDisabled -or !$e.FinalizerDbUserRemoved -or
               !$e.FinalizerImpersonationRevoked -or !$e.FinalizerPostTransferRetakeDenied -or
