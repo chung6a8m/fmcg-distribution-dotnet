@@ -145,7 +145,7 @@ public sealed class TenantSafetyTests
         var handler=new FinalizerVaultStub();
         try
         {
-            await File.WriteAllTextAsync(file,"ci-only-token-material-123456");
+            await File.WriteAllTextAsync(file,"ci-only-token-material-123456",TestContext.Current.CancellationToken);
             var vault=new VaultTenantOperatorSecrets("https://vault.internal.example",file,handler);
             var result=await vault.ReadFinalizerAsync(tenant,TestContext.Current.CancellationToken);
             Assert.Equal("Server=sql.internal;Database=control",result.RegistryConnection);
