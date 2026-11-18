@@ -184,8 +184,11 @@ public static class B8AuditVerifier
             throw new ArgumentException("B8_SHA256_LENGTH_DENIED");
     }
 
+    // SQL Server CONVERT(binary(16), uniqueidentifier) uses the native mixed-endian
+    // byte layout, equivalent to Guid.ToByteArray() (NOT RFC 4122 big-endian).
+    // The two-tenant LocalDB test independently compares real SQL hashes.
     private static void WriteGuid(Stream output, Guid guid) =>
-        output.Write(guid.ToByteArray(bigEndian: true));
+        output.Write(guid.ToByteArray());
 
     private static void WriteLong(Stream output, long value)
     {
