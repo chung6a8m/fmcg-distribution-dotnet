@@ -280,7 +280,9 @@ BEGIN
         AND EXISTS (SELECT 1 FROM sys.databases AS d
             WHERE d.name=r.DatabaseName AND d.owner_sid=SUSER_SID(r.ApprovedOwnerLogin)
                 AND d.owner_sid<>SUSER_SID(r.ApprovedProvisionerLogin));
-    IF @old NOT IN (''VERIFYING'',''REACTIVATION_VERIFYING'')
+    -- A missing row or failed owner/rowversion/binding predicate yields NULL.
+    -- SQL IF (NULL NOT IN (...)) is UNKNOWN, not TRUE: explicitly fence NULL.
+    IF @old IS NULL OR @old NOT IN (''VERIFYING'',''REACTIVATION_VERIFYING'')
         THROW 51410, ''TENANT_VERIFICATION_FENCED'', 1;
     UPDATE dbo.PreprodTenantRegistry SET VerifiedBy=@actor, VerificationHash=@WitnessHash,
         VerifiedUtc=SYSUTCDATETIME(), VerifiedEpoch=SecurityEpoch,
