@@ -11,6 +11,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -67,7 +68,16 @@ def strict_json_bytes(data: bytes) -> object:
             result[key] = value
         return result
 
-    return json.loads(data, parse_constant=no_constant, object_pairs_hook=unique_keys)
+    def finite_float(value: str) -> float:
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("NON_FINITE_JSON_NUMBER")
+        return result
+
+    return json.loads(
+        data, parse_constant=no_constant, parse_float=finite_float,
+        object_pairs_hook=unique_keys,
+    )
 
 
 def read_object(path: Path) -> dict:
@@ -132,14 +142,17 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
         require(len({trusted["keys"][role]["publicKeySha256"]
                      for role in ("fixture", "observer", "security", "dba")}) == 4,
                 "INDEPENDENT_TRUST_KEY_ROLES_REQUIRED")
-        require(len(set(trusted["tenantDatabaseIds"].values())) == 2,
-                "TRUST_TWO_DISTINCT_TENANT_DATABASES_REQUIRED")
+        database_ids = trusted.get("tenantDatabaseIds")
+        require(isinstance(database_ids, dict) and set(database_ids) == {"A", "B"}
+                and all(isinstance(database_ids[k], str) and bool(database_ids[k].strip())
+                        for k in ("A", "B")) and database_ids["A"] != database_ids["B"],
+                "TRUST_EXACT_TWO_NAMED_TENANT_DATABASES_REQUIRED")
+        require(isinstance(trusted.get("approvedEnvironmentId"), str)
+                and bool(trusted["approvedEnvironmentId"].strip()),
+                "TRUST_APPROVED_ENVIRONMENT_ID_REQUIRED")
         require(bool(HEX64.fullmatch(str(trusted.get("expectedFixtureSha256", "")))) and
                 bool(HEX64.fullmatch(str(trusted.get("approvedHostSha256", "")))),
                 "TRUST_APPROVED_SHA256_PINS_REQUIRED")
-        require(all(isinstance(x, str) and bool(x.strip())
-                    for x in trusted["tenantDatabaseIds"].values()),
-                "TRUST_EMPTY_DATABASE_IDS")
     except (OSError, ValueError, TypeError, KeyError) as exc:
         errors.append(f"TRUST_UNAVAILABLE:{str(exc)[:120]}")
 
@@ -161,6 +174,11 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                         and isinstance(row.get("requiredKinds"), list)
                         and len(set(row["requiredKinds"])) == len(row["requiredKinds"])
                         and bool(row["requiredKinds"]), f"FIXTURE_INCOMPLETE:{code}")
+        # The signed operator fixture must also be the exact frozen fixture from
+        # the inspected source HEAD; externally pinned *different* expectations
+        # cannot silently replace the committed acceptance contract.
+        require(fixture_bytes == Path(__file__).with_name("expected-v1.json").read_bytes(),
+                "FIXTURE_DIFFERS_FROM_REVIEWED_SOURCE")
         require(sha256(fixture_bytes) == trusted.get("expectedFixtureSha256"),
                 "INDEPENDENT_FIXTURE_PIN_MISMATCH")
         if trusted:
@@ -182,6 +200,11 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                 "UNTRUSTED_HOST")
         require(isinstance(manifest.get("testRunId"), str) and
                 bool(manifest["testRunId"].strip()), "MISSING_TEST_RUN_ID")
+        require(all(isinstance(manifest.get(actor), str) and
+                    bool(manifest[actor].strip())
+                    for actor in ("observerId", "implementerId")) and
+                manifest["observerId"] != manifest["implementerId"],
+                "DISTINCT_NONEMPTY_OBSERVER_AND_IMPLEMENTER_REQUIRED")
         require(bool(DIGEST.fullmatch(str(manifest.get("apiImageDigest", "")))) and
                 bool(DIGEST.fullmatch(str(manifest.get("workerImageDigest", "")))),
                 "MISSING_REPRODUCIBLE_IMAGE_DIGESTS")
@@ -317,6 +340,36 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
 
         recovery = manifest.get("recovery", {})
         try:
+            # A measurement is not independently witnessed merely because an
+            # observer-signed manifest contains plausible RPO/RTO numbers.
+            # Require B03-02 physical RESTORE, SQL, BACKUP and OUTCOME raw
+            # witnesses and bind the recovery clock anchors to the RESTORE witness.
+            recovery_refs = recovery["witnessRefs"]
+            if (not isinstance(recovery_refs, list) or
+                len(recovery_refs) != len(set(recovery_refs)) or
+                len(recovery_refs) < 4):
+                raise ValueError("RECOVERY_WITNESS_REFS_REQUIRED")
+            recovery_case = next(x for x in reported if x.get("caseId") == "B03-02")
+            recovery_kinds = set()
+            restore_measurement_found = False
+            for ref in recovery_refs:
+                w, body = witness_map[ref]
+                if body.get("caseId") != "B03-02" or ref not in recovery_case["positiveRefs"]:
+                    raise ValueError("RECOVERY_WITNESS_NOT_BOUND_TO_B03_02")
+                recovery_kinds.add(w["kind"])
+                if w["kind"] == "RESTORE":
+                    measurement = body.get("recoveryMeasurements")
+                    fields = ("failureUtc", "latestRecoveredCommittedUtc",
+                              "monotonicFailureSeconds", "monotonicSafeServiceSeconds")
+                    if (not isinstance(measurement, dict) or
+                        any(measurement.get(field) != recovery.get(field) or
+                            type(measurement.get(field)) is not type(recovery.get(field))
+                            for field in fields)):
+                        raise ValueError("RECOVERY_CLOCK_ANCHORS_UNWITNESSED")
+                    restore_measurement_found = True
+            if (not restore_measurement_found or
+                not {"RESTORE", "SQL", "BACKUP", "OUTCOME"}.issubset(recovery_kinds)):
+                raise ValueError("RECOVERY_INDEPENDENT_KINDS_INCOMPLETE")
             rpo = (parse_utc(recovery["failureUtc"]) -
                    parse_utc(recovery["latestRecoveredCommittedUtc"])).total_seconds()
             rto = recovery["monotonicSafeServiceSeconds"] - recovery["monotonicFailureSeconds"]
@@ -334,7 +387,7 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                     "externalEffectsReconciled", "safeApiAndWorkerReentry",
                     "peerDatabaseUnchanged"))):
                 raise ValueError("RPO_RTO_OR_SAFE_RESTORE_NOT_PROVEN")
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, StopIteration) as exc:
             errors.append(f"PHYSICAL_RECOVERY_UNVERIFIED:{str(exc)[:120]}")
 
         ci = manifest.get("ciChecks", [])
@@ -433,15 +486,21 @@ def main() -> int:
             report["classification"] = "NOT_VERIFIED"
             report["decision"] = "NO_GO"
             report["passedCases"] = 0
+            report["cases"] = {c: ("BLOCKED" if state == "PASS" else state)
+                               for c, state in report["cases"].items()}
             report["gates"] = {g: "NOT_VERIFIED" for g in GATES}
             report["errors"] = sorted(set(report["errors"] + ["EXACT_CHECKOUT_HEAD_MISMATCH"]))
     except Exception as exc:  # no crash/fail-open on attacker-supplied evidence
         report = {
             "schema": "APP02B9-ORACLE-REPORT-V1", "decision": "NO_GO",
             "classification": "NOT_VERIFIED",
+            "sourceHeadSha": args.expected_head,
+            "passedCases": 0, "requiredCases": len(CASE_IDS),
             "gates": {g: "NOT_VERIFIED" for g in GATES},
             "cases": {c: "NOT_RUN" for c in CASE_IDS},
             "errors": [f"VALIDATOR_FAIL_CLOSED:{type(exc).__name__}"],
+            "actualEv08": "NOT_VERIFIED", "productionP0": "NOT_VERIFIED",
+            "app02cde": "NOT_AUTHORIZED",
             "productionAndPilot": "NOT_AUTHORIZED",
         }
     payload = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
