@@ -103,8 +103,10 @@ BEGIN
 END');
     GRANT EXECUTE ON OBJECT::dbo.b53_AssertIdentityBridgeInstalled TO b5_session_runtime;
     -- EXEC-only B5 assertion caller needs trigger *metadata* visibility for
-    -- OBJECT_ID/sys.triggers fail-closed checks; never grant table DML/SELECT.
-    GRANT VIEW DEFINITION ON OBJECT::dbo.b53_SessionMonotonicTrigger TO b5_session_runtime;
+    -- OBJECT_ID/sys.triggers fail-closed checks; this is only VIEW DEFINITION
+    -- on the parent table (not an independently grantable DML trigger).
+    -- Never grant row SELECT/INSERT/UPDATE/DELETE.
+    GRANT VIEW DEFINITION ON OBJECT::dbo.PreprodLoginSessions TO b5_session_runtime;
     INSERT dbo.__B53IdentityBridgeHistory
       (SchemaVersion,FenceDatabase,AppliedUtc)
     VALUES(N'B53_IDENTITY_20261118_001',
