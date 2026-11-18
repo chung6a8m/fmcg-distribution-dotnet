@@ -123,6 +123,78 @@ public sealed class B5SqlTests
             JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }), ct);
     }
 
+    [Fact]
+    public async Task Current_B3_session_and_B4_registry_revocations_wait_for_protected_COMMIT()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var f = await Fixture.CreateAsync(ct);
+        var actor = Guid.NewGuid();
+        var session = Guid.NewGuid();
+        var bindingA = Guid.NewGuid();
+        await f.SeedAsync(actor, session, Guid.NewGuid(), bindingA, Guid.NewGuid(), ct);
+        var guard = new SqlControlPlaneGuards(f.IdentityDatabase, f.RegistryDatabase);
+        var fence = new SqlAuthorizationFence(f.FenceConnection)
+        {
+            InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
+        };
+        var request = new AuthorizationContext(f.TenantA, f.TenantA, actor, session,
+            bindingA, 1, 1, 1, 0, "tenant.write", "stock:ci-only");
+
+        async Task CheckLinearizationAsync(AuthorizationContext current,
+            Func<Task> revoke, string operation)
+        {
+            var inside = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var protectedWork = fence.ExecuteAsync(current, guard, async (db, tx, token) =>
+            {
+                var row = await f.WriteAsync(db, tx, f.TenantADatabase, token);
+                inside.TrySetResult(true);
+                await release.Task.WaitAsync(token);
+                return row;
+            }, ct);
+            await inside.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+            var pending = revoke();
+            try
+            {
+                await Task.Delay(300, ct);
+                Assert.False(pending.IsCompleted, operation + " overtook fenced SQL COMMIT");
+            }
+            finally { release.TrySetResult(true); }
+            Assert.Equal(1, await protectedWork);
+            await pending;
+            await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+                fence.ExecuteAsync(current, guard,
+                    (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
+        }
+
+        await CheckLinearizationAsync(request,
+            () => f.RevokeIdentitySessionAsync(session, ct), "B3 session revoke");
+        var replacementSession = Guid.NewGuid();
+        await f.AddIdentitySessionAsync(actor, replacementSession, ct);
+        await CheckLinearizationAsync(request with { SessionId = replacementSession },
+            () => f.SuspendRegistryTenantAsync(f.TenantA, ct), "B4 tenant suspend");
+        Assert.Equal(2, await f.CountAsync(f.TenantADatabase, ct));
+        Assert.Equal(0, await f.CountAsync(f.TenantBDatabase, ct));
+        Assert.Equal(1L, await f.EpochAsync(f.TenantA, ct)); // external fence independent
+        var source = Environment.GetEnvironmentVariable("APP02B5_SOURCE_HEAD_SHA")
+            ?? throw new InvalidOperationException("Source SHA missing");
+        var testRunId = Environment.GetEnvironmentVariable("APP02B5_TEST_RUN_ID")
+            ?? throw new InvalidOperationException("TestRunId missing");
+        Directory.CreateDirectory("TestResults");
+        await File.WriteAllTextAsync("TestResults/APP-02B5-CONTROL-RACES.json",
+            JsonSerializer.Serialize(new {
+                TestRunId=testRunId,SourceHeadSha=source,
+                ActualB3SqlSessionRevokeSerialized=true,
+                ActualB4TransitionSerialized=true,
+                StaleJwtAndRegistryEpochDenied=true,
+                PeerTenantEffects=0,
+                RestoreResurrectionProof="NOT_VERIFIED",
+                RealPreprod="NOT_VERIFIED"
+            },new JsonSerializerOptions{WriteIndented=true}),ct);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string server;
@@ -137,6 +209,7 @@ public sealed class B5SqlTests
         public string RegistryDatabase { get; }
         public string RuntimeLogin { get; }
         public string SecurityLogin { get; }
+        public string RegistrySecurityLogin { get; }
         public string FenceConnection => Connection(FenceDatabase);
         private string Master => Connection("master");
 
@@ -150,6 +223,7 @@ public sealed class B5SqlTests
             TenantBDatabase = "FmcgB5TenB_" + nonce;
             RuntimeLogin = "b5rt_" + nonce;
             SecurityLogin = "b5sec_" + nonce;
+            RegistrySecurityLogin = "b5b4sec_" + nonce;
         }
 
         public static async Task<Fixture> CreateAsync(CancellationToken ct)
@@ -175,6 +249,7 @@ public sealed class B5SqlTests
                 "20261118_003_registry_guard.sql", ct);
             await f.CreateLoginAsync(f.RuntimeLogin, ct);
             await f.CreateLoginAsync(f.SecurityLogin, ct);
+            await f.CreateLoginAsync(f.RegistrySecurityLogin, ct);
             await f.RunAsync(f.FenceConnection,
                 "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
                 "ALTER ROLE b5_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
@@ -185,7 +260,13 @@ public sealed class B5SqlTests
                 "ALTER ROLE b5_session_runtime ADD MEMBER [" + f.RuntimeLogin + "];", ct);
             await f.RunAsync(f.Connection(f.RegistryDatabase),
                 "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
-                "ALTER ROLE b5_registry_runtime ADD MEMBER [" + f.RuntimeLogin + "];", ct);
+                "ALTER ROLE b5_registry_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
+                "CREATE USER [" + f.RegistrySecurityLogin + "] FOR LOGIN [" + f.RegistrySecurityLogin + "];" +
+                "GRANT EXECUTE ON OBJECT::dbo.cp_TenantTransition TO [" +
+                    f.RegistrySecurityLogin + "];", ct);
+            await f.RunAsync(f.Connection(f.RegistryDatabase),
+                "INSERT dbo.PreprodTenantOperators(LoginName,Enabled,CanSuspend) " +
+                "VALUES(N'" + f.RegistrySecurityLogin + "',1,1)", ct);
             foreach (var database in new[] { f.TenantADatabase, f.TenantBDatabase })
                 await f.RunAsync(f.Connection(database),
                     "CREATE TABLE dbo.B5WriteWitness(Id bigint IDENTITY(1,1) PRIMARY KEY);" +
@@ -241,6 +322,33 @@ public sealed class B5SqlTests
             return await cmd.ExecuteNonQueryAsync(ct);
         }
 
+        public Task RevokeIdentitySessionAsync(Guid session, CancellationToken ct) =>
+            RunAsync(Connection(IdentityDatabase), """
+                UPDATE dbo.PreprodLoginSessions
+                   SET Epoch=Epoch+1, RevokedUtc=SYSUTCDATETIME()
+                 WHERE Id=@session AND RevokedUtc IS NULL;
+                """, ct, P("@session",session));
+
+        public Task AddIdentitySessionAsync(Guid actor, Guid session, CancellationToken ct) =>
+            RunAsync(Connection(IdentityDatabase), """
+                INSERT dbo.PreprodLoginSessions(Id,UserId,Epoch,SecurityStamp,CreatedUtc)
+                VALUES(@session,@actor,0,N'CI_STAMP',SYSUTCDATETIME());
+                """, ct, P("@session",session),P("@actor",actor));
+
+        public async Task SuspendRegistryTenantAsync(Guid tenant, CancellationToken ct)
+        {
+            await using var db = new SqlConnection(Connection(RegistryDatabase));
+            await db.OpenAsync(ct);
+            await ImpersonateAsync(db, RegistrySecurityLogin, ct);
+            await using var command = new SqlCommand("dbo.cp_TenantTransition", db)
+            { CommandType=CommandType.StoredProcedure, CommandTimeout=30 };
+            command.Parameters.AddRange([
+                P("@TenantId",tenant),P("@Action","SUSPEND"),
+                P("@EvidenceRef","ci-b5-current-registry-serial")
+            ]);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
         public async Task RevokeAsync(Guid actor, CancellationToken ct) =>
             await SecurityCommandAsync("dbo.b5_RevokeMember", TenantA, ct,
                 P("@ExpectedFenceEpoch", 1L), P("@ActorId", actor),
@@ -274,7 +382,7 @@ public sealed class B5SqlTests
 
         public async Task ImpersonateAsync(SqlConnection db, string login, CancellationToken ct)
         {
-            if (login != RuntimeLogin && login != SecurityLogin)
+            if (login != RuntimeLogin && login != SecurityLogin && login != RegistrySecurityLogin)
                 throw new InvalidOperationException("Unrecognized CI principal");
             await using var cmd = new SqlCommand(
                 "EXECUTE AS LOGIN=N'" + login + "'", db);
