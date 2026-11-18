@@ -120,7 +120,7 @@ public static class B8AuditVerifier
         {
             try
             {
-                var digest = ComputeAnchorDigest(anchor);
+                var digest = ComputeAnchorDigest(anchor!);
                 if (receipt?.SignedPayloadSha256 is not { Length: 32 } ||
                     !CryptographicOperations.FixedTimeEquals(digest, receipt.SignedPayloadSha256))
                     Deny("B8_ANCHOR_RECEIPT_MISMATCH");
