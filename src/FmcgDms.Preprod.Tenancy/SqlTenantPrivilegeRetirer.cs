@@ -75,7 +75,8 @@ public sealed class SqlTenantPrivilegeRetirer(TenantRegistrySql registry,string 
                 WHILE 1=1
                 BEGIN
                     SELECT TOP (1) @session=session_id FROM sys.dm_exec_sessions
-                    WHERE login_name=@finalizer AND session_id<>@@SPID
+                    WHERE (login_name=@finalizer OR original_login_name=@finalizer)
+                      AND session_id<>@@SPID
                     ORDER BY session_id;
                     IF @session IS NULL BREAK;
                     DECLARE @kill nvarchar(50)=N'KILL '+CONVERT(nvarchar(11),@session);

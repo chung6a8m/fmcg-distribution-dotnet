@@ -369,7 +369,8 @@ BEGIN
             JOIN sys.server_principals AS sp ON sp.principal_id=p.grantee_principal_id
             WHERE sp.name=@fin AND p.permission_name=''IMPERSONATE''
               AND p.major_id=SUSER_ID(@owner) AND p.state IN (''G'',''W''))
-        OR EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE login_name=@fin)
+        OR EXISTS (SELECT 1 FROM sys.dm_exec_sessions
+            WHERE login_name=@fin OR original_login_name=@fin)
         THROW 51428,''TENANT_FINALIZER_PRIVILEGE_STILL_ACTIVE'',1;
     DECLARE @check nvarchar(max)=N''SELECT @count=COUNT_BIG(*) FROM ''
         +QUOTENAME(@db)+N''.sys.database_principals WHERE name=@login'';
