@@ -277,6 +277,110 @@ BEGIN
     COMMIT TRANSACTION;
 END;');
     EXEC(N'
+CREATE PROCEDURE dbo.cp_ClaimFinalization
+    @TenantId uniqueidentifier, @LeaseToken uniqueidentifier
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    DECLARE @actor sysname=SUSER_SNAME(),@old varchar(32);
+    IF @LeaseToken IS NULL OR @LeaseToken=''00000000-0000-0000-0000-000000000000''
+        THROW 51420,''TENANT_FINALIZER_TOKEN_INVALID'',1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
+          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+        THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
+    BEGIN TRANSACTION;
+    SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
+    WHERE TenantId=@TenantId AND ApprovedFinalizerLogin=@actor AND ApprovedBy<>@actor
+      AND RequestedBy<>@actor AND ProvisionedBy<>@actor
+      AND ApprovedFinalizerLogin<>ApprovedOwnerLogin
+      AND ApprovedFinalizerLogin<>ApprovedProvisionerLogin
+      AND FinalizedUtc IS NULL;
+    IF @old IS NULL OR @old NOT IN (''VERIFYING'',''FINALIZING'')
+        THROW 51422,''TENANT_FINALIZER_STATE_DENIED'',1;
+    IF @old=''FINALIZING'' AND EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
+        WHERE TenantId=@TenantId AND FinalizationLeaseUntilUtc>=SYSUTCDATETIME())
+        THROW 51423,''TENANT_FINALIZER_LEASE_BUSY'',1;
+    UPDATE dbo.PreprodTenantRegistry
+      SET State=''FINALIZING'',FinalizationOperationId=COALESCE(FinalizationOperationId,NEWID()),
+          FinalizationLeaseToken=@LeaseToken,
+          FinalizationLeaseUntilUtc=DATEADD(minute,5,SYSUTCDATETIME()),
+          UpdatedUtc=SYSUTCDATETIME()
+    WHERE TenantId=@TenantId;
+    INSERT dbo.PreprodTenantLifecycleEvents
+        (TenantId,ActionCode,FromState,ToState,ActorLogin,OperationId,SecurityEpoch,BindingId)
+    SELECT TenantId,''FINALIZE_CLAIM'',@old,State,@actor,FinalizationOperationId,
+        SecurityEpoch,BindingId FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
+    COMMIT TRANSACTION;
+END;
+');
+    EXEC(N'
+CREATE PROCEDURE dbo.cp_CompleteFinalization
+    @TenantId uniqueidentifier, @LeaseToken uniqueidentifier,
+    @ExpectedOperationId uniqueidentifier, @ExpectedBindingId uniqueidentifier,
+    @ExpectedEpoch bigint
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    DECLARE @actor sysname=SUSER_SNAME();
+    IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
+          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+        THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
+    BEGIN TRANSACTION;
+    UPDATE r SET State=''VERIFYING'',FinalizationLeaseToken=NULL,
+        FinalizationLeaseUntilUtc=NULL,FinalizedBy=@actor,FinalizedUtc=SYSUTCDATETIME(),
+        FinalizedEpoch=SecurityEpoch,FinalizedBindingId=BindingId,
+        UpdatedUtc=SYSUTCDATETIME()
+    FROM dbo.PreprodTenantRegistry AS r
+    WHERE r.TenantId=@TenantId AND r.State=''FINALIZING''
+      AND r.ApprovedFinalizerLogin=@actor AND r.FinalizationLeaseToken=@LeaseToken
+      AND r.FinalizationLeaseUntilUtc>SYSUTCDATETIME()
+      AND r.FinalizationOperationId=@ExpectedOperationId
+      AND r.BindingId=@ExpectedBindingId AND r.SecurityEpoch=@ExpectedEpoch
+      AND r.ApprovedOwnerLogin IS NOT NULL AND r.ApprovedProvisionerLogin IS NOT NULL
+      AND EXISTS (SELECT 1 FROM sys.databases d WHERE d.name=r.DatabaseName
+          AND d.owner_sid=SUSER_SID(r.ApprovedOwnerLogin)
+          AND d.owner_sid<>SUSER_SID(r.ApprovedProvisionerLogin));
+    IF @@ROWCOUNT<>1 THROW 51424,''TENANT_FINALIZER_COMPLETION_FENCED'',1;
+    INSERT dbo.PreprodTenantLifecycleEvents
+        (TenantId,ActionCode,FromState,ToState,ActorLogin,OperationId,SecurityEpoch,BindingId)
+    SELECT TenantId,''FINALIZED'',''FINALIZING'',State,@actor,FinalizationOperationId,
+       SecurityEpoch,BindingId FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
+    COMMIT TRANSACTION;
+END;
+');
+    EXEC(N'
+CREATE PROCEDURE dbo.cp_FailFinalization
+    @TenantId uniqueidentifier, @LeaseToken uniqueidentifier, @ErrorCode varchar(32)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    DECLARE @actor sysname=SUSER_SNAME();
+    IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
+          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+        THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
+    IF @ErrorCode IS NULL OR LEN(@ErrorCode) NOT BETWEEN 3 AND 32
+       OR @ErrorCode COLLATE Latin1_General_100_BIN2 LIKE ''%[^A-Z0-9_]''
+        THROW 51402,''TENANT_FINALIZER_ERROR_CODE_INVALID'',1;
+    BEGIN TRANSACTION;
+    UPDATE dbo.PreprodTenantRegistry SET State=''VERIFYING'',
+        FinalizationLeaseToken=NULL,FinalizationLeaseUntilUtc=NULL,
+        UpdatedUtc=SYSUTCDATETIME()
+    WHERE TenantId=@TenantId AND State=''FINALIZING''
+        AND ApprovedFinalizerLogin=@actor AND FinalizationLeaseToken=@LeaseToken
+        AND FinalizationLeaseUntilUtc>SYSUTCDATETIME();
+    IF @@ROWCOUNT<>1 THROW 51425,''TENANT_FINALIZER_FAILURE_FENCED'',1;
+    INSERT dbo.PreprodTenantLifecycleEvents
+        (TenantId,ActionCode,FromState,ToState,ActorLogin,OperationId,
+            SecurityEpoch,BindingId,EvidenceRef)
+    SELECT TenantId,''FINALIZE_FAILED'',''FINALIZING'',State,@actor,FinalizationOperationId,
+        SecurityEpoch,BindingId,@ErrorCode FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
+    COMMIT TRANSACTION;
+END;
+');
+    EXEC(N'
 CREATE PROCEDURE dbo.cp_RecordVerification
     @TenantId uniqueidentifier, @ExpectedRowVer binary(8),
     @ObservedBindingId uniqueidentifier, @WitnessHash binary(32)
@@ -461,7 +565,8 @@ END;');
        OR (SELECT COUNT(*) FROM sys.procedures WHERE schema_id=SCHEMA_ID(N'dbo')
         AND name IN (N'cp_RequestTenant',N'cp_ApproveTenant',N'cp_ClaimProvision',
                      N'cp_CompleteProvision',N'cp_FailProvision',N'cp_RecordVerification',
-                     N'cp_TenantTransition',N'cp_GetTenant',N'cp_GetPeerForVerification'))<>9
+                     N'cp_TenantTransition',N'cp_GetTenant',N'cp_GetPeerForVerification',
+                     N'cp_ClaimFinalization',N'cp_CompleteFinalization',N'cp_FailFinalization'))<>12
        OR NOT EXISTS (SELECT 1 FROM sys.columns
             WHERE object_id=OBJECT_ID(N'dbo.PreprodTenantRegistry') AND name=N'RowVer')
         THROW 51400,'TENANT_REGISTRY_SCHEMA_DRIFT_DENIED',1;
