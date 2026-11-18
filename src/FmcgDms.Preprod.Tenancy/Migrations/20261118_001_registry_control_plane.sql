@@ -365,7 +365,8 @@ BEGIN
     IF @userCount<>0
         THROW 51428,''TENANT_FINALIZER_DB_PRINCIPAL_PRESENT'',1;
     UPDATE r SET State=''VERIFYING'',FinalizationLeaseToken=NULL,
-        FinalizationLeaseUntilUtc=NULL,FinalizedBy=@actor,FinalizedUtc=SYSUTCDATETIME(),
+        FinalizationLeaseUntilUtc=NULL,FinalizedBy=r.ApprovedFinalizerLogin,
+        FinalizedUtc=SYSUTCDATETIME(),
         FinalizedEpoch=SecurityEpoch,FinalizedBindingId=BindingId,
         FinalizerRetiredBy=@actor,FinalizerRetiredUtc=SYSUTCDATETIME(),
         UpdatedUtc=SYSUTCDATETIME()
