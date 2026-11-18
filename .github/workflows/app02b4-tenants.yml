@@ -84,7 +84,9 @@ jobs:
               !$e.DifferentDatabaseIds -or !$e.MakerCheckerDenied -or
               !$e.LeaseCollisionDenied -or !$e.SameOperationRetry -or
               !$e.PeerBindingDenied -or !$e.OwnerTransferEnforced -or
-              !$e.OwnerSidMatchesApproved -or !$e.SqlImpersonatedEndToEndVerifier -or
+              !$e.OwnerSidMatchesApproved -or !$e.SqlOwnerApprovalImmutable -or
+              !$e.DirectForgedOwnerWitnessDenied -or
+              !$e.SqlImpersonatedEndToEndVerifier -or
               !$e.SqlScopeDenied -or
               !$e.DdlCreatorDirectReadDenied -or
               !$e.SuspendedEpochAdvanced -or

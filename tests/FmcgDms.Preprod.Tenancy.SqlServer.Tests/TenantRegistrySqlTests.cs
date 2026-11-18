@@ -122,6 +122,13 @@ public sealed class TenantRegistrySqlTests
         await RequestApprove(tenantA,"tenant-ci-a",ownerA);
         await RequestApprove(tenantB,"tenant-ci-b",ownerB);
         await RequestApprove(orphan,"tenant-ci-orphan",ownerOrphan);
+        // Owner/DDL identities are immutable approval content: an idempotent
+        // replay with changed owner may not silently rewrite SQL authority.
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
+            "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+            new SqlParameter("@id",tenantA),
+            new SqlParameter("@ref","CHG-CHECK-"+tenantA.ToString("N")),
+            new SqlParameter("@owner",ownerB),new SqlParameter("@provisioner",ddlLogin)));
 
         // Exclusive Control Plane lease; failure preserves stable operation ID.
         var lease=Guid.NewGuid();
@@ -170,6 +177,14 @@ public sealed class TenantRegistrySqlTests
         var missingOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
             verifier.VerifyAsync(tenantA,scoped,ct));
         Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",missingOwner.Code);
+        // Bypass attempt: even a CanVerify SQL principal must not submit
+        // an arbitrary nonzero hash while the original DDL owner is in charge.
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Verifier,
+            "EXEC dbo.cp_RecordVerification @TenantId=@id,@ExpectedRowVer=@row,@ObservedBindingId=@binding,@WitnessHash=@hash",ct,
+            new SqlParameter("@id",tenantA),
+            new SqlParameter("@row",SqlDbType.Binary,8){Value=a.RowVersion},
+            new SqlParameter("@binding",a.BindingId),
+            new SqlParameter("@hash",SqlDbType.Binary,32){Value=SHA256.HashData([1,2,3,4])})));
         await f.ExecAsync(f.Master,
             $"ALTER AUTHORIZATION ON DATABASE::[{a.DatabaseName}] TO [{ownerA}]",ct);
         await f.ExecAsync(f.Connection(a.DatabaseName),
@@ -294,6 +309,7 @@ public sealed class TenantRegistrySqlTests
             DifferentDatabaseIds=true,MakerCheckerDenied=true,LeaseCollisionDenied=true,
             SameOperationRetry=true,PeerBindingDenied=true,
             OwnerTransferEnforced=true,OwnerSidMatchesApproved=true,
+            SqlOwnerApprovalImmutable=true,DirectForgedOwnerWitnessDenied=true,
             SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,
             DdlCreatorDirectReadDenied=true,
             SuspendedEpochAdvanced=true,ReactivationRaceDenied=true,
