@@ -149,6 +149,14 @@ public sealed class B8LocalDbTests
         Assert.Equal(1, await f.ScalarAsync<int>(
             "SELECT COUNT(*) FROM dbo.__B8SchemaHistory WHERE SchemaVersion=@v",
             new SqlParameter("@v", B8Schema.Version)));
+        await f.ExecAsync("DISABLE TRIGGER dbo.b8_ImmutableAudit ON dbo.B8AuditEntry");
+        var disabled = await Assert.ThrowsAsync<SqlException>(async () =>
+        {
+            await f.ExecAsync(f.MigrationSql);
+        });
+        Assert.Contains("B8_RECORDED_SCHEMA_CORRUPTED", disabled.Message);
+        await f.ExecAsync("ENABLE TRIGGER dbo.b8_ImmutableAudit ON dbo.B8AuditEntry");
+        await f.ExecAsync(f.MigrationSql);
         await f.ExecAsync("DROP TRIGGER dbo.b8_ImmutableAudit");
         var denied = await Assert.ThrowsAsync<SqlException>(async () =>
         {
@@ -166,7 +174,8 @@ public sealed class B8LocalDbTests
         {
             TestRunId=f.TestRunId, SourceHeadSha=f.SourceHead,
             SchemaVersion=B8Schema.Version, IntactReplayIdempotent=true,
-            MissingTriggerReplayDenied=true, UnknownVersionReplayDenied=true,
+            MissingTriggerReplayDenied=true, DisabledTriggerReplayDenied=true,
+            UnknownVersionReplayDenied=true,
             EvidenceClass="GITHUB_HOSTED_DISPOSABLE_LOCALDB_ONLY",
             RealPreprod="NOT_VERIFIED", G_B04="NOT_RUN"
         });

@@ -56,6 +56,15 @@ public sealed class B8OperationsContractTests
         Assert.Contains("B8_ANCHOR_SIGNATURE_INVALID",
             B8AuditVerifier.Verify([one, two], anchor, receipt,
                 wrongKey.ExportSubjectPublicKeyInfo()).Denials);
+        using var wrongCurve = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+        var wrongCurveAnchor = anchor with
+        {
+            Signature = wrongCurve.SignHash(digest,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+        };
+        Assert.Contains("B8_ANCHOR_UNTRUSTED_KEY_CURVE",
+            B8AuditVerifier.Verify([one, two], wrongCurveAnchor, receipt,
+                wrongCurve.ExportSubjectPublicKeyInfo()).Denials);
         Assert.False(B8AuditVerifier.Verify([one, two], anchor, receipt, pub).IsPhysicalPreprodVerified);
     }
 
@@ -152,6 +161,16 @@ public sealed class B8OperationsContractTests
         Assert.Contains("B8_INCIDENT_CLOSEOUT_REVIEW_INVALID",
             B8IncidentVerifier.Inspect(witness with
             { Timeline = entries.SkipLast(1).Append(entries[^1] with { ActorId = owner }).ToList() }).Denials);
+        var handoffBeforeAssignment = entries.ToList();
+        handoffBeforeAssignment[1] = entries[2] with { AtUtc = entries[1].AtUtc };
+        handoffBeforeAssignment[2] = entries[1] with { AtUtc = entries[2].AtUtc };
+        Assert.Contains("B8_INCIDENT_HANDOFF_NOT_PROVEN",
+            B8IncidentVerifier.Inspect(witness with
+            { Timeline = handoffBeforeAssignment }).Denials);
+        var doubleClose = entries.Append(entries[^1] with
+            { AtUtc = Now.AddMinutes(9).AddSeconds(30) }).ToList();
+        Assert.Contains("B8_INCIDENT_TIMELINE_INVALID",
+            B8IncidentVerifier.Inspect(witness with { Timeline = doubleClose }).Denials);
     }
 
     private static B8RetentionRequest Retention() => new(

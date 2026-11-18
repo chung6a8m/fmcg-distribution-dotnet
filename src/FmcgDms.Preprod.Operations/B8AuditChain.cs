@@ -126,8 +126,12 @@ public static class B8AuditVerifier
                     !CryptographicOperations.FixedTimeEquals(digest, receipt.SignedPayloadSha256))
                     Deny("B8_ANCHOR_RECEIPT_MISMATCH");
                 using var publicKey = ECDsa.Create();
-                publicKey.ImportSubjectPublicKeyInfo(publicKeySpki, out _);
-                if (!publicKey.VerifyHash(digest, validatedAnchor.Signature,
+                publicKey.ImportSubjectPublicKeyInfo(publicKeySpki, out var consumed);
+                // V1 requires one complete ECDSA P-256 SPKI, not an arbitrary
+                // caller-selected curve or an SPKI with trailing bytes.
+                if (consumed != publicKeySpki.Length || publicKey.KeySize != 256)
+                    Deny("B8_ANCHOR_UNTRUSTED_KEY_CURVE");
+                else if (!publicKey.VerifyHash(digest, validatedAnchor.Signature,
                     DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
                     Deny("B8_ANCHOR_SIGNATURE_INVALID");
             }

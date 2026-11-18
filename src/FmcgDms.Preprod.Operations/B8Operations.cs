@@ -133,11 +133,24 @@ public static class B8IncidentVerifier
             t.Zip(t.Skip(1)).Any(p => p.First.AtUtc >= p.Second.AtUtc) ||
             t[^1].AtUtc > evidence.ObservedUtc)
             Deny("B8_INCIDENT_TIMELINE_INVALID");
-        if (!t.Any(e => e.Action == B8IncidentAction.Assigned &&
-                        e.ActorId == evidence.OwnerId) ||
-            !t.Any(e => e.Action == B8IncidentAction.HandoffAcknowledged &&
-                        e.ActorId == evidence.OwnerId))
+        // A handoff acknowledgement is not evidence of an assignment if it
+        // precedes that assignment. Duplicate openings/closeouts are invalid.
+        var assignedIndex = -1;
+        var handoffIndex = -1;
+        for (var i = 0; i < t.Count; i++)
+        {
+            if (assignedIndex < 0 && t[i].Action == B8IncidentAction.Assigned &&
+                t[i].ActorId == evidence.OwnerId)
+                assignedIndex = i;
+            if (handoffIndex < 0 && t[i].Action == B8IncidentAction.HandoffAcknowledged &&
+                t[i].ActorId == evidence.OwnerId)
+                handoffIndex = i;
+        }
+        if (assignedIndex < 0 || handoffIndex <= assignedIndex)
             Deny("B8_INCIDENT_HANDOFF_NOT_PROVEN");
+        if (t.Skip(1).Any(e => e.Action == B8IncidentAction.Opened) ||
+            t.Count(e => e.Action == B8IncidentAction.Closed) > 1)
+            Deny("B8_INCIDENT_TIMELINE_INVALID");
         var closed = t.LastOrDefault(e => e.Action == B8IncidentAction.Closed);
         if (closed is not null &&
             (closed != t[^1] || closed.ActorId != evidence.ReviewerId ||

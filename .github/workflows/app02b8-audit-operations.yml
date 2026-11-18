@@ -135,7 +135,7 @@ jobs:
           if ($y.SourceHeadSha -cne $env:SOURCE_HEAD -or
               $y.SchemaVersion -cne 'B8_20261118_001' -or
               !$y.IntactReplayIdempotent -or !$y.MissingTriggerReplayDenied -or
-              !$y.UnknownVersionReplayDenied -or
+              !$y.DisabledTriggerReplayDenied -or !$y.UnknownVersionReplayDenied -or
               $y.RealPreprod -cne 'NOT_VERIFIED' -or $y.G_B04 -cne 'NOT_RUN') {
             throw 'B8_SCHEMA_WITNESS_INVALID_OR_OVERCLAIMED'
           }

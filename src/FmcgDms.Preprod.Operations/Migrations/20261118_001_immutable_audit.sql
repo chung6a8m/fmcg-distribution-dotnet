@@ -190,6 +190,14 @@ BEGIN TRY
       OBJECT_ID(N'dbo.b8_PlaceHold',N'P') IS NULL OR
       OBJECT_ID(N'dbo.b8_ImmutableAudit',N'TR') IS NULL OR
       OBJECT_ID(N'dbo.b8_ImmutableHold',N'TR') IS NULL OR
+      NOT EXISTS(SELECT 1 FROM sys.triggers
+       WHERE object_id=OBJECT_ID(N'dbo.b8_ImmutableAudit',N'TR')
+         AND parent_id=OBJECT_ID(N'dbo.B8AuditEntry',N'U')
+         AND is_disabled=0) OR
+      NOT EXISTS(SELECT 1 FROM sys.triggers
+       WHERE object_id=OBJECT_ID(N'dbo.b8_ImmutableHold',N'TR')
+         AND parent_id=OBJECT_ID(N'dbo.B8LegalHold',N'U')
+         AND is_disabled=0) OR
       DATABASE_PRINCIPAL_ID(N'b8_writer') IS NULL OR
       DATABASE_PRINCIPAL_ID(N'b8_hold') IS NULL
       THROW 52805,N'B8_RECORDED_SCHEMA_CORRUPTED',1;
