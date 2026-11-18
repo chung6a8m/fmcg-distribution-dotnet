@@ -105,6 +105,9 @@ BEGIN
     THROW 51868,N''B53_CONTROL_BRIDGE_NOT_CURRENT'',1;
 END');
     GRANT EXECUTE ON OBJECT::dbo.b53_AssertRegistryBridgeInstalled TO b5_registry_runtime;
+    -- EXEC-only B5 assertion caller needs trigger *metadata* visibility for
+    -- OBJECT_ID/sys.triggers fail-closed checks; never grant table DML/SELECT.
+    GRANT VIEW DEFINITION ON OBJECT::dbo.b53_TenantMonotonicTrigger TO b5_registry_runtime;
     INSERT dbo.__B53RegistryBridgeHistory
      (SchemaVersion,FenceDatabase,AppliedUtc)
     VALUES(N'B53_REGISTRY_20261118_001',

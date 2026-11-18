@@ -102,6 +102,9 @@ BEGIN
     THROW 51858,N''B53_CONTROL_BRIDGE_NOT_CURRENT'',1;
 END');
     GRANT EXECUTE ON OBJECT::dbo.b53_AssertIdentityBridgeInstalled TO b5_session_runtime;
+    -- EXEC-only B5 assertion caller needs trigger *metadata* visibility for
+    -- OBJECT_ID/sys.triggers fail-closed checks; never grant table DML/SELECT.
+    GRANT VIEW DEFINITION ON OBJECT::dbo.b53_SessionMonotonicTrigger TO b5_session_runtime;
     INSERT dbo.__B53IdentityBridgeHistory
       (SchemaVersion,FenceDatabase,AppliedUtc)
     VALUES(N'B53_IDENTITY_20261118_001',

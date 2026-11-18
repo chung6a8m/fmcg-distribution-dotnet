@@ -25,6 +25,8 @@ B.3 `LoginSession.Epoch`, `RevokedUtc` and B.4 `PreprodTenantRegistry.SecurityEp
 | `tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/B53SqlTests.cs` | Two distinct disposable A/B SQL DBs, independent B5/B3/B4, stale snapshots simulated by DBA-only row rewinds, SQL atomicity/negative tests |
 | `.github/workflows/app02b53-revocation.yml` | Source + Windows LocalDB gates, source HEAD/migration/test evidence, explicit physical NO_GO |
 
+The B.5 bridge role receives only EXEC plus **VIEW DEFINITION on its corresponding installed trigger**, allowing low-privilege validation of enabled/installed trigger metadata through SQL `OBJECT_ID`/`sys.triggers`. No underlying B.3/B.4 table SELECT, UPDATE or cross-tenant DML is granted by this B53 role. CI previously detected the fail-closed metadata-visibility denial and now exercises the narrowed grant explicitly.
+
 B.3's EF Core mapping declares the table trigger to prevent SQL Server OUTPUT-based DML from conflicting with an enabled SQL trigger. This is a source compatibility change, not an automatic migration. All scripts are DBA-controlled and must never run at API or Worker startup.
 
 ## Synthetic/LocalDB gate (not physical PREPROD)
