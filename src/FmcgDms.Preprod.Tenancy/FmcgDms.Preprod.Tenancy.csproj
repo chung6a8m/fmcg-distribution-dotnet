@@ -3,5 +3,6 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <EmbeddedResource Include="Migrations/*.sql" />
+    <InternalsVisibleTo Include="FmcgDms.Preprod.Tenancy.SqlServer.Tests" />
   </ItemGroup>
 </Project>

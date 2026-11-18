@@ -4,6 +4,8 @@ using System.Text.Json;
 namespace FmcgDms.Preprod.Tenancy;
 
 public sealed record TenantOperatorSecrets(string RegistryConnection, string? MasterConnection);
+public sealed record TenantVerifierProbeSecrets(
+    string ConnectionString,string ApprovedOwnerLogin,string ProvisionerLogin);
 
 /// <summary>
 /// Private operator-only Vault KV-v2 reader. A separate scoped token file is
@@ -39,17 +41,21 @@ public sealed class VaultTenantOperatorSecrets(string address,
         return new TenantOperatorSecrets(registry,master);
     }
 
-    public async Task<string> ReadProbeAsync(string command, Guid tenant,CancellationToken ct)
+    public async Task<TenantVerifierProbeSecrets> ReadProbeAsync(string command, Guid tenant,CancellationToken ct)
     {
         if(SecretRoleForCommand(command)!="verifier" || command!="verify")
             throw new TenantLifecycleDeniedException("TENANT_PROBE_ROLE_DENIED");
         if(tenant==Guid.Empty) throw new TenantLifecycleDeniedException("TENANT_PROBE_INVALID");
         using var doc=await ReadAsync("tenant-provisioning/probe/"+tenant.ToString("N"),ct);
-        var connection=doc.RootElement.GetProperty("data").GetProperty("data")
-            .GetProperty("connectionString").GetString();
-        if(string.IsNullOrWhiteSpace(connection))
+        var data=doc.RootElement.GetProperty("data").GetProperty("data");
+        var connection=data.GetProperty("connectionString").GetString();
+        var owner=data.GetProperty("approvedOwnerLogin").GetString();
+        var provisioner=data.GetProperty("provisionerLogin").GetString();
+        if(string.IsNullOrWhiteSpace(connection)
+            || string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(provisioner)
+            || string.Equals(owner,provisioner,StringComparison.OrdinalIgnoreCase))
             throw new TenantLifecycleDeniedException("TENANT_PROBE_SECRET_INVALID");
-        return connection;
+        return new TenantVerifierProbeSecrets(connection,owner,provisioner);
     }
 
     private async Task<JsonDocument> ReadAsync(string path,CancellationToken ct)

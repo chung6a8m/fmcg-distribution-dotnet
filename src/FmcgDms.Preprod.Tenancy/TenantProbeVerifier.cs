@@ -13,8 +13,12 @@ namespace FmcgDms.Preprod.Tenancy;
 /// </summary>
 public sealed class TenantProbeVerifier(TenantRegistrySql registry)
 {
+    // Test-only: SQL EXECUTE AS LOGIN after opening a disposable LocalDB connection.
+    // This never changes how the public operator CLI authenticates.
+    internal Func<SqlConnection,CancellationToken,Task>? InitializeCiScopedSession { get; init; }
+
     public async Task<TenantRegistryEntry> VerifyAsync(Guid tenantId,
-        string scopedProbeConnectionString, CancellationToken ct)
+        TenantVerifierProbeSecrets scope, CancellationToken ct)
     {
         var entry=await registry.GetAsync(tenantId,ct)
             ?? throw new TenantLifecycleDeniedException("TENANT_UNKNOWN");
@@ -22,16 +26,26 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
             || entry.DatabaseName!=TenantRegistryEntry.ExpectedDatabase(tenantId))
             throw new TenantLifecycleDeniedException("TENANT_VERIFICATION_STATE_DENIED");
         var registryCs=new SqlConnectionStringBuilder(registry.ConnectionString);
-        var probeCs=new SqlConnectionStringBuilder(scopedProbeConnectionString);
+        if(string.IsNullOrWhiteSpace(scope.ApprovedOwnerLogin)
+            || string.IsNullOrWhiteSpace(scope.ProvisionerLogin)
+            || string.Equals(scope.ApprovedOwnerLogin,scope.ProvisionerLogin,
+                StringComparison.OrdinalIgnoreCase))
+            throw new TenantLifecycleDeniedException("TENANT_DB_OWNER_APPROVAL_MISSING");
+        var probeCs=new SqlConnectionStringBuilder(scope.ConnectionString);
         if (!string.Equals(probeCs.DataSource,registryCs.DataSource,StringComparison.OrdinalIgnoreCase)
             || !string.Equals(probeCs.InitialCatalog,entry.DatabaseName,StringComparison.OrdinalIgnoreCase)
-            || (probeCs.IntegratedSecurity && registryCs.IntegratedSecurity)
+            || (probeCs.IntegratedSecurity && registryCs.IntegratedSecurity
+                && InitializeCiScopedSession is null)
             || (!probeCs.IntegratedSecurity && string.Equals(probeCs.UserID,registryCs.UserID,
                 StringComparison.OrdinalIgnoreCase)))
             throw new TenantLifecycleDeniedException("TENANT_PROBE_IDENTITY_NOT_SCOPED");
 
         await using var registryDb=new SqlConnection(registry.ConnectionString);
         await registryDb.OpenAsync(ct);
+        await registry.OpenCiSessionAsync(registryDb,ct);
+        // Fail closed until a separately authorized DBA transfers the DB away
+        // from its original CREATE DATABASE principal. The verifier never performs DDL.
+        await AssertApprovedOwnerAsync(registryDb,entry,scope,ct);
         string? peer;
         await using(var lookup=new SqlCommand("dbo.cp_GetPeerForVerification",registryDb)
             {CommandType=CommandType.StoredProcedure})
@@ -52,6 +66,8 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
 
         await using var own=new SqlConnection(probeCs.ConnectionString);
         await own.OpenAsync(ct);
+        if(InitializeCiScopedSession is not null)
+            await InitializeCiScopedSession(own,ct);
         if(!await SqlTenantProvisioner.HasApprovedMarkerAsync(own,entry,ct))
             throw new TenantLifecycleDeniedException("TENANT_PROBE_MARKER_MISMATCH");
         var identity=await ReadIdentityAsync(own,ct);
@@ -74,8 +90,31 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         }
 
         var witness=SHA256.HashData(Encoding.UTF8.GetBytes(
-            $"{tenantId:N}|{entry.BindingId:N}|{entry.BindingVersion}|{entry.SecurityEpoch}|{entry.DatabaseName}|{peer}|{identity}|{TenantSchemaVersions.Tenant}"));
+            $"{tenantId:N}|{entry.BindingId:N}|{entry.BindingVersion}|{entry.SecurityEpoch}|{entry.DatabaseName}|{peer}|{identity}|{scope.ApprovedOwnerLogin}|{scope.ProvisionerLogin}|{TenantSchemaVersions.Tenant}"));
         return await registry.VerifyAsync(tenantId,entry.RowVersion,entry.BindingId,witness,ct);
+    }
+
+    private static async Task AssertApprovedOwnerAsync(SqlConnection control,
+        TenantRegistryEntry entry,TenantVerifierProbeSecrets scope,CancellationToken ct)
+    {
+        // The owner and original DDL-login identifiers are explicitly pinned in
+        // the independently ACL-scoped per-tenant verifier Vault record.
+        // SQL metadata (not an application-supplied assertion) is authoritative.
+        const string sql=@"SELECT CASE WHEN d.owner_sid=SUSER_SID(@approved)
+              AND d.owner_sid<>SUSER_SID(@provisioner)
+              AND SUSER_SID(@approved) IS NOT NULL
+              AND SUSER_SID(@provisioner) IS NOT NULL
+              AND IS_SRVROLEMEMBER('sysadmin',@approved)=0
+              AND IS_SRVROLEMEMBER('dbcreator',@approved)=0
+              AND d.owner_sid<>SUSER_SID(SUSER_SNAME())
+              THEN 1 ELSE 0 END
+            FROM sys.databases AS d WHERE d.name=@db";
+        await using var command=new SqlCommand(sql,control);
+        command.Parameters.AddWithValue("@approved",scope.ApprovedOwnerLogin);
+        command.Parameters.AddWithValue("@provisioner",scope.ProvisionerLogin);
+        command.Parameters.AddWithValue("@db",entry.DatabaseName);
+        if(Convert.ToInt32(await command.ExecuteScalarAsync(ct) ?? 0)!=1)
+            throw new TenantLifecycleDeniedException("TENANT_DB_OWNER_NOT_ATTESTED");
     }
 
     private static async Task<string> ReadIdentityAsync(SqlConnection conn,CancellationToken ct)
@@ -84,7 +123,7 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         return (string?)await c.ExecuteScalarAsync(ct) ?? "";
     }
 
-    private static async Task AssertDeniedAsync(SqlConnectionStringBuilder baseCs,
+    private async Task AssertDeniedAsync(SqlConnectionStringBuilder baseCs,
         string dbName, string sql, CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(dbName))
@@ -94,6 +133,8 @@ public sealed class TenantProbeVerifier(TenantRegistrySql registry)
         {
             await using var conn=new SqlConnection(cs.ConnectionString);
             await conn.OpenAsync(ct);
+            if(InitializeCiScopedSession is not null)
+                await InitializeCiScopedSession(conn,ct);
             await using var command=new SqlCommand(sql,conn);
             await command.ExecuteScalarAsync(ct);
             throw new TenantLifecycleDeniedException("TENANT_PROBE_CROSS_SCOPE_PERMITTED");

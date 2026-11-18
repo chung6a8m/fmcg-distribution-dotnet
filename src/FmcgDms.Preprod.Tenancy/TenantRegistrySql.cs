@@ -29,10 +29,19 @@ public sealed class TenantRegistrySql(string connectionString)
 {
     public string ConnectionString { get; } = connectionString;
 
+    // Internal SQL-engine impersonation seam for disposable LocalDB integration tests only.
+    // The public operator constructor always opens a real independently authenticated login.
+    internal Func<SqlConnection,CancellationToken,Task>? InitializeCiSession { get; init; }
+    internal async Task OpenCiSessionAsync(SqlConnection db,CancellationToken ct)
+    {
+        if(InitializeCiSession is not null) await InitializeCiSession(db,ct);
+    }
+
     public async Task<TenantRegistryEntry?> GetAsync(Guid id, CancellationToken ct)
     {
         await using var db = new SqlConnection(ConnectionString);
         await db.OpenAsync(ct);
+        await OpenCiSessionAsync(db,ct);
         await using var c = new SqlCommand("dbo.cp_GetTenant", db)
             { CommandType = CommandType.StoredProcedure };
         c.Parameters.Add(new SqlParameter("@TenantId", SqlDbType.UniqueIdentifier) { Value=id });
@@ -105,6 +114,7 @@ public sealed class TenantRegistrySql(string connectionString)
     {
         await using var db = new SqlConnection(ConnectionString);
         await db.OpenAsync(ct);
+        await OpenCiSessionAsync(db,ct);
         await using var c = new SqlCommand(procedure, db)
         { CommandType=CommandType.StoredProcedure, CommandTimeout=30 };
         c.Parameters.AddRange(parameters);
