@@ -31,6 +31,7 @@ public sealed class B5SqlTests
             InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
         };
         var guard = new SqlControlPlaneGuards(f.IdentityDatabase, f.RegistryDatabase);
+        await f.AssertDirectExecWithoutRoleDeniedAsync(a, ct);
 
         Assert.Equal(1, await fence.ExecuteAsync(a, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
@@ -210,6 +211,7 @@ public sealed class B5SqlTests
         public string RuntimeLogin { get; }
         public string SecurityLogin { get; }
         public string RegistrySecurityLogin { get; }
+        public string UnroledLogin { get; }
         public string FenceConnection => Connection(FenceDatabase);
         private string Master => Connection("master");
 
@@ -224,6 +226,7 @@ public sealed class B5SqlTests
             RuntimeLogin = "b5rt_" + nonce;
             SecurityLogin = "b5sec_" + nonce;
             RegistrySecurityLogin = "b5b4sec_" + nonce;
+            UnroledLogin = "b5un_" + nonce;
         }
 
         public static async Task<Fixture> CreateAsync(CancellationToken ct)
@@ -250,20 +253,28 @@ public sealed class B5SqlTests
             await f.CreateLoginAsync(f.RuntimeLogin, ct);
             await f.CreateLoginAsync(f.SecurityLogin, ct);
             await f.CreateLoginAsync(f.RegistrySecurityLogin, ct);
+            await f.CreateLoginAsync(f.UnroledLogin, ct);
             await f.RunAsync(f.FenceConnection,
                 "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
                 "ALTER ROLE b5_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
                 "CREATE USER [" + f.SecurityLogin + "] FOR LOGIN [" + f.SecurityLogin + "];" +
-                "ALTER ROLE b5_revoker ADD MEMBER [" + f.SecurityLogin + "];", ct);
+                "ALTER ROLE b5_revoker ADD MEMBER [" + f.SecurityLogin + "];" +
+                "CREATE USER [" + f.UnroledLogin + "] FOR LOGIN [" + f.UnroledLogin + "];" +
+                "GRANT EXECUTE ON OBJECT::dbo.b5_AssertAuthority TO [" + f.UnroledLogin + "];" +
+                "GRANT EXECUTE ON OBJECT::dbo.b5_RevokeMember TO [" + f.UnroledLogin + "];", ct);
             await f.RunAsync(f.Connection(f.IdentityDatabase),
                 "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
-                "ALTER ROLE b5_session_runtime ADD MEMBER [" + f.RuntimeLogin + "];", ct);
+                "ALTER ROLE b5_session_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
+                "CREATE USER [" + f.UnroledLogin + "] FOR LOGIN [" + f.UnroledLogin + "];" +
+                "GRANT EXECUTE ON OBJECT::dbo.b5_AssertCurrentSession TO [" + f.UnroledLogin + "];", ct);
             await f.RunAsync(f.Connection(f.RegistryDatabase),
                 "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
                 "ALTER ROLE b5_registry_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
                 "CREATE USER [" + f.RegistrySecurityLogin + "] FOR LOGIN [" + f.RegistrySecurityLogin + "];" +
                 "GRANT EXECUTE ON OBJECT::dbo.cp_TenantTransition TO [" +
-                    f.RegistrySecurityLogin + "];", ct);
+                    f.RegistrySecurityLogin + "];" +
+                "CREATE USER [" + f.UnroledLogin + "] FOR LOGIN [" + f.UnroledLogin + "];" +
+                "GRANT EXECUTE ON OBJECT::dbo.b5_AssertCurrentTenant TO [" + f.UnroledLogin + "];", ct);
             await f.RunAsync(f.Connection(f.RegistryDatabase),
                 "INSERT dbo.PreprodTenantOperators(LoginName,Enabled,CanSuspend) " +
                 "VALUES(N'" + f.RegistrySecurityLogin + "',1,1)", ct);
@@ -358,6 +369,41 @@ public sealed class B5SqlTests
             await SecurityCommandAsync("dbo.b5_SuspendTenant", tenant, ct,
                 P("@ExpectedFenceEpoch", 1L), P("@EvidenceRef", "ci-tenant-suspend"));
 
+        public async Task AssertDirectExecWithoutRoleDeniedAsync(AuthorizationContext a,
+            CancellationToken ct)
+        {
+            await UnroledDeniedAsync(FenceDatabase,"dbo.b5_AssertAuthority",ct,
+                P("@TenantId",a.TenantId),P("@ResourceTenantId",a.ResourceTenantId),
+                P("@ActorId",a.ActorId),P("@SessionId",a.SessionId),
+                P("@BindingId",a.BindingId),P("@RegistryEpoch",a.RegistryEpoch),
+                P("@FenceEpoch",a.FenceEpoch),P("@MembershipEpoch",a.MembershipEpoch),
+                P("@PermissionCode",a.PermissionCode),P("@ResourceKey",a.ResourceKey));
+            await UnroledDeniedAsync(FenceDatabase,"dbo.b5_RevokeMember",ct,
+                P("@TenantId",a.TenantId),P("@ActorId",a.ActorId),
+                P("@ExpectedFenceEpoch",1L),P("@EvidenceRef","ci-no-role-denied"));
+            await UnroledDeniedAsync(IdentityDatabase,"dbo.b5_AssertCurrentSession",ct,
+                P("@ActorId",a.ActorId),P("@SessionId",a.SessionId),
+                P("@SessionEpoch",a.SessionEpoch));
+            await UnroledDeniedAsync(RegistryDatabase,"dbo.b5_AssertCurrentTenant",ct,
+                P("@TenantId",a.TenantId),P("@BindingId",a.BindingId),
+                P("@RegistryEpoch",a.RegistryEpoch));
+        }
+
+        private async Task UnroledDeniedAsync(string dbName,string procedure,CancellationToken ct,
+            params SqlParameter[] parameters)
+        {
+            await using var connection=new SqlConnection(Connection(dbName));
+            await connection.OpenAsync(ct);
+            await ImpersonateAsync(connection,UnroledLogin,ct);
+            await using var tx=(SqlTransaction)await connection.BeginTransactionAsync(
+                IsolationLevel.Serializable,ct);
+            await using var cmd=new SqlCommand(procedure,connection,tx)
+            {CommandType=CommandType.StoredProcedure,CommandTimeout=30};
+            cmd.Parameters.AddRange(parameters);
+            var denied=await Assert.ThrowsAsync<SqlException>(()=>cmd.ExecuteNonQueryAsync(ct));
+            Assert.Contains("DENIED",denied.Message,StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task SecurityCommandAsync(string procedure, Guid tenant,
             CancellationToken ct, params SqlParameter[] parameters)
         {
@@ -382,7 +428,8 @@ public sealed class B5SqlTests
 
         public async Task ImpersonateAsync(SqlConnection db, string login, CancellationToken ct)
         {
-            if (login != RuntimeLogin && login != SecurityLogin && login != RegistrySecurityLogin)
+            if (login != RuntimeLogin && login != SecurityLogin && login != RegistrySecurityLogin &&
+                login != UnroledLogin)
                 throw new InvalidOperationException("Unrecognized CI principal");
             await using var cmd = new SqlCommand(
                 "EXECUTE AS LOGIN=N'" + login + "'", db);
