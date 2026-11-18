@@ -4,5 +4,7 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
     <ProjectReference Include="../../src/FmcgDms.Preprod.Authorization/FmcgDms.Preprod.Authorization.csproj" />
+    <ProjectReference Include="../../src/FmcgDms.Preprod.Identity/FmcgDms.Preprod.Identity.csproj" />
+    <ProjectReference Include="../../src/FmcgDms.Preprod.Tenancy/FmcgDms.Preprod.Tenancy.csproj" />
   </ItemGroup>
 </Project>

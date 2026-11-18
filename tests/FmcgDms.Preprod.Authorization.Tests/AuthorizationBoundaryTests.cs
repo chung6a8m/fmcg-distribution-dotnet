@@ -7,7 +7,7 @@ public sealed class AuthorizationBoundaryTests
 {
     private static AuthorizationContext Valid() => new(
         Guid.NewGuid(), Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-        1, 1, 1, "tenant.read", "tenant:own");
+        1, 1, 1, 0, "tenant.read", "tenant:own");
 
     private static AuthorizationContext Own() =>
         Valid() is var a ? a with { ResourceTenantId = a.TenantId } : throw new Exception();
@@ -52,5 +52,18 @@ public sealed class AuthorizationBoundaryTests
             (envelope with { RegistryEpoch = 0 }).Validate());
         Assert.Throws<AuthorizationDeniedException>(() =>
             (envelope with { BindingId = Guid.Empty }).Validate());
+        Assert.Throws<AuthorizationDeniedException>(() =>
+            (envelope with { SessionEpoch = -1 }).Validate());
+    }
+    [Theory]
+    [InlineData("master")]
+    [InlineData("tempdb")]
+    [InlineData("[control]")]
+    [InlineData("other;select")]
+    [InlineData("")]
+    public void Unapproved_control_database_identifiers_are_denied(string database)
+    {
+        Assert.Throws<AuthorizationDeniedException>(() =>
+            new SqlControlPlaneGuards(database, "FmcgB5Registry_ci"));
     }
 }

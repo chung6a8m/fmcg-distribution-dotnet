@@ -2,6 +2,8 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text.Json;
 using FmcgDms.Preprod.Authorization;
+using FmcgDms.Preprod.Identity;
+using FmcgDms.Preprod.Tenancy;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -19,38 +21,40 @@ public sealed class B5SqlTests
         var role = Guid.NewGuid();
         var bindingA = Guid.NewGuid();
         var bindingB = Guid.NewGuid();
-        await f.SeedAsync(actor, role, bindingA, bindingB, ct);
+        await f.SeedAsync(actor, session, role, bindingA, bindingB, ct);
         var a = new AuthorizationContext(f.TenantA, f.TenantA, actor, session,
-            bindingA, 1, 1, 1, "tenant.write", "stock:ci-only");
+            bindingA, 1, 1, 1, 0, "tenant.write", "stock:ci-only");
         var b = a with { TenantId = f.TenantB, ResourceTenantId = f.TenantB,
             BindingId = bindingB };
         var fence = new SqlAuthorizationFence(f.FenceConnection)
         {
             InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
         };
-        CurrentSessionCheck current = (user, sid, _) =>
-            Task.FromResult(user == actor && sid == session);
-        static Task<bool> DenySession(Guid _, Guid __, CancellationToken ___) =>
-            Task.FromResult(false);
+        var guard = new SqlControlPlaneGuards(f.IdentityDatabase, f.RegistryDatabase);
 
-        Assert.Equal(1, await fence.ExecuteAsync(a, current,
+        Assert.Equal(1, await fence.ExecuteAsync(a, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         Assert.Equal(1, await f.CountAsync(f.TenantADatabase, ct));
 
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            b, current, (db, tx, token) => f.WriteAsync(db, tx, f.TenantBDatabase, token), ct));
+            b, guard, (db, tx, token) => f.WriteAsync(db, tx, f.TenantBDatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a with { BindingId = Guid.NewGuid() }, current,
+            a with { BindingId = Guid.NewGuid() }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a with { ActorId = Guid.NewGuid() },
-            (_, _, _) => Task.FromResult(true),
+            a with { ActorId = Guid.NewGuid() }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a, DenySession,
+            a with { SessionId = Guid.NewGuid() }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a with { MakerId = actor }, current,
+            a with { MakerId = actor }, guard,
+            (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
+            a with { SessionEpoch = 1 }, guard,
+            (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
+            a with { RegistryEpoch = 2 }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         Assert.Equal(0, await f.CountAsync(f.TenantBDatabase, ct));
         Assert.Equal(1, await f.CountAsync(f.TenantADatabase, ct));
@@ -59,7 +63,7 @@ public sealed class B5SqlTests
         // An independently authenticated security login cannot overtake it.
         var inside = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var protectedWork = fence.ExecuteAsync(a, current, async (db, tx, token) =>
+        var protectedWork = fence.ExecuteAsync(a, guard, async (db, tx, token) =>
         {
             var count = await f.WriteAsync(db, tx, f.TenantADatabase, token);
             inside.TrySetResult(true);
@@ -92,7 +96,7 @@ public sealed class B5SqlTests
 
         await f.SuspendAsync(f.TenantB, ct);
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            b, (_, _, _) => Task.FromResult(true),
+            b, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantBDatabase, token), ct));
         Assert.Equal(0, await f.CountAsync(f.TenantBDatabase, ct));
 
@@ -129,6 +133,8 @@ public sealed class B5SqlTests
         public string TenantADatabase { get; }
         public string TenantBDatabase { get; }
         public string FenceDatabase { get; }
+        public string IdentityDatabase { get; }
+        public string RegistryDatabase { get; }
         public string RuntimeLogin { get; }
         public string SecurityLogin { get; }
         public string FenceConnection => Connection(FenceDatabase);
@@ -138,6 +144,8 @@ public sealed class B5SqlTests
         {
             server = sqlServer;
             FenceDatabase = "FmcgB5Fence_" + nonce;
+            IdentityDatabase = "FmcgB5Identity_" + nonce;
+            RegistryDatabase = "FmcgB5Registry_" + nonce;
             TenantADatabase = "FmcgB5TenA_" + nonce;
             TenantBDatabase = "FmcgB5TenB_" + nonce;
             RuntimeLogin = "b5rt_" + nonce;
@@ -151,15 +159,20 @@ public sealed class B5SqlTests
                 !server.Contains("(localdb)", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("B.5 SQL verification requires disposable LocalDB");
             var f = new Fixture(server, Guid.NewGuid().ToString("N")[..12]);
-            foreach (var name in new[] { f.FenceDatabase, f.TenantADatabase, f.TenantBDatabase })
+            foreach (var name in new[] { f.FenceDatabase, f.IdentityDatabase, f.RegistryDatabase,
+                f.TenantADatabase, f.TenantBDatabase })
                 await f.CreateDatabaseAsync(name, ct);
-            var migrationName = typeof(B5Schema).Assembly.GetManifestResourceNames().Single(
-                n => n.EndsWith("20261118_001_independent_fence.sql", StringComparison.Ordinal));
-            using var stream = new StreamReader(typeof(B5Schema).Assembly
-                .GetManifestResourceStream(migrationName)!);
-            var script = await stream.ReadToEndAsync(ct);
-            await f.RunAsync(f.FenceConnection, script, ct);
-            await f.RunAsync(f.FenceConnection, script, ct);
+            // Apply exact production source migrations to distinct CI databases.
+            await f.ApplyTwiceAsync(f.FenceConnection, typeof(B5Schema),
+                "20261118_001_independent_fence.sql", ct);
+            await f.ApplyTwiceAsync(f.Connection(f.IdentityDatabase), typeof(PreprodIdentityDb),
+                "20261117_001_identity_control_plane.sql", ct);
+            await f.ApplyTwiceAsync(f.Connection(f.RegistryDatabase), typeof(TenantRegistrySql),
+                "20261118_001_registry_control_plane.sql", ct);
+            await f.ApplyTwiceAsync(f.Connection(f.IdentityDatabase), typeof(B5Schema),
+                "20261118_002_identity_guard.sql", ct);
+            await f.ApplyTwiceAsync(f.Connection(f.RegistryDatabase), typeof(B5Schema),
+                "20261118_003_registry_guard.sql", ct);
             await f.CreateLoginAsync(f.RuntimeLogin, ct);
             await f.CreateLoginAsync(f.SecurityLogin, ct);
             await f.RunAsync(f.FenceConnection,
@@ -167,6 +180,12 @@ public sealed class B5SqlTests
                 "ALTER ROLE b5_runtime ADD MEMBER [" + f.RuntimeLogin + "];" +
                 "CREATE USER [" + f.SecurityLogin + "] FOR LOGIN [" + f.SecurityLogin + "];" +
                 "ALTER ROLE b5_revoker ADD MEMBER [" + f.SecurityLogin + "];", ct);
+            await f.RunAsync(f.Connection(f.IdentityDatabase),
+                "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
+                "ALTER ROLE b5_session_runtime ADD MEMBER [" + f.RuntimeLogin + "];", ct);
+            await f.RunAsync(f.Connection(f.RegistryDatabase),
+                "CREATE USER [" + f.RuntimeLogin + "] FOR LOGIN [" + f.RuntimeLogin + "];" +
+                "ALTER ROLE b5_registry_runtime ADD MEMBER [" + f.RuntimeLogin + "];", ct);
             foreach (var database in new[] { f.TenantADatabase, f.TenantBDatabase })
                 await f.RunAsync(f.Connection(database),
                     "CREATE TABLE dbo.B5WriteWitness(Id bigint IDENTITY(1,1) PRIMARY KEY);" +
@@ -175,9 +194,26 @@ public sealed class B5SqlTests
             return f;
         }
 
-        public async Task SeedAsync(Guid actor, Guid role, Guid bindingA, Guid bindingB,
+        public async Task SeedAsync(Guid actor, Guid session, Guid role, Guid bindingA, Guid bindingB,
             CancellationToken ct)
         {
+            await RunAsync(Connection(IdentityDatabase), """
+                INSERT dbo.AspNetUsers(Id,UserName,NormalizedUserName,EmailConfirmed,
+                    PhoneNumberConfirmed,TwoFactorEnabled,LockoutEnabled,AccessFailedCount,
+                    Disabled,SecurityStamp)
+                VALUES(@actor,N'CI_USER',N'CI_USER',0,0,0,0,0,0,N'CI_STAMP');
+                INSERT dbo.PreprodLoginSessions(Id,UserId,Epoch,SecurityStamp,CreatedUtc)
+                VALUES(@session,@actor,0,N'CI_STAMP',SYSUTCDATETIME());
+                """, ct, P("@actor", actor), P("@session", session));
+            await RunAsync(Connection(RegistryDatabase), """
+                INSERT dbo.PreprodTenantRegistry
+                    (TenantId,TenantKey,DatabaseName,BindingId,SecurityEpoch,
+                    State,RequestRef,RequestedBy)
+                VALUES(@a,N'CI_A',@dbA,@bindingA,1,N'ACTIVE',N'ci-source-only',N'ci-dba'),
+                      (@b,N'CI_B',@dbB,@bindingB,1,N'ACTIVE',N'ci-source-only',N'ci-dba');
+                """, ct, P("@a", TenantA), P("@b", TenantB),
+                P("@dbA", TenantADatabase), P("@dbB", TenantBDatabase),
+                P("@bindingA", bindingA), P("@bindingB", bindingB));
             await RunAsync(FenceConnection, """
                 INSERT dbo.B5TenantFence(TenantId,BindingId,RegistryEpoch,FenceEpoch,State)
                 VALUES(@a,@bindingA,1,1,N'ACTIVE'),(@b,@bindingB,1,1,N'ACTIVE');
@@ -262,7 +298,11 @@ public sealed class B5SqlTests
                 "SELECT DB_ID(N'" + TenantBDatabase + "')", ct));
             var fence = Convert.ToInt32(await ScalarAsync(Master,
                 "SELECT DB_ID(N'" + FenceDatabase + "')", ct));
-            return a != b && a != fence && b != fence;
+            var identity = Convert.ToInt32(await ScalarAsync(Master,
+                "SELECT DB_ID(N'" + IdentityDatabase + "')", ct));
+            var registry = Convert.ToInt32(await ScalarAsync(Master,
+                "SELECT DB_ID(N'" + RegistryDatabase + "')", ct));
+            return new HashSet<int> { a, b, fence, identity, registry }.Count == 5;
         }
 
         private string Connection(string database) =>
@@ -272,6 +312,18 @@ public sealed class B5SqlTests
                 Encrypt=SqlConnectionEncryptOption.Optional,
                 TrustServerCertificate=true, Pooling=false
             }.ConnectionString;
+
+        private async Task ApplyTwiceAsync(string databaseConnection, Type assemblyType,
+            string resourceSuffix, CancellationToken ct)
+        {
+            var assembly = assemblyType.Assembly;
+            var name = assembly.GetManifestResourceNames().Single(n =>
+                n.EndsWith(resourceSuffix, StringComparison.Ordinal));
+            using var reader = new StreamReader(assembly.GetManifestResourceStream(name)!);
+            var text = await reader.ReadToEndAsync(ct);
+            await RunAsync(databaseConnection, text, ct);
+            await RunAsync(databaseConnection, text, ct);
+        }
 
         private async Task CreateDatabaseAsync(string name, CancellationToken ct)
         {
