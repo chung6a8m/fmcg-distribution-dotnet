@@ -138,6 +138,48 @@ public sealed class TenantSafetyTests
     }
 
     [Fact]
+    public async Task Finalizer_vault_uses_only_exact_tenant_path_and_never_shared_role()
+    {
+        var tenant=Guid.Parse("20ad96e7-d561-4d5d-9f79-3b8b1b1ea402");
+        var file=Path.GetTempFileName();
+        var handler=new FinalizerVaultStub();
+        try
+        {
+            await File.WriteAllTextAsync(file,"ci-only-token-material-123456");
+            var vault=new VaultTenantOperatorSecrets("https://vault.internal.example",file,handler);
+            var result=await vault.ReadFinalizerAsync(tenant,TestContext.Current.CancellationToken);
+            Assert.Equal("Server=sql.internal;Database=control",result.RegistryConnection);
+            Assert.Equal("Server=sql.internal;Database=master",result.MasterConnection);
+            Assert.Equal("/v1/preprod/data/tenant-provisioning/finalizer/"+tenant.ToString("N"),
+                handler.RequestedPath);
+            await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
+                vault.ReadFinalizerAsync(Guid.Empty,TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
+                vault.ReadOperatorAsync("finalize",TestContext.Current.CancellationToken));
+        }
+        finally {File.Delete(file);}
+    }
+
+    private sealed class FinalizerVaultStub : HttpMessageHandler
+    {
+        public string? RequestedPath {get;private set;}
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,CancellationToken cancellationToken)
+        {
+            RequestedPath=request.RequestUri?.AbsolutePath;
+            const string body="""
+            {"data":{"metadata":{"version":1},"data":{
+              "registryConnectionString":"Server=sql.internal;Database=control",
+              "masterConnectionString":"Server=sql.internal;Database=master"}}}
+            """;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content=new StringContent(body)
+            });
+        }
+    }
+
+    [Fact]
     public void Unknown_or_client_selected_vault_role_is_denied()
     {
         Assert.Throws<TenantLifecycleDeniedException>(()=>
