@@ -1,0 +1,181 @@
+name: APP-02B.8 immutable audit and operations (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  b8-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Assert exact PR source HEAD
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(dotnet --version)" = "10.0.404"
+      - name: Compile and test six B04 source-contract cases
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Operations.Tests/FmcgDms.Preprod.Operations.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Operations.Tests/FmcgDms.Preprod.Operations.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Operations.Tests/FmcgDms.Preprod.Operations.Tests.csproj -c Release --no-build -- --report-trx
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release
+      - name: Require exact six passed, zero failed/not-executed
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          trxs=list(Path(".").rglob("FmcgDms.Preprod.Operations.Tests*.trx"))
+          if len(trxs)!=1: raise SystemExit(f"B8_SOURCE_TRX_MISSING_OR_DUPLICATED {trxs}")
+          root=ET.parse(trxs[0]).getroot()
+          counters=next((x for x in root.iter() if x.tag.rsplit("}",1)[-1]=="Counters"),None)
+          if counters is None: raise SystemExit("B8_SOURCE_TRX_NO_COUNTERS")
+          values={k:int(counters.get(k,"-1")) for k in ("total","executed","passed","failed","notExecuted")}
+          if values!={"total":6,"executed":6,"passed":6,"failed":0,"notExecuted":0}:
+              raise SystemExit(f"B8_SOURCE_REQUIRED_6_PASS {values}")
+          print("B8_SOURCE_EXACT",values)
+          PY
+      - name: Block accidental activation and explicit dangerous SQL operations
+        shell: bash
+        run: |
+          ! grep -REn 'FmcgDms\.Preprod\.Operations|b8_Append|b8_PlaceHold' src/FmcgDms.Preprod.Api src/FmcgDms.Preprod.Worker
+          ! grep -REni '(TRUNCATE TABLE|DROP DATABASE|DELETE FROM dbo\.B8|GRANT (UPDATE|DELETE|SELECT) ON dbo\.B8)' src/FmcgDms.Preprod.Operations/Migrations
+          test ! -e src/FmcgDms.Preprod.Operations/Program.cs
+      - name: Record B.8 source-only manifest
+        if: always()
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=b8-source-%s-%s\nSourceHeadSha=%s\nWorkflowCommitSha=%s\nEvidenceClass=GITHUB_HOSTED_CI_ONLY\nOffHostAuditAnchor=NOT_PERFORMED\nAlertSinkAndPager=NOT_CONNECTED\nLegalRetention=UNSET\nRealPREPROD=NOT_VERIFIED\nG-B04=NOT_RUN\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/APP-02B8-SOURCE.txt
+          sha256sum src/FmcgDms.Preprod.Operations/*.cs src/FmcgDms.Preprod.Operations/Migrations/*.sql tests/FmcgDms.Preprod.Operations.Tests/*.cs .github/workflows/app02b8-audit-operations.yml >> TestResults/APP-02B8-SOURCE.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b8-source-ci-only
+          path: |
+            TestResults/APP-02B8-SOURCE.txt
+            tests/FmcgDms.Preprod.Operations.Tests/TestResults/
+            TestResults/*.trx
+          if-no-files-found: warn
+
+  b8-two-tenant-localdb:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Assert final source and disposable LocalDB
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_HEAD) { throw 'B8_SOURCE_HEAD_MISMATCH' }
+          if ((dotnet --version).Trim() -ne '10.0.404') { throw 'B8_SDK_MISMATCH' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -b -Q 'SELECT @@VERSION'
+          if ($LASTEXITCODE -ne 0) { throw 'B8_LOCALDB_UNAVAILABLE' }
+      - name: Test atomic two-tenant SQL audit, roles, holds, migration corruption
+        shell: pwsh
+        env:
+          APP02B8_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B8_TEST_RUN_ID: b8-localdb-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B8_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Operations.SqlServer.Tests/FmcgDms.Preprod.Operations.SqlServer.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Operations.SqlServer.Tests/FmcgDms.Preprod.Operations.SqlServer.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Operations.SqlServer.Tests/FmcgDms.Preprod.Operations.SqlServer.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Validate SQL TestRunId, source/peer hashes and no PREPROD overclaim
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $a=@(Get-ChildItem . -Recurse -File -Filter APP-02B8-AUDIT-WITNESS.json)
+          $s=@(Get-ChildItem . -Recurse -File -Filter APP-02B8-SCHEMA-WITNESS.json)
+          if ($a.Count -ne 1 -or $s.Count -ne 1) { throw 'B8_SQL_WITNESSES_MISSING_OR_AMBIGUOUS' }
+          $x=Get-Content -Raw $a[0].FullName | ConvertFrom-Json
+          $y=Get-Content -Raw $s[0].FullName | ConvertFrom-Json
+          if ($x.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $x.SchemaVersion -cne 'B8_20261118_001' -or
+              $x.EvidenceClass -cne 'GITHUB_HOSTED_DISPOSABLE_LOCALDB_ONLY' -or
+              $x.PhysicalTenantDatabases -ne 2 -or !$x.IndependentAuditDatabase -or
+              !$x.AppendOnlyTriggerDenied -or !$x.CrossTenantRoleDenied -or
+              !$x.DuplicateRollbackNoGap -or !$x.ConcurrentAppendAtomic -or
+              !$x.PeerDistinct -or !$x.CrossLanguageSha256ChainVerified -or
+              !$x.TamperAndTruncationDetected -or !$x.LegalHoldImmutable -or
+              !$x.PurgeEndpointAbsent -or
+              $x.PeerAHashBefore -cne $x.PeerAHashAfter -or
+              $x.PeerBHashBefore -cne $x.PeerBHashAfter -or
+              $x.PeerAHashBefore -ceq $x.PeerBHashBefore -or
+              $x.PeerAHashBefore -notmatch '^[0-9A-F]{64}$' -or
+              $x.PeerBHashBefore -notmatch '^[0-9A-F]{64}$' -or
+              $x.OffHostAnchor -cne 'NOT_PERFORMED' -or
+              $x.RealPreprod -cne 'NOT_VERIFIED' -or $x.G_B04 -cne 'NOT_RUN') {
+            throw 'B8_SQL_WITNESS_INVALID_OR_OVERCLAIMED'
+          }
+          if ($y.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $y.SchemaVersion -cne 'B8_20261118_001' -or
+              !$y.IntactReplayIdempotent -or !$y.MissingTriggerReplayDenied -or
+              !$y.DisabledTriggerReplayDenied -or !$y.UnknownVersionReplayDenied -or
+              $y.RealPreprod -cne 'NOT_VERIFIED' -or $y.G_B04 -cne 'NOT_RUN') {
+            throw 'B8_SCHEMA_WITNESS_INVALID_OR_OVERCLAIMED'
+          }
+          $trxs=@(Get-ChildItem . -Recurse -File -Filter 'FmcgDms.Preprod.Operations.SqlServer.Tests*.trx')
+          if ($trxs.Count -ne 1) { throw 'B8_SQL_TRX_MISSING_OR_DUPLICATED' }
+          [xml]$trx=Get-Content -Raw $trxs[0].FullName
+          $c=$trx.TestRun.ResultSummary.Counters
+          if ([int]$c.total -ne 2 -or [int]$c.passed -ne 2 -or
+              [int]$c.failed -ne 0 -or [int]$c.notExecuted -ne 0) {
+            throw 'B8_SQL_TWO_TESTS_NOT_ALL_PASSED'
+          }
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          Copy-Item $a[0].FullName TestResults/APP-02B8-AUDIT-WITNESS.json
+          Copy-Item $s[0].FullName TestResults/APP-02B8-SCHEMA-WITNESS.json
+          Copy-Item $trxs[0].FullName TestResults/APP-02B8-SQL.trx
+          # Windows checkout may use CRLF while the reviewed Git blob has LF.
+          # Hash committed source BYTES, not PowerShell text or normalized checkout.
+          $migrationPath='src/FmcgDms.Preprod.Operations/Migrations/20261118_001_immutable_audit.sql'
+          $gitInfo=[System.Diagnostics.ProcessStartInfo]::new('git')
+          $gitInfo.ArgumentList.Add('show')
+          $gitInfo.ArgumentList.Add('HEAD:' + $migrationPath)
+          $gitInfo.RedirectStandardOutput=$true
+          $gitInfo.RedirectStandardError=$true
+          $gitProcess=[System.Diagnostics.Process]::Start($gitInfo)
+          if ($null -eq $gitProcess) { throw 'B8_GIT_BLOB_PROCESS_START_FAILED' }
+          $gitBytes=[System.IO.MemoryStream]::new()
+          $gitProcess.StandardOutput.BaseStream.CopyTo($gitBytes)
+          $gitProcess.WaitForExit()
+          if ($gitProcess.ExitCode -ne 0 -or $gitBytes.Length -lt 1) { throw 'B8_GIT_BLOB_READ_FAILED' }
+          $migrationGitSha=[Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($gitBytes.ToArray()))
+          $migrationCheckoutSha=(Get-FileHash $migrationPath -Algorithm SHA256).Hash
+          @("TestRunId=$($x.TestRunId)","SourceHeadSha=$($x.SourceHeadSha)",
+            "MigrationGitBlobSha256=$migrationGitSha","MigrationCheckoutSha256=$migrationCheckoutSha",
+            "EvidenceClass=GITHUB_HOSTED_LOCALDB_ONLY",
+            "PhysicalPreprod=NOT_VERIFIED","G-B04=NOT_RUN") |
+            Set-Content TestResults/APP-02B8-MANIFEST.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b8-two-tenant-localdb-ci-only
+          path: |
+            TestResults/
+          if-no-files-found: warn
