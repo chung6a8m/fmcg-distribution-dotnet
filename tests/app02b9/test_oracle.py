@@ -135,7 +135,7 @@ class OracleTests(unittest.TestCase):
             })
         for probe in ("RUNTIME-01", "RUNTIME-02"):
             ref = probe + "-witness"
-            self.add_witness(ref, "RUNTIME", probe, "RUNNING", "NO_EXTERNAL_PORTS",
+            self.add_witness(ref, "RUNTIME", probe, "PASS", "NO_EXTERNAL_PORTS",
                              probe, False)
             self.manifest["runtimeProbes"].append({
                 "id": probe, "status": "PASS", "witnessRef": ref
@@ -156,6 +156,10 @@ class OracleTests(unittest.TestCase):
     def add_witness(self, ref, kind, code, observed, invariant, fault, negative):
         target = self.bundle / "witness" / (ref + ".json")
         target.parent.mkdir(parents=True, exist_ok=True)
+        raw = self.bundle / "raw" / (ref + ".txt")
+        raw.parent.mkdir(parents=True, exist_ok=True)
+        raw.write_text("SYNTHETIC UNIT TEST ONLY: " + code + "/" + kind + "/" + ref,
+                       encoding="utf-8")
         witness = {
             "evidenceClass": "PHYSICAL_PREPROD_INDEPENDENT",
             "testRunId": RUN, "sourceHeadSha": HEAD,
@@ -165,6 +169,8 @@ class OracleTests(unittest.TestCase):
             "negativeInvariant": invariant, "negativeObserved": negative,
             "faultId": fault, "peerReadRows": 0,
             "peerSqlHashBefore": PEER, "peerSqlHashAfter": PEER,
+            "rawArtifactPath": str(raw.relative_to(self.bundle)).replace("\\", "/"),
+            "rawArtifactSha256": digest(raw),
         }
         target.write_text(json.dumps(witness), encoding="utf-8")
         self.manifest["witnesses"].append({
@@ -227,6 +233,20 @@ class OracleTests(unittest.TestCase):
         self.manifest["witnesses"][0]["path"] = "../outside.json"
         self.seal()
         self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
+
+    def test_reject_raw_artifact_or_ambiguous_json(self):
+        raw = self.bundle / "raw" / (self.manifest["witnesses"][0]["ref"] + ".txt")
+        raw.unlink()
+        self.assertEqual(self.assess()["decision"], "NO_GO")
+        self.assertIn("WITNESS_INVALID:", " ".join(self.assess()["errors"]))
+        # Duplicate JSON object keys are forbidden even when both values agree.
+        self.seal()
+        path = self.bundle / "witness" / (self.manifest["witnesses"][1]["ref"] + ".json")
+        body = path.read_text(encoding="utf-8")
+        path.write_text(body[:-1] + ', "peerReadRows": 0}', encoding="utf-8")
+        self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
+        with self.assertRaises(ValueError):
+            oracle.strict_json_bytes(b'{"value": NaN}')
 
     def test_reject_missing_case_and_bad_recovery(self):
         self.manifest["cases"].pop()
