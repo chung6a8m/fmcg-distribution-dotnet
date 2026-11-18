@@ -34,3 +34,12 @@ Source [issue #59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/
 The CI workflow may use npm's public registry metadata to establish whether the claimed exact candidate tarballs exist. It must not install or override a candidate automatically, must not modify the authoritative lockfile, and must not claim candidate metadata equals a security patch. Candidate availability and `npm audit` failure are independent observations.
 
 **Current disposition:** No candidate has passed these checks. No dependency lockfile or required CI audit changes have been made. This is an evaluation protocol, not security acceptance.
+
+## Measured public npm registry availability — 2026-11-18
+
+Independent [GitHub-hosted Node 26 candidate probe #44225144759](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44225144759), artifact `issue59-candidate-registry-metadata-only` (ID `14391947805`), returned:
+
+- `npm view @rootio/picomatch@4.0.7-root.io.1`: **HTTP 404** from the public npm registry; `@rootio` patched distribution listed by Root's own OSV database is **not installable as this exact public npm package** in the CI environment. Do not use the Root version in package.json/lockfile or claim it is an available public npm fix. A private registry would constitute a separately approved new supply-chain boundary.
+- `npm view @ryotsu/picomatch@4.0.7-a`: **metadata retrieved**, including public registry integrity metadata, from a public npm registry. This proves package metadata availability **only**; it does not verify patch source, upstream provenance, semantic compatibility, runtime correctness, or safety. The candidate has not been installed or permitted as an npm override.
+
+The **required full-tree audit and vulnerable-lockfile jobs still fail**, correctly. Any future candidate evaluation must demonstrate independent code diff and sandboxed CVE-2026-112366 ReDoS tests plus complete Vite/PWA/Playwright/Workbox/APP-00A regression. Package-name aliasing solely to evade advisory matching is forbidden. Maintain issue #59 and PR #61 as **OPEN / DRAFT / NOT_PATCHED**.
