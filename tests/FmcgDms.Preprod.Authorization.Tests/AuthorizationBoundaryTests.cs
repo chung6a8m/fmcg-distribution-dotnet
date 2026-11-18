@@ -55,6 +55,20 @@ public sealed class AuthorizationBoundaryTests
         Assert.Throws<AuthorizationDeniedException>(() =>
             (envelope with { SessionEpoch = -1 }).Validate());
     }
+
+    [Fact]
+    public async Task B5_runtime_execution_is_denied_before_SQL_without_test_only_gate()
+    {
+        var authority = Own();
+        var fence = new SqlAuthorizationFence(
+            "Server=(localdb)\\MSSQLLocalDB;Database=B5NeverCreated;Integrated Security=true");
+        var guards = new SqlControlPlaneGuards("FmcgB5Identity_ci", "FmcgB5Registry_ci");
+        var error = await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            fence.ExecuteAsync(authority, guards,
+                (_db, _tx, _ct) => Task.FromResult(1), CancellationToken.None));
+        Assert.Equal("B5_RUNTIME_NOT_AUTHORIZED", error.Code);
+    }
+
     [Theory]
     [InlineData("master")]
     [InlineData("tempdb")]

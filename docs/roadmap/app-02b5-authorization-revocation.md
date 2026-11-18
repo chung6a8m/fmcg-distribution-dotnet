@@ -43,6 +43,14 @@ Implementation workflow: .github/workflows/app02b5-authorization.yml (Ubuntu uni
 
 **SEC-59 — Full npm audit remains FAILED:** #59 is OPEN HIGH security debt. The B.4-specific DEBT-01 source merge exception applies only to PR #58 and cannot be inherited. Do not relabel APP-00A as PASS, waive checks or authorize release on this PR.
 
+### Independent review findings: containment, not authority
+
+**SAFE-DEFAULT (fixed in this draft):** `SqlAuthorizationFence.ExecuteAsync` now denies every ordinary production/runtime invocation, before opening a SQL connection. Only the internal test-only hook against disposable `(localdb)\\...` permits the existing CI harness. This is a containment guard, **not** B.5 authorization acceptance.
+
+**SQL-BOUNDARY-01 (BLOCKING):** The protected `effect` delegate is not constrained to the tenant database represented by the B.4 registry binding. The LocalDB runtime login has INSERT to **both** tenant databases; an A-authorized callback can select the B three-part SQL name, and the present B.3/B.4/B.5 assertions do not compare the actual SQL write target to the authorized tenant. Existing `CrossTenantDenied` evidence only tests B authority without B membership, **not** the cross-target A-context/B-write case. Replace the unrestricted effect surface with an operator-pinned database-bound command/SQL grant model, prove negative A→B write under a valid A grant, and capture independent SQL before/after peer hashes. Do not enable business paths or label CI-B5-03 / G-B01 verified until this is closed.
+
+**CHECKER-01 (BLOCKING):** `MakerId` defaults to null in the public authorization envelope and SQL procedure; a caller omitting it bypasses the equality check. The checker must come from an immutable, authoritative workflow source and be required for every approval command, with negative omitted/forged/matching-maker SQL witnesses. Current `MakerCheckerDenied` proves only an explicitly supplied self-maker is rejected; it does not prove real Maker/Checker independence.
+
 ## 4. Strict exit rule
 
 Do not merge or mark B.5 AUTHORIZATION_VERIFIED while REV-01/ADMIN-01 remains unresolved or full required source security checks fail. Even a future B.5 source-only merge, if separately Owner-authorized, cannot promote G-B01..05 from NOT_RUN. No real PREPROD admission, production, pilot or APP-02C/D/E can be inferred from B.5 CI evidence.

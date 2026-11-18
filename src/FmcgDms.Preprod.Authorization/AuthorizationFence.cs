@@ -55,6 +55,13 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString)
     {
         authority.Validate();
         ArgumentNullException.ThrowIfNull(controlAuthority);
+        // B.5 has no approved runtime authorization path. Disposable CI is the
+        // only allowed execution context until restore-safe, tenant-bound SQL
+        // isolation and Owner/operator admission have independent evidence.
+        if (InitializeCiSession is null ||
+            !new SqlConnectionStringBuilder(fenceConnectionString).DataSource
+                .StartsWith("(localdb)\\", StringComparison.OrdinalIgnoreCase))
+            throw new AuthorizationDeniedException("B5_RUNTIME_NOT_AUTHORIZED");
         await using var connection = new SqlConnection(fenceConnectionString);
         await connection.OpenAsync(cancellationToken);
         if (InitializeCiSession is not null)
