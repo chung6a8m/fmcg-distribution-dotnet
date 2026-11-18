@@ -56,11 +56,12 @@ BEGIN TRY
        EvidenceRef nvarchar(160) NOT NULL,
        ApprovedBy sysname NOT NULL,
        ExpiresUtc datetime2(7) NOT NULL,
-       ConsumedUtc datetime2(7) NULL
+       ConsumedUtc datetime2(7) NULL,
+       ExpiredUtc datetime2(7) NULL
     );
     CREATE UNIQUE INDEX UX_B53ActivePermit
         ON dbo.B53ActivationPermit(TenantId)
-        WHERE ConsumedUtc IS NULL;
+        WHERE ConsumedUtc IS NULL AND ExpiredUtc IS NULL;
     CREATE TABLE dbo.B53RevocationEvent
     (
        EventNo bigint IDENTITY(1,1) PRIMARY KEY,
@@ -135,7 +136,7 @@ END');
  @TargetRegistryEpoch bigint,@EvidenceRef nvarchar(160)
 AS
 BEGIN
- SET NOCOUNT ON;
+ SET NOCOUNT ON; SET XACT_ABORT ON;
  IF ISNULL(IS_ROLEMEMBER(N''b53_reactivation_approver''),0)<>1
     THROW 51820,N''B53_APPROVER_PRINCIPAL_DENIED'',1;
  IF @TenantId IS NULL OR @BindingId IS NULL OR @TargetRegistryEpoch<2
@@ -147,13 +148,22 @@ BEGIN
     WHERE TenantId=@TenantId AND BindingId=@BindingId
       AND RegistryEpoch=@TargetRegistryEpoch-1 AND State=''SUSPENDED'')
     THROW 51822,N''B53_APPROVAL_EPOCH_OR_STATE_DENIED'',1;
+ -- A stale, never-used permit must not permanently prevent independent
+ -- reapproval. Preserve it with ExpiredUtc rather than erasing history.
+ UPDATE dbo.B53ActivationPermit WITH(UPDLOCK)
+    SET ExpiredUtc=SYSUTCDATETIME()
+ WHERE TenantId=@TenantId AND ConsumedUtc IS NULL
+    AND ExpiredUtc IS NULL AND ExpiresUtc<=SYSUTCDATETIME();
  IF EXISTS(SELECT 1 FROM dbo.B53ActivationPermit WITH(UPDLOCK,HOLDLOCK)
-    WHERE TenantId=@TenantId AND ConsumedUtc IS NULL)
+    WHERE TenantId=@TenantId AND ConsumedUtc IS NULL AND ExpiredUtc IS NULL)
     THROW 51823,N''B53_DUPLICATE_APPROVAL_DENIED'',1;
  INSERT dbo.B53ActivationPermit
     (TenantId,BindingId,TargetRegistryEpoch,EvidenceRef,ApprovedBy,ExpiresUtc)
+ -- Bind the ACTUAL SQL execution identity. ORIGINAL_LOGIN() would report
+ -- the outer connection for an EXECUTE AS operator and allow dual-role
+ -- self-approval to appear as an unrelated actor.
  VALUES(@TenantId,@BindingId,@TargetRegistryEpoch,@EvidenceRef,
-        ORIGINAL_LOGIN(),DATEADD(MINUTE,5,SYSUTCDATETIME()));
+        SUSER_SNAME(),DATEADD(MINUTE,5,SYSUTCDATETIME()));
  COMMIT TRANSACTION;
 END');
     EXEC(N'CREATE PROCEDURE dbo.b53_AdvanceTenant
@@ -169,14 +179,25 @@ BEGIN
     OR @NewRegistryEpoch<>@ExpectedRegistryEpoch+1
     OR @NewState NOT IN (''ACTIVE'',''SUSPENDED'')
     THROW 51831,N''B53_TENANT_EPOCH_INVALID'',1;
+ -- Lock fence first, then permit: same order as b53_ApproveActivation.
+ -- The lock remains held through the caller''s B4 COMMIT.
+ IF NOT EXISTS(SELECT 1 FROM dbo.B5TenantFence WITH(UPDLOCK,HOLDLOCK)
+    WHERE TenantId=@TenantId AND BindingId=@BindingId
+      AND RegistryEpoch=@ExpectedRegistryEpoch
+      AND FenceEpoch<9223372036854775807
+      AND (@NewState=''SUSPENDED'' OR State=''SUSPENDED''))
+    THROW 51833,N''B53_TENANT_FENCE_STALE'',1;
  IF @NewState=''ACTIVE''
  BEGIN
-    -- Independent permit is target-epoch/binding-bound and single-use.
+    -- Independent permit is target-epoch/binding-bound, single-use and
+    -- the approving SQL login may NOT perform the tenant activation.
     UPDATE dbo.B53ActivationPermit WITH(UPDLOCK)
        SET ConsumedUtc=SYSUTCDATETIME()
     WHERE TenantId=@TenantId AND BindingId=@BindingId
       AND TargetRegistryEpoch=@NewRegistryEpoch
-      AND ConsumedUtc IS NULL AND ExpiresUtc>SYSUTCDATETIME();
+      AND ConsumedUtc IS NULL AND ExpiredUtc IS NULL
+      AND ApprovedBy<>SUSER_SNAME()
+      AND ExpiresUtc>SYSUTCDATETIME();
     IF @@ROWCOUNT<>1 THROW 51832,N''B53_ACTIVATION_PERMIT_MISSING'',1;
  END;
  UPDATE dbo.B5TenantFence WITH(UPDLOCK)
