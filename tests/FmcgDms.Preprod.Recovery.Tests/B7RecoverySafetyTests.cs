@@ -73,6 +73,10 @@ public sealed class B7RecoverySafetyTests
         Assert.False(B7BackupChain.Inspect(input with { Pieces = missing }).AcceptedForOperatorReview);
         var stale = input with { ObservationUtc = input.ObservationUtc.AddMinutes(6) };
         Assert.Contains("FIVE_MINUTE_LOG_INTERVAL_EXCEEDED", B7BackupChain.Inspect(stale).Denials);
+        var missingDiffs = input.Pieces.Where(p => p.Kind != B7BackupKind.Differential ||
+            p.FinishUtc == input.ObservationUtc.AddMinutes(-120)).ToArray();
+        Assert.Contains("DIFFERENTIAL_SCHEDULE_GAP",
+            B7BackupChain.Inspect(input with { Pieces = missingDiffs }).Denials);
     }
 
     [Fact]
@@ -114,6 +118,9 @@ public sealed class B7RecoverySafetyTests
         var unknown = committed with { State = B7OutcomeState.Unknown };
         Assert.Contains("UNKNOWN_OUTCOME_HOLD_CASE",
             B7SafeRestore.Inspect(original with { Outcomes = [unknown] }).Denials);
+        Assert.Contains("UNKNOWN_OUTCOME_HOLD_CASE",
+            B7SafeRestore.Inspect(original with
+                { Outcomes = [committed with { State = (B7OutcomeState)99 }] }).Denials);
         Assert.Contains("EXTERNAL_COMMIT_COUNT_INVALID",
             B7SafeRestore.Inspect(original with { Outcomes = [committed with { ObservedEffectCount = 2 }] }).Denials);
         Assert.Contains("DUPLICATE_MESSAGE_ID",

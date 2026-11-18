@@ -76,7 +76,7 @@ public static class B7SafeRestore
                 if (o.SourceId == Guid.Empty || o.MessageId == Guid.Empty ||
                     !o.IndependentReceiverJournalVerified)
                     Deny("SOURCE_OR_RECEIVER_WITNESS_MISSING");
-                if (o.State == B7OutcomeState.Unknown)
+                if (o.State == B7OutcomeState.Unknown || !Enum.IsDefined(o.State))
                     Deny("UNKNOWN_OUTCOME_HOLD_CASE");
                 else if (o.State == B7OutcomeState.Committed && o.ObservedEffectCount != 1)
                     Deny("EXTERNAL_COMMIT_COUNT_INVALID");

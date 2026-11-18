@@ -83,7 +83,14 @@ public static class B7BackupChain
             p.FinishUtc >= full.FinishUtc).ToArray();
         if (diffs.Any(p => p.CopyOnly || p.DatabaseBackupLsn != full.CheckpointLsn))
             Deny("DIFFERENTIAL_BASE_MISMATCH");
-        var newestBase = diffs.Length == 0 ? full.FinishUtc : diffs[^1].FinishUtc;
+        var priorDifferentialUtc = full.FinishUtc;
+        foreach (var diff in diffs)
+        {
+            if (diff.FinishUtc - priorDifferentialUtc > TimeSpan.FromHours(6))
+                Deny("DIFFERENTIAL_SCHEDULE_GAP");
+            priorDifferentialUtc = diff.FinishUtc;
+        }
+        var newestBase = priorDifferentialUtc;
         if (inventory.ObservationUtc - newestBase > TimeSpan.FromHours(6))
             Deny("SIX_HOUR_DIFFERENTIAL_INTERVAL_EXCEEDED");
 
