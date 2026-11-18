@@ -119,10 +119,21 @@ jobs:
               $a.RealPreprod -cne 'NOT_VERIFIED') {
             throw 'B5 approval SQL witness mismatch'
           }
+
+          $schemaFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-SCHEMA-INTEGRITY.json)
+          if ($schemaFiles.Count -ne 1) { throw 'Missing B5 schema replay witness' }
+          $s = Get-Content -Raw $schemaFiles[0].FullName | ConvertFrom-Json
+          if ($s.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$s.FenceHistoryTamperDenied -or !$s.IdentityHistoryTamperDenied -or
+              !$s.RegistryHistoryTamperDenied -or
+              $s.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B5 schema history accepted corrupted migration objects'
+          }
           New-Item -ItemType Directory -Force TestResults | Out-Null
           Copy-Item $all[0].FullName TestResults/APP-02B5-SQL-WITNESS.json
           Copy-Item $controlFiles[0].FullName TestResults/APP-02B5-CONTROL-RACES.json
           Copy-Item $approvalFiles[0].FullName TestResults/APP-02B5-APPROVAL.json
+          Copy-Item $schemaFiles[0].FullName TestResults/APP-02B5-SCHEMA-INTEGRITY.json
           $identityHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_002_identity_guard.sql -Algorithm SHA256).Hash
           $registryHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_003_registry_guard.sql -Algorithm SHA256).Hash
           $hash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_001_independent_fence.sql -Algorithm SHA256).Hash
@@ -141,6 +152,7 @@ jobs:
             TestResults/APP-02B5-SQL-WITNESS.json
             TestResults/APP-02B5-CONTROL-RACES.json
             TestResults/APP-02B5-APPROVAL.json
+            TestResults/APP-02B5-SCHEMA-INTEGRITY.json
             TestResults/APP-02B5-SQL-PROVENANCE.txt
             tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/TestResults/
           if-no-files-found: warn

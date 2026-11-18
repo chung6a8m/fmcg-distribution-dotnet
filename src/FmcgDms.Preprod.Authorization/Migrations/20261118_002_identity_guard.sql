@@ -49,6 +49,13 @@ END');
     INSERT dbo.__B5IdentityGuardHistory(SchemaVersion,AppliedUtc)
       VALUES(N'B5_20261118_001',SYSUTCDATETIME());
  END;
+ IF (SELECT COUNT_BIG(*) FROM dbo.__B5IdentityGuardHistory) <> 1
+    OR NOT EXISTS (SELECT 1 FROM dbo.__B5IdentityGuardHistory
+                   WHERE SchemaVersion=N'B5_20261118_001')
+    OR OBJECT_ID(N'dbo.b5_AssertCurrentSession',N'P') IS NULL
+    OR NOT EXISTS (SELECT 1 FROM sys.database_principals
+                   WHERE name=N'b5_session_runtime' AND type=N'R')
+    THROW 51671,N'B5_IDENTITY_INTEGRITY_DENIED',1;
  COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH

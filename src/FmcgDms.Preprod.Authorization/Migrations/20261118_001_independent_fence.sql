@@ -247,6 +247,30 @@ END');
       INSERT dbo.__B5SchemaHistory(SchemaVersion,AppliedUtc)
         VALUES(N'B5_20261118_001',SYSUTCDATETIME());
   END;
+
+  -- A recorded migration version must never mask dropped/partial authority objects.
+  IF (SELECT COUNT_BIG(*) FROM dbo.__B5SchemaHistory) <> 1
+     OR NOT EXISTS (SELECT 1 FROM dbo.__B5SchemaHistory
+                    WHERE SchemaVersion=N'B5_20261118_001')
+     OR OBJECT_ID(N'dbo.B5TenantFence',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5Membership',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5Role',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5ActorRole',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5ActionCatalog',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5RolePermission',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5ApprovalSource',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5ApprovalDecision',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.B5SecurityEvent',N'U') IS NULL
+     OR OBJECT_ID(N'dbo.b5_ImmutableApprovalSource',N'TR') IS NULL
+     OR OBJECT_ID(N'dbo.b5_ImmutableApprovalDecision',N'TR') IS NULL
+     OR OBJECT_ID(N'dbo.b5_AssertAuthority',N'P') IS NULL
+     OR OBJECT_ID(N'dbo.b5_RevokeMember',N'P') IS NULL
+     OR OBJECT_ID(N'dbo.b5_SuspendTenant',N'P') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM sys.database_principals
+                    WHERE name=N'b5_runtime' AND type=N'R')
+     OR NOT EXISTS (SELECT 1 FROM sys.database_principals
+                    WHERE name=N'b5_revoker' AND type=N'R')
+     THROW 51670,N'B5_SCHEMA_INTEGRITY_DENIED',1;
   COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH

@@ -283,6 +283,41 @@ public sealed class B5SqlTests
             },new JsonSerializerOptions { WriteIndented=true }),ct);
     }
 
+
+    [Fact]
+    public async Task Recorded_B5_migration_versions_reject_missing_guard_procedures()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var f = await Fixture.CreateAsync(ct);
+
+        await f.CorruptSchemaForCiAsync("fence", ct);
+        var fenceError = await Assert.ThrowsAsync<SqlException>(
+            () => f.ReplayB5ForCiAsync("fence", "20261118_001_independent_fence.sql", ct));
+        Assert.Contains("B5_SCHEMA_INTEGRITY_DENIED", fenceError.Message);
+
+        await f.CorruptSchemaForCiAsync("identity", ct);
+        var identityError = await Assert.ThrowsAsync<SqlException>(
+            () => f.ReplayB5ForCiAsync("identity", "20261118_002_identity_guard.sql", ct));
+        Assert.Contains("B5_IDENTITY_INTEGRITY_DENIED", identityError.Message);
+
+        await f.CorruptSchemaForCiAsync("registry", ct);
+        var registryError = await Assert.ThrowsAsync<SqlException>(
+            () => f.ReplayB5ForCiAsync("registry", "20261118_003_registry_guard.sql", ct));
+        Assert.Contains("B5_REGISTRY_INTEGRITY_DENIED", registryError.Message);
+
+        Directory.CreateDirectory("TestResults");
+        await File.WriteAllTextAsync("TestResults/APP-02B5-SCHEMA-INTEGRITY.json",
+            JsonSerializer.Serialize(new
+            {
+                TestRunId = Environment.GetEnvironmentVariable("APP02B5_TEST_RUN_ID"),
+                SourceHeadSha = Environment.GetEnvironmentVariable("APP02B5_SOURCE_HEAD_SHA"),
+                FenceHistoryTamperDenied = true,
+                IdentityHistoryTamperDenied = true,
+                RegistryHistoryTamperDenied = true,
+                RealPreprod = "NOT_VERIFIED"
+            }, new JsonSerializerOptions { WriteIndented = true }), ct);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string server;
@@ -616,6 +651,34 @@ public sealed class B5SqlTests
                 Encrypt=SqlConnectionEncryptOption.Optional,
                 TrustServerCertificate=true, Pooling=false
             }.ConnectionString;
+
+
+        public Task CorruptSchemaForCiAsync(string dbKind, CancellationToken ct) =>
+            dbKind switch
+            {
+                "fence" => RunAsync(FenceConnection, "DROP PROCEDURE dbo.b5_AssertAuthority", ct),
+                "identity" => RunAsync(Connection(IdentityDatabase),
+                    "DROP PROCEDURE dbo.b5_AssertCurrentSession", ct),
+                "registry" => RunAsync(Connection(RegistryDatabase),
+                    "DROP PROCEDURE dbo.b5_AssertCurrentTenant", ct),
+                _ => throw new ArgumentOutOfRangeException(nameof(dbKind))
+            };
+
+        public async Task ReplayB5ForCiAsync(string dbKind, string resourceSuffix, CancellationToken ct)
+        {
+            var db = dbKind switch
+            {
+                "fence" => FenceConnection,
+                "identity" => Connection(IdentityDatabase),
+                "registry" => Connection(RegistryDatabase),
+                _ => throw new ArgumentOutOfRangeException(nameof(dbKind))
+            };
+            var assembly = typeof(B5Schema).Assembly;
+            var resource = assembly.GetManifestResourceNames().Single(n =>
+                n.EndsWith(resourceSuffix, StringComparison.Ordinal));
+            using var reader = new StreamReader(assembly.GetManifestResourceStream(resource)!);
+            await RunAsync(db, await reader.ReadToEndAsync(ct), ct);
+        }
 
         private async Task ApplyTwiceAsync(string databaseConnection, Type assemblyType,
             string resourceSuffix, CancellationToken ct)

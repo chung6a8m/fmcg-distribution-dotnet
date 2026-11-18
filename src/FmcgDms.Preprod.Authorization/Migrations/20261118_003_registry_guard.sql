@@ -47,6 +47,13 @@ END');
     INSERT dbo.__B5RegistryGuardHistory(SchemaVersion,AppliedUtc)
       VALUES(N'B5_20261118_001',SYSUTCDATETIME());
  END;
+ IF (SELECT COUNT_BIG(*) FROM dbo.__B5RegistryGuardHistory) <> 1
+    OR NOT EXISTS (SELECT 1 FROM dbo.__B5RegistryGuardHistory
+                   WHERE SchemaVersion=N'B5_20261118_001')
+    OR OBJECT_ID(N'dbo.b5_AssertCurrentTenant',N'P') IS NULL
+    OR NOT EXISTS (SELECT 1 FROM sys.database_principals
+                   WHERE name=N'b5_registry_runtime' AND type=N'R')
+    THROW 51672,N'B5_REGISTRY_INTEGRITY_DENIED',1;
  COMMIT TRANSACTION;
 END TRY
 BEGIN CATCH
