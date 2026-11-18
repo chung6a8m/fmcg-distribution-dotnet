@@ -55,8 +55,23 @@ def parse_utc(value: object) -> dt.datetime:
     return result
 
 
+def strict_json_bytes(data: bytes) -> object:
+    def no_constant(value: str) -> object:
+        raise ValueError(f"NON_FINITE_JSON_NUMBER:{value}")
+
+    def unique_keys(pairs: list[tuple[str, object]]) -> dict:
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"DUPLICATE_JSON_PROPERTY:{key}")
+            result[key] = value
+        return result
+
+    return json.loads(data, parse_constant=no_constant, object_pairs_hook=unique_keys)
+
+
 def read_object(path: Path) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_bytes(path.read_bytes())
     if not isinstance(value, dict):
         raise ValueError("OBJECT_REQUIRED")
     return value
@@ -119,6 +134,12 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                 "INDEPENDENT_TRUST_KEY_ROLES_REQUIRED")
         require(len(set(trusted["tenantDatabaseIds"].values())) == 2,
                 "TRUST_TWO_DISTINCT_TENANT_DATABASES_REQUIRED")
+        require(bool(HEX64.fullmatch(str(trusted.get("expectedFixtureSha256", "")))) and
+                bool(HEX64.fullmatch(str(trusted.get("approvedHostSha256", "")))),
+                "TRUST_APPROVED_SHA256_PINS_REQUIRED")
+        require(all(isinstance(x, str) and bool(x.strip())
+                    for x in trusted["tenantDatabaseIds"].values()),
+                "TRUST_EMPTY_DATABASE_IDS")
     except (OSError, ValueError, TypeError, KeyError) as exc:
         errors.append(f"TRUST_UNAVAILABLE:{str(exc)[:120]}")
 
@@ -126,7 +147,7 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
     fixture_bytes: bytes = b""
     try:
         fixture_bytes = fixture.read_bytes()
-        fixture_json = json.loads(fixture_bytes)
+        fixture_json = strict_json_bytes(fixture_bytes)
         defs = fixture_json["cases"]
         require(fixture_json.get("schema") == "APP02B9-FROZEN-FIXTURE-V1", "FIXTURE_SCHEMA")
         require(isinstance(defs, dict) and set(defs) == set(CASE_IDS),
@@ -206,6 +227,11 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                     or body.get("observerId") != manifest.get("observerId")
                     or body.get("independentlyMeasured") is not True):
                     raise ValueError("WITNESS_NOT_INDEPENDENT_OR_WRONG_LINEAGE")
+                raw = canonical_path(bundle, body["rawArtifactPath"])
+                if (not HEX64.fullmatch(str(body.get("rawArtifactSha256", ""))) or
+                    sha256(raw.read_bytes()) != body["rawArtifactSha256"] or
+                    raw.stat().st_size == 0):
+                    raise ValueError("RAW_INDEPENDENT_ARTIFACT_MISSING_OR_HASH_MISMATCH")
                 witness_map[ref] = (w, body)
             except (KeyError, TypeError, OSError, ValueError, json.JSONDecodeError) as exc:
                 errors.append(f"WITNESS_INVALID:{str(exc)[:120]}")
@@ -282,7 +308,11 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
             errors.append("REAL_HOST_RUNTIME_01_02_MISSING")
         else:
             for probe in probes:
-                if probe.get("status") != "PASS" or probe.get("witnessRef") not in witness_map or witness_map[probe["witnessRef"]][0].get("kind") != "RUNTIME":
+                ref = probe.get("witnessRef")
+                if (probe.get("status") != "PASS" or ref not in witness_map or
+                    witness_map[ref][0].get("kind") != "RUNTIME" or
+                    witness_map[ref][1].get("caseId") != probe.get("id") or
+                    witness_map[ref][1].get("observedOutcome") != "PASS"):
                     errors.append(f"RUNTIME_PROBE_UNVERIFIED:{probe.get('id')}")
 
         recovery = manifest.get("recovery", {})
@@ -295,6 +325,9 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                 or not 0 <= rpo <= 900 or not 0 <= rto <= 14400
                 or abs(recovery["rpoSeconds"] - rpo) > 0.001
                 or abs(recovery["rtoSeconds"] - rto) > 0.001
+                or type(recovery.get("monotonicFailureSeconds")) not in (int, float)
+                or type(recovery.get("monotonicSafeServiceSeconds")) not in (int, float)
+                or recovery["monotonicFailureSeconds"] < 0
                 or not all(recovery.get(flag) is True for flag in (
                     "sqlFullRecovery", "lsnChainContinuous", "encryptedOffHostCopy",
                     "independentRestoreKey", "currentExternalRevocationFence",
@@ -383,6 +416,18 @@ def main() -> int:
     args = parser.parse_args()
     try:
         report = evaluate(args.bundle, args.fixture, args.expected_head, args.trust_roots)
+        # The CLI must never verify stale signed evidence against a different
+        # checkout. A caller-provided --expected-head is not authoritative.
+        inspected = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if inspected.returncode != 0 or inspected.stdout.strip() != args.expected_head:
+            report["classification"] = "NOT_VERIFIED"
+            report["decision"] = "NO_GO"
+            report["passedCases"] = 0
+            report["gates"] = {g: "NOT_VERIFIED" for g in GATES}
+            report["errors"] = sorted(set(report["errors"] + ["EXACT_CHECKOUT_HEAD_MISMATCH"]))
     except Exception as exc:  # no crash/fail-open on attacker-supplied evidence
         report = {
             "schema": "APP02B9-ORACLE-REPORT-V1", "decision": "NO_GO",
