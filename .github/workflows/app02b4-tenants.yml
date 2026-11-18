@@ -1,0 +1,125 @@
+name: APP-02B.4 tenant registry and provisioning (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  tenant-b4-unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Build and run operator-only B4 unit tests
+        run: |
+          test "$(dotnet --version)" = '10.0.404'
+          dotnet restore tests/FmcgDms.Preprod.Tenancy.Tests/FmcgDms.Preprod.Tenancy.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Tenancy.Tests/FmcgDms.Preprod.Tenancy.Tests.csproj -c Release --no-restore
+          dotnet build src/FmcgDms.Preprod.TenantTool/FmcgDms.Preprod.TenantTool.csproj -c Release
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release
+          dotnet test tests/FmcgDms.Preprod.Tenancy.Tests/FmcgDms.Preprod.Tenancy.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Create redacted CI-only provenance
+        if: always()
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=app02b4-unit-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nScope=GITHUB_HOSTED_CI_NOT_PREPROD\nG-B01..05=NOT_VERIFIED\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/APP-02B4-UNIT.txt
+      - name: Upload unit test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b4-unit-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Tenancy.Tests/TestResults/
+          if-no-files-found: warn
+
+  tenant-b4-sql:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify disposable SQL Server LocalDB and pinned SDK
+        shell: pwsh
+        run: |
+          if ((dotnet --version).Trim() -ne '10.0.404') { throw 'SDK mismatch' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION'
+      - name: Build SQL migration, state machine and fault tests
+        shell: pwsh
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests.csproj -c Release --no-restore
+      - name: Execute B4 two-tenant SQL migration/retry/isolation/race/quarantine tests
+        shell: pwsh
+        env:
+          APP02B4_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B4_TEST_RUN_ID: app02b4-sql-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dotnet test tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Gate redacted source-bound independent SQL readback witness
+        shell: pwsh
+        env:
+          B4_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $files = @(Get-ChildItem -Path . -Recurse -File -Filter 'APP-02B4-SQL-WITNESS.json')
+          if ($files.Count -ne 1) { throw 'Missing/ambiguous B4 SQL witness' }
+          $e = Get-Content -Raw $files[0].FullName | ConvertFrom-Json
+          if ($e.SourceHeadSha -cne $env:B4_SOURCE_HEAD -or
+              $e.ControlSchemaVersion -cne 'B4_20261118_001' -or
+              $e.TenantSchemaVersion -cne 'B4_TENANT_20261118_001' -or
+              $e.PhysicalTenantDatabases -ne 2 -or
+              !$e.DifferentDatabaseIds -or !$e.MakerCheckerDenied -or
+              !$e.LeaseCollisionDenied -or !$e.SameOperationRetry -or
+              !$e.PeerBindingDenied -or !$e.OwnerTransferEnforced -or
+              !$e.OwnerSidMatchesApproved -or !$e.SqlOwnerApprovalImmutable -or
+              !$e.DirectForgedOwnerWitnessDenied -or
+              !$e.ScopedFinalizerAutomation -or !$e.FinalizerDirectPeerDdlDenied -or
+              !$e.FinalizerLeaseCollisionDenied -or
+              !$e.FinalizerStableOperationRetry -or !$e.FinalizerPeerClaimDenied -or
+              !$e.FinalizerStaleCompletionDenied -or !$e.FinalizerRevokeDuringClaimDenied -or
+              !$e.IndependentDbaRetirement -or !$e.FinalizerCredentialUniqueAcrossTenants -or
+              !$e.CrossTenantCrossRoleCredentialReuseDenied -or
+              !$e.RetirementLostAckRecovery -or
+              !$e.FinalizerSelfCompletionDenied -or
+              !$e.FinalizerLoginDisabled -or !$e.FinalizerDbUserRemoved -or
+              !$e.FinalizerImpersonationRevoked -or !$e.FinalizerPostTransferRetakeDenied -or
+              !$e.SqlImpersonatedEndToEndVerifier -or
+              !$e.SqlScopeDenied -or
+              !$e.DdlCreatorDirectReadDenied -or
+              !$e.SuspendedEpochAdvanced -or
+              !$e.ReactivationRaceDenied -or !$e.UnmarkedDatabaseQuarantined -or
+              !$e.DecommissionPreservesSql -or $e.FullPreprodGate -cne 'NOT_VERIFIED') {
+            throw 'APP-02B.4 independent CI SQL witness mismatch'
+          }
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          Copy-Item $files[0].FullName TestResults/APP-02B4-SQL-WITNESS.json -Force
+          $registryHash=(Get-FileHash src/FmcgDms.Preprod.Tenancy/Migrations/20261118_001_registry_control_plane.sql -Algorithm SHA256).Hash
+          $tenantHash=(Get-FileHash src/FmcgDms.Preprod.Tenancy/Migrations/20261118_001_tenant_marker.sql -Algorithm SHA256).Hash
+          @("SourceHeadSha=$env:B4_SOURCE_HEAD", "WorkflowSha=$env:GITHUB_SHA",
+            "TestRunId=$($e.TestRunId)","RegistryMigrationSha256=$registryHash",
+            "TenantMigrationSha256=$tenantHash","EvidenceClass=GITHUB_HOSTED_WINDOWS_LOCALDB_CI_ONLY",
+            "PhysicalPreprodVerification=NOT_VERIFIED") |
+            Set-Content TestResults/APP-02B4-SQL-PROVENANCE.txt -Encoding utf8
+      - name: Upload redacted disposable LocalDB evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b4-sql-localdb-ci-only
+          path: |
+            TestResults/APP-02B4-SQL-WITNESS.json
+            TestResults/APP-02B4-SQL-PROVENANCE.txt
+            tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests/TestResults/
+          if-no-files-found: warn

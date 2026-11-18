@@ -3,6 +3,8 @@
   <Project Path="src/FmcgDms.Preprod.Runtime/FmcgDms.Preprod.Runtime.csproj" />
   <Project Path="src/FmcgDms.Preprod.Identity/FmcgDms.Preprod.Identity.csproj" />
   <Project Path="src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj" />
+  <Project Path="src/FmcgDms.Preprod.Tenancy/FmcgDms.Preprod.Tenancy.csproj" />
+  <Project Path="src/FmcgDms.Preprod.TenantTool/FmcgDms.Preprod.TenantTool.csproj" />
   <Project Path="src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj" />
   <Project Path="tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj" />
 </Solution>
