@@ -71,7 +71,7 @@ public sealed record B6PolicyProposal(
 
 public sealed record B6EffectiveSnapshot(
     Guid TenantId, string PolicyCode, Guid ProposalId, string Tier,
-    decimal NumericValue, Guid SourceId, byte[] SourceHash, long SourceVersion,
+    Guid? CaseId, decimal NumericValue, Guid SourceId, byte[] SourceHash, long SourceVersion,
     DateTime EffectiveFromUtc, DateTime EffectiveUntilUtc)
 {
     public bool IsEffectiveAt(DateTime utcNow) =>
@@ -79,9 +79,12 @@ public sealed record B6EffectiveSnapshot(
         EffectiveFromUtc <= utcNow && utcNow < EffectiveUntilUtc;
 
     public void AssertExpected(Guid tenantId, Guid proposalId, ReadOnlySpan<byte> sourceHash,
-        DateTime nowUtc)
+        DateTime nowUtc, Guid? currentCaseId = null)
     {
         if (tenantId != TenantId || proposalId != ProposalId ||
+            !((Tier == "L1" && CaseId is null) ||
+              (Tier == "L2" && CaseId is not null && CaseId == currentCaseId)) ||
+            SourceHash is not { Length: 32 } || sourceHash.Length != 32 ||
             !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
                 SourceHash, sourceHash) || !IsEffectiveAt(nowUtc) ||
             SourceVersion < 1)
