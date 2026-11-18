@@ -1,6 +1,6 @@
 # APP-02B.6 — Policy Registry & Approvals (PREPROD-only, inert source PR)
 
-**State:** SOURCE_IMPLEMENTED / CI_FINAL_HEAD_PENDING / INDEPENDENT_REVIEW_PENDING / PHYSICAL_PREPROD_NOT_VERIFIED. This PR does **not** earn `POLICY_GOVERNANCE_VERIFIED` or G-B02 PASS. Owner design scope: OWN-APP02B-06 and OWN-APP02B-10, with B.1 TM/B01/B02 threats and the [30-case acceptance contract](../security/app-02b1-acceptance-evidence.md). B.5 conditional CODE_ONLY merge is **not** an authorization or debt waiver for B.6.
+**State:** SOURCE_IMPLEMENTED / INDEPENDENT_SOURCE_REVIEW_COMPLETED / OWNER_APPROVED_B6_SOURCE_ONLY_MERGE / FINAL_HEAD_CI_RECHECK_REQUIRED / PHYSICAL_PREPROD_NOT_VERIFIED. This PR does **not** earn `POLICY_GOVERNANCE_VERIFIED` or G-B02 PASS. Owner design scope: OWN-APP02B-06 and OWN-APP02B-10, with B.1 TM/B01/B02 threats and the [30-case acceptance contract](../security/app-02b1-acceptance-evidence.md). B.5 conditional CODE_ONLY merge is **not** an authorization or debt waiver for B.6. The Owner has now separately accepted [OWN-APP02B6-DEBT-01](../decisions/owner-app02b6-bounded-source-only-merge-2026-11-18.md) for **inert source integration only**; this is not PREPROD approval.
 
 ## Boundary and delivered change
 
@@ -38,4 +38,4 @@
 
 ## Exit/merge rule
 
-Separate B.6 PR. Verify current HEAD, whole diff/negative cases and all required CI workflows. Only mark *source CI tested* when the exact HEAD passes both B.6 jobs. **Without additional Owner authorization to merge source-only despite B.5/B.6 physical debts, do not merge** or claim full B.6 verification. Never modify `business/`, `business.lock.json`, synthetic oracle baselines or npm audit gates to manufacture a PASS.
+Separate B.6 PR. Verify current HEAD, whole diff/negative cases and all required CI workflows. Only mark *source CI tested* when the exact HEAD passes both B.6 jobs. **B.6 now has separate, narrowly scoped Owner authorization to merge inert source despite disclosed #53/#59/#67/#68 debts**, subject to [SRC-B6-01..05](../decisions/owner-app02b6-bounded-source-only-merge-2026-11-18.md). APP-00A full npm audit must still be reported **FAILED**, not PASS. Do not merge on a new failure outside that exception, or claim full B.6 verification. Never modify `business/`, `business.lock.json`, synthetic oracle baselines or npm audit gates to manufacture a PASS.
