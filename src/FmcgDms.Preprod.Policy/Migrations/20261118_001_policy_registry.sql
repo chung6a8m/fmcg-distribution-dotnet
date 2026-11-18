@@ -315,11 +315,12 @@ BEGIN
     OR @ExpectedCaseId=''00000000-0000-0000-0000-000000000000''
     THROW 52640,N''B6_RESOLVE_AUTHORITY_DENIED'',1;
  DECLARE @now datetime2(7)=SYSUTCDATETIME(), @chosen uniqueidentifier,
+   @chosenCase uniqueidentifier,
    @hash binary(32), @value decimal(19,4), @tier char(2), @version bigint,
    @source uniqueidentifier, @from datetime2(7), @until datetime2(7);
  SELECT TOP (1)
    @chosen=ProposalId,@hash=SourceHash,@value=NumericValue,
-   @tier=Tier,@version=SourceVersion,@source=SourceId,
+   @tier=Tier,@chosenCase=CaseId,@version=SourceVersion,@source=SourceId,
    @from=EffectiveFromUtc,@until=EffectiveUntilUtc
  FROM dbo.B6PolicySnapshot WITH(HOLDLOCK)
  WHERE TenantId=@TenantId AND PolicyCode=@PolicyCode
@@ -330,7 +331,7 @@ BEGIN
     OR @hash<>@ExpectedSourceHash
     THROW 52641,N''B6_UNSET_STALE_OR_AMBIGUOUS_DENIED'',1;
  SELECT @TenantId AS TenantId,@PolicyCode AS PolicyCode,
-   @chosen AS ProposalId,@tier AS Tier,
+   @chosen AS ProposalId,@tier AS Tier,@chosenCase AS CaseId,
    @value AS NumericValue,CAST(1 AS bit) AS IsExplicitlySet,
    @source AS SourceId,@hash AS SourceHash,@version AS SourceVersion,
    @from AS EffectiveFromUtc,@until AS EffectiveUntilUtc;
