@@ -61,6 +61,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Reject malformed PREPROD operator PowerShell before CI SQL
+        shell: pwsh
+        run: |
+          foreach ($p in @('scripts/Invoke-App02B7Backup.ps1','scripts/Test-App02B7LocalDb.ps1')) {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $p).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "B7_POWERSHELL_PARSE_FAILED: $p $($errors[0])" }
+          }
       - name: Confirm exact source HEAD and disposable LocalDB
         shell: pwsh
         env:

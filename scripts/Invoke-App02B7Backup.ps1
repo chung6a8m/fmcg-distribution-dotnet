@@ -39,15 +39,19 @@ if ($SqlServerStageFile.Contains("'") -or $SqlServerStageFile.Contains('"') -or
     throw 'B7_STAGING_PATH_INVALID'
 }
 $db = 'FmcgPpT_' + $TenantId.ToString('N')
-$root = $ApprovedStagingDirectory.TrimEnd('/','\\')
+$root = $ApprovedStagingDirectory.TrimEnd('/','\')
 if ($root.Length -lt 8 -or
     (!$SqlServerStageFile.StartsWith($root + '/', [StringComparison]::Ordinal) -and
-     !$SqlServerStageFile.StartsWith($root + '\\', [StringComparison]::OrdinalIgnoreCase))) {
+     !$SqlServerStageFile.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase))) {
     throw 'B7_STAGE_NOT_IN_APPROVED_DIRECTORY'
 }
 $extension = if ($Kind -eq 'Log') { 'trn' } else { 'bak' }
-$leaf = $SqlServerStageFile.Replace('\\','/').Split('/')[-1]
-$leafPattern = '^' + [regex]::Escape($db) + '_' + $Kind + '_[0-9]{8}T[0-9]{6}Z_[a-fA-F0-9]{32}\\.' + $extension + ' = $SqlServerStageFile.Replace("'", "''")
+$leaf = $SqlServerStageFile.Replace('\','/').Split('/')[-1]
+$leafPattern = '^' + [regex]::Escape($db) + '_' + $Kind + '_[0-9]{8}T[0-9]{6}Z_[a-fA-F0-9]{32}\.' + $extension + '$'
+if ($leaf -cnotmatch $leafPattern) {
+    throw 'B7_UNIQUE_BACKUP_OBJECT_NAME_REQUIRED'
+}
+$escapedPath = $SqlServerStageFile.Replace("'", "''")
 $cert = "[$EncryptionCertificate]"
 $requiredName = $ApprovedSqlServerName.Replace("'", "''")
 $tenantText = $TenantId.ToString()
