@@ -138,6 +138,37 @@ public sealed class B53SqlTests
             DurableGuard=new DurableRevocationGuard(f.FenceDatabase,f.IdentityDatabase,f.RegistryDatabase)
         };
         var guards = new SqlControlPlaneGuards(f.IdentityDatabase,f.RegistryDatabase);
+        // A preflight intentionally labels only the failing procedure and SQL
+        // error number; it never writes credentials, SQL contents, or auth data.
+        async Task ProbeB53Async(string name,string procedure,params SqlParameter[] parameters)
+        {
+            await using var connection=new SqlConnection(fence);
+            await connection.OpenAsync(ct);
+            await f.ImpersonateAsync(connection,f.RuntimeLogin,ct);
+            await using var transaction=(SqlTransaction)await connection.BeginTransactionAsync(
+                IsolationLevel.Serializable,ct);
+            try
+            {
+                await using var command=new SqlCommand(procedure,connection,transaction)
+                    {CommandType=CommandType.StoredProcedure,CommandTimeout=15};
+                command.Parameters.AddRange(parameters);
+                await command.ExecuteNonQueryAsync(ct);
+                await transaction.RollbackAsync(ct);
+            }
+            catch(SqlException ex)
+            {
+                await transaction.RollbackAsync(ct);
+                throw new InvalidOperationException(
+                    "B53_LOCALDB_GUARD_"+name+"_DENIED_SQL_"+ex.Number,ex);
+            }
+        }
+        await ProbeB53Async("IDENTITY_BRIDGE",
+            "["+f.IdentityDatabase+"].dbo.b53_AssertIdentityBridgeInstalled");
+        await ProbeB53Async("REGISTRY_BRIDGE",
+            "["+f.RegistryDatabase+"].dbo.b53_AssertRegistryBridgeInstalled");
+        await ProbeB53Async("SESSION_WATERMARK",
+            "["+f.FenceDatabase+"].dbo.b53_AssertFreshSession",
+            P("@SessionId",session),P("@ActorId",actor),P("@SessionEpoch",0L));
         Assert.Equal(1,await sqlFence.ExecuteAsync(auth,guards,
             (db,tx,token)=>f.WriteAsync(db,tx,f.TenantADatabase,token),ct));
         var peerBefore = await f.TenantSqlHashAsync(f.TenantBDatabase,ct);
