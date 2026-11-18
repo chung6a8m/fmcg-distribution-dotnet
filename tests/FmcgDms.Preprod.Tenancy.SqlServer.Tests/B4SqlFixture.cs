@@ -104,6 +104,13 @@ internal sealed class B4SqlFixture : IAsyncDisposable
         return login;
     }
 
+    public async Task<string> CreateDdlLoginAsync(CancellationToken ct)
+    {
+        var login=await CreateBareLoginAsync("b4ddl",ct);
+        await ExecAsync(Master,$"GRANT CREATE ANY DATABASE TO [{login}]",ct);
+        return login;
+    }
+
     public static async Task ImpersonateAsync(SqlConnection connection,string login,CancellationToken ct)
     {
         // Only CI-generated SQL Server logins are passed here; prove real SQL

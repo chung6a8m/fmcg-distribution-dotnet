@@ -10,6 +10,10 @@ namespace FmcgDms.Preprod.Tenancy;
 public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
     string approvedMasterConnectionString)
 {
+    // CI-only SQL EXECUTE AS LOGIN: the real operator opens its own restricted
+    // CREATE ANY DATABASE SQL principal and never uses this internal hook.
+    internal Func<SqlConnection,CancellationToken,Task>? InitializeCiDdlSession { get; init; }
+
     public async Task<TenantRegistryEntry> ProvisionAsync(Guid tenantId, CancellationToken ct)
     {
         var token=Guid.NewGuid();
@@ -28,6 +32,19 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
 
             await using var master=new SqlConnection(masterBuilder.ConnectionString);
             await master.OpenAsync(ct);
+            if(InitializeCiDdlSession is not null)
+                await InitializeCiDdlSession(master,ct);
+            await using(var permission=new SqlCommand(@"SELECT CASE WHEN
+                IS_SRVROLEMEMBER('sysadmin')=0
+                AND IS_SRVROLEMEMBER('dbcreator')=0
+                AND HAS_PERMS_BY_NAME(NULL,'SERVER','CREATE ANY DATABASE')=1
+                AND HAS_PERMS_BY_NAME(NULL,'SERVER','ALTER ANY DATABASE')=0
+                AND HAS_PERMS_BY_NAME(NULL,'SERVER','CONTROL SERVER')=0
+                THEN 1 ELSE 0 END",master))
+            {
+                if(Convert.ToInt32(await permission.ExecuteScalarAsync(ct) ?? 0)!=1)
+                    throw new TenantLifecycleDeniedException("TENANT_DDL_PRINCIPAL_OVERPRIVILEGED");
+            }
             var lockKey="FMCG_B4_"+claim.DatabaseName;
             await using(var lockCmd=new SqlCommand(
                 "DECLARE @r int; EXEC @r=sys.sp_getapplock @Resource=@name,@LockMode='Exclusive',@LockOwner='Session',@LockTimeout=15000; SELECT @r",master))
@@ -57,6 +74,8 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
                     { InitialCatalog=claim.DatabaseName };
                 await using var tenant=new SqlConnection(target.ConnectionString);
                 await tenant.OpenAsync(ct);
+                if(InitializeCiDdlSession is not null)
+                    await InitializeCiDdlSession(tenant,ct);
                 if(existed && !await HasApprovedMarkerAsync(tenant,claim,ct))
                     throw new TenantLifecycleDeniedException("TENANT_UNMARKED_DATABASE_QUARANTINED");
                 await ApplyMarkerMigrationAsync(tenant,claim,ct);

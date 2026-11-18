@@ -48,7 +48,11 @@ public sealed class TenantRegistrySqlTests
         var tenantB=Guid.NewGuid();
         var orphan=Guid.NewGuid();
         var registry=new TenantRegistrySql(f.Control);
-        var provisioner=new SqlTenantProvisioner(registry,f.Master);
+        var ddlLogin=await f.CreateDdlLoginAsync(ct);
+        var provisioner=new SqlTenantProvisioner(registry,f.Master)
+        {
+            InitializeCiDdlSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,ddlLogin,c)
+        };
         var ownerA=await f.CreateBareLoginAsync("b4owner",ct);
         var probeA=await f.CreateBareLoginAsync("b4probe",ct);
         var verifierRegistry=new TenantRegistrySql(f.Control)
@@ -89,7 +93,7 @@ public sealed class TenantRegistrySqlTests
             // Exercise the real verifier, including the independently authenticated
             // Control Plane SQL procedures and SQL-engine cross-db negative probes.
             var scoped=new TenantVerifierProbeSecrets(f.Connection(target.DatabaseName),
-                ownerA,f.CurrentLogin);
+                ownerA,ddlLogin);
             var verified=await verifier.VerifyAsync(target.TenantId,scoped,ct);
             Assert.Equal(f.Verifier,verified.VerifiedBy);
         }
@@ -150,7 +154,7 @@ public sealed class TenantRegistrySqlTests
         // A database created by the DDL principal must remain VERIFYING until
         // the independent DBA-controlled ownership transfer is observed by SQL.
         var scoped=new TenantVerifierProbeSecrets(f.Connection(a.DatabaseName),
-            ownerA,f.CurrentLogin);
+            ownerA,ddlLogin);
         var missingOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
             verifier.VerifyAsync(tenantA,scoped,ct));
         Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",missingOwner.Code);
@@ -164,10 +168,16 @@ public sealed class TenantRegistrySqlTests
         var expectedOwnerSid=(byte[])(await f.ScalarAsync(f.Master,
             "SELECT SUSER_SID(@login)",ct,new SqlParameter("@login",ownerA)))!;
         Assert.Equal(expectedOwnerSid,ownerSid);
+        // The actual non-sysadmin CREATE ANY DATABASE principal now loses dbo.
+        // Prove it cannot SELECT or UPDATE its formerly owned database.
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(ddlLogin,
+            $"SELECT COUNT_BIG(*) FROM [{a.DatabaseName}].dbo.__PreprodTenantBinding",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(ddlLogin,
+            $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
         var wrongOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
             verifier.VerifyAsync(tenantA,
                 new TenantVerifierProbeSecrets(f.Connection(a.DatabaseName),
-                    f.CurrentLogin,ownerA),ct));
+                    ddlLogin,ownerA),ct));
         Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",wrongOwner.Code);
         // The test login can access own marker read-only; cannot access peer,
         // control, or change marker. All proofs execute under EXECUTE AS LOGIN.
@@ -267,7 +277,7 @@ public sealed class TenantRegistrySqlTests
             SameOperationRetry=true,PeerBindingDenied=true,
             OwnerTransferEnforced=true,OwnerSidMatchesApproved=true,
             SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,
-            DdlCreatorDirectReadDenied="REQUIRES_INDEPENDENT_NON_SYSADMIN_PREPROD_WITNESS",
+            DdlCreatorDirectReadDenied=true,
             SuspendedEpochAdvanced=true,ReactivationRaceDenied=true,
             UnmarkedDatabaseQuarantined=true,DecommissionPreservesSql=true,
             FullPreprodGate="NOT_VERIFIED"
