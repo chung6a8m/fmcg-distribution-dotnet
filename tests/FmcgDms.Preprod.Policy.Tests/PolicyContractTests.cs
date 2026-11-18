@@ -33,12 +33,34 @@ public sealed class PolicyContractTests
     }
 
     [Fact]
+    public void Case_specific_snapshot_requires_exact_case_context()
+    {
+        var now = DateTime.UtcNow;
+        var caseId = Guid.NewGuid();
+        var snapshot = new B6EffectiveSnapshot(
+            Guid.NewGuid(), "approval.enabled", Guid.NewGuid(), "L2",
+            caseId, 0.5m, Guid.NewGuid(), new byte[32], 1,
+            now.AddMinutes(-1), now.AddMinutes(1));
+        snapshot.AssertExpected(snapshot.TenantId, snapshot.ProposalId, new byte[32],
+            now, caseId);
+        Assert.Throws<B6PolicyDeniedException>(() =>
+            snapshot.AssertExpected(snapshot.TenantId, snapshot.ProposalId,
+                new byte[32], now));
+        Assert.Throws<B6PolicyDeniedException>(() =>
+            snapshot.AssertExpected(snapshot.TenantId, snapshot.ProposalId,
+                new byte[32], now, Guid.NewGuid()));
+        Assert.Throws<B6PolicyDeniedException>(() =>
+            snapshot.AssertExpected(snapshot.TenantId, snapshot.ProposalId,
+                new byte[31], now, caseId));
+    }
+
+    [Fact]
     public void Effective_interval_is_half_open_and_expected_hash_is_pinned()
     {
         var from = DateTime.UtcNow;
         var until = from.AddDays(1);
         var a = new B6EffectiveSnapshot(Guid.NewGuid(), "approval.enabled",
-            Guid.NewGuid(), "L1", 0m, Guid.NewGuid(), new byte[32], 1, from, until);
+            Guid.NewGuid(), "L1", null, 0m, Guid.NewGuid(), new byte[32], 1, from, until);
         Assert.True(a.IsEffectiveAt(from));
         Assert.False(a.IsEffectiveAt(until));
         a.AssertExpected(a.TenantId, a.ProposalId, new byte[32], from);
