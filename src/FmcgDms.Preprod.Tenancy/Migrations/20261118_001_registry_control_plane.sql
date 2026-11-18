@@ -40,6 +40,7 @@ BEGIN TRY
         CanApprove bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Approve DEFAULT (0),
         CanProvision bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Provision DEFAULT (0),
         CanFinalize bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Finalize DEFAULT (0),
+        CanRetireFinalizer bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Retire DEFAULT (0),
         CanVerify bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Verify DEFAULT (0),
         CanSuspend bit NOT NULL CONSTRAINT DF_PreprodTenantOperators_Suspend DEFAULT (0)
     );
@@ -60,6 +61,7 @@ BEGIN TRY
         ApprovedOwnerLogin sysname NULL,
         ApprovedProvisionerLogin sysname NULL,
         ApprovedFinalizerLogin sysname NULL,
+        ApprovedRetirerLogin sysname NULL,
         ProvisionedBy sysname NULL,
         VerifiedBy sysname NULL,
         VerificationHash binary(32) NULL,
@@ -75,6 +77,8 @@ BEGIN TRY
         FinalizedBy sysname NULL,
         FinalizedUtc datetime2(7) NULL,
         FinalizedEpoch bigint NULL,
+        FinalizerRetiredBy sysname NULL,
+        FinalizerRetiredUtc datetime2(7) NULL,
         FinalizedBindingId uniqueidentifier NULL,
         ReactivationApprovedBy sysname NULL,
         DecommissionApprovedBy sysname NULL,
@@ -142,14 +146,16 @@ BEGIN
     COMMIT TRANSACTION;
     SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,RowVer,
         OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc,
-        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,
+        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,ApprovedRetirerLogin,
         FinalizationOperationId,FinalizationLeaseToken,FinalizationLeaseUntilUtc,
-        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId
+        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId,
+        FinalizerRetiredBy,FinalizerRetiredUtc
     FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
 END;');
     EXEC(N'
 CREATE PROCEDURE dbo.cp_ApproveTenant @TenantId uniqueidentifier, @ApprovalRef nvarchar(160),
-    @ApprovedOwnerLogin sysname, @ProvisionerLogin sysname, @FinalizerLogin sysname
+    @ApprovedOwnerLogin sysname, @ProvisionerLogin sysname, @FinalizerLogin sysname,
+    @RetirerLogin sysname
 AS
 BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -160,8 +166,10 @@ BEGIN
     IF @ApprovalRef IS NULL OR LEN(TRIM(@ApprovalRef)) NOT BETWEEN 3 AND 160
         THROW 51402, ''TENANT_APPROVAL_REF_INVALID'', 1;
     IF @ApprovedOwnerLogin IS NULL OR @ProvisionerLogin IS NULL OR @FinalizerLogin IS NULL
+        OR @RetirerLogin IS NULL OR SUSER_SID(@RetirerLogin) IS NULL
         OR @ApprovedOwnerLogin=@ProvisionerLogin OR @ApprovedOwnerLogin=@actor
         OR @FinalizerLogin IN (@ApprovedOwnerLogin,@ProvisionerLogin,@actor)
+        OR @RetirerLogin IN (@ApprovedOwnerLogin,@ProvisionerLogin,@FinalizerLogin,@actor)
         OR SUSER_SID(@FinalizerLogin) IS NULL
         OR COALESCE(IS_SRVROLEMEMBER(''sysadmin'',@FinalizerLogin),1)<>0
         OR COALESCE(IS_SRVROLEMEMBER(''dbcreator'',@FinalizerLogin),1)<>0
@@ -178,12 +186,13 @@ BEGIN
     IF @old=''APPROVED'' AND EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
         WHERE TenantId=@TenantId AND ApprovedBy=@actor AND ApprovalRef=@ApprovalRef
             AND ApprovedOwnerLogin=@ApprovedOwnerLogin AND ApprovedProvisionerLogin=@ProvisionerLogin
-            AND ApprovedFinalizerLogin=@FinalizerLogin)
+            AND ApprovedFinalizerLogin=@FinalizerLogin AND ApprovedRetirerLogin=@RetirerLogin)
     BEGIN COMMIT TRANSACTION; RETURN; END;
     IF @old<>''REQUESTED'' THROW 51405, ''TENANT_APPROVAL_STATE_DENIED'', 1;
     UPDATE dbo.PreprodTenantRegistry SET State=''APPROVED'', ApprovedBy=@actor,
         ApprovalRef=@ApprovalRef,ApprovedOwnerLogin=@ApprovedOwnerLogin,
         ApprovedProvisionerLogin=@ProvisionerLogin,ApprovedFinalizerLogin=@FinalizerLogin,
+        ApprovedRetirerLogin=@RetirerLogin,
         UpdatedUtc=SYSUTCDATETIME()
     WHERE TenantId=@TenantId;
     INSERT dbo.PreprodTenantLifecycleEvents(TenantId,ActionCode,FromState,ToState,ActorLogin,
@@ -223,9 +232,10 @@ BEGIN
     FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
     SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,RowVer,
         OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc,
-        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,
+        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,ApprovedRetirerLogin,
         FinalizationOperationId,FinalizationLeaseToken,FinalizationLeaseUntilUtc,
-        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId
+        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId,
+        FinalizerRetiredBy,FinalizerRetiredUtc
     FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
     COMMIT TRANSACTION;
 END;');
@@ -322,19 +332,46 @@ CREATE PROCEDURE dbo.cp_CompleteFinalization
 AS
 BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
-    DECLARE @actor sysname=SUSER_SNAME();
+    DECLARE @actor sysname=SUSER_SNAME(), @db sysname,@fin sysname,@owner sysname,
+        @userCount bigint=1;
     IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
-        WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
-          AND CanRequest=0 AND CanApprove=0 AND CanProvision=0 AND CanVerify=0 AND CanSuspend=0)
-        THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
+        WHERE LoginName=@actor AND Enabled=1 AND CanRetireFinalizer=1
+          AND CanFinalize=0 AND CanRequest=0 AND CanApprove=0
+          AND CanProvision=0 AND CanVerify=0 AND CanSuspend=0)
+        THROW 51426,''TENANT_RETIRER_OPERATOR_DENIED'',1;
     BEGIN TRANSACTION;
+    SELECT @db=DatabaseName,@fin=ApprovedFinalizerLogin,@owner=ApprovedOwnerLogin
+      FROM dbo.PreprodTenantRegistry WITH(UPDLOCK,HOLDLOCK)
+      WHERE TenantId=@TenantId AND State=''FINALIZING''
+        AND ApprovedRetirerLogin=@actor
+        AND FinalizationLeaseToken=@LeaseToken
+        AND FinalizationOperationId=@ExpectedOperationId
+        AND BindingId=@ExpectedBindingId AND SecurityEpoch=@ExpectedEpoch;
+    IF @db IS NULL OR @fin IS NULL OR @owner IS NULL
+        THROW 51427,''TENANT_RETIRER_BINDING_DENIED'',1;
+    -- This is an independent DBA-owned SQL authority check, not CLI self-attestation.
+    IF NOT EXISTS (SELECT 1 FROM sys.server_principals
+        WHERE name=@fin AND type=''S'' AND is_disabled=1)
+        OR EXISTS (SELECT 1 FROM sys.server_permissions AS p
+            JOIN sys.server_principals AS sp ON sp.principal_id=p.grantee_principal_id
+            WHERE sp.name=@fin AND p.permission_name=''IMPERSONATE''
+              AND p.major_id=SUSER_ID(@owner) AND p.state IN (''G'',''W''))
+        OR EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE login_name=@fin)
+        THROW 51428,''TENANT_FINALIZER_PRIVILEGE_STILL_ACTIVE'',1;
+    DECLARE @check nvarchar(max)=N''SELECT @count=COUNT_BIG(*) FROM ''
+        +QUOTENAME(@db)+N''.sys.database_principals WHERE name=@login'';
+    EXEC sys.sp_executesql @check,
+        N''@login sysname,@count bigint OUTPUT'',@login=@fin,@count=@userCount OUTPUT;
+    IF @userCount<>0
+        THROW 51428,''TENANT_FINALIZER_DB_PRINCIPAL_PRESENT'',1;
     UPDATE r SET State=''VERIFYING'',FinalizationLeaseToken=NULL,
         FinalizationLeaseUntilUtc=NULL,FinalizedBy=@actor,FinalizedUtc=SYSUTCDATETIME(),
         FinalizedEpoch=SecurityEpoch,FinalizedBindingId=BindingId,
+        FinalizerRetiredBy=@actor,FinalizerRetiredUtc=SYSUTCDATETIME(),
         UpdatedUtc=SYSUTCDATETIME()
     FROM dbo.PreprodTenantRegistry AS r
     WHERE r.TenantId=@TenantId AND r.State=''FINALIZING''
-      AND r.ApprovedFinalizerLogin=@actor AND r.FinalizationLeaseToken=@LeaseToken
+      AND r.ApprovedRetirerLogin=@actor AND r.FinalizationLeaseToken=@LeaseToken
       AND r.FinalizationLeaseUntilUtc>SYSUTCDATETIME()
       AND r.FinalizationOperationId=@ExpectedOperationId
       AND r.BindingId=@ExpectedBindingId AND r.SecurityEpoch=@ExpectedEpoch
@@ -399,6 +436,8 @@ BEGIN
         AND r.ApprovedOwnerLogin IS NOT NULL AND r.ApprovedProvisionerLogin IS NOT NULL
         AND r.ApprovedFinalizerLogin IS NOT NULL AND r.FinalizedBy=r.ApprovedFinalizerLogin
         AND r.FinalizedUtc IS NOT NULL AND r.FinalizedBindingId=r.BindingId
+        AND r.FinalizerRetiredBy=r.ApprovedRetirerLogin
+        AND r.FinalizerRetiredUtc IS NOT NULL
         AND (r.State=''REACTIVATION_VERIFYING'' OR r.FinalizedEpoch=r.SecurityEpoch)
         AND r.ApprovedOwnerLogin<>r.ApprovedProvisionerLogin
         AND SUSER_SID(r.ApprovedOwnerLogin) IS NOT NULL
@@ -457,6 +496,7 @@ BEGIN
                 AND ApprovedOwnerLogin IS NOT NULL AND ApprovedProvisionerLogin IS NOT NULL
                 AND ApprovedFinalizerLogin IS NOT NULL AND FinalizedBy=ApprovedFinalizerLogin
                 AND FinalizedUtc IS NOT NULL AND FinalizedBindingId=BindingId
+                AND FinalizerRetiredBy=ApprovedRetirerLogin AND FinalizerRetiredUtc IS NOT NULL
                 AND (State=''REACTIVATION_VERIFYING'' OR FinalizedEpoch=SecurityEpoch)
                 AND ApprovedOwnerLogin<>ApprovedProvisionerLogin
                 AND SUSER_SID(ApprovedOwnerLogin) IS NOT NULL
@@ -542,9 +582,10 @@ BEGIN
         THROW 51421, ''TENANT_FINALIZER_PEER_METADATA_DENIED'', 1;
     SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,
         RowVer,OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc,
-        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,
+        ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,ApprovedRetirerLogin,
         FinalizationOperationId,FinalizationLeaseToken,FinalizationLeaseUntilUtc,
-        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId
+        FinalizedBy,FinalizedUtc,FinalizedEpoch,FinalizedBindingId,
+        FinalizerRetiredBy,FinalizerRetiredUtc
     FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
 END;');
     EXEC(N'
