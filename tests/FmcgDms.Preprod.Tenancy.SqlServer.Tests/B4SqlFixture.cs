@@ -76,7 +76,8 @@ internal sealed class B4SqlFixture : IAsyncDisposable
     }
 
     public async Task AddActorAsync(string name,bool request=false,bool approve=false,
-        bool verify=false,bool suspend=false,bool finalize=false,CancellationToken ct=default)
+        bool verify=false,bool suspend=false,bool finalize=false,
+        bool retire=false,CancellationToken ct=default)
     {
         if(!name.StartsWith("b4",StringComparison.Ordinal)) throw new InvalidOperationException();
         var password=Convert.ToHexString(RandomNumberGenerator.GetBytes(20))+"aA1!";
@@ -84,20 +85,32 @@ internal sealed class B4SqlFixture : IAsyncDisposable
         logins.Add(name);
         await ExecAsync(Control,$"CREATE USER [{name}] FOR LOGIN [{name}]; GRANT EXECUTE ON SCHEMA::dbo TO [{name}];",ct);
         await ExecAsync(Control,@"INSERT dbo.PreprodTenantOperators
-            (LoginName,Enabled,CanRequest,CanApprove,CanVerify,CanSuspend,CanFinalize)
-            VALUES(@name,1,@request,@approve,@verify,@suspend,@finalize)",ct,
+            (LoginName,Enabled,CanRequest,CanApprove,CanVerify,CanSuspend,CanFinalize,CanRetireFinalizer)
+            VALUES(@name,1,@request,@approve,@verify,@suspend,@finalize,@retire)",ct,
             new SqlParameter("@name",name),
             new SqlParameter("@request",request),
             new SqlParameter("@approve",approve),
             new SqlParameter("@verify",verify),
             new SqlParameter("@suspend",suspend),
-            new SqlParameter("@finalize",finalize));
+            new SqlParameter("@finalize",finalize),
+            new SqlParameter("@retire",retire));
     }
 
     public async Task<string> CreateFinalizerAsync(CancellationToken ct)
     {
         var login="b4fin_"+Guid.NewGuid().ToString("N")[..12];
         await AddActorAsync(login,finalize:true,ct:ct);
+        return login;
+    }
+
+    public async Task<string> CreateRetirerAsync(CancellationToken ct)
+    {
+        // Disposable LocalDB: DBA retirement actor has a separate SQL LOGIN,
+        // and is independently granted server administrator rights. The
+        // privilege is never assigned to the finalizer/provisioner.
+        var login="b4ret_"+Guid.NewGuid().ToString("N")[..12];
+        await AddActorAsync(login,retire:true,ct:ct);
+        await ExecAsync(Master,$"ALTER SERVER ROLE [sysadmin] ADD MEMBER [{login}]",ct);
         return login;
     }
 

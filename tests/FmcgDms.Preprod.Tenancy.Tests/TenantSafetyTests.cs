@@ -128,6 +128,7 @@ public sealed class TenantSafetyTests
     [InlineData("start-reactivation","approver")]
     [InlineData("provision","provisioner")]
     [InlineData("finalize","finalizer")]
+    [InlineData("retire-finalizer","retirer")]
     [InlineData("verify","verifier")]
     [InlineData("suspend","security")]
     [InlineData("revoke","security")]
