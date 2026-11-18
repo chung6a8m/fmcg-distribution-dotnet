@@ -78,7 +78,8 @@ jobs:
           $db='FmcgPpT_' + $tenant.ToString('N')
           $leaf=$db+'_Full_20261118T000000Z_'+([guid]::NewGuid().ToString('N'))+'.bak'
           $arguments=@{
-            TenantId=$tenant; Kind='Full'; SqlInstance='sql.private.invalid'
+            TenantId=$tenant; ApprovedBindingId=[guid]::NewGuid(); ApprovedBindingVersion=1
+            Kind='Full'; SqlInstance='sql.private.invalid'
             ApprovedSqlInstance='sql.private.invalid'
             ApprovedSqlServerName='approved-sql'
             SqlServerStageFile=$root+'\'+$leaf
@@ -101,6 +102,19 @@ jobs:
           try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
           catch { $denied=($_.Exception.Message -eq 'B7_APPROVED_PRIVATE_SQL_TARGET_REQUIRED') }
           if (!$denied) { throw 'B7_SQL_TARGET_SWAP_WAS_NOT_DENIED' }
+          $arguments.ApprovedSqlInstance='sql.private.invalid'
+          $arguments.ApprovedBindingId=[guid]::Empty
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_EXACT_APPROVED_BINDING_REQUIRED') }
+          if (!$denied) { throw 'B7_EMPTY_APPROVED_BINDING_WAS_NOT_DENIED' }
+          $operatorScript=Get-Content -Raw scripts/Invoke-App02B7Backup.ps1
+          if ([regex]::Matches($operatorScript,'(?m)^\s*& sqlcmd -S ').Count -ne 1 -or
+              $operatorScript -notmatch '(?m)^\s*& sqlcmd -S \$SqlInstance -E -N -b' -or
+              $operatorScript -notmatch 'B7_STAGE_FILE_ALREADY_EXISTS' -or
+              $operatorScript -notmatch 'BindingVersion=\$bindingVersionText') {
+            throw 'B7_SINGLE_TLS_BACKUP_NO_OVERWRITE_AND_BINDING_GUARDS_REQUIRED'
+          }
       - name: Confirm exact source HEAD and disposable LocalDB
         shell: pwsh
         env:
