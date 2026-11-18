@@ -83,7 +83,11 @@ jobs:
               $e.PhysicalTenantDatabases -ne 2 -or
               !$e.DifferentDatabaseIds -or !$e.MakerCheckerDenied -or
               !$e.LeaseCollisionDenied -or !$e.SameOperationRetry -or
-              !$e.PeerBindingDenied -or !$e.SuspendedEpochAdvanced -or
+              !$e.PeerBindingDenied -or !$e.OwnerTransferEnforced -or
+              !$e.OwnerSidMatchesApproved -or !$e.SqlImpersonatedEndToEndVerifier -or
+              !$e.SqlScopeDenied -or
+              $e.DdlCreatorDirectReadDenied -cne 'REQUIRES_INDEPENDENT_NON_SYSADMIN_PREPROD_WITNESS' -or
+              !$e.SuspendedEpochAdvanced -or
               !$e.ReactivationRaceDenied -or !$e.UnmarkedDatabaseQuarantined -or
               !$e.DecommissionPreservesSql -or $e.FullPreprodGate -cne 'NOT_VERIFIED') {
             throw 'APP-02B.4 independent CI SQL witness mismatch'

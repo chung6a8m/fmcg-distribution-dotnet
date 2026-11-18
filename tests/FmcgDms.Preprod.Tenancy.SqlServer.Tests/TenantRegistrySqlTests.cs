@@ -49,6 +49,16 @@ public sealed class TenantRegistrySqlTests
         var orphan=Guid.NewGuid();
         var registry=new TenantRegistrySql(f.Control);
         var provisioner=new SqlTenantProvisioner(registry,f.Master);
+        var ownerA=await f.CreateBareLoginAsync("b4owner",ct);
+        var probeA=await f.CreateBareLoginAsync("b4probe",ct);
+        var verifierRegistry=new TenantRegistrySql(f.Control)
+        {
+            InitializeCiSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,f.Verifier,c)
+        };
+        var verifier=new TenantProbeVerifier(verifierRegistry)
+        {
+            InitializeCiScopedSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,probeA,c)
+        };
 
         async Task RequestApprove(Guid id,string key)
         {
@@ -76,18 +86,12 @@ public sealed class TenantRegistrySqlTests
 
         async Task RecordVerification(TenantRegistryEntry target)
         {
-            var cs=f.Connection(target.DatabaseName);
-            await using var c=new SqlConnection(cs);
-            await c.OpenAsync(ct);
-            Assert.True(await SqlTenantProvisioner.HasApprovedMarkerAsync(c,target,ct));
-            var witness=SHA256.HashData(Encoding.UTF8.GetBytes(
-                target.TenantId.ToString("N")+target.BindingId.ToString("N")+target.SecurityEpoch));
-            await f.RunAsAsync(f.Verifier,
-                "EXEC dbo.cp_RecordVerification @TenantId=@id,@ExpectedRowVer=@row,@ObservedBindingId=@binding,@WitnessHash=@hash",ct,
-                new SqlParameter("@id",target.TenantId),
-                new SqlParameter("@row",SqlDbType.Binary,8){Value=target.RowVersion},
-                new SqlParameter("@binding",target.BindingId),
-                new SqlParameter("@hash",SqlDbType.Binary,32){Value=witness});
+            // Exercise the real verifier, including the independently authenticated
+            // Control Plane SQL procedures and SQL-engine cross-db negative probes.
+            var scoped=new TenantVerifierProbeSecrets(f.Connection(target.DatabaseName),
+                ownerA,f.CurrentLogin);
+            var verified=await verifier.VerifyAsync(target.TenantId,scoped,ct);
+            Assert.Equal(f.Verifier,verified.VerifiedBy);
         }
 
         async Task Transition(string login,Guid id,string action,byte[]? row=null,string? evidence=null)
@@ -143,6 +147,38 @@ public sealed class TenantRegistrySqlTests
             await peer.OpenAsync(ct);
             Assert.False(await SqlTenantProvisioner.HasApprovedMarkerAsync(peer,a,ct));
         }
+        // A database created by the DDL principal must remain VERIFYING until
+        // the independent DBA-controlled ownership transfer is observed by SQL.
+        var scoped=new TenantVerifierProbeSecrets(f.Connection(a.DatabaseName),
+            ownerA,f.CurrentLogin);
+        var missingOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
+            verifier.VerifyAsync(tenantA,scoped,ct));
+        Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",missingOwner.Code);
+        await f.ExecAsync(f.Master,
+            $"ALTER AUTHORIZATION ON DATABASE::[{a.DatabaseName}] TO [{ownerA}]",ct);
+        await f.ExecAsync(f.Connection(a.DatabaseName),
+            $"CREATE USER [{probeA}] FOR LOGIN [{probeA}]; GRANT SELECT ON dbo.__PreprodTenantBinding TO [{probeA}]; GRANT SELECT ON dbo.__PreprodTenantSchemaHistory TO [{probeA}];",ct);
+        var ownerSid=(byte[])(await f.ScalarAsync(f.Master,
+            "SELECT owner_sid FROM sys.databases WHERE name=@db",ct,
+            new SqlParameter("@db",a.DatabaseName)))!;
+        var expectedOwnerSid=(byte[])(await f.ScalarAsync(f.Master,
+            "SELECT SUSER_SID(@login)",ct,new SqlParameter("@login",ownerA)))!;
+        Assert.Equal(expectedOwnerSid,ownerSid);
+        var wrongOwner=await Assert.ThrowsAsync<TenantLifecycleDeniedException>(()=>
+            verifier.VerifyAsync(tenantA,
+                new TenantVerifierProbeSecrets(f.Connection(a.DatabaseName),
+                    f.CurrentLogin,ownerA),ct));
+        Assert.Equal("TENANT_DB_OWNER_NOT_ATTESTED",wrongOwner.Code);
+        // The test login can access own marker read-only; cannot access peer,
+        // control, or change marker. All proofs execute under EXECUTE AS LOGIN.
+        await f.RunAsAsync(probeA,
+            $"SELECT COUNT_BIG(*) FROM [{a.DatabaseName}].dbo.__PreprodTenantBinding",ct);
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
+            $"SELECT COUNT_BIG(*) FROM [{b.DatabaseName}].dbo.__PreprodTenantBinding",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
+            "SELECT COUNT_BIG(*) FROM dbo.PreprodTenantRegistry",ct));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(probeA,
+            $"UPDATE [{a.DatabaseName}].dbo.__PreprodTenantBinding SET BindingVersion=BindingVersion",ct));
         // SQL impersonation proves a scoped A principal can read A but cannot
         // SELECT peer B or control-plane rows or UPDATE its own marker.
         await f.ExecAsync(f.Connection(a.DatabaseName),
@@ -229,6 +265,9 @@ public sealed class TenantRegistrySqlTests
             PhysicalTenantDatabases=2,
             DifferentDatabaseIds=true,MakerCheckerDenied=true,LeaseCollisionDenied=true,
             SameOperationRetry=true,PeerBindingDenied=true,
+            OwnerTransferEnforced=true,OwnerSidMatchesApproved=true,
+            SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,
+            DdlCreatorDirectReadDenied="REQUIRES_INDEPENDENT_NON_SYSADMIN_PREPROD_WITNESS",
             SuspendedEpochAdvanced=true,ReactivationRaceDenied=true,
             UnmarkedDatabaseQuarantined=true,DecommissionPreservesSql=true,
             FullPreprodGate="NOT_VERIFIED"

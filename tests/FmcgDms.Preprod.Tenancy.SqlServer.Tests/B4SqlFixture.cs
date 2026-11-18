@@ -93,6 +93,27 @@ internal sealed class B4SqlFixture : IAsyncDisposable
             new SqlParameter("@suspend",suspend));
     }
 
+    public async Task<string> CreateBareLoginAsync(string prefix,CancellationToken ct)
+    {
+        if(!prefix.StartsWith("b4",StringComparison.Ordinal))
+            throw new InvalidOperationException("Unapproved CI principal prefix");
+        var login=prefix+"_"+Guid.NewGuid().ToString("N")[..12];
+        var password=Convert.ToHexString(RandomNumberGenerator.GetBytes(20))+"aA1!";
+        await ExecAsync(Master,$"CREATE LOGIN [{login}] WITH PASSWORD=N'{password}',CHECK_POLICY=OFF",ct);
+        logins.Add(login);
+        return login;
+    }
+
+    public static async Task ImpersonateAsync(SqlConnection connection,string login,CancellationToken ct)
+    {
+        // Only CI-generated SQL Server logins are passed here; prove real SQL
+        // permission checking under EXECUTE AS instead of mock SqlException.
+        if(!login.StartsWith("b4",StringComparison.Ordinal))
+            throw new InvalidOperationException("CI impersonation login not allowed");
+        await using var command=new SqlCommand($"EXECUTE AS LOGIN=N'{login}'",connection);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
     public Task RunAsAsync(string login,string invocation,CancellationToken ct,
         params SqlParameter[] parameters)
     {

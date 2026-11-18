@@ -77,7 +77,9 @@ public sealed class TenantSafetyTests
             "Server=127.0.0.1,1;Database=missing;Connect Timeout=1;TrustServerCertificate=False;Encrypt=True");
         await Assert.ThrowsAnyAsync<Exception>(async ()=>
             await new TenantProbeVerifier(registry)
-                .VerifyAsync(Guid.NewGuid(),"",TestContext.Current.CancellationToken));
+                .VerifyAsync(Guid.NewGuid(),
+                    new TenantVerifierProbeSecrets("","approved-owner","ddl-provisioner"),
+                    TestContext.Current.CancellationToken));
     }
 
     [Fact]
