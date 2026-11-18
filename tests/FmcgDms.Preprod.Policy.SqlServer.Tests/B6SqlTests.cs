@@ -365,6 +365,10 @@ public sealed class B6SqlTests
             var amount=reader.GetDecimal(reader.GetOrdinal("NumericValue"));
             var explicitValue=reader.GetBoolean(reader.GetOrdinal("IsExplicitlySet"));
             var tier=reader.GetString(reader.GetOrdinal("Tier")).Trim();
+            var caseOrdinal=reader.GetOrdinal("CaseId");
+            var resolvedCase=reader.IsDBNull(caseOrdinal)
+                ? (Guid?)null : reader.GetGuid(caseOrdinal);
+            Assert.Equal(tier=="L2" ? caseId : null, resolvedCase);
             Assert.False(await reader.ReadAsync(ct));
             return(amount,explicitValue,tier);
         }
