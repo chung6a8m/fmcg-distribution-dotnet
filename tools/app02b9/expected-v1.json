@@ -1,0 +1,277 @@
+{
+  "schema": "APP02B9-FROZEN-FIXTURE-V1",
+  "authority": "docs/security/app-02b1-acceptance-evidence.md",
+  "caseCount": 30,
+  "cases": {
+    "B01-01": {
+      "expected": "DENY_CROSS_TENANT_DATA_AND_METADATA",
+      "negativeInvariant": "PEER_READ_WRITE_ZERO",
+      "requiredKinds": [
+        "HTTP",
+        "SQL",
+        "REGISTRY"
+      ]
+    },
+    "B01-02": {
+      "expected": "INVALID_JWT_AND_REUSED_REFRESH_DENIED",
+      "negativeInvariant": "NO_TOKEN_FAMILY_ELEVATION",
+      "requiredKinds": [
+        "HTTP",
+        "IDENTITY",
+        "SQL"
+      ]
+    },
+    "B01-03": {
+      "expected": "REVOKED_API_WORKER_CASE_COMMIT_DENIED",
+      "negativeInvariant": "NO_PARTIAL_PRIVILEGED_EFFECT",
+      "requiredKinds": [
+        "AUTHORIZATION",
+        "SQL",
+        "WORKER"
+      ]
+    },
+    "B01-04": {
+      "expected": "SYSTEM_ADMIN_WITHOUT_MEMBERSHIP_DENIED",
+      "negativeInvariant": "CONTROL_PLANE_NO_BUSINESS_DATA",
+      "requiredKinds": [
+        "HTTP",
+        "SQL",
+        "IDENTITY"
+      ]
+    },
+    "B01-05": {
+      "expected": "SELF_OR_STALE_APPROVAL_DENIED",
+      "negativeInvariant": "MAKER_CHECKER_AND_SOURCE_IMMUTABLE",
+      "requiredKinds": [
+        "POLICY",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B01-06": {
+      "expected": "RESTORED_STALE_RIGHTS_DENIED",
+      "negativeInvariant": "REVOKED_RIGHTS_NOT_RESURRECTED_AND_PEER_UNCHANGED",
+      "requiredKinds": [
+        "RESTORE",
+        "AUTHORIZATION",
+        "REGISTRY",
+        "SQL"
+      ]
+    },
+    "B02-01": {
+      "expected": "WRONG_WORKLOAD_TENANT_SECRET_DENIED",
+      "negativeInvariant": "NO_SECRET_LEAK_OR_SQL_PEER_ACCESS",
+      "requiredKinds": [
+        "VAULT",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B02-02": {
+      "expected": "VAULT_MISSING_KEY_FAIL_CLOSED",
+      "negativeInvariant": "NO_CONFIG_PLAINTEXT_FALLBACK",
+      "requiredKinds": [
+        "VAULT",
+        "RUNTIME",
+        "SQL"
+      ]
+    },
+    "B02-03": {
+      "expected": "VERSIONED_KEY_ROTATION_WITH_REVOKE",
+      "negativeInvariant": "NO_REVOKED_FAMILY_REUSE",
+      "requiredKinds": [
+        "VAULT",
+        "IDENTITY",
+        "SQL"
+      ]
+    },
+    "B02-04": {
+      "expected": "L0_IMMUTABLE_OVERRIDE_DENIED",
+      "negativeInvariant": "L0_HISTORY_HASH_UNCHANGED",
+      "requiredKinds": [
+        "POLICY",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B02-05": {
+      "expected": "L1_SCOPE_EFFECTIVE_TIME_ENFORCED",
+      "negativeInvariant": "TENANT_B_POLICY_UNCHANGED",
+      "requiredKinds": [
+        "POLICY",
+        "SQL",
+        "REGISTRY"
+      ]
+    },
+    "B02-06": {
+      "expected": "L2_DISTINCT_MAKER_CHECKER_AND_APPROVED_ZERO",
+      "negativeInvariant": "UNSET_AND_SELF_APPROVAL_DENIED",
+      "requiredKinds": [
+        "POLICY",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B03-01": {
+      "expected": "PHYSICAL_ENCRYPTED_FULL_DIFF_LOG_CHAIN_VALID",
+      "negativeInvariant": "BACKUP_GAP_OR_KEY_MISSING_REJECTED",
+      "requiredKinds": [
+        "BACKUP",
+        "SQL",
+        "VAULT"
+      ]
+    },
+    "B03-02": {
+      "expected": "PHYSICAL_TENANT_PITR_RPO_RTO_MET",
+      "negativeInvariant": "SAFE_REENTRY_NO_BLIND_EXTERNAL_EFFECTS",
+      "requiredKinds": [
+        "RESTORE",
+        "SQL",
+        "BACKUP",
+        "OUTCOME"
+      ]
+    },
+    "B03-03": {
+      "expected": "WRONG_REGISTRY_DATABASE_BINDING_DENIED",
+      "negativeInvariant": "PEER_FULL_SQL_FINGERPRINT_UNCHANGED",
+      "requiredKinds": [
+        "RESTORE",
+        "REGISTRY",
+        "SQL"
+      ]
+    },
+    "B03-04": {
+      "expected": "STALE_RESTORE_REVOKE_SUSPEND_DENIED",
+      "negativeInvariant": "RESTORE_DOES_NOT_REISSUE_RIGHTS",
+      "requiredKinds": [
+        "RESTORE",
+        "AUTHORIZATION",
+        "VAULT"
+      ]
+    },
+    "B03-05": {
+      "expected": "SAME_MESSAGE_ID_NO_DUPLICATE_EXTERNAL_EFFECT",
+      "negativeInvariant": "UNKNOWN_OUTCOME_HOLD_CASE",
+      "requiredKinds": [
+        "OUTCOME",
+        "SQL",
+        "RESTORE"
+      ]
+    },
+    "B03-06": {
+      "expected": "CORRUPT_KEY_MISSING_UNAUTHORIZED_RESTORE_DENIED",
+      "negativeInvariant": "NO_ACTIVE_OR_DISPATCH_ON_RESTORE_FAILURE",
+      "requiredKinds": [
+        "RESTORE",
+        "BACKUP",
+        "INCIDENT",
+        "REGISTRY"
+      ]
+    },
+    "B04-01": {
+      "expected": "AUDIT_TAMPER_DENIED_OR_DETECTED",
+      "negativeInvariant": "CHAIN_ORIGINAL_PRESERVED",
+      "requiredKinds": [
+        "AUDIT",
+        "SQL"
+      ]
+    },
+    "B04-02": {
+      "expected": "END_TO_END_CORRELATED_TRACE_AND_DURABLE_ACK",
+      "negativeInvariant": "NO_SECRET_PII_AND_ACK_OUTCOME_DISTINCT",
+      "requiredKinds": [
+        "TELEMETRY",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B04-03": {
+      "expected": "REAL_ALERT_TRIGGER_DELIVERY_AND_ACK",
+      "negativeInvariant": "MISSING_ALERT_DELIVERY_VISIBLE",
+      "requiredKinds": [
+        "ALERT",
+        "TELEMETRY",
+        "INCIDENT"
+      ]
+    },
+    "B04-04": {
+      "expected": "INCIDENT_TIMELINE_ESCALATED_AND_REVIEWED",
+      "negativeInvariant": "NO_UNOWNED_OR_UNREVIEWED_CLOSEOUT",
+      "requiredKinds": [
+        "INCIDENT",
+        "AUDIT"
+      ]
+    },
+    "B04-05": {
+      "expected": "LEGAL_HOLD_PRESERVED_DENIED_PURGE",
+      "negativeInvariant": "PROTECTED_OBJECT_HASHES_STABLE",
+      "requiredKinds": [
+        "RETENTION",
+        "AUDIT",
+        "SQL"
+      ]
+    },
+    "B04-06": {
+      "expected": "APPROVED_ELIGIBLE_ARCHIVE_PROTECTED_DURABLE",
+      "negativeInvariant": "NO_DURABLE_APP02A_TTL_PURGE",
+      "requiredKinds": [
+        "RETENTION",
+        "SQL",
+        "AUDIT"
+      ]
+    },
+    "B05-01": {
+      "expected": "TWO_PHYSICAL_TENANTS_AND_REPRODUCIBLE_FIXTURE",
+      "negativeInvariant": "NO_MISSING_CASE_OR_PEER_EVIDENCE",
+      "requiredKinds": [
+        "SQL",
+        "REGISTRY",
+        "CI"
+      ]
+    },
+    "B05-02": {
+      "expected": "INDEPENDENT_SECURITY_AND_DBA_FINAL_HEAD_REVIEW",
+      "negativeInvariant": "NO_SELF_REVIEW_OR_BLOCKING_FINDINGS",
+      "requiredKinds": [
+        "REVIEW",
+        "SECURITY",
+        "SQL"
+      ]
+    },
+    "B05-03": {
+      "expected": "REQUIRED_FULL_REGRESSION_FINAL_HEAD_PASS",
+      "negativeInvariant": "NO_SKIPPED_REQUIRED_OR_FAILED_AUDIT",
+      "requiredKinds": [
+        "CI",
+        "SECURITY"
+      ]
+    },
+    "B05-04": {
+      "expected": "INDEPENDENT_ORACLE_MUTATION_NEGATIVES_REJECTED",
+      "negativeInvariant": "EXPECTED_ACTUAL_DIFF_HASH_PEER_HEAD_MUTATIONS_FAIL",
+      "requiredKinds": [
+        "ORACLE",
+        "MUTATION"
+      ]
+    },
+    "B05-05": {
+      "expected": "API_POSITIVE_WITHOUT_PHYSICAL_PROOF_REJECTED",
+      "negativeInvariant": "NO_SELF_ATTESTED_GATE_PASS",
+      "requiredKinds": [
+        "HTTP",
+        "SQL",
+        "RESTORE",
+        "ALERT"
+      ]
+    },
+    "B05-06": {
+      "expected": "NEW_HEAD_INVALIDATES_PRIOR_SIGNOFF",
+      "negativeInvariant": "NO_STALE_CI_OR_PRODUCTION_PROMOTION",
+      "requiredKinds": [
+        "CI",
+        "REVIEW",
+        "SECURITY"
+      ]
+    }
+  }
+}
