@@ -100,6 +100,7 @@ class OracleTests(unittest.TestCase):
                 "externalEffectsReconciled": True,
                 "safeApiAndWorkerReentry": True,
                 "peerDatabaseUnchanged": True,
+                "witnessRefs": [],
             },
             "ciChecks": [{
                 "name": name, "sourceHeadSha": HEAD, "conclusion": "success",
@@ -121,6 +122,8 @@ class OracleTests(unittest.TestCase):
             neg = f"{code}-negative"
             self.add_witness(neg, f["requiredKinds"][0], code, f["expected"],
                              f["negativeInvariant"], f"{code}-fault", True)
+            if code == "B03-02":
+                self.manifest["recovery"]["witnessRefs"] = list(refs)
             self.manifest["cases"].append({
                 "caseId": code, "gateId": f"G-{code[:3]}",
                 "testRunId": RUN, "sourceHeadSha": HEAD,
@@ -172,6 +175,14 @@ class OracleTests(unittest.TestCase):
             "rawArtifactPath": str(raw.relative_to(self.bundle)).replace("\\", "/"),
             "rawArtifactSha256": digest(raw),
         }
+        if code == "B03-02" and kind == "RESTORE":
+            recovery = self.manifest["recovery"]
+            witness["recoveryMeasurements"] = {
+                key: recovery[key] for key in (
+                    "failureUtc", "latestRecoveredCommittedUtc",
+                    "monotonicFailureSeconds", "monotonicSafeServiceSeconds",
+                )
+            }
         target.write_text(json.dumps(witness), encoding="utf-8")
         self.manifest["witnesses"].append({
             "ref": ref, "path": str(target.relative_to(self.bundle)).replace("\\", "/"),
@@ -273,6 +284,62 @@ class OracleTests(unittest.TestCase):
         self.manifest["recovery"]["rtoSeconds"] = 15000
         self.seal()
         self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
+
+    def test_reject_missing_manifest_actor_identities_and_swapped_tenant_keys(self):
+        self.manifest.pop("observerId")
+        for row in self.manifest["cases"]:
+            row.pop("observerId")
+        for witness in self.manifest["witnesses"]:
+            path = self.bundle / witness["path"]
+            record = json.loads(path.read_text())
+            record.pop("observerId")
+            path.write_text(json.dumps(record), encoding="utf-8")
+            witness["sha256"] = digest(path)
+        self.seal()
+        self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
+        self.assertIn("DISTINCT_NONEMPTY_OBSERVER_AND_IMPLEMENTER_REQUIRED",
+                      self.assess()["errors"])
+        self.manifest["observerId"] = self.manifest["implementerId"]
+        self.seal()
+        self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
+
+        self.trust["tenantDatabaseIds"] = {"X": "mock-db-id-a", "Y": "mock-db-id-b"}
+        self.persist_trust()
+        self.assertIn("TRUST_EXACT_TWO_NAMED_TENANT_DATABASES_REQUIRED",
+                      self.assess()["errors"])
+
+    def test_reject_signed_alternate_expected_fixture(self):
+        # Even a fixture re-signed by the synthetic fixture key and re-pinned
+        # out-of-band must not silently replace the reviewed source contract.
+        alternative = self.root / "wrong-expected.json"
+        fixture = json.loads(FIXTURE.read_text())
+        fixture["cases"]["B01-01"]["expected"] = "SYNTHETIC_DIFFERENT_VALUE"
+        alternative.write_text(json.dumps(fixture), encoding="utf-8")
+        self.trust["expectedFixtureSha256"] = digest(alternative)
+        self.persist_trust()
+        self.sign("fixture", alternative, self.bundle / "expected.sig")
+        report = oracle.evaluate(self.bundle, alternative, HEAD, self.trust_file)
+        self.assertEqual(report["decision"], "NO_GO")
+        self.assertIn("FIXTURE_DIFFERS_FROM_REVIEWED_SOURCE", report["errors"])
+
+    def test_reject_unbound_recovery_witnesses_and_clock_forgery(self):
+        self.manifest["recovery"].pop("witnessRefs")
+        self.seal()
+        self.assertIn("PHYSICAL_RECOVERY_UNVERIFIED", " ".join(self.assess()["errors"]))
+        self.manifest["recovery"]["witnessRefs"] = [
+            w["ref"] for w in self.manifest["witnesses"]
+            if w["ref"].startswith("B03-02-positive-")
+        ]
+        restore_ref = next(w for w in self.manifest["witnesses"]
+                           if w["ref"].startswith("B03-02-positive-0"))
+        path = self.bundle / restore_ref["path"]
+        body = json.loads(path.read_text())
+        body["recoveryMeasurements"]["monotonicSafeServiceSeconds"] += 1
+        path.write_text(json.dumps(body), encoding="utf-8")
+        restore_ref["sha256"] = digest(path)
+        self.seal()
+        self.assertIn("RECOVERY_CLOCK_ANCHORS_UNWITNESSED",
+                      " ".join(self.assess()["errors"]))
 
     def test_reject_reused_localdb_label_and_full_audit_failure(self):
         self.manifest["evidenceClass"] = "GITHUB_HOSTED_LOCALDB_ONLY"
