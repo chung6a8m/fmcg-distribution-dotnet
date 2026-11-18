@@ -101,7 +101,7 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString)
     internal static SqlParameter Parameter(string name, object? value) => new(
         name, value switch
         {
-            Guid or Guid? => SqlDbType.UniqueIdentifier,
+            Guid => SqlDbType.UniqueIdentifier,
             long => SqlDbType.BigInt,
             _ => SqlDbType.NVarChar
         })
