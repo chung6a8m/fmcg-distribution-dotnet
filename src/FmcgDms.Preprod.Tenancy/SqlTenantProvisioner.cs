@@ -22,7 +22,9 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
         {
             if (tenantId==Guid.Empty || claim.DatabaseName!=TenantRegistryEntry.ExpectedDatabase(tenantId)
                 || claim.BindingId==Guid.Empty || claim.BindingVersion<1 || claim.LeaseToken!=token
-                || claim.State!="PROVISIONING")
+                || claim.State!="PROVISIONING"
+                || string.IsNullOrWhiteSpace(claim.ApprovedProvisionerLogin)
+                || string.IsNullOrWhiteSpace(claim.ApprovedFinalizerLogin))
                 throw new TenantLifecycleDeniedException("TENANT_REGISTRY_BINDING_DENIED");
 
             var masterBuilder=new SqlConnectionStringBuilder(approvedMasterConnectionString);
@@ -44,6 +46,12 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
             {
                 if(Convert.ToInt32(await permission.ExecuteScalarAsync(ct) ?? 0)!=1)
                     throw new TenantLifecycleDeniedException("TENANT_DDL_PRINCIPAL_OVERPRIVILEGED");
+            }
+            await using(var login=new SqlCommand("SELECT CONVERT(sysname,SUSER_SNAME())",master))
+            {
+                if(!string.Equals((string?)await login.ExecuteScalarAsync(ct),
+                    claim.ApprovedProvisionerLogin,StringComparison.OrdinalIgnoreCase))
+                    throw new TenantLifecycleDeniedException("TENANT_PROVISIONER_PRINCIPAL_MISMATCH");
             }
             var lockKey="FMCG_B4_"+claim.DatabaseName;
             await using(var lockCmd=new SqlCommand(
@@ -81,6 +89,10 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
                 await ApplyMarkerMigrationAsync(tenant,claim,ct);
                 if(!await HasApprovedMarkerAsync(tenant,claim,ct))
                     throw new TenantLifecycleDeniedException("TENANT_MARKER_READBACK_DENIED");
+                // Scoped TAKE OWNERSHIP is granted by the current tenant database
+                // creator, to the *SQL-approved* finalizer login only. IMPERSONATE
+                // on the approved new owner is independent DBA-controlled authority.
+                await GrantScopedFinalizerAsync(tenant,claim,ct);
             }
             finally
             {
@@ -101,6 +113,28 @@ public sealed class SqlTenantProvisioner(TenantRegistrySql registry,
             catch (Exception) { /* Original failure kept; no secondary fence override. */ }
             throw;
         }
+    }
+
+    private static async Task GrantScopedFinalizerAsync(SqlConnection tenant,
+        TenantRegistryEntry entry,CancellationToken ct)
+    {
+        const string sql=@"IF SUSER_SID(@finalizer) IS NULL OR
+              @finalizer=@provisioner OR @finalizer=@owner
+              THROW 51520,'TENANT_FINALIZER_GRANT_DENIED',1;
+            IF USER_ID(@finalizer) IS NULL
+            BEGIN
+              DECLARE @create nvarchar(max)=N'CREATE USER '+QUOTENAME(@finalizer)
+                  +N' FOR LOGIN '+QUOTENAME(@finalizer);
+              EXEC(@create);
+            END;
+            DECLARE @grant nvarchar(max)=N'GRANT TAKE OWNERSHIP ON DATABASE::'
+                +QUOTENAME(DB_NAME())+N' TO '+QUOTENAME(@finalizer);
+            EXEC(@grant);";
+        await using var command=new SqlCommand(sql,tenant);
+        command.Parameters.AddWithValue("@finalizer",entry.ApprovedFinalizerLogin!);
+        command.Parameters.AddWithValue("@provisioner",entry.ApprovedProvisionerLogin!);
+        command.Parameters.AddWithValue("@owner",entry.ApprovedOwnerLogin!);
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     public static async Task<bool> HasApprovedMarkerAsync(SqlConnection tenant,
