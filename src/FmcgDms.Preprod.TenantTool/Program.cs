@@ -9,8 +9,8 @@ try
     string command=args[0];
     bool withRef=command is "start-reactivation" or "decommission"
         or "complete-decommission";
-    if(args.Length!=(command=="request"?4:command=="approve"?6:withRef?3:2)
-        || command is not ("request" or "approve" or "provision" or "finalize" or "verify"
+    if(args.Length!=(command=="request"?4:command=="approve"?7:withRef?3:2)
+        || command is not ("request" or "approve" or "provision" or "finalize" or "retire-finalizer" or "verify"
             or "activate" or "suspend" or "revoke" or "start-reactivation"
             or "abort-reactivation" or "decommission" or "complete-decommission"))
         throw new TenantLifecycleDeniedException("TENANT_OPERATOR_COMMAND_INVALID");
@@ -20,10 +20,21 @@ try
     TenantOperatorAdmission.ValidateVaultAnchor(
         Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address);
     var vault=new VaultTenantOperatorSecrets(address ?? "");
-    var secrets=command=="finalize"
-        ? await vault.ReadFinalizerAsync(tenantId,CancellationToken.None)
-        : await vault.ReadOperatorAsync(command,CancellationToken.None);
-    if(command=="finalize")
+    var secrets=command switch
+    {
+        "finalize" => await vault.ReadFinalizerAsync(tenantId,CancellationToken.None),
+        "retire-finalizer" => await vault.ReadRetirerAsync(tenantId,CancellationToken.None),
+        _ => await vault.ReadOperatorAsync(command,CancellationToken.None)
+    };
+    if(command=="retire-finalizer")
+    {
+        if(secrets.MasterConnection is null)
+            throw new TenantLifecycleDeniedException("TENANT_RETIRER_SECRET_INVALID");
+        TenantOperatorAdmission.ValidateRetirer(
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),address,
+            secrets.RegistryConnection,secrets.MasterConnection);
+    }
+    else if(command=="finalize")
     {
         if(secrets.MasterConnection is null)
             throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
@@ -42,7 +53,8 @@ try
             result=await registry.RequestAsync(tenantId,args[2],args[3],CancellationToken.None);
             break;
         case "approve":
-            result=await registry.ApproveAsync(tenantId,args[2],args[3],args[4],args[5],CancellationToken.None);
+            result=await registry.ApproveAsync(tenantId,args[2],args[3],args[4],
+                args[5],args[6],CancellationToken.None);
             break;
         case "provision":
             if(secrets.MasterConnection is null)
@@ -55,6 +67,12 @@ try
                 throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
             result=await new SqlTenantFinalizer(registry,secrets.MasterConnection)
                 .FinalizeAsync(tenantId,CancellationToken.None);
+            break;
+        case "retire-finalizer":
+            if(secrets.MasterConnection is null)
+                throw new TenantLifecycleDeniedException("TENANT_RETIRER_SECRET_INVALID");
+            result=await new SqlTenantPrivilegeRetirer(registry,secrets.MasterConnection)
+                .RetireAsync(tenantId,CancellationToken.None);
             break;
         case "verify":
             var scoped=await vault.ReadProbeAsync(command,tenantId,CancellationToken.None);

@@ -71,6 +71,14 @@ public static class TenantOperatorAdmission
             throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SQL_SCOPE_DENIED");
     }
 
+    public static void ValidateRetirer(string? environment,string? vaultAddress,
+        string registryConnection,string masterConnection)
+    {
+        // Same pinned Vault, strict SQL TLS and same effective SQL login across
+        // Control Plane/master for the independent DBA retirement actor.
+        ValidateFinalizer(environment,vaultAddress,registryConnection,masterConnection);
+    }
+
     private static SqlConnectionStringBuilder Parse(string connection)
     {
         SqlConnectionStringBuilder cs;

@@ -23,6 +23,7 @@ public sealed class VaultTenantOperatorSecrets(string address,
         "approve" or "activate" or "start-reactivation" or "decommission" => "approver",
         "provision" => "provisioner",
         "finalize" => "finalizer",
+        "retire-finalizer" => "retirer",
         "verify" or "abort-reactivation" or "complete-decommission" => "verifier",
         "suspend" or "revoke" => "security",
         _ => throw new TenantLifecycleDeniedException("TENANT_OPERATOR_ROLE_INVALID")
@@ -31,7 +32,7 @@ public sealed class VaultTenantOperatorSecrets(string address,
     public async Task<TenantOperatorSecrets> ReadOperatorAsync(string command,CancellationToken ct)
     {
         string role=SecretRoleForCommand(command);
-        if(role=="finalizer")
+        if(role=="finalizer" || role=="retirer")
             throw new TenantLifecycleDeniedException("TENANT_FINALIZER_TENANT_SCOPE_REQUIRED");
         using var doc=await ReadAsync("tenant-provisioning/"+role,ct);
         var data=doc.RootElement.GetProperty("data").GetProperty("data");
@@ -57,6 +58,22 @@ public sealed class VaultTenantOperatorSecrets(string address,
         var master=data.GetProperty("masterConnectionString").GetString();
         if(string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(master))
             throw new TenantLifecycleDeniedException("TENANT_FINALIZER_SECRET_INVALID");
+        return new TenantOperatorSecrets(registry,master);
+    }
+
+    /// <summary>
+    /// Independently DBA-owned retirement identity. Never reuse the transfer
+    /// finalizer token; each credential can read only the one approved tenant.
+    /// </summary>
+    public async Task<TenantOperatorSecrets> ReadRetirerAsync(Guid tenant,CancellationToken ct)
+    {
+        if(tenant==Guid.Empty) throw new TenantLifecycleDeniedException("TENANT_RETIRER_TENANT_INVALID");
+        using var doc=await ReadAsync("tenant-provisioning/retirer/"+tenant.ToString("N"),ct);
+        var data=doc.RootElement.GetProperty("data").GetProperty("data");
+        var registry=data.GetProperty("registryConnectionString").GetString();
+        var master=data.GetProperty("masterConnectionString").GetString();
+        if(string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(master))
+            throw new TenantLifecycleDeniedException("TENANT_RETIRER_SECRET_INVALID");
         return new TenantOperatorSecrets(registry,master);
     }
 
