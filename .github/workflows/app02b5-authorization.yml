@@ -86,11 +86,28 @@ jobs:
               $e.RealPreprod -cne 'NOT_VERIFIED' -or $e.GB01ToGB05 -cne 'NOT_RUN') {
             throw 'B5 SQL witness missing mandatory assertions'
           }
+          $controlFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-CONTROL-RACES.json)
+          if ($controlFiles.Count -ne 1) { throw 'Missing/ambiguous B3/B4 commit race evidence' }
+          $c = Get-Content -Raw $controlFiles[0].FullName | ConvertFrom-Json
+          if ($c.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$c.ActualB3SqlSessionRevokeSerialized -or
+              !$c.ActualB4TransitionSerialized -or
+              !$c.StaleJwtAndRegistryEpochDenied -or
+              $c.PeerTenantEffects -ne 0 -or
+              $c.RestoreResurrectionProof -cne 'NOT_VERIFIED' -or
+              $c.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B3/B4 current authority SQL race witness mismatch'
+          }
           New-Item -ItemType Directory -Force TestResults | Out-Null
           Copy-Item $all[0].FullName TestResults/APP-02B5-SQL-WITNESS.json
+          Copy-Item $controlFiles[0].FullName TestResults/APP-02B5-CONTROL-RACES.json
+          $identityHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_002_identity_guard.sql -Algorithm SHA256).Hash
+          $registryHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_003_registry_guard.sql -Algorithm SHA256).Hash
           $hash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_001_independent_fence.sql -Algorithm SHA256).Hash
           @("TestRunId=$($e.TestRunId)","SourceHeadSha=$env:SOURCE_HEAD",
             "WorkflowSha=$env:GITHUB_SHA","MigrationSha256=$hash",
+            "IdentityGuardMigrationSha256=$identityHash",
+            "RegistryGuardMigrationSha256=$registryHash",
             "Scope=GITHUB_HOSTED_LOCALDB_NOT_PHYSICAL_PREPROD",
             "G-B01..05=NOT_RUN") | Set-Content TestResults/APP-02B5-SQL-PROVENANCE.txt -Encoding utf8
       - name: Upload LocalDB evidence
@@ -100,6 +117,7 @@ jobs:
           name: app02b5-two-tenant-sql-ci-only
           path: |
             TestResults/APP-02B5-SQL-WITNESS.json
+            TestResults/APP-02B5-CONTROL-RACES.json
             TestResults/APP-02B5-SQL-PROVENANCE.txt
             tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/TestResults/
           if-no-files-found: warn
