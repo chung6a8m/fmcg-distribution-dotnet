@@ -265,8 +265,9 @@ BEGIN
         AND s.MakerLogin<>SUSER_SNAME() AND d.CheckerLogin<>@maker)
     THROW 52632,N''B6_CASE_EVIDENCE_DENIED'',1;
   DECLARE @gate int;
+  DECLARE @lockResource nvarchar(255)=CONCAT(N''B6:'',CONVERT(nvarchar(36),@TenantId),N'':'',@code,N'':'',@tier);
   EXEC @gate=sys.sp_getapplock
-      @Resource=CONCAT(N''B6:'',CONVERT(nvarchar(36),@TenantId),N'':'',@code,N'':'',@tier),
+      @Resource=@lockResource,
       @LockMode=N''Exclusive'',@LockOwner=N''Transaction'',@LockTimeout=12000;
   IF @gate<0 THROW 52633,N''B6_POLICY_LOCK_DENIED'',1;
   IF EXISTS(SELECT 1 FROM dbo.B6PolicySnapshot WITH(UPDLOCK,HOLDLOCK)
