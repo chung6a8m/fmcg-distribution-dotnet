@@ -47,11 +47,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p TestResults
-          npm view '@rootio/picomatch@4.0.7-root.io.1' name version dist.integrity dist.tarball --json             > TestResults/rootio-picomatch-metadata.json
-          npm view '@ryotsu/picomatch@4.0.7-a' name version dist.integrity dist.tarball --json             > TestResults/ryotsu-picomatch-metadata.json
-          test -s TestResults/rootio-picomatch-metadata.json
+          npm view '@ryotsu/picomatch@4.0.7-a' name version repository dist.integrity dist.tarball --json > TestResults/ryotsu-picomatch-metadata.json
           test -s TestResults/ryotsu-picomatch-metadata.json
-          printf '%s\n' 'Candidate metadata only; PATCHED_SOURCE_NOT_REVIEWED'             'NO_LOCKFILE_CHANGE' 'FULL_NPM_AUDIT_STILL_REQUIRED'             > TestResults/ACCEPTANCE-NOT-VERIFIED.txt
+          if npm view '@rootio/picomatch@4.0.7-root.io.1' name version repository dist.integrity dist.tarball --json > TestResults/rootio-picomatch-metadata.json; then
+            echo 'RootPublicNpmAvailability=AVAILABLE' > TestResults/ROOT-STATUS.txt
+          else
+            echo 'RootPublicNpmAvailability=NOT_AVAILABLE_NO_INSTALL' > TestResults/ROOT-STATUS.txt
+            rm -f TestResults/rootio-picomatch-metadata.json
+          fi
+          printf '%s\n' 'Candidate registry metadata only; PATCHED_SOURCE_NOT_REVIEWED' 'NO_LOCKFILE_CHANGE' 'FULL_NPM_AUDIT_STILL_REQUIRED' > TestResults/ACCEPTANCE-NOT-VERIFIED.txt
       - name: Upload candidate availability metadata (not signoff)
         if: always()
         uses: actions/upload-artifact@v7
