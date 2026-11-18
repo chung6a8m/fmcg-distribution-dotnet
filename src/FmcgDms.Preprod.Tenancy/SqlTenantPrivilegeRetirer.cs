@@ -77,7 +77,8 @@ public sealed class SqlTenantPrivilegeRetirer(TenantRegistrySql registry,string 
                     WHERE login_name=@finalizer AND session_id<>@@SPID
                     ORDER BY session_id;
                     IF @session IS NULL BREAK;
-                    EXEC(N'KILL '+CONVERT(nvarchar(11),@session));
+                    DECLARE @kill nvarchar(50)=N'KILL '+CONVERT(nvarchar(11),@session);
+                    EXEC(@kill);
                     SET @session=NULL;
                 END;";
             await using var cmd=new SqlCommand(sql,master){CommandTimeout=90};
