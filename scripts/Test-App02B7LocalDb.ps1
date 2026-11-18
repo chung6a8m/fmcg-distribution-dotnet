@@ -14,7 +14,7 @@ $folder = Join-Path $env:RUNNER_TEMP ('app02b7-'+$tag)
 New-Item -Path $folder -ItemType Directory -Force | Out-Null
 function Lit([string]$v) { return $v.Replace("'","''") }
 function Sql([string]$q) {
-    $output = & sqlcmd -S $server -E -b -V 16 -h -1 -W -Q $q 2>&1
+    $output = & sqlcmd -S $server -E -b -V 16 -h -1 -W -Q ("SET NOCOUNT ON; " + $q) 2>&1
     if ($LASTEXITCODE -ne 0) { throw "B7_SQL_FAILED: $($output | Out-String)" }
     return ($output | Out-String).Trim()
 }
