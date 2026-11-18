@@ -23,6 +23,7 @@ public sealed class B8LocalDbTests
         await using var f = await Fixture.CreateAsync();
         var peerBeforeA = await f.PeerHashAsync(f.PeerA);
         var peerBeforeB = await f.PeerHashAsync(f.PeerB);
+        Assert.NotEqual(peerBeforeA, peerBeforeB); // CI tenants must have distinct, nonaliased content
         var entryA = Guid.NewGuid();
         Assert.Equal(1, await f.AppendAsync(f.Writer, f.TenantA, entryA));
         Assert.Equal(2, await f.AppendAsync(f.Writer, f.TenantA, Guid.NewGuid()));
@@ -42,6 +43,12 @@ public sealed class B8LocalDbTests
             await f.ExecAsAsync(f.Writer, "SELECT COUNT(*) FROM dbo.B8AuditEntry");
         });
         Assert.Equal(3, await f.AppendAsync(f.Writer, f.TenantA, Guid.NewGuid()));
+        // Two independent SQL connections must serialize a single tenant append
+        // without duplicate sequence or a lost update to its hash-chain head.
+        var concurrentlyAppended = await Task.WhenAll(
+            f.AppendAsync(f.Writer, f.TenantA, Guid.NewGuid()),
+            f.AppendAsync(f.Writer, f.TenantA, Guid.NewGuid()));
+        Assert.Equal(new[] { 4, 5 }, concurrentlyAppended.OrderBy(x => x).ToArray());
 
         // Even db_owner UPDATE/DELETE is intercepted by append-only triggers.
         await Assert.ThrowsAsync<SqlException>(async () =>
@@ -59,7 +66,7 @@ public sealed class B8LocalDbTests
         // off-host anchor or PREPROD G-B04 acceptance witness.
         var rowsA = await f.ReadAsync(f.TenantA);
         var rowsB = await f.ReadAsync(f.TenantB);
-        Assert.Equal(3, rowsA.Count);
+        Assert.Equal(5, rowsA.Count);
         Assert.Single(rowsB);
         using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var anchor = new B8AuditAnchor(f.TenantA, rowsA.Count, rowsA[^1].EntrySha256,
@@ -121,6 +128,8 @@ public sealed class B8LocalDbTests
             AppendOnlyTriggerDenied = true,
             CrossTenantRoleDenied = true,
             DuplicateRollbackNoGap = true,
+            ConcurrentAppendAtomic = true,
+            PeerDistinct = peerBeforeA != peerBeforeB,
             CrossLanguageSha256ChainVerified = verified.CryptographicallyConsistent,
             TamperAndTruncationDetected = true,
             LegalHoldImmutable = true,
@@ -238,7 +247,9 @@ public sealed class B8LocalDbTests
                 await using var con = await f.OpenAsync(peer);
                 using var cmd = con.CreateCommand();
                 cmd.CommandText = "CREATE TABLE dbo.B8CiPeerSentinel(Id int NOT NULL PRIMARY KEY, Value nvarchar(64) NOT NULL);" +
-                    "INSERT dbo.B8CiPeerSentinel VALUES(1,N'UNCHANGED');";
+                    "INSERT dbo.B8CiPeerSentinel VALUES(1,@tenantMarker);";
+                cmd.Parameters.AddWithValue("@tenantMarker",
+                    peer == f.PeerA ? f.TenantA.ToString("N") : f.TenantB.ToString("N"));
                 await cmd.ExecuteNonQueryAsync();
             }
             return f;
