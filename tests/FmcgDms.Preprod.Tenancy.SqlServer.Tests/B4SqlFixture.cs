@@ -111,6 +111,15 @@ internal sealed class B4SqlFixture : IAsyncDisposable
         return login;
     }
 
+    public async Task<object?> ScalarAsLoginAsync(string login,string sql,CancellationToken ct)
+    {
+        await using var db=new SqlConnection(Master);
+        await db.OpenAsync(ct);
+        await ImpersonateAsync(db,login,ct);
+        await using var query=new SqlCommand(sql,db);
+        return await query.ExecuteScalarAsync(ct);
+    }
+
     public static async Task ImpersonateAsync(SqlConnection connection,string login,CancellationToken ct)
     {
         // Only CI-generated SQL Server logins are passed here; prove real SQL

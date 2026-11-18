@@ -49,6 +49,14 @@ public sealed class TenantRegistrySqlTests
         var orphan=Guid.NewGuid();
         var registry=new TenantRegistrySql(f.Control);
         var ddlLogin=await f.CreateDdlLoginAsync(ct);
+        // SQL engine permission profile is asserted under the real isolated
+        // CI login, never inferred from the administrator/fixture connection.
+        var ddlProfile=Convert.ToString(await f.ScalarAsLoginAsync(ddlLogin,
+            @"SELECT CONCAT(COALESCE(CONVERT(varchar(5),IS_SRVROLEMEMBER('sysadmin')),'null'),
+                    '|',COALESCE(CONVERT(varchar(5),IS_SRVROLEMEMBER('dbcreator')),'null'),
+                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,'SERVER','ALTER ANY DATABASE')),'null'),
+                    '|',COALESCE(CONVERT(varchar(5),HAS_PERMS_BY_NAME(NULL,'SERVER','CONTROL SERVER')),'null'))",ct));
+        Assert.Equal("0|0|0|0",ddlProfile);
         var provisioner=new SqlTenantProvisioner(registry,f.Master)
         {
             InitializeCiDdlSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,ddlLogin,c)
