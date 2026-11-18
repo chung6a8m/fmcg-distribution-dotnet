@@ -68,7 +68,7 @@ public sealed class B5SqlTests
             a with { SessionId = Guid.NewGuid() }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a with { MakerId = actor }, guard,
+            a with { ApprovalSourceId = Guid.NewGuid() }, guard,
             (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
             a with { SessionEpoch = 1 }, guard,
@@ -219,6 +219,70 @@ public sealed class B5SqlTests
             },new JsonSerializerOptions{WriteIndented=true}),ct);
     }
 
+
+    [Fact]
+    public async Task Approval_source_immutable_checker_independent_decision_atomic()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var f = await Fixture.CreateAsync(ct);
+        var checker = Guid.NewGuid(); var maker = Guid.NewGuid();
+        var initiator = Guid.NewGuid(); var session = Guid.NewGuid();
+        var bindingA = Guid.NewGuid();
+        await f.SeedAsync(checker, session, Guid.NewGuid(), bindingA, Guid.NewGuid(), ct);
+        var auth = new AuthorizationContext(f.TenantA, f.TenantA, checker, session,
+            bindingA, 1, 1, 1, 0, "tenant.approve", "stock:ci-only");
+        var guard = new SqlControlPlaneGuards(f.IdentityDatabase, f.RegistryDatabase);
+        var fence = new SqlAuthorizationFence(f.FenceConnection, f.TenantADatabase)
+        {
+            InitializeCiSession = (db, token) => f.ImpersonateAsync(db, f.RuntimeLogin, token)
+        };
+        Task<int> Apply(AuthorizationContext a) => fence.ExecuteAsync(a,guard,
+            (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token),ct);
+        var peerHash = await f.TenantSqlHashAsync(f.TenantBDatabase, ct);
+        var aHash = await f.TenantSqlHashAsync(f.TenantADatabase, ct);
+
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() => Apply(auth));
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            Apply(auth with { ApprovalSourceId=Guid.NewGuid() }));
+        var self = await f.AddApprovalSourceAsync(checker, initiator, "stock:ci-only", ct);
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            Apply(auth with { ApprovalSourceId=self }));
+        var initiatorIsChecker = await f.AddApprovalSourceAsync(maker, checker, "stock:ci-only", ct);
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            Apply(auth with { ApprovalSourceId=initiatorIsChecker }));
+        var wrong = await f.AddApprovalSourceAsync(maker, initiator, "other:resource", ct);
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            Apply(auth with { ApprovalSourceId=wrong }));
+
+        var good = await f.AddApprovalSourceAsync(maker, initiator, "stock:ci-only", ct);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fence.ExecuteAsync<int>(
+            auth with { ApprovalSourceId=good }, guard,
+            (_db,_tx,_token) => throw new InvalidOperationException("ci-rollback-after-decision"),ct));
+        Assert.Equal(0, await f.ApprovalDecisionCountAsync(good,ct));
+        Assert.Equal(aHash, await f.TenantSqlHashAsync(f.TenantADatabase,ct));
+
+        Assert.Equal(1,await Apply(auth with { ApprovalSourceId=good }));
+        Assert.Equal(1,await f.ApprovalDecisionCountAsync(good,ct));
+        await Assert.ThrowsAsync<AuthorizationDeniedException>(() =>
+            Apply(auth with { ApprovalSourceId=good }));
+        await f.AssertImmutableApprovalDeniedAsync(good,ct);
+        Assert.Equal(1, await f.CountAsync(f.TenantADatabase, ct));
+        Assert.Equal(peerHash, await f.TenantSqlHashAsync(f.TenantBDatabase,ct));
+
+        Directory.CreateDirectory("TestResults");
+        await File.WriteAllTextAsync("TestResults/APP-02B5-APPROVAL.json",
+            JsonSerializer.Serialize(new {
+                TestRunId=Environment.GetEnvironmentVariable("APP02B5_TEST_RUN_ID"),
+                SourceHeadSha=Environment.GetEnvironmentVariable("APP02B5_SOURCE_HEAD_SHA"),
+                ActionCatalogRequired=true, MissingSourceDenied=true, ForgedSourceDenied=true,
+                SelfMakerDenied=true, CheckerInitiatorDenied=true, WrongResourceDenied=true,
+                ApprovalRollbackAtomic=true, SourceImmutable=true, DecisionImmutable=true,
+                ApprovalReplayDenied=true, DecisionCommitCount=1, PeerHashBefore=peerHash,
+                PeerHashAfter=await f.TenantSqlHashAsync(f.TenantBDatabase,ct),
+                RealPreprod="NOT_VERIFIED"
+            },new JsonSerializerOptions { WriteIndented=true }),ct);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string server;
@@ -340,12 +404,49 @@ public sealed class B5SqlTests
                 VALUES(@a,@role,N'READER_WRITER_TEST',1);
                 INSERT dbo.B5ActorRole(TenantId,ActorId,RoleId)
                 VALUES(@a,@actor,@role);
+                INSERT dbo.B5ActionCatalog(PermissionCode,ActionKind)
+                VALUES(N'tenant.write','WRITE'),(N'tenant.approve','APPROVAL');
                 INSERT dbo.B5RolePermission(TenantId,RoleId,PermissionCode,ResourceKey)
-                VALUES(@a,@role,N'tenant.write',N'stock:ci-only');
+                VALUES(@a,@role,N'tenant.write',N'stock:ci-only'),
+                      (@a,@role,N'tenant.approve',N'stock:ci-only');
                 """, ct,
                 P("@a", TenantA), P("@b", TenantB),
                 P("@bindingA", bindingA), P("@bindingB", bindingB),
                 P("@actor", actor), P("@role", role));
+        }
+
+
+        public async Task<Guid> AddApprovalSourceAsync(Guid maker, Guid initiator,
+            string resource, CancellationToken ct)
+        {
+            var id = Guid.NewGuid();
+            await RunAsync(FenceConnection, """
+                INSERT dbo.B5ApprovalSource
+                    (TenantId,ApprovalSourceId,PermissionCode,ResourceKey,
+                     MakerId,InitiatorId,SourceHash)
+                VALUES(@tenant,@id,N'tenant.approve',@resource,@maker,@initiator,
+                       HASHBYTES('SHA2_256',CONCAT(
+                           CONVERT(nvarchar(36),@id),N':',CONVERT(nvarchar(36),@maker),
+                           N':',CONVERT(nvarchar(36),@initiator),N':',@resource)));
+                """, ct, P("@tenant",TenantA),P("@id",id),P("@resource",resource),
+                P("@maker",maker),P("@initiator",initiator));
+            return id;
+        }
+
+        public async Task<int> ApprovalDecisionCountAsync(Guid id, CancellationToken ct) =>
+            Convert.ToInt32(await ScalarAsync(FenceConnection,
+                "SELECT COUNT(*) FROM dbo.B5ApprovalDecision WHERE TenantId=@tenant AND ApprovalSourceId=@id",
+                ct,P("@tenant",TenantA),P("@id",id)));
+
+        public async Task AssertImmutableApprovalDeniedAsync(Guid id, CancellationToken ct)
+        {
+            await Assert.ThrowsAsync<SqlException>(() => RunAsync(FenceConnection,
+                "UPDATE dbo.B5ApprovalSource SET MakerId=NEWID() WHERE TenantId=@tenant AND ApprovalSourceId=@id",
+                ct,P("@tenant",TenantA),P("@id",id)));
+            await Assert.ThrowsAsync<SqlException>(() => RunAsync(FenceConnection,
+                "DELETE dbo.B5ApprovalDecision WHERE TenantId=@tenant AND ApprovalSourceId=@id",
+                ct,P("@tenant",TenantA),P("@id",id)));
+            Assert.Equal(1, await ApprovalDecisionCountAsync(id,ct));
         }
 
         public async Task<int> WriteAsync(SqlConnection db, SqlTransaction transaction,

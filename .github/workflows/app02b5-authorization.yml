@@ -104,9 +104,25 @@ jobs:
               $c.RealPreprod -cne 'NOT_VERIFIED') {
             throw 'B3/B4 current authority SQL race witness mismatch'
           }
+          $approvalFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-APPROVAL.json)
+          if ($approvalFiles.Count -ne 1) { throw 'Missing B5 approval SQL witness' }
+          $a = Get-Content -Raw $approvalFiles[0].FullName | ConvertFrom-Json
+          if ($a.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$a.ActionCatalogRequired -or !$a.MissingSourceDenied -or
+              !$a.ForgedSourceDenied -or !$a.SelfMakerDenied -or
+              !$a.CheckerInitiatorDenied -or !$a.WrongResourceDenied -or
+              !$a.ApprovalRollbackAtomic -or !$a.SourceImmutable -or
+              !$a.DecisionImmutable -or !$a.ApprovalReplayDenied -or
+              $a.DecisionCommitCount -ne 1 -or
+              [string]::IsNullOrWhiteSpace($a.PeerHashBefore) -or
+              $a.PeerHashBefore -cne $a.PeerHashAfter -or
+              $a.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B5 approval SQL witness mismatch'
+          }
           New-Item -ItemType Directory -Force TestResults | Out-Null
           Copy-Item $all[0].FullName TestResults/APP-02B5-SQL-WITNESS.json
           Copy-Item $controlFiles[0].FullName TestResults/APP-02B5-CONTROL-RACES.json
+          Copy-Item $approvalFiles[0].FullName TestResults/APP-02B5-APPROVAL.json
           $identityHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_002_identity_guard.sql -Algorithm SHA256).Hash
           $registryHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_003_registry_guard.sql -Algorithm SHA256).Hash
           $hash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_001_independent_fence.sql -Algorithm SHA256).Hash
@@ -124,6 +140,7 @@ jobs:
           path: |
             TestResults/APP-02B5-SQL-WITNESS.json
             TestResults/APP-02B5-CONTROL-RACES.json
+            TestResults/APP-02B5-APPROVAL.json
             TestResults/APP-02B5-SQL-PROVENANCE.txt
             tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/TestResults/
           if-no-files-found: warn

@@ -23,11 +23,11 @@ public sealed class AuthorizationBoundaryTests
         Own().Validate();
 
     [Fact]
-    public void Maker_cannot_check_own_action()
+    public void Approval_source_identifier_cannot_be_empty()
     {
         var envelope = Own();
         Assert.Throws<AuthorizationDeniedException>(() =>
-            (envelope with { MakerId = envelope.ActorId }).Validate());
+            (envelope with { ApprovalSourceId = Guid.Empty }).Validate());
     }
 
     [Fact]
