@@ -173,7 +173,7 @@ BEGIN
         THROW 51402, ''TENANT_APPROVED_OWNER_OR_PROVISIONER_INVALID'', 1;
     BEGIN TRANSACTION;
     SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
-        WHERE TenantId=@TenantId AND RequestedBy<>@actor;
+        WHERE TenantId=@TenantId AND RequestedBy<>@actor AND RequestedBy<>@FinalizerLogin;
     IF @old IS NULL THROW 51404, ''TENANT_SELF_APPROVAL_OR_NOT_FOUND'', 1;
     IF @old=''APPROVED'' AND EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
         WHERE TenantId=@TenantId AND ApprovedBy=@actor AND ApprovalRef=@ApprovalRef
@@ -287,7 +287,7 @@ BEGIN
         THROW 51420,''TENANT_FINALIZER_TOKEN_INVALID'',1;
     IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
         WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
-          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+          AND CanRequest=0 AND CanApprove=0 AND CanProvision=0 AND CanVerify=0 AND CanSuspend=0)
         THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
     BEGIN TRANSACTION;
     SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
@@ -325,7 +325,7 @@ BEGIN
     DECLARE @actor sysname=SUSER_SNAME();
     IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
         WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
-          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+          AND CanRequest=0 AND CanApprove=0 AND CanProvision=0 AND CanVerify=0 AND CanSuspend=0)
         THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
     BEGIN TRANSACTION;
     UPDATE r SET State=''VERIFYING'',FinalizationLeaseToken=NULL,
@@ -359,7 +359,7 @@ BEGIN
     DECLARE @actor sysname=SUSER_SNAME();
     IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
         WHERE LoginName=@actor AND Enabled=1 AND CanFinalize=1
-          AND CanApprove=0 AND CanProvision=0 AND CanVerify=0)
+          AND CanRequest=0 AND CanApprove=0 AND CanProvision=0 AND CanVerify=0 AND CanSuspend=0)
         THROW 51421,''TENANT_FINALIZER_OPERATOR_DENIED'',1;
     IF @ErrorCode IS NULL OR LEN(@ErrorCode) NOT BETWEEN 3 AND 32
        OR @ErrorCode COLLATE Latin1_General_100_BIN2 LIKE ''%[^A-Z0-9_]''
@@ -535,6 +535,11 @@ BEGIN
         WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND
         (CanRequest=1 OR CanApprove=1 OR CanProvision=1 OR CanFinalize=1 OR CanVerify=1 OR CanSuspend=1))
         THROW 51401, ''TENANT_OPERATOR_DENIED'', 1;
+    IF EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND CanFinalize=1)
+      AND NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
+        WHERE TenantId=@TenantId AND ApprovedFinalizerLogin=SUSER_SNAME())
+        THROW 51421, ''TENANT_FINALIZER_PEER_METADATA_DENIED'', 1;
     SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,
         RowVer,OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc,
         ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,

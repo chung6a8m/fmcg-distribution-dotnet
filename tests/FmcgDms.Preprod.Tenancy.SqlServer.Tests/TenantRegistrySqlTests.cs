@@ -215,7 +215,8 @@ public sealed class TenantRegistrySqlTests
         Assert.Equal(peerOwnerBefore,(byte[])(await f.ScalarAsync(f.Master,
             "SELECT owner_sid FROM sys.databases WHERE name=@name",ct,
             new SqlParameter("@name",b.DatabaseName)))!);
-        // A finalizer approved for tenant A must NOT be able to claim tenant B.
+        // A finalizer must not read peer Control Plane metadata or claim it.
+        await Assert.ThrowsAsync<SqlException>(()=>finalizerRegistryA.GetAsync(tenantB,ct));
         await Assert.ThrowsAsync<SqlException>(()=>
             finalizerRegistryA.ClaimFinalizationAsync(tenantB,Guid.NewGuid(),ct));
         var firstFinalizationToken=Guid.NewGuid();
