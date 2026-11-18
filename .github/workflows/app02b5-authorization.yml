@@ -130,6 +130,7 @@ jobs:
           if ($b53.SourceHeadSha -cne $env:SOURCE_HEAD -or
               $b53.EvidenceClass -cne 'GITHUB_HOSTED_LOCALDB_ONLY' -or
               !$b53.SessionRevokeSameCommit -or !$b53.TenantSuspendSameCommit -or
+              !$b53.IndependentActivationSelfApprovalDenied -or !$b53.ExpiredPermitReapprovalSucceeded -or
               !$b53.DeniedB3OnlyCommitOnFencePrivilegeLoss -or
               !$b53.RestoredOldSessionJwtDenied -or !$b53.RestoredOldRegistryEpochDenied -or
               !$b53.DisabledB3B4BridgesDenied -or
