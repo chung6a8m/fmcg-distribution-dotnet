@@ -13,14 +13,14 @@ public static class B5Schema
 // The registry binding/epoch must come from an authoritative current B.4 read.
 public sealed record AuthorizationContext(
     Guid TenantId, Guid ResourceTenantId, Guid ActorId, Guid SessionId,
-    Guid BindingId, long RegistryEpoch, long FenceEpoch, long MembershipEpoch,
+    Guid BindingId, long RegistryEpoch, long FenceEpoch, long MembershipEpoch, long SessionEpoch,
     string PermissionCode, string ResourceKey, Guid? MakerId = null)
 {
     public void Validate()
     {
         if (TenantId == Guid.Empty || ResourceTenantId != TenantId ||
             ActorId == Guid.Empty || SessionId == Guid.Empty || BindingId == Guid.Empty ||
-            RegistryEpoch < 1 || FenceEpoch < 1 || MembershipEpoch < 1 ||
+            RegistryEpoch < 1 || FenceEpoch < 1 || MembershipEpoch < 1 || SessionEpoch < 0 ||
             string.IsNullOrWhiteSpace(PermissionCode) || PermissionCode.Length > 96 ||
             string.IsNullOrWhiteSpace(ResourceKey) || ResourceKey.Length > 160 ||
             PermissionCode.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')) ||
@@ -34,12 +34,6 @@ public sealed class AuthorizationDeniedException(string code) : Exception(code)
 {
     public string Code { get; } = code;
 }
-
-// A real session check is mandatory. In API, B.3 JwtBearer checks current
-// SQL session; in future Worker, a separate durable-session recheck is required.
-// The preflight is NOT a substitute for the B.5 SQL commit fence.
-public delegate Task<bool> CurrentSessionCheck(Guid actorId, Guid sessionId,
-    CancellationToken cancellationToken);
 
 /// <summary>
 /// Runs the authorization assertion and any protected effect in ONE SQL Server
@@ -55,13 +49,12 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString)
     internal Func<SqlConnection, CancellationToken, Task>? InitializeCiSession { get; init; }
 
     public async Task<T> ExecuteAsync<T>(AuthorizationContext authority,
-        CurrentSessionCheck currentSession,
+        SqlControlPlaneGuards controlAuthority,
         Func<SqlConnection, SqlTransaction, CancellationToken, Task<T>> effect,
         CancellationToken cancellationToken)
     {
         authority.Validate();
-        if (!await currentSession(authority.ActorId, authority.SessionId, cancellationToken))
-            throw new AuthorizationDeniedException("B5_SESSION_DENIED");
+        ArgumentNullException.ThrowIfNull(controlAuthority);
         await using var connection = new SqlConnection(fenceConnectionString);
         await connection.OpenAsync(cancellationToken);
         if (InitializeCiSession is not null)
@@ -70,6 +63,11 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString)
             IsolationLevel.Serializable, cancellationToken);
         try
         {
+            // Lock B.4 registry + B.3 current session through EXEC-only, same-
+            // instance stored procedures INSIDE the protected transaction.
+            // An independent revoke of B.3 or B.4 blocks until this COMMIT.
+            await controlAuthority.AssertCurrentAsync(
+                connection, transaction, authority, cancellationToken);
             await using var command = new SqlCommand("dbo.b5_AssertAuthority",
                 connection, transaction) { CommandType = CommandType.StoredProcedure, CommandTimeout = 15 };
             command.Parameters.AddRange(
