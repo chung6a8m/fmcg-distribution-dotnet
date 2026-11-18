@@ -172,6 +172,32 @@ public sealed class TenantRegistrySqlTests
             new SqlParameter("@provisioner",ddlLogin),
             new SqlParameter("@finalizer",finalizerA),
             new SqlParameter("@retirer",retirerA)));
+        // Cross-tenant cross-role collisions are not protected by ordinary
+        // per-column unique indexes; assert all three role directions and a
+        // provisioner that is a tenant owner elsewhere are rejected in SQL.
+        var freshOwner=await f.CreateBareLoginAsync("b4owner",ct);
+        var freshFinalizer=await f.CreateBareLoginAsync("b4fin",ct);
+        var freshRetirer=await f.CreateBareLoginAsync("b4ret",ct);
+        const string crossRoleApproval=
+            "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner,@FinalizerLogin=@finalizer,@RetirerLogin=@retirer";
+        async Task ExpectCrossRoleReuseDenied(string owner,string provisioner,
+            string finalizerLogin,string retirer)
+        {
+            var denied=await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
+                crossRoleApproval,ct,
+                new SqlParameter("@id",duplicateTenant),
+                new SqlParameter("@ref","CHG-CROSS-ROLE-DENIED"),
+                new SqlParameter("@owner",owner),
+                new SqlParameter("@provisioner",provisioner),
+                new SqlParameter("@finalizer",finalizerLogin),
+                new SqlParameter("@retirer",retirer)));
+            Assert.Equal(51419,denied.Number);
+            Assert.Equal("REQUESTED",(await registry.GetAsync(duplicateTenant,ct))!.State);
+        }
+        await ExpectCrossRoleReuseDenied(finalizerA,ddlLogin,freshFinalizer,freshRetirer);
+        await ExpectCrossRoleReuseDenied(freshOwner,ddlLogin,ownerA,freshRetirer);
+        await ExpectCrossRoleReuseDenied(freshOwner,ddlLogin,freshFinalizer,retirerA);
+        await ExpectCrossRoleReuseDenied(freshOwner,ownerB,freshFinalizer,freshRetirer);
         // Owner/DDL identities are immutable approval content: an idempotent
         // replay with changed owner may not silently rewrite SQL authority.
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
@@ -466,6 +492,7 @@ public sealed class TenantRegistrySqlTests
             FinalizerStableOperationRetry=true,FinalizerPeerClaimDenied=true,
             FinalizerStaleCompletionDenied=true,FinalizerRevokeDuringClaimDenied=true,
             IndependentDbaRetirement=true,FinalizerCredentialUniqueAcrossTenants=true,
+            CrossTenantCrossRoleCredentialReuseDenied=true,
             RetirementLostAckRecovery=true,
             FinalizerSelfCompletionDenied=true,
             FinalizerLoginDisabled=true,FinalizerDbUserRemoved=true,

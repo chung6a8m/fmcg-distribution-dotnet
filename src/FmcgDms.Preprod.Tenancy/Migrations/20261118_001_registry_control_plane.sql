@@ -193,6 +193,21 @@ BEGIN
         OR COALESCE(IS_SRVROLEMEMBER(''dbcreator'',@ProvisionerLogin),1)<>0
         THROW 51402, ''TENANT_APPROVED_OWNER_OR_PROVISIONER_INVALID'', 1;
     BEGIN TRANSACTION;
+    -- Filtered per-column indexes cannot prevent A-owner == B-finalizer.
+    -- Serialize all cross-tenant role-bound approvals under the same SQL
+    -- transaction. CREATE DATABASE provisioner can serve multiple tenants,
+    -- but must never be a per-tenant owner/finalizer/retirer.
+    DECLARE @roleLock int;
+    EXEC @roleLock=sys.sp_getapplock @Resource=N''FMCG_B4_SQL_ROLE_BOUNDARY'',
+        @LockMode=''Exclusive'',@LockOwner=''Transaction'',@LockTimeout=15000;
+    IF @roleLock<0 THROW 51419,''TENANT_SQL_ROLE_LOCK_DENIED'',1;
+    IF EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
+        WHERE TenantId<>@TenantId AND
+        (ApprovedOwnerLogin IN (@ApprovedOwnerLogin,@FinalizerLogin,@RetirerLogin,@ProvisionerLogin)
+        OR ApprovedFinalizerLogin IN (@ApprovedOwnerLogin,@FinalizerLogin,@RetirerLogin,@ProvisionerLogin)
+        OR ApprovedRetirerLogin IN (@ApprovedOwnerLogin,@FinalizerLogin,@RetirerLogin,@ProvisionerLogin)
+        OR ApprovedProvisionerLogin IN (@ApprovedOwnerLogin,@FinalizerLogin,@RetirerLogin)))
+        THROW 51419,''TENANT_SQL_PRINCIPAL_CROSS_ROLE_REUSE_DENIED'',1;
     SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
         WHERE TenantId=@TenantId AND RequestedBy<>@actor AND RequestedBy<>@FinalizerLogin;
     IF @old IS NULL THROW 51404, ''TENANT_SELF_APPROVAL_OR_NOT_FOUND'', 1;

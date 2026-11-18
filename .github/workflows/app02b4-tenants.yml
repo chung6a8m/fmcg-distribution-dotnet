@@ -91,6 +91,7 @@ jobs:
               !$e.FinalizerStableOperationRetry -or !$e.FinalizerPeerClaimDenied -or
               !$e.FinalizerStaleCompletionDenied -or !$e.FinalizerRevokeDuringClaimDenied -or
               !$e.IndependentDbaRetirement -or !$e.FinalizerCredentialUniqueAcrossTenants -or
+              !$e.CrossTenantCrossRoleCredentialReuseDenied -or
               !$e.RetirementLostAckRecovery -or
               !$e.FinalizerSelfCompletionDenied -or
               !$e.FinalizerLoginDisabled -or !$e.FinalizerDbUserRemoved -or
