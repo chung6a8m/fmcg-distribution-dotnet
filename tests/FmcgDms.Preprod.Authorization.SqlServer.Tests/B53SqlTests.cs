@@ -163,7 +163,7 @@ public sealed class B53SqlTests
         await f.RunAsync(fence,$"ALTER ROLE b53_registry_bridge ADD MEMBER [{f.SecurityLogin}];",ct);
         await f.RunAsync(registry,$"""
             CREATE USER [{f.SecurityLogin}] FOR LOGIN [{f.SecurityLogin}];
-            GRANT UPDATE ON dbo.PreprodTenantRegistry TO [{f.SecurityLogin}];
+            GRANT SELECT, UPDATE ON dbo.PreprodTenantRegistry TO [{f.SecurityLogin}];
             """,ct);
         var selfActivation = await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(registry,$"""
             EXECUTE AS LOGIN=N'{f.SecurityLogin}';
@@ -184,7 +184,7 @@ public sealed class B53SqlTests
             "SELECT COUNT(*) FROM dbo.B53ActivationPermit WHERE TenantId=@t AND ConsumedUtc IS NOT NULL",
             ct,P("@t",f.TenantB))));
         await f.RunAsync(fence,$"ALTER ROLE b53_registry_bridge DROP MEMBER [{f.SecurityLogin}];",ct);
-        await f.RunAsync(registry,$"REVOKE UPDATE ON dbo.PreprodTenantRegistry FROM [{f.SecurityLogin}];",ct);
+        await f.RunAsync(registry,$"REVOKE SELECT, UPDATE ON dbo.PreprodTenantRegistry FROM [{f.SecurityLogin}];",ct);
 
         // CI-only DBA seeds one A permission: no tenant B runtime grant.
         await f.RunAsync(fence, """
