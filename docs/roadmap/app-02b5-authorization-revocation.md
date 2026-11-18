@@ -56,3 +56,10 @@ Implementation workflow: .github/workflows/app02b5-authorization.yml (Ubuntu uni
 Do not enable B.5 or mark it AUTHORIZATION_VERIFIED while REV-01/ADMIN-01 and #64/#65 physical/operator acceptance remain unresolved or full required source security checks fail. **Only** [OWN-APP02B5-DEBT-01](../decisions/owner-app02b5-bounded-code-only-debt-2026-11-18.md) permits a bounded **inert source merge** with those issues still OPEN, after SRC-B5-01..05. Source integration does not promote G-B01..05 from NOT_RUN. No real PREPROD admission, production, pilot or APP-02C/D/E can be inferred from B.5 CI evidence.
 
 See the [operator migration and denial runbook](../../deploy/preprod/authorization-operator.md), B.1 threat model and frozen acceptance matrix.
+
+
+## Issue #53 source-only follow-on (18/11/2026 — independent DRAFT PR)
+
+The original **REV-01 #53 remains OPEN**. A separately reviewable [B53 cross-database monotonic revocation source package](../security/app-02b53-monotonic-revocation.md) and [operator protocol](../../deploy/preprod/revocation-fence-operator.md) add: independent B5 session high-watermark, approved activation permit, same-SQL-transaction B.3/B.4 triggers and disabled-bridge fail-closed probes, plus two disposable SQL tenant negative tests and source-bound CI. This is a **candidate technical mitigation**, not evidence of completed physical B.3 HTTP/refresh + B.4 + Worker/CASE runtime integration, old-snapshot PITR, operator SQL/Vault review, B01-03/06, G-B01/B03/B05 or RPO/RTO. The new C# `DurableRevocationGuard` is internal and optional in the CI-only `SqlAuthorizationFence`, which still denies ordinary runtime usage. No real API/Worker tenant handler is enabled.
+
+**Acceptance ceiling:** `DRAFT / SOURCE_ONLY_CI_PENDING / #53_OPEN / PHYSICAL_PREPROD_NOT_VERIFIED / NO_GO`; full APP-00A audit #59 remains a blocking FAILED check, and existing PR-specific source-only exceptions do not transfer. Independent review, final-HEAD CI, physical migration/restore/SQL permission evidence, operational Identity JWT/refresh revocation, external effects and B.9 remain separately mandatory.

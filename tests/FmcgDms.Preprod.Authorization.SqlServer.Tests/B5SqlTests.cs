@@ -318,7 +318,7 @@ public sealed class B5SqlTests
             }, new JsonSerializerOptions { WriteIndented = true }), ct);
     }
 
-    private sealed class Fixture : IAsyncDisposable
+    internal sealed class Fixture : IAsyncDisposable
     {
         private readonly string server;
         private readonly List<string> databases = [];
@@ -644,7 +644,7 @@ public sealed class B5SqlTests
             return new HashSet<int> { a, b, fence, identity, registry }.Count == 5;
         }
 
-        private string Connection(string database) =>
+        internal string Connection(string database) =>
             new SqlConnectionStringBuilder
             {
                 DataSource=server, InitialCatalog=database, IntegratedSecurity=true,
@@ -680,7 +680,7 @@ public sealed class B5SqlTests
             await RunAsync(db, await reader.ReadToEndAsync(ct), ct);
         }
 
-        private async Task ApplyTwiceAsync(string databaseConnection, Type assemblyType,
+        internal async Task ApplyTwiceAsync(string databaseConnection, Type assemblyType,
             string resourceSuffix, CancellationToken ct)
         {
             var assembly = assemblyType.Assembly;
@@ -708,9 +708,9 @@ public sealed class B5SqlTests
             logins.Add(login);
         }
 
-        private static SqlParameter P(string name, object value) => new(name, value);
+        internal static SqlParameter P(string name, object value) => new(name, value);
 
-        private async Task<object?> ScalarAsync(string connection, string sql,
+        internal async Task<object?> ScalarAsync(string connection, string sql,
             CancellationToken ct, params SqlParameter[] parameters)
         {
             await using var db = new SqlConnection(connection);
@@ -720,7 +720,7 @@ public sealed class B5SqlTests
             return await cmd.ExecuteScalarAsync(ct);
         }
 
-        private async Task RunAsync(string connection, string sql,
+        internal async Task RunAsync(string connection, string sql,
             CancellationToken ct, params SqlParameter[] parameters)
         {
             await using var db = new SqlConnection(connection);
