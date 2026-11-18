@@ -379,6 +379,13 @@ def evaluate(bundle: Path, fixture: Path, expected_head: str, trust_path: Path |
                 manifest.get("_verified_security_reviewer") != manifest.get("_verified_dba_reviewer"),
                 "TWO_DISTINCT_INDEPENDENT_REVIEWERS_REQUIRED")
 
+    # Never expose per-case PASS when the global observer trust, reviewer,
+    # final-HEAD CI, physical recovery or security blocker gate is incomplete.
+    # Signed/self-reported positive rows cannot outrank external acceptance.
+    if errors:
+        cases = {code: ("BLOCKED" if status == "PASS" else status)
+                 for code, status in cases.items()}
+
     # Source-only CI cannot supply physical evidence/trust keys or close security debt.
     gate_results = {}
     for gate in GATES:
