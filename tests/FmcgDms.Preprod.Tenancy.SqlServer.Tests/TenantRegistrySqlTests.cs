@@ -273,6 +273,19 @@ public sealed class TenantRegistrySqlTests
                 transferPending.FinalizationOperationId!.Value,
                 transferPending.BindingId,transferPending.SecurityEpoch,ct));
         await Assert.ThrowsAsync<SqlException>(()=>retirerRegistryA.GetAsync(tenantB,ct));
+        var losingAck=new SqlTenantPrivilegeRetirer(retirerRegistryA,f.Master)
+        {
+            InitializeCiRetirerSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,retirerA,c),
+            AfterRevocationCiFault=c=>Task.FromException(
+                new InvalidOperationException("CI_INJECTED_RETIRE_ACK_LOSS"))
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>
+            losingAck.RetireAsync(tenantA,ct));
+        Assert.Equal("FINALIZING",(await registry.GetAsync(tenantA,ct))!.State);
+        Assert.Equal(1,Convert.ToInt32(await f.ScalarAsync(f.Master,
+            "SELECT CONVERT(int,is_disabled) FROM sys.server_principals WHERE name=@login",
+            ct,new SqlParameter("@login",finalizerA))));
+        // Resume with a new process and the SAME durable finalization operation.
         var finalized=await retirerServiceA.RetireAsync(tenantA,ct);
         Assert.Equal("VERIFYING",finalized.State);
         Assert.Equal(finalizerA,finalized.FinalizedBy);
@@ -435,7 +448,8 @@ public sealed class TenantRegistrySqlTests
             FinalizerLeaseCollisionDenied=true,
             FinalizerStableOperationRetry=true,FinalizerPeerClaimDenied=true,
             FinalizerStaleCompletionDenied=true,FinalizerRevokeDuringClaimDenied=true,
-            IndependentDbaRetirement=true,FinalizerSelfCompletionDenied=true,
+            IndependentDbaRetirement=true,RetirementLostAckRecovery=true,
+            FinalizerSelfCompletionDenied=true,
             FinalizerLoginDisabled=true,FinalizerDbUserRemoved=true,
             FinalizerImpersonationRevoked=true,FinalizerPostTransferRetakeDenied=true,
             SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,

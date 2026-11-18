@@ -11,6 +11,7 @@ namespace FmcgDms.Preprod.Tenancy;
 public sealed class SqlTenantPrivilegeRetirer(TenantRegistrySql registry,string dbaMasterConnectionString)
 {
     internal Func<SqlConnection,CancellationToken,Task>? InitializeCiRetirerSession {get;init;}
+    internal Func<CancellationToken,Task>? AfterRevocationCiFault {get;init;}
 
     public async Task<TenantRegistryEntry> RetireAsync(Guid tenantId,CancellationToken ct)
     {
@@ -87,6 +88,11 @@ public sealed class SqlTenantPrivilegeRetirer(TenantRegistrySql registry,string 
             cmd.Parameters.AddWithValue("@finalizer",entry.ApprovedFinalizerLogin);
             await cmd.ExecuteNonQueryAsync(ct);
         }
+        // Simulate process death / lost ACK after durable privilege revocation
+        // and before control-plane completion; a fresh DBA call may safely
+        // recover the same operation without re-granting any DDL privilege.
+        if(AfterRevocationCiFault is not null)
+            await AfterRevocationCiFault(ct);
         // New independent Control Plane connection: the retired finalizer
         // cannot execute cp_CompleteFinalization or impersonate this actor.
         await registry.CompleteFinalizationAsync(tenantId,
