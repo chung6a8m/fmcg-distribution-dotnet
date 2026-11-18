@@ -1,6 +1,6 @@
 # APP-02B.4 — Tenant Registry & Provisioning (PREPROD only)
 
-**Status 2026-11-18: PR #58 DRAFT / SOURCE_IMPLEMENTED / CI_PENDING / REAL_PREPROD_TENANCY_NOT_VERIFIED.** Strictly `OWN-APP02B-04` and the frozen [B.1 security contract](app-02b1-architecture-security-contract.md), [threats TM-05..10](../security/app-02b1-threat-model.md) and [B.1 30-case matrix](../security/app-02b1-acceptance-evidence.md). This increment does **not** amend or satisfy physical `G-B01..05`. B.2 and B.3 had separate scoped CI-only Owner exceptions: they do not grant B.4 an automatic CI-only merge waiver.
+**Status 2026-11-18: PR #58 MERGED / B4_GITHUB_HOSTED_CI_TESTED / KNOWN_SECURITY_DEBT_59_OPEN / PHYSICAL_PREPROD_NOT_VERIFIED.** Strictly `OWN-APP02B-04` and the frozen [B.1 security contract](app-02b1-architecture-security-contract.md), [threats TM-05..10](../security/app-02b1-threat-model.md) and [B.1 30-case matrix](../security/app-02b1-acceptance-evidence.md). This increment does **not** amend or satisfy physical `G-B01..05`. B.2 and B.3 had separate scoped CI-only Owner exceptions: they do not grant B.4 an automatic CI-only merge waiver.
 
 ## Isolation, source ownership and API boundary
 
@@ -86,3 +86,7 @@ The narrower `CODE_ONLY_MERGE` decision `OWN-APP02B4-MERGE-01` does not waive pr
 ## Owner-directed bounded source integration with known security debt (2026-11-18)
 
 [DEBT-01](../decisions/owner-app02b4-bounded-security-debt-merge-2026-11-18.md) supersedes only the C-B4-04/05 strict *source-merge timing* for PR #58: #59 full npm audit is a disclosed **OPEN HIGH security debt**, and APP-00A continues to fail, rather than being relabeled PASS. Mandatory compensating gates: all B.4/B.2/B.3 SQL/Identity CI, retained APP-00A pre-audit two-tenant .NET/ledger/business SQL oracles, separate Windows Node 26 `web/PWA/Playwright` regression job, zero source-level security findings including **cross-tenant cross-role SQL credential reuse**. Source review provenance is [solo DBA/Security technical assessment](../security/app-02b4-solo-source-review-disposition-2026-11-18.md); no second human reviewer or physical PREPROD witness claimed. #60 actual SQL/Vault/DBA permissions stay OPEN/NOT_VERIFIED. Real PREPROD and the B.1 thirty cases remain blocked; no production/pilot or business route.
+
+## Source merge closeout — 2026-11-18
+
+[PR #58](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/58) is **MERGED**, source `e467f9bd`, squash `0e3951db`. [Full bounded source-only closeout](../closeout/2026-11-18-app-02b4-bounded-source-only.md) documents 30/30 B4 unit, 2/2 SQL LocalDB, B2/B3 PASS, 296/296 APP00A .NET pre-audit tests and separate web/PWA/Playwright PASS. The **required APP00A full npm audit FAIL** is explicitly Owner-accepted security debt **for source merge only** under DEBT-01; 11 HIGH `picomatch` #59 remains OPEN. #60 physical SQL/Vault security and every real PREPROD/B1 G-B01..05 remain `NOT_VERIFIED`. No production/pilot/tenant business API admission.
