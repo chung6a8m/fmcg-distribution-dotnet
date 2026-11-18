@@ -1,0 +1,36 @@
+name: Security / picomatch GHSA-fc5q-39xc-vjpf (unwaived)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  picomatch-lock-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Fail closed on affected picomatch lockfile resolution
+        run: node --test web/tests/picomatch-advisory.test.mjs
+
+  full-npm-security-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Reproduce lockfile exactly
+        run: npm ci --no-audit --no-fund
+      - name: Production-tree audit (all severities)
+        run: npm audit --omit=dev --audit-level=low
+      - name: Full-tree audit (moderate and above, no exclusion)
+        run: npm audit --audit-level=moderate
