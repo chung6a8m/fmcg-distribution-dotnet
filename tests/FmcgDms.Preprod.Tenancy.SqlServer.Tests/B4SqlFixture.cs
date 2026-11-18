@@ -76,7 +76,7 @@ internal sealed class B4SqlFixture : IAsyncDisposable
     }
 
     public async Task AddActorAsync(string name,bool request=false,bool approve=false,
-        bool verify=false,bool suspend=false,CancellationToken ct=default)
+        bool verify=false,bool suspend=false,bool finalize=false,CancellationToken ct=default)
     {
         if(!name.StartsWith("b4",StringComparison.Ordinal)) throw new InvalidOperationException();
         var password=Convert.ToHexString(RandomNumberGenerator.GetBytes(20))+"aA1!";
@@ -84,13 +84,28 @@ internal sealed class B4SqlFixture : IAsyncDisposable
         logins.Add(name);
         await ExecAsync(Control,$"CREATE USER [{name}] FOR LOGIN [{name}]; GRANT EXECUTE ON SCHEMA::dbo TO [{name}];",ct);
         await ExecAsync(Control,@"INSERT dbo.PreprodTenantOperators
-            (LoginName,Enabled,CanRequest,CanApprove,CanVerify,CanSuspend)
-            VALUES(@name,1,@request,@approve,@verify,@suspend)",ct,
+            (LoginName,Enabled,CanRequest,CanApprove,CanVerify,CanSuspend,CanFinalize)
+            VALUES(@name,1,@request,@approve,@verify,@suspend,@finalize)",ct,
             new SqlParameter("@name",name),
             new SqlParameter("@request",request),
             new SqlParameter("@approve",approve),
             new SqlParameter("@verify",verify),
-            new SqlParameter("@suspend",suspend));
+            new SqlParameter("@suspend",suspend),
+            new SqlParameter("@finalize",finalize));
+    }
+
+    public async Task<string> CreateFinalizerAsync(CancellationToken ct)
+    {
+        var login="b4fin_"+Guid.NewGuid().ToString("N")[..12];
+        await AddActorAsync(login,finalize:true,ct:ct);
+        return login;
+    }
+
+    public Task GrantOwnerImpersonationAsync(string finalizer,string owner,CancellationToken ct)
+    {
+        if(!logins.Contains(finalizer)||!logins.Contains(owner))
+            throw new InvalidOperationException("Only fixture-created SQL logins permitted");
+        return ExecAsync(Master,$"GRANT IMPERSONATE ON LOGIN::[{owner}] TO [{finalizer}]",ct);
     }
 
     public async Task<string> CreateBareLoginAsync(string prefix,CancellationToken ct)

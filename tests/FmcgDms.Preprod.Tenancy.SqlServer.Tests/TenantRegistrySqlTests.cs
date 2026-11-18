@@ -64,6 +64,23 @@ public sealed class TenantRegistrySqlTests
         var ownerA=await f.CreateBareLoginAsync("b4owner",ct);
         var ownerB=await f.CreateBareLoginAsync("b4owner",ct);
         var ownerOrphan=await f.CreateBareLoginAsync("b4owner",ct);
+        var finalizerA=await f.CreateFinalizerAsync(ct);
+        var finalizerB=await f.CreateFinalizerAsync(ct);
+        var finalizerOrphan=await f.CreateFinalizerAsync(ct);
+        await f.GrantOwnerImpersonationAsync(finalizerA,ownerA,ct);
+        await f.GrantOwnerImpersonationAsync(finalizerB,ownerB,ct);
+        var finalizerRegistryA=new TenantRegistrySql(f.Control)
+        {
+            InitializeCiSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,finalizerA,c)
+        };
+        var finalizerServiceA=new SqlTenantFinalizer(finalizerRegistryA,f.Master)
+        {
+            InitializeCiFinalizerSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,finalizerA,c)
+        };
+        var finalizerRegistryB=new TenantRegistrySql(f.Control)
+        {
+            InitializeCiSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,finalizerB,c)
+        };
         var probeA=await f.CreateBareLoginAsync("b4probe",ct);
         var verifierRegistry=new TenantRegistrySql(f.Control)
         {
@@ -74,7 +91,7 @@ public sealed class TenantRegistrySqlTests
             InitializeCiScopedSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,probeA,c)
         };
 
-        async Task RequestApprove(Guid id,string key,string ownerLogin)
+        async Task RequestApprove(Guid id,string key,string ownerLogin,string finalizerLogin)
         {
             var reqArgs=new[]
             {
@@ -91,13 +108,15 @@ public sealed class TenantRegistrySqlTests
                 ct,new SqlParameter("@id",id))));
             await Assert.ThrowsAsync<SqlException>(()=>
                 f.RunAsAsync(f.Requester,
-                    "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+                    "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner,@FinalizerLogin=@finalizer",ct,
                     new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N")),
-                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin)));
+                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin),
+                new SqlParameter("@finalizer",finalizerLogin)));
             await f.RunAsAsync(f.Checker,
-                "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+                "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner,@FinalizerLogin=@finalizer",ct,
                 new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N")),
-                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin));
+                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin),
+                new SqlParameter("@finalizer",finalizerLogin));
         }
 
         async Task RecordVerification(TenantRegistryEntry target)
@@ -119,16 +138,17 @@ public sealed class TenantRegistrySqlTests
                 new SqlParameter("@ref",(object?)evidence ?? DBNull.Value));
         }
 
-        await RequestApprove(tenantA,"tenant-ci-a",ownerA);
-        await RequestApprove(tenantB,"tenant-ci-b",ownerB);
-        await RequestApprove(orphan,"tenant-ci-orphan",ownerOrphan);
+        await RequestApprove(tenantA,"tenant-ci-a",ownerA,finalizerA);
+        await RequestApprove(tenantB,"tenant-ci-b",ownerB,finalizerB);
+        await RequestApprove(orphan,"tenant-ci-orphan",ownerOrphan,finalizerOrphan);
         // Owner/DDL identities are immutable approval content: an idempotent
         // replay with changed owner may not silently rewrite SQL authority.
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsAsync(f.Checker,
-            "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+            "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner,@FinalizerLogin=@finalizer",ct,
             new SqlParameter("@id",tenantA),
             new SqlParameter("@ref","CHG-CHECK-"+tenantA.ToString("N")),
-            new SqlParameter("@owner",ownerB),new SqlParameter("@provisioner",ddlLogin)));
+            new SqlParameter("@owner",ownerB),new SqlParameter("@provisioner",ddlLogin),
+            new SqlParameter("@finalizer",finalizerA)));
 
         // Exclusive Control Plane lease; failure preserves stable operation ID.
         var lease=Guid.NewGuid();
@@ -185,8 +205,54 @@ public sealed class TenantRegistrySqlTests
             new SqlParameter("@row",SqlDbType.Binary,8){Value=a.RowVersion},
             new SqlParameter("@binding",a.BindingId),
             new SqlParameter("@hash",SqlDbType.Binary,32){Value=SHA256.HashData([1,2,3,4])}));
-        await f.ExecAsync(f.Master,
-            $"ALTER AUTHORIZATION ON DATABASE::[{a.DatabaseName}] TO [{ownerA}]",ct);
+        // A finalizer approved for tenant A must NOT be able to claim tenant B.
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryA.ClaimFinalizationAsync(tenantB,Guid.NewGuid(),ct));
+        var firstFinalizationToken=Guid.NewGuid();
+        var firstFinalization=await finalizerRegistryA.ClaimFinalizationAsync(
+            tenantA,firstFinalizationToken,ct);
+        Assert.Equal("FINALIZING",firstFinalization.State);
+        Assert.False(firstFinalization.IsRoutable);
+        Assert.NotNull(firstFinalization.FinalizationOperationId);
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryA.ClaimFinalizationAsync(tenantA,Guid.NewGuid(),ct));
+        // Exact active lease expiration and stale completion/failure are denied.
+        await f.ExecAsync(f.Control,
+            "UPDATE dbo.PreprodTenantRegistry SET FinalizationLeaseUntilUtc=DATEADD(minute,-1,SYSUTCDATETIME()) WHERE TenantId=@id",
+            ct,new SqlParameter("@id",tenantA));
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryA.FailFinalizationAsync(tenantA,firstFinalizationToken,
+                "EXPIRED_FINALIZER",ct));
+        var secondFinalizationToken=Guid.NewGuid();
+        var takeoverFinalization=await finalizerRegistryA.ClaimFinalizationAsync(
+            tenantA,secondFinalizationToken,ct);
+        Assert.Equal(firstFinalization.FinalizationOperationId,takeoverFinalization.FinalizationOperationId);
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryA.CompleteFinalizationAsync(tenantA,firstFinalizationToken,
+                takeoverFinalization.FinalizationOperationId!.Value,
+                takeoverFinalization.BindingId,takeoverFinalization.SecurityEpoch,ct));
+        await finalizerRegistryA.FailFinalizationAsync(tenantA,secondFinalizationToken,
+            "CI_SAFE_RETRY",ct);
+        Assert.Equal("VERIFYING",(await registry.GetAsync(tenantA,ct))!.State);
+        var finalized=await finalizerServiceA.FinalizeAsync(tenantA,ct);
+        Assert.Equal("VERIFYING",finalized.State);
+        Assert.Equal(finalizerA,finalized.FinalizedBy);
+        Assert.Equal(takeoverFinalization.FinalizationOperationId,finalized.FinalizationOperationId);
+        Assert.False(finalized.IsRoutable);
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryA.ClaimFinalizationAsync(tenantA,Guid.NewGuid(),ct));
+        // Revoke during finalization of the peer must cancel its lease and
+        // prevent completion even if a delayed SQL owner transfer occurs.
+        var peerFinalizationToken=Guid.NewGuid();
+        var peerClaim=await finalizerRegistryB.ClaimFinalizationAsync(tenantB,peerFinalizationToken,ct);
+        await Transition(f.Security,tenantB,"REVOKE");
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryB.CompleteFinalizationAsync(tenantB,peerFinalizationToken,
+                peerClaim.FinalizationOperationId!.Value,peerClaim.BindingId,
+                peerClaim.SecurityEpoch,ct));
+        Assert.Equal("SUSPENDED",(await registry.GetAsync(tenantB,ct))!.State);
+        await Assert.ThrowsAsync<SqlException>(()=>
+            finalizerRegistryB.ClaimFinalizationAsync(tenantB,Guid.NewGuid(),ct));
         await f.ExecAsync(f.Connection(a.DatabaseName),
             $"CREATE USER [{probeA}] FOR LOGIN [{probeA}]; GRANT SELECT ON dbo.__PreprodTenantBinding TO [{probeA}]; GRANT SELECT ON dbo.__PreprodTenantSchemaHistory TO [{probeA}];",ct);
         var ownerSid=(byte[])(await f.ScalarAsync(f.Master,
@@ -310,6 +376,9 @@ public sealed class TenantRegistrySqlTests
             SameOperationRetry=true,PeerBindingDenied=true,
             OwnerTransferEnforced=true,OwnerSidMatchesApproved=true,
             SqlOwnerApprovalImmutable=true,DirectForgedOwnerWitnessDenied=true,
+            ScopedFinalizerAutomation=true,FinalizerLeaseCollisionDenied=true,
+            FinalizerStableOperationRetry=true,FinalizerPeerClaimDenied=true,
+            FinalizerStaleCompletionDenied=true,FinalizerRevokeDuringClaimDenied=true,
             SqlImpersonatedEndToEndVerifier=true,SqlScopeDenied=true,
             DdlCreatorDirectReadDenied=true,
             SuspendedEpochAdvanced=true,ReactivationRaceDenied=true,

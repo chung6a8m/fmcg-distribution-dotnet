@@ -58,7 +58,7 @@ public sealed class TenantSafetyTests
     public void Non_active_registry_states_are_always_non_routable()
     {
         foreach(var state in new[]{"REQUESTED","APPROVED","PROVISIONING","FAILED_RETRYABLE",
-            "VERIFYING","SUSPENDED","REACTIVATION_VERIFYING","DECOMMISSIONING",
+            "VERIFYING","FINALIZING","SUSPENDED","REACTIVATION_VERIFYING","DECOMMISSIONING",
             "DECOMMISSIONED"})
         {
             var record=new TenantRegistryEntry(Guid.NewGuid(),"",Guid.NewGuid(),1,1,
@@ -111,6 +111,7 @@ public sealed class TenantSafetyTests
     [InlineData("activate","approver")]
     [InlineData("start-reactivation","approver")]
     [InlineData("provision","provisioner")]
+    [InlineData("finalize","finalizer")]
     [InlineData("verify","verifier")]
     [InlineData("suspend","security")]
     [InlineData("revoke","security")]

@@ -86,6 +86,9 @@ jobs:
               !$e.PeerBindingDenied -or !$e.OwnerTransferEnforced -or
               !$e.OwnerSidMatchesApproved -or !$e.SqlOwnerApprovalImmutable -or
               !$e.DirectForgedOwnerWitnessDenied -or
+              !$e.ScopedFinalizerAutomation -or !$e.FinalizerLeaseCollisionDenied -or
+              !$e.FinalizerStableOperationRetry -or !$e.FinalizerPeerClaimDenied -or
+              !$e.FinalizerStaleCompletionDenied -or !$e.FinalizerRevokeDuringClaimDenied -or
               !$e.SqlImpersonatedEndToEndVerifier -or
               !$e.SqlScopeDenied -or
               !$e.DdlCreatorDirectReadDenied -or
