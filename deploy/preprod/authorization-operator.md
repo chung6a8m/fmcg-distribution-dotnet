@@ -1,6 +1,6 @@
 # APP-02B.5 — PREPROD Authorization DBA Operator Runbook (SOURCE ONLY)
 
-**STOP / NO-GO:** This is not an instruction to deploy to a real PREPROD host today. Three migrations exist as un-applied source. Issue #53 (monotonic revocation source after restore), independently approved RBAC enrollment and #59 audit remain blocking; existing API/Worker are NO_GO. No business routes, production secrets or pilot. The #64/#65 new CI source countermeasures do not constitute operator authorization or a deployed admission path.
+**STOP / NO-GO:** This is not an instruction to deploy to a real PREPROD host today. Three migrations exist as un-applied source. Issue #53 (monotonic revocation source after restore), independently approved RBAC enrollment and #59 audit remain blocking; existing API/Worker are NO_GO. No business routes, production secrets or pilot. The #64/#65 new CI source countermeasures do not constitute operator authorization or a deployed admission path. The arbitrary SQL callback is internal and test-only; no future operator may expose it as a public tenant command. Implement separate vetted, database-bound commands before runtime enablement.
 
 ## Preconditions for a future Owner-authorized operator exercise
 

@@ -57,6 +57,15 @@ public sealed class AuthorizationBoundaryTests
     }
 
     [Fact]
+    public void Unrestricted_sql_callback_is_not_a_public_runtime_api()
+    {
+        Assert.DoesNotContain(
+            typeof(SqlAuthorizationFence).GetMethods(
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public),
+            method => method.Name == "ExecuteAsync");
+    }
+
+    [Fact]
     public async Task B5_runtime_execution_is_denied_before_SQL_without_test_only_gate()
     {
         var authority = Own();

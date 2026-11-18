@@ -49,7 +49,9 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString, string a
     // TEST ONLY: disposable LocalDB login to verify real SQL permission checks.
     internal Func<SqlConnection, CancellationToken, Task>? InitializeCiSession { get; init; }
 
-    public async Task<T> ExecuteAsync<T>(AuthorizationContext authority,
+    // Never part of the public API: unrestricted SQL callbacks are confined to
+    // explicit friend test assemblies and disposable LocalDB only.
+    internal async Task<T> ExecuteAsync<T>(AuthorizationContext authority,
         SqlControlPlaneGuards controlAuthority,
         Func<SqlConnection, SqlTransaction, CancellationToken, Task<T>> effect,
         CancellationToken cancellationToken)
