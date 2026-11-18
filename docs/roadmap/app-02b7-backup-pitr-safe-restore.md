@@ -1,6 +1,6 @@
 # APP-02B.7 — Backup / PITR / Safe Restore
 
-**State: SOURCE_IN_PR / GITHUB_HOSTED_CI_PENDING / PHYSICAL_PREPROD_NOT_VERIFIED / G-B03 NOT_RUN.** Owner approved design [OWN-APP02B-08/10](../decisions/owner-app02b-2026-11-17.md), not runtime activation or a code-only exception to unrelated failing gates. This increment is an independently reviewable PREPROD-only operator package; no production business use, Pilot, APP-02C/D/E, tenant routing, API or Worker dispatch. B.1 acceptance [B03-01..06](../security/app-02b1-acceptance-evidence.md), threats TM-06/TM-11/TM-12/TM-13/TM-14 and open restore-safe revocation [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) are normative.
+**State: MERGED / B7_GITHUB_HOSTED_LOCALDB_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED / G-B03 NOT_RUN.** Owner approved design [OWN-APP02B-08/10](../decisions/owner-app02b-2026-11-17.md), not runtime activation or a code-only exception to unrelated failing gates. This increment is an independently reviewable PREPROD-only operator package; no production business use, Pilot, APP-02C/D/E, tenant routing, API or Worker dispatch. B.1 acceptance [B03-01..06](../security/app-02b1-acceptance-evidence.md), threats TM-06/TM-11/TM-12/TM-13/TM-14 and open restore-safe revocation [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) are normative.
 
 ## Architecture and authority
 
@@ -32,6 +32,6 @@ The dedicated `.github/workflows/app02b7-recovery.yml` tests .NET 10 xUnit sourc
 - [ ] Operator DBA/Security approval, physical SQL FULL/diff/log jobs and monitoring, separate backup/encryption/restore principals, validated off-host ciphertext/key restore chain and Control Plane/Key recovery.
 - [ ] Resolve #53 external revocation high watermark and protected B.3/B.4/B.5 lifecycle, plus #67 live CASE source/authority and physical #52/#54/#55/#56/#60.
 - [ ] Real two-physical-tenant PREPROD recovery drill, B03-01..06 complete expected/actual/diff, independent peer SQL fingerprint, no unauthorized writes; measured actual RPO/RTO through safe API/Worker and external reconciliation.
-- [ ] B.8 immutable audit/incident and B.9 independent 30-case gates still pending; no legal retention defaults chosen.
+- [ ] B.8/B.9 *physical* audit and independent 30-case gates still pending despite source-only merges; no legal retention defaults chosen.
 
 **Maximum potential source evidence:** `B7_GITHUB_HOSTED_LOCALDB_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED` *only if* final source-bound B.7 workflow passes. **`PREPROD_RECOVERY_VERIFIED` is NOT earned**, `G-B03 NOT_RUN` until independently signed physical drills. The Owner's PR #70-specific [bounded source-only decision](../decisions/owner-app02b7-bounded-source-only-merge-2026-11-18.md) allows inert source integration **only after** independently reviewed final-HEAD source CI and compensating regression gates. Existing #59 full-tree npm audit remains FAILED under a narrow source integration timing exception, not PASS. No GitHub rule may be bypassed; merge does not change G-B03 physical NO_GO.
