@@ -94,3 +94,25 @@ The **source-only** signoff is distinct from a physical PREPROD signoff. It may 
 ## E. Decision requested
 
 The independent DBA and Security reviewers must **each** comment on [PR #58](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/58) or [issue #60](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/60), identify the exact reviewed commit and test evidence, and give one of `ACCEPT_CODE_BOUNDARY`, `REQUEST_CHANGES`, or `BLOCKED_MISSING_EVIDENCE`. Their review cannot be inferred from an automated code comment. If reviewers are not available or do not approve, keep both issue and PR open; **do not self-sign on their behalf**.
+
+## Subsequent solo-dev Owner authorization (2026-11-18) — controls the reviewer staffing step
+
+**Read this before using the earlier handoff.** The Owner has authorized the **same person** to serve as Owner, DBA and Security for APP-02B.4 development, documented at [OWN-APP02B4-SOLO-01](../decisions/owner-app02b4-solo-governance-2026-11-18.md). The original two-independent-human request and `NOT_ASSIGNED` fields above are retained as **historical pre-decision wording**, not an instruction to recruit additional GitHub accounts.
+
+For **source-only** C-B4-02, substitute two *separate review passes* by the sole Owner: DBA60-01..10 as the DBA role, then a distinct adversarial Security review of the same frozen exact PR HEAD. Record the identity once, list both role capacities accurately, and label the result `SOLO_OWNER_SELF_ATTESTED` with `HUMAN_INDEPENDENCE_DEVIATION_DISCLOSED`. Do not create a second GitHub reviewer account or claim two independent humans. Another AI/automated review can aid technical scrutiny but is not another human signoff.
+
+### Updated solo-source review record (blank until actual inspection)
+
+| Field | Expected current value |
+|---|---|
+| Natural-person reviewer | Sole Owner / developer — authorized for Owner+DBA+Security |
+| Role staffing | `OWNER_AUTHORIZED_SOLO` |
+| Review mode | `TWO_ROLE_PASSES_ONE_PERSON`; no separate human independence |
+| Frozen PR final HEAD | `PENDING_FINAL_HEAD_REVIEW` |
+| DBA60-01..10 expected/actual/diff and permission proof | `PENDING_ROLE_PASS` |
+| Security TM-05..10, Vault/secrets and owner-retake negative proof | `PENDING_ROLE_PASS` |
+| Review decision | `NOT_SIGNED` until explicit Owner role-by-role disposition |
+| CI / full APP-00A audit | `ALL_REQUIRED_PASS_PENDING`; #59 remains open |
+| Actual physical PREPROD G-B01..05 | `NOT_RUN / NOT_VERIFIED` |
+
+The solo authorization **does not equal** `SOLO_ACCEPT_CODE_BOUNDARY`: only the Owner's later documented inspection and acceptance of the *final* code/evidence may use that verdict. If a frozen B.1 physical test still demands genuinely independent personnel, disclose the deviation and seek separate explicit acceptance for that *physical* gate; never label a solo witness as independent human or physical PREPROD PASS. No merge while #59, #60 technical findings or any required CI gate remains open.

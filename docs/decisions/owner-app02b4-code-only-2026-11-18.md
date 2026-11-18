@@ -37,3 +37,9 @@ Owner decision evidence: [PR #58 decision comment](https://github.com/chung6a8m/
 - B.5 authorization/revocation, B.7 PITR/restore, B.8 immutable audit, B.9 physical independent acceptance keep their own PRs, responsibilities and gates.
 - No tenant business writes/routing, production deployment, pilot, cutover, financial provider, APP-02C/D/E or A/B/Mixed mode admission. Original production P0 gates and real AC-11/EV-08 are `NOT_VERIFIED`.
 - This B.4-specific code-only exception does **not** retroactively modify B.2/B.3 Owner decisions or waive any APP-00A security finding. Approval of this *policy* is not evidence that its preconditions have been met.
+
+## Subsequent Owner staffing addendum — OWN-APP02B4-SOLO-01 (2026-11-18)
+
+The Owner subsequently authorized **one solo developer to act in Owner, DBA reviewer and Security reviewer capacities**, without assigning other GitHub users. See [the versioned solo-governance decision](owner-app02b4-solo-governance-2026-11-18.md). This supersedes **only the different-human reviewer staffing expectation for C-B4-02 source-only review**. The DBA and Security checks must still be performed as separate documented evidence-based passes, and the signoff must explicitly be marked `SOLO_OWNER_SELF_ATTESTED`, **not** `TWO_INDEPENDENT_HUMANS_REVIEWED`. This decision is role authorization, **not** automatic source/security acceptance of PR #58. C-B4-01/C-B4-03..06, exact-final-HEAD review, all CI and full npm audit, #59 and technical #60 findings, separate SQL/Vault principal scopes and non-PREPROD claims remain unchanged.
+
+Original Owner decisions and their historical independent-review language above are preserved verbatim; this later dated addendum controls only the source-level human staffing exception.
