@@ -116,6 +116,74 @@ public sealed class B53SqlTests
         Assert.Equal(2L, await f.EpochAsync(f.TenantA, ct));
         Assert.Equal(1L, await f.EpochAsync(f.TenantB, ct));
 
+        // Independent approver must be distinct from the actual SQL actor
+        // performing B4 activation even when that principal holds BOTH roles.
+        // B is a nonce-owned, never-business-routable CI tenant.
+        await f.RunAsync(fence, $"""
+            EXECUTE AS LOGIN=N'{f.SecurityLogin}';
+            EXEC dbo.b53_ApproveActivation @TenantId=@tenant,
+              @BindingId=@binding,@TargetRegistryEpoch=2,
+              @EvidenceRef=N'B53-CI-B-PERMIT-V1';
+            REVERT;
+            """, ct,P("@tenant",f.TenantB),P("@binding",bindingB));
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(fence,$"""
+            EXECUTE AS LOGIN=N'{f.SecurityLogin}';
+            EXEC dbo.b53_ApproveActivation @TenantId=@tenant,
+              @BindingId=@binding,@TargetRegistryEpoch=2,
+              @EvidenceRef=N'B53-CI-DUPLICATE-MUST-FAIL';
+            REVERT;
+            """,ct,P("@tenant",f.TenantB),P("@binding",bindingB)));
+        // Expired unused permits stay in history with explicit ExpiredUtc;
+        // a newly approved permit must remain possible without DBA deletion.
+        await f.RunAsync(fence,"""
+            UPDATE dbo.B53ActivationPermit
+               SET ExpiresUtc=DATEADD(SECOND,-1,SYSUTCDATETIME())
+             WHERE TenantId=@tenant AND ConsumedUtc IS NULL AND ExpiredUtc IS NULL;
+            """,ct,P("@tenant",f.TenantB));
+        await f.RunAsync(fence,$"""
+            EXECUTE AS LOGIN=N'{f.SecurityLogin}';
+            EXEC dbo.b53_ApproveActivation @TenantId=@tenant,
+              @BindingId=@binding,@TargetRegistryEpoch=2,
+              @EvidenceRef=N'B53-CI-B-PERMIT-V2';
+            REVERT;
+            """,ct,P("@tenant",f.TenantB),P("@binding",bindingB));
+        Assert.Equal(1,Convert.ToInt32(await f.ScalarAsync(fence,
+            "SELECT COUNT(*) FROM dbo.B53ActivationPermit WHERE TenantId=@t AND ExpiredUtc IS NOT NULL",
+            ct,P("@t",f.TenantB))));
+        Assert.Equal(1,Convert.ToInt32(await f.ScalarAsync(fence,
+            "SELECT COUNT(*) FROM dbo.B53ActivationPermit WHERE TenantId=@t AND ExpiredUtc IS NULL AND ConsumedUtc IS NULL",
+            ct,P("@t",f.TenantB))));
+        Assert.Equal(f.SecurityLogin,Convert.ToString(await f.ScalarAsync(fence,
+            "SELECT TOP(1) ApprovedBy FROM dbo.B53ActivationPermit WHERE TenantId=@t AND ExpiredUtc IS NULL",
+            ct,P("@t",f.TenantB))));
+
+        // Adversarial CI DBA deliberately gives one operator the approver
+        // AND registry bridge roles. Physical provisioning must not do so.
+        await f.RunAsync(fence,$"ALTER ROLE b53_registry_bridge ADD MEMBER [{f.SecurityLogin}];",ct);
+        await f.RunAsync(registry,$"""
+            CREATE USER [{f.SecurityLogin}] FOR LOGIN [{f.SecurityLogin}];
+            GRANT UPDATE ON dbo.PreprodTenantRegistry TO [{f.SecurityLogin}];
+            """,ct);
+        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(registry,$"""
+            EXECUTE AS LOGIN=N'{f.SecurityLogin}';
+            UPDATE dbo.PreprodTenantRegistry
+               SET State='ACTIVE',SecurityEpoch=SecurityEpoch+1
+             WHERE TenantId=@tenant;
+            REVERT;
+            """,ct,P("@tenant",f.TenantB)));
+        Assert.Equal("REQUESTED",Convert.ToString(await f.ScalarAsync(registry,
+            "SELECT State FROM dbo.PreprodTenantRegistry WHERE TenantId=@t",
+            ct,P("@t",f.TenantB))));
+        Assert.Equal(1L,await f.EpochAsync(f.TenantB,ct));
+        Assert.Equal("SUSPENDED",Convert.ToString(await f.ScalarAsync(fence,
+            "SELECT State FROM dbo.B5TenantFence WHERE TenantId=@t",
+            ct,P("@t",f.TenantB))));
+        Assert.Equal(0,Convert.ToInt32(await f.ScalarAsync(fence,
+            "SELECT COUNT(*) FROM dbo.B53ActivationPermit WHERE TenantId=@t AND ConsumedUtc IS NOT NULL",
+            ct,P("@t",f.TenantB))));
+        await f.RunAsync(fence,$"ALTER ROLE b53_registry_bridge DROP MEMBER [{f.SecurityLogin}];",ct);
+        await f.RunAsync(registry,$"REVOKE UPDATE ON dbo.PreprodTenantRegistry FROM [{f.SecurityLogin}];",ct);
+
         // CI-only DBA seeds one A permission: no tenant B runtime grant.
         await f.RunAsync(fence, """
             INSERT dbo.B5Membership(TenantId,ActorId,MembershipEpoch)
@@ -295,6 +363,8 @@ public sealed class B53SqlTests
                 EvidenceClass="GITHUB_HOSTED_LOCALDB_ONLY",
                 IndependentFenceDatabase=true,SeparatePhysicalTenantDatabases=2,
                 SessionRevokeSameCommit=true,TenantSuspendSameCommit=true,
+                IndependentActivationSelfApprovalDenied=true,
+                ExpiredPermitReapprovalSucceeded=true,
                 DeniedB3OnlyCommitOnFencePrivilegeLoss=true,
                 RestoredOldSessionJwtDenied=true,RestoredOldRegistryEpochDenied=true,
                 CorruptedBridgeHistoryDenied=true,DisabledB3B4BridgesDenied=true,PeerTenantNoWrite=true,
