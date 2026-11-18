@@ -184,7 +184,7 @@ public sealed class TenantRegistrySqlTests
             new SqlParameter("@id",tenantA),
             new SqlParameter("@row",SqlDbType.Binary,8){Value=a.RowVersion},
             new SqlParameter("@binding",a.BindingId),
-            new SqlParameter("@hash",SqlDbType.Binary,32){Value=SHA256.HashData([1,2,3,4])})));
+            new SqlParameter("@hash",SqlDbType.Binary,32){Value=SHA256.HashData([1,2,3,4])}));
         await f.ExecAsync(f.Master,
             $"ALTER AUTHORIZATION ON DATABASE::[{a.DatabaseName}] TO [{ownerA}]",ct);
         await f.ExecAsync(f.Connection(a.DatabaseName),
