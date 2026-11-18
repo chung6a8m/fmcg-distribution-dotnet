@@ -12,9 +12,16 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.404'
+      - name: Assert exact source HEAD checkout (not synthetic PR merge commit)
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
       - name: Compile B6 operator-only contract and PREPROD binaries
         run: |
           test "$(dotnet --version)" = "10.0.404"
@@ -50,9 +57,17 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.404'
+      - name: Assert exact source HEAD checkout (not synthetic PR merge commit)
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_HEAD) { throw 'B6 source HEAD mismatch' }
       - name: Require disposable SQL Server LocalDB, not PREPROD
         shell: pwsh
         run: |
@@ -89,6 +104,8 @@ jobs:
               !$e.MakerCheckerSeparated -or !$e.CaseSourcePinned -or
               !$e.OverlapAtomicDenied -or !$e.CrossTenantDenied -or
               !$e.StaleSnapshotDenied -or !$e.SourceHistoryImmutable -or
+              !$e.CaseScopedL2 -or !$e.ConcurrentSeparateCasesAllowed -or
+              !$e.SameCaseOverlapDenied -or !$e.SourceRevisionReplayDenied -or
               [string]::IsNullOrWhiteSpace($e.TenantAHashBefore) -or
               $e.TenantAHashBefore -cne $e.TenantAHashAfter -or
               [string]::IsNullOrWhiteSpace($e.TenantBHashBefore) -or
