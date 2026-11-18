@@ -126,13 +126,14 @@ public sealed class B53SqlTests
               @EvidenceRef=N'B53-CI-B-PERMIT-V1';
             REVERT;
             """, ct,P("@tenant",f.TenantB),P("@binding",bindingB));
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(fence,$"""
+        var duplicatePermit = await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(fence,$"""
             EXECUTE AS LOGIN=N'{f.SecurityLogin}';
             EXEC dbo.b53_ApproveActivation @TenantId=@tenant,
               @BindingId=@binding,@TargetRegistryEpoch=2,
               @EvidenceRef=N'B53-CI-DUPLICATE-MUST-FAIL';
             REVERT;
             """,ct,P("@tenant",f.TenantB),P("@binding",bindingB)));
+        Assert.Equal(51823,duplicatePermit.Number);
         // Expired unused permits stay in history with explicit ExpiredUtc;
         // a newly approved permit must remain possible without DBA deletion.
         await f.RunAsync(fence,"""
@@ -164,13 +165,14 @@ public sealed class B53SqlTests
             CREATE USER [{f.SecurityLogin}] FOR LOGIN [{f.SecurityLogin}];
             GRANT UPDATE ON dbo.PreprodTenantRegistry TO [{f.SecurityLogin}];
             """,ct);
-        await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(registry,$"""
+        var selfActivation = await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(registry,$"""
             EXECUTE AS LOGIN=N'{f.SecurityLogin}';
             UPDATE dbo.PreprodTenantRegistry
                SET State='ACTIVE',SecurityEpoch=SecurityEpoch+1
              WHERE TenantId=@tenant;
             REVERT;
             """,ct,P("@tenant",f.TenantB)));
+        Assert.Equal(51832,selfActivation.Number);
         Assert.Equal("REQUESTED",Convert.ToString(await f.ScalarAsync(registry,
             "SELECT State FROM dbo.PreprodTenantRegistry WHERE TenantId=@t",
             ct,P("@t",f.TenantB))));
