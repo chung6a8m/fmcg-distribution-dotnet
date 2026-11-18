@@ -65,6 +65,17 @@ public sealed class B8OperationsContractTests
         Assert.Contains("B8_ANCHOR_UNTRUSTED_KEY_CURVE",
             B8AuditVerifier.Verify([one, two], wrongCurveAnchor, receipt,
                 wrongCurve.ExportSubjectPublicKeyInfo()).Denials);
+        // secp256k1 ALSO has a 256-bit key. KeySize alone must never be
+        // mistaken for the v1 NIST P-256 curve constraint.
+        using var other256 = ECDsa.Create(ECCurve.CreateFromValue("1.3.132.0.10"));
+        var otherAnchor = anchor with
+        {
+            Signature = other256.SignHash(digest,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)
+        };
+        Assert.Contains("B8_ANCHOR_UNTRUSTED_KEY_CURVE",
+            B8AuditVerifier.Verify([one, two], otherAnchor, receipt,
+                other256.ExportSubjectPublicKeyInfo()).Denials);
         Assert.False(B8AuditVerifier.Verify([one, two], anchor, receipt, pub).IsPhysicalPreprodVerified);
     }
 

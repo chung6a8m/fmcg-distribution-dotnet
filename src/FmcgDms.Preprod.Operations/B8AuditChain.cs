@@ -129,7 +129,10 @@ public static class B8AuditVerifier
                 publicKey.ImportSubjectPublicKeyInfo(publicKeySpki, out var consumed);
                 // V1 requires one complete ECDSA P-256 SPKI, not an arbitrary
                 // caller-selected curve or an SPKI with trailing bytes.
-                if (consumed != publicKeySpki.Length || publicKey.KeySize != 256)
+                if (consumed != publicKeySpki.Length ||
+                    publicKey.KeySize != 256 ||
+                    publicKey.ExportParameters(false).Curve.Oid.Value !=
+                        "1.2.840.10045.3.1.7")
                     Deny("B8_ANCHOR_UNTRUSTED_KEY_CURVE");
                 else if (!publicKey.VerifyHash(digest, validatedAnchor.Signature,
                     DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
