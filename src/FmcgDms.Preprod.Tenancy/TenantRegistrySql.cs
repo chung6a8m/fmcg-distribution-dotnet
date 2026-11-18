@@ -58,10 +58,12 @@ public sealed class TenantRegistrySql(string connectionString)
     }
 
     public async Task<TenantRegistryEntry> ApproveAsync(Guid id, string changeRef,
-        CancellationToken ct)
+        string approvedOwnerLogin,string provisionerLogin,CancellationToken ct)
     {
         await ExecuteAsync("dbo.cp_ApproveTenant", ct,
-            Param("@TenantId", id), Param("@ApprovalRef", changeRef));
+            Param("@TenantId", id), Param("@ApprovalRef", changeRef),
+            Param("@ApprovedOwnerLogin", approvedOwnerLogin),
+            Param("@ProvisionerLogin", provisionerLogin));
         return await RequiredAsync(id, ct);
     }
 

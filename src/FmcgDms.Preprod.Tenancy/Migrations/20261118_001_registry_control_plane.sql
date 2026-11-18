@@ -56,6 +56,8 @@ BEGIN TRY
         RequestedBy sysname NOT NULL,
         ApprovedBy sysname NULL,
         ApprovalRef nvarchar(160) NULL,
+        ApprovedOwnerLogin sysname NULL,
+        ApprovedProvisionerLogin sysname NULL,
         ProvisionedBy sysname NULL,
         VerifiedBy sysname NULL,
         VerificationHash binary(32) NULL,
@@ -134,7 +136,8 @@ BEGIN
     FROM dbo.PreprodTenantRegistry WHERE TenantId=@TenantId;
 END;');
     EXEC(N'
-CREATE PROCEDURE dbo.cp_ApproveTenant @TenantId uniqueidentifier, @ApprovalRef nvarchar(160)
+CREATE PROCEDURE dbo.cp_ApproveTenant @TenantId uniqueidentifier, @ApprovalRef nvarchar(160),
+    @ApprovedOwnerLogin sysname, @ProvisionerLogin sysname
 AS
 BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -144,16 +147,27 @@ BEGIN
         THROW 51401, ''TENANT_OPERATOR_DENIED'', 1;
     IF @ApprovalRef IS NULL OR LEN(TRIM(@ApprovalRef)) NOT BETWEEN 3 AND 160
         THROW 51402, ''TENANT_APPROVAL_REF_INVALID'', 1;
+    IF @ApprovedOwnerLogin IS NULL OR @ProvisionerLogin IS NULL
+        OR @ApprovedOwnerLogin=@ProvisionerLogin OR @ApprovedOwnerLogin=@actor
+        OR SUSER_SID(@ApprovedOwnerLogin) IS NULL OR SUSER_SID(@ProvisionerLogin) IS NULL
+        OR COALESCE(IS_SRVROLEMEMBER(''sysadmin'',@ApprovedOwnerLogin),1)<>0
+        OR COALESCE(IS_SRVROLEMEMBER(''dbcreator'',@ApprovedOwnerLogin),1)<>0
+        OR COALESCE(IS_SRVROLEMEMBER(''sysadmin'',@ProvisionerLogin),1)<>0
+        OR COALESCE(IS_SRVROLEMEMBER(''dbcreator'',@ProvisionerLogin),1)<>0
+        THROW 51402, ''TENANT_APPROVED_OWNER_OR_PROVISIONER_INVALID'', 1;
     BEGIN TRANSACTION;
     SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
         WHERE TenantId=@TenantId AND RequestedBy<>@actor;
     IF @old IS NULL THROW 51404, ''TENANT_SELF_APPROVAL_OR_NOT_FOUND'', 1;
     IF @old=''APPROVED'' AND EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
-        WHERE TenantId=@TenantId AND ApprovedBy=@actor AND ApprovalRef=@ApprovalRef)
+        WHERE TenantId=@TenantId AND ApprovedBy=@actor AND ApprovalRef=@ApprovalRef
+            AND ApprovedOwnerLogin=@ApprovedOwnerLogin AND ApprovedProvisionerLogin=@ProvisionerLogin)
     BEGIN COMMIT TRANSACTION; RETURN; END;
     IF @old<>''REQUESTED'' THROW 51405, ''TENANT_APPROVAL_STATE_DENIED'', 1;
     UPDATE dbo.PreprodTenantRegistry SET State=''APPROVED'', ApprovedBy=@actor,
-        ApprovalRef=@ApprovalRef, UpdatedUtc=SYSUTCDATETIME() WHERE TenantId=@TenantId;
+        ApprovalRef=@ApprovalRef,ApprovedOwnerLogin=@ApprovedOwnerLogin,
+        ApprovedProvisionerLogin=@ProvisionerLogin,UpdatedUtc=SYSUTCDATETIME()
+    WHERE TenantId=@TenantId;
     INSERT dbo.PreprodTenantLifecycleEvents(TenantId,ActionCode,FromState,ToState,ActorLogin,
         SecurityEpoch,BindingId,EvidenceRef)
     SELECT TenantId,''APPROVE'',@old,State,@actor,SecurityEpoch,BindingId,@ApprovalRef
@@ -253,10 +267,19 @@ BEGIN
         WHERE LoginName=@actor AND Enabled=1 AND CanVerify=1)
         THROW 51401, ''TENANT_OPERATOR_DENIED'', 1;
     BEGIN TRANSACTION;
-    SELECT @old=State FROM dbo.PreprodTenantRegistry WITH (UPDLOCK,HOLDLOCK)
-    WHERE TenantId=@TenantId AND RowVer=@ExpectedRowVer AND BindingId=@ObservedBindingId
-        AND ProvisionedBy<>@actor
-        AND @WitnessHash IS NOT NULL AND @WitnessHash<>CONVERT(binary(32),0x);
+    SELECT @old=State FROM dbo.PreprodTenantRegistry AS r WITH (UPDLOCK,HOLDLOCK)
+    WHERE r.TenantId=@TenantId AND r.RowVer=@ExpectedRowVer AND r.BindingId=@ObservedBindingId
+        AND r.ProvisionedBy<>@actor
+        AND @WitnessHash IS NOT NULL AND @WitnessHash<>CONVERT(binary(32),0x)
+        AND r.ApprovedOwnerLogin IS NOT NULL AND r.ApprovedProvisionerLogin IS NOT NULL
+        AND r.ApprovedOwnerLogin<>r.ApprovedProvisionerLogin
+        AND SUSER_SID(r.ApprovedOwnerLogin) IS NOT NULL
+        AND SUSER_SID(r.ApprovedProvisionerLogin) IS NOT NULL
+        AND COALESCE(IS_SRVROLEMEMBER(''sysadmin'',r.ApprovedOwnerLogin),1)=0
+        AND COALESCE(IS_SRVROLEMEMBER(''dbcreator'',r.ApprovedOwnerLogin),1)=0
+        AND EXISTS (SELECT 1 FROM sys.databases AS d
+            WHERE d.name=r.DatabaseName AND d.owner_sid=SUSER_SID(r.ApprovedOwnerLogin)
+                AND d.owner_sid<>SUSER_SID(r.ApprovedProvisionerLogin));
     IF @old NOT IN (''VERIFYING'',''REACTIVATION_VERIFYING'')
         THROW 51410, ''TENANT_VERIFICATION_FENCED'', 1;
     UPDATE dbo.PreprodTenantRegistry SET VerifiedBy=@actor, VerificationHash=@WitnessHash,
@@ -300,7 +323,15 @@ BEGIN
                 AND VerifiedEpoch=SecurityEpoch AND VerifiedBindingId=BindingId
                 AND VerifiedBy IS NOT NULL AND VerifiedBy<>@actor
                 AND VerifiedBy<>@approvedBy
-                AND VerificationHash IS NOT NULL AND VerifiedUtc>DATEADD(minute,-5,SYSUTCDATETIME()))
+                AND VerificationHash IS NOT NULL AND VerifiedUtc>DATEADD(minute,-5,SYSUTCDATETIME())
+                AND ApprovedOwnerLogin IS NOT NULL AND ApprovedProvisionerLogin IS NOT NULL
+                AND ApprovedOwnerLogin<>ApprovedProvisionerLogin
+                AND SUSER_SID(ApprovedOwnerLogin) IS NOT NULL
+                AND SUSER_SID(ApprovedProvisionerLogin) IS NOT NULL
+                AND EXISTS (SELECT 1 FROM sys.databases d
+                    WHERE d.name=PreprodTenantRegistry.DatabaseName
+                        AND d.owner_sid=SUSER_SID(ApprovedOwnerLogin)
+                        AND d.owner_sid<>SUSER_SID(ApprovedProvisionerLogin)))
             THROW 51412, ''TENANT_ACTIVATION_GATE_DENIED'', 1;
         SET @new=''ACTIVE'';
     END

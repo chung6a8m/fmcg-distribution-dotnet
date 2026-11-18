@@ -54,6 +54,8 @@ public sealed class TenantRegistrySqlTests
             InitializeCiDdlSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,ddlLogin,c)
         };
         var ownerA=await f.CreateBareLoginAsync("b4owner",ct);
+        var ownerB=await f.CreateBareLoginAsync("b4owner",ct);
+        var ownerOrphan=await f.CreateBareLoginAsync("b4owner",ct);
         var probeA=await f.CreateBareLoginAsync("b4probe",ct);
         var verifierRegistry=new TenantRegistrySql(f.Control)
         {
@@ -64,7 +66,7 @@ public sealed class TenantRegistrySqlTests
             InitializeCiScopedSession=(conn,c)=>B4SqlFixture.ImpersonateAsync(conn,probeA,c)
         };
 
-        async Task RequestApprove(Guid id,string key)
+        async Task RequestApprove(Guid id,string key,string ownerLogin)
         {
             var reqArgs=new[]
             {
@@ -81,11 +83,13 @@ public sealed class TenantRegistrySqlTests
                 ct,new SqlParameter("@id",id))));
             await Assert.ThrowsAsync<SqlException>(()=>
                 f.RunAsAsync(f.Requester,
-                    "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref",ct,
-                    new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N"))));
+                    "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+                    new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N")),
+                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin)));
             await f.RunAsAsync(f.Checker,
-                "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref",ct,
-                new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N")));
+                "EXEC dbo.cp_ApproveTenant @TenantId=@id,@ApprovalRef=@ref,@ApprovedOwnerLogin=@owner,@ProvisionerLogin=@provisioner",ct,
+                new SqlParameter("@id",id),new SqlParameter("@ref","CHG-CHECK-"+id.ToString("N")),
+                new SqlParameter("@owner",ownerLogin),new SqlParameter("@provisioner",ddlLogin));
         }
 
         async Task RecordVerification(TenantRegistryEntry target)
@@ -107,9 +111,9 @@ public sealed class TenantRegistrySqlTests
                 new SqlParameter("@ref",(object?)evidence ?? DBNull.Value));
         }
 
-        await RequestApprove(tenantA,"tenant-ci-a");
-        await RequestApprove(tenantB,"tenant-ci-b");
-        await RequestApprove(orphan,"tenant-ci-orphan");
+        await RequestApprove(tenantA,"tenant-ci-a",ownerA);
+        await RequestApprove(tenantB,"tenant-ci-b",ownerB);
+        await RequestApprove(orphan,"tenant-ci-orphan",ownerOrphan);
 
         // Exclusive Control Plane lease; failure preserves stable operation ID.
         var lease=Guid.NewGuid();

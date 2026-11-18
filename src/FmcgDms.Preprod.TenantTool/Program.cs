@@ -7,9 +7,9 @@ try
     if(args.Length<2 || !Guid.TryParse(args[1],out var tenantId) || tenantId==Guid.Empty)
         throw new TenantLifecycleDeniedException("TENANT_OPERATOR_COMMAND_INVALID");
     string command=args[0];
-    bool withRef=command is "approve" or "start-reactivation" or "decommission"
+    bool withRef=command is "start-reactivation" or "decommission"
         or "complete-decommission";
-    if(args.Length!=(command=="request"?4:withRef?3:2)
+    if(args.Length!=(command=="request"?4:command=="approve"?5:withRef?3:2)
         || command is not ("request" or "approve" or "provision" or "verify"
             or "activate" or "suspend" or "revoke" or "start-reactivation"
             or "abort-reactivation" or "decommission" or "complete-decommission"))
@@ -31,7 +31,7 @@ try
             result=await registry.RequestAsync(tenantId,args[2],args[3],CancellationToken.None);
             break;
         case "approve":
-            result=await registry.ApproveAsync(tenantId,args[2],CancellationToken.None);
+            result=await registry.ApproveAsync(tenantId,args[2],args[3],args[4],CancellationToken.None);
             break;
         case "provision":
             if(secrets.MasterConnection is null)
