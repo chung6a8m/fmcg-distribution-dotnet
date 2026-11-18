@@ -1,6 +1,6 @@
 # APP-02B.5 — Authorization & Revocation (PREPROD source-only)
 
-**Status on this PR:** SOURCE_IMPLEMENTED / FINAL_HEAD_CI_AND_REVIEW_PENDING. B.5 is NOT AUTHORIZATION_VERIFIED. The original B.1 G-B01..05 / 30 physical PREPROD cases remain NOT_RUN / NOT_VERIFIED. No tenant business route, no Worker dispatch, no production/pilot/APP-02C/D/E authorization.
+**Status on this PR:** SOURCE_IMPLEMENTED / OWNER_CONDITIONAL_CODE_ONLY_MERGE / FINAL_HEAD_REVIEW_AND_CI_PENDING. B.5 is NOT AUTHORIZATION_VERIFIED. The original B.1 G-B01..05 / 30 physical PREPROD cases remain NOT_RUN / NOT_VERIFIED. No tenant business route, no Worker dispatch, no production/pilot/APP-02C/D/E authorization.
 
 ## 1. Contract and authorized boundaries
 
@@ -12,7 +12,7 @@ The standalone B.5 code package has three **operator-only** forward SQL Server m
 - **002 Identity bridge:** applied only after B.3 in the approved Identity Control Plane database. b5_AssertCurrentSession locks B.3 session and user rows until caller COMMIT, checks live user, security stamp, lockout, MFA, current epoch and revoke. The caller has EXEC only; no direct Identity table read.
 - **003 Registry bridge:** applied only after B.4 in the approved Registry Control Plane database. b5_AssertCurrentTenant locks the current B.4 registry row through COMMIT, checks ACTIVE, binding ID, **exact operator-pinned physical DatabaseName** and SecurityEpoch. Caller has EXEC only; no direct Registry table read.
 
-All three migrations reject system databases, missing predecessor history, partial or unknown version. They are **not** applied on app startup. Operator grants and independent DBA evidence are distinct from disposable CI SQL principals.
+All three migrations reject system databases, missing predecessor history, partial or unknown version. **Replay now rejects recorded version with missing required tables, procedures, roles or immutable triggers**; a CI negative destroys each guard procedure after initial successful apply and verifies 001/002/003 fail closed. They are **not** applied on app startup. Operator grants and independent DBA evidence are distinct from disposable CI SQL principals.
 
 SqlAuthorizationFence.ExecuteAsync requires **operator-pinned** tenant database name and SqlControlPlaneGuards tied to operator-pinned Identity and Registry database names; raw client database paths and bogus identifiers are denied. CI only: the A SQL runtime principal has INSERT to A, **not** B; a valid A authorization followed by B-target DML is denied by SQL and verified with before/after A/B SHA-256 table fingerprints. A registry mismatch is rejected before DML. These are disposable LocalDB witnesses and cannot replace real SQL/Vault principal review. Approval actions require a catalog-classified `APPROVAL` permission and an existing immutable SQL approval source ID; MakerId/InitiatorId are read from source, not accepted from request. B5ApprovalDecision insert and the effect commit/rollback together, with duplicate-check/replay denied. Within one SqlConnection and SERIALIZABLE SqlTransaction, it verifies current B.4 Registry and B.3 Identity (real SQL locks), then B.5 role/membership/resource/fence via b5_AssertAuthority (UPDLOCK/HOLDLOCK) and only then runs the protected tenant-local SQL effect. Each source mutation must use this SAME SQL connection and transaction. The B.3/B.4 revoke and suspend operations cannot overtake a transaction already holding their SQL locks. An effect after their COMMIT fails current-state checks.
 
@@ -29,7 +29,7 @@ SqlAuthorizationFence.ExecuteAsync requires **operator-pinned** tenant database 
 | CI-B5-05 | Real B.3 session row revoke blocks on protected COMMIT; stale JWT/session denied |
 | CI-B5-06 | Actual B.4 cp_TenantTransition SUSPEND blocks on protected COMMIT; stale Registry state denied |
 | CI-B5-07 | SQL runtime cannot directly read membership or write B with valid A authority; independent A/B fingerprints unchanged on malicious B-target attempt |
-| CI-B5-08 | Source SHA, migration hashes, TestRunId, three SQL witness reports (fence/control/approval) and redacted CI artifacts |
+| CI-B5-08 | Source SHA, migration hashes, TestRunId, four SQL witness reports (fence/control/approval/schema-integrity) and redacted CI artifacts |
 
 Implementation workflow: .github/workflows/app02b5-authorization.yml (Ubuntu unit + Windows SQL Server LocalDB). Existing APP-01E/APP-02A/B.2–B.4/frontend/PWA/Playwright regressions remain required. All B.5 CI engineering results are **GITHUB_HOSTED_CI_ONLY**, never actual PREPROD.
 
@@ -41,7 +41,7 @@ Implementation workflow: .github/workflows/app02b5-authorization.yml (Ubuntu uni
 
 **REAL-01 — Missing operator environment:** #52/#54/#60 require real PREPROD SQL/Vault/DBA principals, separate identities, actual port/TLS/security witnesses and approved migrations. #55 immutable audit, #56 independent B.9 30-case acceptance and B.7 PITR drill remain future dependencies. No actual RUNTIME-01/02, G-B01..05 or physical restore assertions have been executed.
 
-**SEC-59 — Full npm audit remains FAILED:** #59 is OPEN HIGH security debt. The B.4-specific DEBT-01 source merge exception applies only to PR #58 and cannot be inherited. Do not relabel APP-00A as PASS, waive checks or authorize release on this PR.
+**SEC-59 — Full npm audit remains FAILED:** #59 is OPEN HIGH security debt. B.4's DEBT-01 applies only to PR #58. The newer, scoped [OWN-APP02B5-DEBT-01](../decisions/owner-app02b5-bounded-code-only-debt-2026-11-18.md) accepts **inert B.5 source-only integration risk** after SRC-B5-01..05, despite a separately documented APP-00A FAIL. It does **not** mark the audit PASS, close #59, relax the workflow or authorize a release.
 
 ### Independent review findings: containment, not authority
 
@@ -53,6 +53,6 @@ Implementation workflow: .github/workflows/app02b5-authorization.yml (Ubuntu uni
 
 ## 4. Strict exit rule
 
-Do not merge or mark B.5 AUTHORIZATION_VERIFIED while REV-01/ADMIN-01 and #64/#65 physical/operator acceptance remain unresolved or full required source security checks fail. Even a future B.5 source-only merge, if separately Owner-authorized, cannot promote G-B01..05 from NOT_RUN. No real PREPROD admission, production, pilot or APP-02C/D/E can be inferred from B.5 CI evidence.
+Do not enable B.5 or mark it AUTHORIZATION_VERIFIED while REV-01/ADMIN-01 and #64/#65 physical/operator acceptance remain unresolved or full required source security checks fail. **Only** [OWN-APP02B5-DEBT-01](../decisions/owner-app02b5-bounded-code-only-debt-2026-11-18.md) permits a bounded **inert source merge** with those issues still OPEN, after SRC-B5-01..05. Source integration does not promote G-B01..05 from NOT_RUN. No real PREPROD admission, production, pilot or APP-02C/D/E can be inferred from B.5 CI evidence.
 
 See the [operator migration and denial runbook](../../deploy/preprod/authorization-operator.md), B.1 threat model and frozen acceptance matrix.
