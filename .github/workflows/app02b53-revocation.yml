@@ -82,6 +82,7 @@ jobs:
              $w.EvidenceClass -cne 'GITHUB_HOSTED_LOCALDB_ONLY' -or
              !$w.IndependentFenceDatabase -or $w.SeparatePhysicalTenantDatabases -ne 2 -or
              !$w.SessionRevokeSameCommit -or !$w.TenantSuspendSameCommit -or
+             !$w.IndependentActivationSelfApprovalDenied -or !$w.ExpiredPermitReapprovalSucceeded -or
              !$w.DeniedB3OnlyCommitOnFencePrivilegeLoss -or
              !$w.RestoredOldSessionJwtDenied -or !$w.RestoredOldRegistryEpochDenied -or
              !$w.CorruptedBridgeHistoryDenied -or !$w.DisabledB3B4BridgesDenied -or !$w.PeerTenantNoWrite -or
