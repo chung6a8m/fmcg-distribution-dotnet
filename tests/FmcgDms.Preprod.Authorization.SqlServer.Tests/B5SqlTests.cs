@@ -82,7 +82,7 @@ public sealed class B5SqlTests
         await revocation;
 
         await Assert.ThrowsAsync<AuthorizationDeniedException>(() => fence.ExecuteAsync(
-            a, current, (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
+            a, guard, (db, tx, token) => f.WriteAsync(db, tx, f.TenantADatabase, token), ct));
         await Assert.ThrowsAsync<SqlException>(() =>
             f.RuntimeReadMembershipAsync(ct));
 
