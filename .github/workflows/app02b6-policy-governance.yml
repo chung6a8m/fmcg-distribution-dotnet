@@ -1,0 +1,120 @@
+name: APP-02B.6 policy registry and approvals (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  b6-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Compile B6 operator-only contract and PREPROD binaries
+        run: |
+          test "$(dotnet --version)" = "10.0.404"
+          dotnet restore tests/FmcgDms.Preprod.Policy.Tests/FmcgDms.Preprod.Policy.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Policy.Tests/FmcgDms.Preprod.Policy.Tests.csproj -c Release --no-restore
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release
+          dotnet test tests/FmcgDms.Preprod.Policy.Tests/FmcgDms.Preprod.Policy.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Assert no API or Worker B6 registration or B6 default business policy values
+        shell: bash
+        run: |
+          ! grep -REn 'FmcgDms\.Preprod\.Policy|b6_Approve|b6_ResolveCurrent' src/FmcgDms.Preprod.Api src/FmcgDms.Preprod.Worker
+          ! grep -REn 'GRANT (SELECT|INSERT|UPDATE|DELETE).*TO b6_|INSERT dbo.B6L0Policy' src/FmcgDms.Preprod.Policy/Migrations
+      - name: Record synthetic source provenance
+        if: always()
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=app02b6-source-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nClassification=GITHUB_HOSTED_CI_ONLY\nRealPREPROD=NOT_VERIFIED\nG-B01..05=NOT_RUN\nB5RevocationDebt=OPEN\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/APP-02B6-SOURCE.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b6-source-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Policy.Tests/TestResults/
+          if-no-files-found: warn
+
+  b6-localdb:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Require disposable SQL Server LocalDB, not PREPROD
+        shell: pwsh
+        run: |
+          if ((dotnet --version).Trim() -ne '10.0.404') { throw 'SDK mismatch' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION'
+      - name: Execute B6 two-tenant SQL policy and replay tests
+        shell: pwsh
+        env:
+          APP02B6_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B6_TEST_RUN_ID: b6-localdb-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B6_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Policy.SqlServer.Tests/FmcgDms.Preprod.Policy.SqlServer.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Policy.SqlServer.Tests/FmcgDms.Preprod.Policy.SqlServer.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Policy.SqlServer.Tests/FmcgDms.Preprod.Policy.SqlServer.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Require independently parseable B6 source-bound SQL witnesses
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $p = @(Get-ChildItem . -Recurse -File -Filter APP-02B6-POLICY-WITNESS.json)
+          $s = @(Get-ChildItem . -Recurse -File -Filter APP-02B6-SCHEMA-WITNESS.json)
+          if ($p.Count -ne 1 -or $s.Count -ne 1) { throw 'Missing or duplicated B6 SQL witnesses' }
+          $e = Get-Content -Raw $p[0].FullName | ConvertFrom-Json
+          $h = Get-Content -Raw $s[0].FullName | ConvertFrom-Json
+          if ($e.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $e.SchemaVersion -cne 'B6_20261118_001' -or
+              $e.EvidenceClass -cne 'GITHUB_HOSTED_LOCALDB_ONLY' -or
+              $e.PhysicalTenantDatabases -ne 2 -or !$e.IndependentPolicyDatabase -or
+              !$e.DistinctDatabaseIds -or !$e.L0Immutable -or !$e.L0BoundsEnforced -or
+              !$e.UnsetDenied -or !$e.ExplicitApprovedZeroRetained -or
+              !$e.MakerCheckerSeparated -or !$e.CaseSourcePinned -or
+              !$e.OverlapAtomicDenied -or !$e.CrossTenantDenied -or
+              !$e.StaleSnapshotDenied -or !$e.SourceHistoryImmutable -or
+              [string]::IsNullOrWhiteSpace($e.TenantAHashBefore) -or
+              $e.TenantAHashBefore -cne $e.TenantAHashAfter -or
+              [string]::IsNullOrWhiteSpace($e.TenantBHashBefore) -or
+              $e.TenantBHashBefore -cne $e.TenantBHashAfter -or
+              $e.RealPreprod -cne 'NOT_VERIFIED' -or $e.GB01ToGB05 -cne 'NOT_RUN') {
+            throw 'B6 policy SQL witness mismatch'
+          }
+          if ($h.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $h.SchemaVersion -cne 'B6_20261118_001' -or
+              !$h.RecordedVersionTamperDenied -or
+              $h.RealPreprod -cne 'NOT_VERIFIED' -or $h.GB01ToGB05 -cne 'NOT_RUN') {
+            throw 'B6 migration-replay SQL witness mismatch'
+          }
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          Copy-Item $p[0].FullName TestResults/APP-02B6-POLICY-WITNESS.json
+          Copy-Item $s[0].FullName TestResults/APP-02B6-SCHEMA-WITNESS.json
+          $sqlHash=(Get-FileHash src/FmcgDms.Preprod.Policy/Migrations/20261118_001_policy_registry.sql -Algorithm SHA256).Hash
+          @("TestRunId=$($e.TestRunId)","SourceHeadSha=$($e.SourceHeadSha)",
+            "PolicyMigrationSha256=$sqlHash","EvidenceClass=GITHUB_HOSTED_LOCALDB_ONLY",
+            "RealPREPROD=NOT_VERIFIED","G-B01..05=NOT_RUN") |
+            Set-Content TestResults/APP-02B6-MANIFEST.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b6-localdb-sql-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Policy.SqlServer.Tests/TestResults/
+          if-no-files-found: warn
