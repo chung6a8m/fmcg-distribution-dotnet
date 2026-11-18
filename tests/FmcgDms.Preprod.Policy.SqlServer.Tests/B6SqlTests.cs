@@ -128,9 +128,10 @@ public sealed class B6SqlTests
 
         // Re-labeling a previously approved source revision with a fresh ProposalId
         // must not bypass the one-use source/version boundary.
-        await Assert.ThrowsAsync<SqlException>(() => f.ProposeAsync(f.MakerA,
+        var sourceReplayError = await Assert.ThrowsAsync<SqlException>(() => f.ProposeAsync(f.MakerA,
             f.TenantA, Guid.NewGuid(), Code, "L1", null, "SET", 1m,
             start.AddHours(2), until.AddHours(2), source, hash, ct));
+        Assert.Contains(sourceReplayError.Number, new[] { 2601, 2627 });
 
         // An independent CASE may overlap in time without changing the policy
         // for the first CASE or the default tenant L1 policy.
@@ -152,8 +153,9 @@ public sealed class B6SqlTests
             secondProposal, secondHash, ct, secondCase)).Amount);
         Assert.Equal(0m, (await f.ResolveAsync(f.ReaderA, f.TenantA,
             proposal, hash, ct)).Amount);
-        await Assert.ThrowsAsync<SqlException>(() => f.ResolveAsync(f.ReaderA,
+        var wrongCaseError = await Assert.ThrowsAsync<SqlException>(() => f.ResolveAsync(f.ReaderA,
             f.TenantA, l2, caseHash, ct, secondCase));
+        Assert.Contains("B6_UNSET_STALE_OR_AMBIGUOUS_DENIED", wrongCaseError.Message);
 
         // A new revision for the SAME CASE must not allow overlapping windows.
         var overlapInCase = Guid.NewGuid();
@@ -161,8 +163,9 @@ public sealed class B6SqlTests
         await f.ProposeAsync(f.MakerA, f.TenantA, overlapInCase, Code, "L2",
             caseId, "SET", 0.75m, nextCaseStart, nextCaseStart.AddMinutes(30),
             caseSource, caseHash, ct, sourceVersion: 2);
-        await Assert.ThrowsAsync<SqlException>(() =>
+        var sameCaseOverlapError = await Assert.ThrowsAsync<SqlException>(() =>
             f.ApproveAsync(f.CheckerA, f.TenantA, overlapInCase, ct));
+        Assert.Contains("B6_OVERLAPPING_VERSION_DENIED", sameCaseOverlapError.Message);
         Assert.Equal(0, await f.CountApprovalAsync(overlapInCase, ct));
 
         // A different physical tenant independently approves explicit zero.
