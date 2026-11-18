@@ -1,0 +1,181 @@
+name: APP-02B.7 backup chain and safe restore (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  b7-source-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Assert exact source HEAD
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(dotnet --version)" = '10.0.404'
+      - name: Build and run fail-closed B.7 contract tests
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Recovery.Tests/FmcgDms.Preprod.Recovery.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Recovery.Tests/FmcgDms.Preprod.Recovery.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Recovery.Tests/FmcgDms.Preprod.Recovery.Tests.csproj -c Release --no-build -- --report-trx
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release
+      - name: Verify persisted B.7 xUnit TRX exactly 6 passed, 0 failed/skipped
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          trxs = list(Path("TestResults").glob("FmcgDms.Preprod.Recovery.Tests*.trx"))
+          if len(trxs) != 1:
+              raise SystemExit(f"B7_TRX_MISSING_OR_AMBIGUOUS: {trxs}")
+          root = ET.parse(trxs[0]).getroot()
+          counters = next((v for v in root.iter() if v.tag.rsplit("}", 1)[-1] == "Counters"), None)
+          if counters is None:
+              raise SystemExit("B7_TRX_COUNTERS_MISSING")
+          values = {k: int(counters.get(k, "-1")) for k in ("total", "executed", "passed", "failed", "notExecuted")}
+          if values != {"total": 6, "executed": 6, "passed": 6, "failed": 0, "notExecuted": 0}:
+              raise SystemExit(f"B7_TRX_REQUIRED_6_PASS_0_FAIL_SKIP: {values}")
+          print(f"B7_TRX_VERIFIED {trxs[0]}: {values}")
+          PY
+      - name: Disallow accidental API/Worker admission or committed secrets
+        shell: bash
+        run: |
+          ! grep -REn 'FmcgDms\.Preprod\.Recovery|B7SafeRestore|B7BackupChain|Invoke-App02B7Backup' src/FmcgDms.Preprod.Api src/FmcgDms.Preprod.Worker
+          ! grep -REn 'GRANT|password\s*=|private_key\s*=' src/FmcgDms.Preprod.Recovery
+      - name: Record source-only provenance and negative limitations
+        if: always()
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=app02b7-source-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nEvidenceClass=GITHUB_HOSTED_CI_ONLY\nPhysicalPreprod=NOT_VERIFIED\nRpoRto=NOT_MEASURED\nG-B03=NOT_RUN\nIssue53=OPEN\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/APP-02B7-SOURCE.txt
+          sha256sum src/FmcgDms.Preprod.Recovery/*.cs scripts/Invoke-App02B7Backup.ps1 scripts/Test-App02B7LocalDb.ps1 tests/FmcgDms.Preprod.Recovery.Tests/*.cs .github/workflows/app02b7-recovery.yml >> TestResults/APP-02B7-SOURCE.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b7-source-safety-ci-only
+          path: |
+            TestResults/APP-02B7-SOURCE.txt
+            TestResults/*.trx
+          if-no-files-found: warn
+
+  b7-localdb-restore:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Reject malformed PREPROD operator PowerShell before CI SQL
+        shell: pwsh
+        run: |
+          foreach ($p in @('scripts/Invoke-App02B7Backup.ps1','scripts/Test-App02B7LocalDb.ps1')) {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $p).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "B7_POWERSHELL_PARSE_FAILED: $p $($errors[0])" }
+          }
+      - name: Exercise operator plan-only and fault-deny paths (no SQL writes)
+        shell: pwsh
+        run: |
+          $tenant=[guid]::NewGuid()
+          $root='C:\approved\b7-stage'
+          $db='FmcgPpT_' + $tenant.ToString('N')
+          $leaf=$db+'_Full_20261118T000000Z_'+([guid]::NewGuid().ToString('N'))+'.bak'
+          $arguments=@{
+            TenantId=$tenant; ApprovedBindingId=[guid]::NewGuid(); ApprovedBindingVersion=1
+            Kind='Full'; SqlInstance='sql.private.invalid'
+            ApprovedSqlInstance='sql.private.invalid'
+            ApprovedSqlServerName='approved-sql'
+            SqlServerStageFile=$root+'\'+$leaf
+            ApprovedStagingDirectory=$root
+            EncryptionCertificate='PreprodBackupCertV1'
+            ApprovedChangeRef='CI-PLAN-ONLY'
+          }
+          $plan=@(& ./scripts/Invoke-App02B7Backup.ps1 @arguments)
+          if ($plan.Count -ne 1 -or $plan[0] -notlike 'B7_PLAN_ONLY*') {
+            throw 'B7_DEFAULT_PLAN_ONLY_FAILED'
+          }
+          $arguments.SqlServerStageFile='C:\Windows\Temp\'+$leaf
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_STAGE_NOT_IN_APPROVED_DIRECTORY') }
+          if (!$denied) { throw 'B7_OUT_OF_ROOT_STAGE_WAS_NOT_DENIED' }
+          $arguments.SqlServerStageFile=$root+'\'+$leaf
+          $arguments.ApprovedSqlInstance='sql.other.invalid'
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_APPROVED_PRIVATE_SQL_TARGET_REQUIRED') }
+          if (!$denied) { throw 'B7_SQL_TARGET_SWAP_WAS_NOT_DENIED' }
+          $arguments.ApprovedSqlInstance='sql.private.invalid'
+          $arguments.ApprovedBindingId=[guid]::Empty
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_EXACT_APPROVED_BINDING_REQUIRED') }
+          if (!$denied) { throw 'B7_EMPTY_APPROVED_BINDING_WAS_NOT_DENIED' }
+          $operatorScript=Get-Content -Raw scripts/Invoke-App02B7Backup.ps1
+          if ([regex]::Matches($operatorScript,'(?m)^\s*& sqlcmd -S ').Count -ne 1 -or
+              $operatorScript -notmatch '(?m)^\s*& sqlcmd -S \$SqlInstance -E -N -b' -or
+              $operatorScript -notmatch 'B7_STAGE_FILE_ALREADY_EXISTS' -or
+              $operatorScript -notmatch 'BindingVersion=\$bindingVersionText') {
+            throw 'B7_SINGLE_TLS_BACKUP_NO_OVERWRITE_AND_BINDING_GUARDS_REQUIRED'
+          }
+      - name: Confirm exact source HEAD and disposable LocalDB
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_HEAD) { throw 'B7_SOURCE_HEAD_MISMATCH' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -b -Q 'SELECT @@VERSION;'
+          if ($LASTEXITCODE -ne 0) { throw 'B7_LOCALDB_NOT_AVAILABLE' }
+      - name: FULL / DIFF / LOG backup and physical restore in two disposable LocalDB tenants
+        shell: pwsh
+        env:
+          APP02B7_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B7_TEST_RUN_ID: b7-localdb-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B7_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          ./scripts/Test-App02B7LocalDb.ps1
+      - name: Fail if B.7 CI witness is missing or claims real PREPROD
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $p='TestResults/APP-02B7-LOCALDB-WITNESS.json'
+          if (!(Test-Path $p)) { throw 'B7_LOCALDB_WITNESS_MISSING' }
+          $e=Get-Content -Raw $p | ConvertFrom-Json
+          if ($e.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $e.EvidenceClass -cne 'GITHUB_HOSTED_DISPOSABLE_LOCALDB_ONLY' -or
+              $e.TenantDatabases -ne 2 -or !$e.FullDifferentialLogPhysicalRestore -or
+              $e.MsdbBackupSets -lt 3 -or $e.RestoredCommittedWitnesses -ne 3 -or
+              $e.PeerBefore -cne $e.PeerAfter -or !$e.ChecksumVerifyOnly -or
+              !$e.CorruptedLogRejected -or $e.SqlBackupsEncrypted -or
+              $e.OffHostRestored -or $e.ActualPreprodRpoRto -cne 'NOT_MEASURED' -or
+              $e.G_B03 -cne 'NOT_RUN' -or $e.PhysicalPreprod -cne 'NOT_VERIFIED') {
+            throw 'B7_LOCALDB_WITNESS_INVALID_OR_OVERCLAIMED'
+          }
+          foreach ($k in @('FullSha256','DiffSha256','LogSha256')) {
+            if ($e.$k -notmatch '^[0-9a-fA-F]{64}$') { throw "B7_HASH_MISSING: $k" }
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b7-localdb-pitr-ci-only
+          path: |
+            TestResults/APP-02B7-LOCALDB-WITNESS.json
+          if-no-files-found: error
