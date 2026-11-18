@@ -17,7 +17,7 @@ public sealed class TenantRegistrySqlTests
         await using var f=await B4SqlFixture.CreateAsync(ct);
         Assert.Equal(1,Convert.ToInt32(await f.ScalarAsync(f.Control,
             "SELECT COUNT(*) FROM dbo.__PreprodTenantRegistrySchemaHistory WHERE SchemaVersion=N'B4_20261118_001'",ct)));
-        Assert.Equal(9,Convert.ToInt32(await f.ScalarAsync(f.Control,
+        Assert.Equal(12,Convert.ToInt32(await f.ScalarAsync(f.Control,
             "SELECT COUNT(*) FROM sys.procedures WHERE schema_id=SCHEMA_ID(N'dbo') AND name LIKE 'cp_%'",ct)));
         await f.ExecAsync(f.Control,
             "UPDATE dbo.__PreprodTenantRegistrySchemaHistory SET SchemaVersion=N'UNKNOWN'",ct);
