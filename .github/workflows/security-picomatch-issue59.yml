@@ -63,3 +63,41 @@ jobs:
           name: issue59-candidate-registry-metadata-only
           path: TestResults/
           if-no-files-found: warn
+
+  candidate-parse-source-diff:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Fetch upstream and candidate tarballs without running lifecycle scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults tmp/npm-pack tmp/upstream tmp/candidate
+          official=$(npm pack 'picomatch@4.0.7' --ignore-scripts --silent --pack-destination tmp/npm-pack)
+          candidate=$(npm pack '@ryotsu/picomatch@4.0.7-a' --ignore-scripts --silent --pack-destination tmp/npm-pack)
+          tar -xzf "tmp/npm-pack/$official" -C tmp/upstream
+          tar -xzf "tmp/npm-pack/$candidate" -C tmp/candidate
+          test -f tmp/upstream/package/lib/parse.js
+          test -f tmp/candidate/package/lib/parse.js
+          sha256sum "tmp/npm-pack/$official" "tmp/npm-pack/$candidate" > TestResults/candidate-tarball-sha256.txt
+          set +e
+          diff -u tmp/upstream/package/lib/parse.js tmp/candidate/package/lib/parse.js > TestResults/parse-source.diff
+          diff_exit=$?
+          set -e
+          if [ "$diff_exit" -gt 1 ]; then exit "$diff_exit"; fi
+          if [ "$diff_exit" -eq 0 ]; then echo 'NO_PATCH_DIFF_FOUND' >&2; exit 1; fi
+          echo 'CANDIDATE_SOURCE_DIFF_ONLY: PATCH_NOT_YET_INDEPENDENTLY_APPROVED'
+          wc -l TestResults/parse-source.diff
+          sed -n '1,160p' TestResults/parse-source.diff
+          printf '%s\n' 'SOURCE_DIFF_REVIEW_PENDING' 'NO_NPM_OVERRIDE' 'FULL_NPM_AUDIT_STILL_FAILS' > TestResults/CANDIDATE-NOT-ACCEPTED.txt
+      - name: Upload candidate patch diff for independent security review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: issue59-candidate-patch-source-diff-only
+          path: TestResults/
+          if-no-files-found: warn
