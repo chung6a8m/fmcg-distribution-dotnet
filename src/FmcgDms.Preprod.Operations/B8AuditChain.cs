@@ -120,13 +120,14 @@ public static class B8AuditVerifier
         {
             try
             {
-                var digest = ComputeAnchorDigest(anchor!);
+                var validatedAnchor = anchor!;
+                var digest = ComputeAnchorDigest(validatedAnchor);
                 if (receipt?.SignedPayloadSha256 is not { Length: 32 } ||
                     !CryptographicOperations.FixedTimeEquals(digest, receipt.SignedPayloadSha256))
                     Deny("B8_ANCHOR_RECEIPT_MISMATCH");
                 using var publicKey = ECDsa.Create();
                 publicKey.ImportSubjectPublicKeyInfo(publicKeySpki, out _);
-                if (!publicKey.VerifyHash(digest, anchor.Signature,
+                if (!publicKey.VerifyHash(digest, validatedAnchor.Signature,
                     DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
                     Deny("B8_ANCHOR_SIGNATURE_INVALID");
             }
