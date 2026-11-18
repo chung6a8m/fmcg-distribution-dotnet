@@ -117,11 +117,53 @@ public sealed class B6SqlTests
         await f.ApproveAsync(f.CheckerA, f.TenantA, l2, ct);
         await f.WaitUntilAsync(l2Start, ct);
 
-        var overrideValue = await f.ResolveAsync(f.ReaderA, f.TenantA, l2, caseHash, ct);
+        var overrideValue = await f.ResolveAsync(f.ReaderA, f.TenantA, l2, caseHash, ct, caseId);
         Assert.Equal(1m, overrideValue.Amount);
         Assert.Equal("L2", overrideValue.Tier);
+        // A CASE-specific override shadows L1 only for that CASE, not globally.
+        // Without a CASE, L1 remains current, even when L2 is active elsewhere.
+        Assert.Equal(0m, (await f.ResolveAsync(f.ReaderA, f.TenantA, proposal, hash, ct)).Amount);
         await Assert.ThrowsAsync<SqlException>(() =>
-            f.ResolveAsync(f.ReaderA, f.TenantA, proposal, hash, ct)); // stale L1
+            f.ResolveAsync(f.ReaderA, f.TenantA, l2, caseHash, ct));
+
+        // Re-labeling a previously approved source revision with a fresh ProposalId
+        // must not bypass the one-use source/version boundary.
+        await Assert.ThrowsAsync<SqlException>(() => f.ProposeAsync(f.MakerA,
+            f.TenantA, Guid.NewGuid(), Code, "L1", null, "SET", 1m,
+            start.AddHours(2), until.AddHours(2), source, hash, ct));
+
+        // An independent CASE may overlap in time without changing the policy
+        // for the first CASE or the default tenant L1 policy.
+        var secondCase = Guid.NewGuid();
+        var secondSource = Guid.NewGuid();
+        var secondHash = SHA256.HashData(Encoding.UTF8.GetBytes("CI-only independent CASE"));
+        await f.OpenCaseAsync(f.CaseMakerA, f.TenantA, secondCase, secondSource, secondHash, ct);
+        await f.ApproveCaseAsync(f.CaseCheckerA, f.TenantA, secondCase, ct);
+        var secondProposal = Guid.NewGuid();
+        var secondStart = DateTime.UtcNow.AddSeconds(8);
+        await f.ProposeAsync(f.MakerA, f.TenantA, secondProposal, Code, "L2",
+            secondCase, "SET", 0.5m, secondStart, secondStart.AddMinutes(30),
+            secondSource, secondHash, ct);
+        await f.ApproveAsync(f.CheckerA, f.TenantA, secondProposal, ct);
+        await f.WaitUntilAsync(secondStart, ct);
+        Assert.Equal(1m, (await f.ResolveAsync(f.ReaderA, f.TenantA,
+            l2, caseHash, ct, caseId)).Amount);
+        Assert.Equal(0.5m, (await f.ResolveAsync(f.ReaderA, f.TenantA,
+            secondProposal, secondHash, ct, secondCase)).Amount);
+        Assert.Equal(0m, (await f.ResolveAsync(f.ReaderA, f.TenantA,
+            proposal, hash, ct)).Amount);
+        await Assert.ThrowsAsync<SqlException>(() => f.ResolveAsync(f.ReaderA,
+            f.TenantA, l2, caseHash, ct, secondCase));
+
+        // A new revision for the SAME CASE must not allow overlapping windows.
+        var overlapInCase = Guid.NewGuid();
+        var nextCaseStart = DateTime.UtcNow.AddSeconds(8);
+        await f.ProposeAsync(f.MakerA, f.TenantA, overlapInCase, Code, "L2",
+            caseId, "SET", 0.75m, nextCaseStart, nextCaseStart.AddMinutes(30),
+            caseSource, caseHash, ct, sourceVersion: 2);
+        await Assert.ThrowsAsync<SqlException>(() =>
+            f.ApproveAsync(f.CheckerA, f.TenantA, overlapInCase, ct));
+        Assert.Equal(0, await f.CountApprovalAsync(overlapInCase, ct));
 
         // A different physical tenant independently approves explicit zero.
         var bId = Guid.NewGuid();
@@ -134,8 +176,10 @@ public sealed class B6SqlTests
         Assert.Equal(0m, (await f.ResolveAsync(f.ReaderB, f.TenantB, bId, bHash, ct)).Amount);
 
         await f.AssertImmutableAsync(ct);
-        Assert.Equal(beforeA, await f.PeerHashAsync(f.TenantADatabase, ct));
-        Assert.Equal(beforeB, await f.PeerHashAsync(f.TenantBDatabase, ct));
+        var afterA = await f.PeerHashAsync(f.TenantADatabase, ct);
+        var afterB = await f.PeerHashAsync(f.TenantBDatabase, ct);
+        Assert.Equal(beforeA, afterA);
+        Assert.Equal(beforeB, afterB);
         Assert.Equal(0, await f.PeerRowEffectCountAsync(f.TenantADatabase, ct));
         Assert.Equal(0, await f.PeerRowEffectCountAsync(f.TenantBDatabase, ct));
         Assert.True(await f.DifferentDatabasesAsync(ct));
@@ -150,8 +194,10 @@ public sealed class B6SqlTests
             MakerCheckerSeparated = true, CaseSourcePinned = true,
             OverlapAtomicDenied = true, CrossTenantDenied = true,
             StaleSnapshotDenied = true, SourceHistoryImmutable = true,
-            TenantAHashBefore = beforeA, TenantAHashAfter = beforeA,
-            TenantBHashBefore = beforeB, TenantBHashAfter = beforeB,
+            CaseScopedL2 = true, ConcurrentSeparateCasesAllowed = true,
+            SameCaseOverlapDenied = true, SourceRevisionReplayDenied = true,
+            TenantAHashBefore = beforeA, TenantAHashAfter = afterA,
+            TenantBHashBefore = beforeB, TenantBHashAfter = afterB,
             RealPreprod="NOT_VERIFIED", GB01ToGB05="NOT_RUN"
         }, ct);
     }
@@ -275,7 +321,7 @@ public sealed class B6SqlTests
 
         public async Task ProposeAsync(string login,Guid tenant,Guid id,string code,string tier,
             Guid? caseId,string state,decimal? value,DateTime from,DateTime until,
-            Guid source,byte[] hash,CancellationToken ct)
+            Guid source,byte[] hash,CancellationToken ct,long sourceVersion=1)
         {
             LastProposal=id;
             await ExecAsync(PolicyDatabase,login,"dbo.b6_Propose",ct,
@@ -283,7 +329,7 @@ public sealed class B6SqlTests
                 Arg("@Tier",tier),ArgNullGuid("@CaseId",caseId),Arg("@ValueState",state),
                 ArgNullDecimal("@NumericValue",value),Arg("@EffectiveFromUtc",from),
                 Arg("@EffectiveUntilUtc",until),Arg("@SourceId",source),
-                Arg("@SourceHash",hash),Arg("@SourceVersion",1L));
+                Arg("@SourceHash",hash),Arg("@SourceVersion",sourceVersion));
         }
 
         public Task ApproveAsync(string login,Guid tenant,Guid proposal,CancellationToken ct) =>
@@ -301,7 +347,8 @@ public sealed class B6SqlTests
                 Arg("@TenantId",tenant),Arg("@CaseId",id));
 
         public async Task<(decimal Amount,bool Explicit,string Tier)> ResolveAsync(
-            string login,Guid tenant,Guid expected,byte[] hash,CancellationToken ct)
+            string login,Guid tenant,Guid expected,byte[] hash,CancellationToken ct,
+            Guid? caseId=null)
         {
             await using var db=new SqlConnection(Connection(PolicyDatabase));
             await db.OpenAsync(ct);
@@ -310,7 +357,8 @@ public sealed class B6SqlTests
                 {CommandType=CommandType.StoredProcedure};
             cmd.Parameters.AddRange([
                 Arg("@TenantId",tenant),Arg("@PolicyCode",Code),
-                Arg("@ExpectedProposalId",expected),Arg("@ExpectedSourceHash",hash)
+                Arg("@ExpectedProposalId",expected),Arg("@ExpectedSourceHash",hash),
+                ArgNullGuid("@ExpectedCaseId",caseId)
             ]);
             await using var reader=await cmd.ExecuteReaderAsync(ct);
             Assert.True(await reader.ReadAsync(ct));
