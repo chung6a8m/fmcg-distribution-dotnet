@@ -1,4 +1,4 @@
-# APP-02B.6 — Policy Registry & Approvals (PREPROD-only, inert source PR)
+# APP-02B.6 — Policy Registry & Approvals (source-only MERGED; real PREPROD NOT_VERIFIED)
 
 **State:** MERGED / B6_GITHUB_HOSTED_CI_TESTED / KNOWN_HIGH_SECURITY_DEBT_59_OPEN / PHYSICAL_PREPROD_NOT_VERIFIED. Source-only PR #66 does **not** earn `POLICY_GOVERNANCE_VERIFIED` or G-B02 PASS. Owner design scope: OWN-APP02B-06 and OWN-APP02B-10, with B.1 TM/B01/B02 threats and the [30-case acceptance contract](../security/app-02b1-acceptance-evidence.md). B.5 conditional CODE_ONLY merge is **not** an authorization or debt waiver for B.6. PR #66 was source-only merged under separate [OWN-APP02B6-DEBT-01](../decisions/owner-app02b6-bounded-source-only-merge-2026-11-18.md); this is not PREPROD approval. See the [source-merge closeout](../closeout/2026-11-18-app-02b6-bounded-source-only.md).
 
