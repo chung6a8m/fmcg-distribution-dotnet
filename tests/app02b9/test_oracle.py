@@ -212,6 +212,8 @@ class OracleTests(unittest.TestCase):
         r = self.assess(trust=False)
         self.assertEqual(r["classification"], "NOT_VERIFIED")
         self.assertEqual(r["decision"], "NO_GO")
+        self.assertEqual(r["passedCases"], 0)
+        self.assertNotIn("PASS", set(r["cases"].values()))
         empty = self.root / "empty"
         empty.mkdir()
         r = oracle.evaluate(empty, FIXTURE, HEAD, None)
