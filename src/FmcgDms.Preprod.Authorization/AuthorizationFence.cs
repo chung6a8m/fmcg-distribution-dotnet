@@ -14,7 +14,7 @@ public static class B5Schema
 public sealed record AuthorizationContext(
     Guid TenantId, Guid ResourceTenantId, Guid ActorId, Guid SessionId,
     Guid BindingId, long RegistryEpoch, long FenceEpoch, long MembershipEpoch, long SessionEpoch,
-    string PermissionCode, string ResourceKey, Guid? MakerId = null)
+    string PermissionCode, string ResourceKey, Guid? ApprovalSourceId = null)
 {
     public void Validate()
     {
@@ -25,7 +25,7 @@ public sealed record AuthorizationContext(
             string.IsNullOrWhiteSpace(ResourceKey) || ResourceKey.Length > 160 ||
             PermissionCode.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')) ||
             ResourceKey.Any(char.IsControl) ||
-            (MakerId.HasValue && (MakerId.Value == Guid.Empty || MakerId == ActorId)))
+            (ApprovalSourceId.HasValue && ApprovalSourceId.Value == Guid.Empty))
             throw new AuthorizationDeniedException("B5_ENVELOPE_DENIED");
     }
 }
@@ -90,7 +90,7 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString, string a
                 Parameter("@MembershipEpoch", authority.MembershipEpoch),
                 Parameter("@PermissionCode", authority.PermissionCode),
                 Parameter("@ResourceKey", authority.ResourceKey),
-                Parameter("@MakerId", authority.MakerId)
+                Parameter("@ApprovalSourceId", authority.ApprovalSourceId)
             ]);
             await command.ExecuteNonQueryAsync(cancellationToken);
             var result = await effect(connection, transaction, cancellationToken);

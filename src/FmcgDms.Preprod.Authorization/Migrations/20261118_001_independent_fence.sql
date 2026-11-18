@@ -73,6 +73,11 @@ BEGIN TRY
           CONSTRAINT FK_B5ActorRole_Role FOREIGN KEY(TenantId,RoleId)
               REFERENCES dbo.B5Role(TenantId,RoleId)
       );
+      CREATE TABLE dbo.B5ActionCatalog
+      (
+          PermissionCode nvarchar(96) NOT NULL PRIMARY KEY,
+          ActionKind varchar(16) NOT NULL CHECK(ActionKind IN ('READ','WRITE','APPROVAL'))
+      );
       CREATE TABLE dbo.B5RolePermission
       (
           TenantId uniqueidentifier NOT NULL,
@@ -82,8 +87,44 @@ BEGIN TRY
           CONSTRAINT PK_B5RolePermission PRIMARY KEY
               (TenantId,RoleId,PermissionCode,ResourceKey),
           CONSTRAINT FK_B5RolePermission_Role FOREIGN KEY(TenantId,RoleId)
-              REFERENCES dbo.B5Role(TenantId,RoleId)
+              REFERENCES dbo.B5Role(TenantId,RoleId),
+          CONSTRAINT FK_B5RolePermission_Catalog FOREIGN KEY(PermissionCode)
+              REFERENCES dbo.B5ActionCatalog(PermissionCode)
       );
+      CREATE TABLE dbo.B5ApprovalSource
+      (
+          TenantId uniqueidentifier NOT NULL,
+          ApprovalSourceId uniqueidentifier NOT NULL,
+          PermissionCode nvarchar(96) NOT NULL,
+          ResourceKey nvarchar(160) NOT NULL,
+          MakerId uniqueidentifier NOT NULL,
+          InitiatorId uniqueidentifier NOT NULL,
+          SourceHash binary(32) NOT NULL,
+          CreatedUtc datetime2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT PK_B5ApprovalSource PRIMARY KEY(TenantId,ApprovalSourceId),
+          CONSTRAINT FK_B5ApprovalSource_Tenant FOREIGN KEY(TenantId)
+              REFERENCES dbo.B5TenantFence(TenantId),
+          CONSTRAINT FK_B5ApprovalSource_Catalog FOREIGN KEY(PermissionCode)
+              REFERENCES dbo.B5ActionCatalog(PermissionCode)
+      );
+      CREATE TABLE dbo.B5ApprovalDecision
+      (
+          TenantId uniqueidentifier NOT NULL,
+          ApprovalSourceId uniqueidentifier NOT NULL,
+          CheckerId uniqueidentifier NOT NULL,
+          SourceHash binary(32) NOT NULL,
+          FenceEpoch bigint NOT NULL,
+          CheckedUtc datetime2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT PK_B5ApprovalDecision PRIMARY KEY(TenantId,ApprovalSourceId),
+          CONSTRAINT FK_B5ApprovalDecision_Source FOREIGN KEY(TenantId,ApprovalSourceId)
+              REFERENCES dbo.B5ApprovalSource(TenantId,ApprovalSourceId)
+      );
+      EXEC(N'CREATE TRIGGER dbo.b5_ImmutableApprovalSource
+          ON dbo.B5ApprovalSource AFTER UPDATE, DELETE AS
+          BEGIN THROW 51650,N''B5_IMMUTABLE_APPROVAL_SOURCE'',1; END');
+      EXEC(N'CREATE TRIGGER dbo.b5_ImmutableApprovalDecision
+          ON dbo.B5ApprovalDecision AFTER UPDATE, DELETE AS
+          BEGIN THROW 51651,N''B5_IMMUTABLE_APPROVAL_DECISION'',1; END');
       CREATE TABLE dbo.B5SecurityEvent
       (
           EventId bigint IDENTITY(1,1) NOT NULL PRIMARY KEY,
@@ -105,7 +146,7 @@ BEGIN TRY
     @BindingId uniqueidentifier, @RegistryEpoch bigint,
     @FenceEpoch bigint, @MembershipEpoch bigint,
     @PermissionCode nvarchar(96), @ResourceKey nvarchar(160),
-    @MakerId uniqueidentifier = NULL
+    @ApprovalSourceId uniqueidentifier = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -116,7 +157,6 @@ BEGIN
        OR @BindingId IS NULL OR @RegistryEpoch < 1 OR @FenceEpoch < 1
        OR @MembershipEpoch < 1 OR NULLIF(LTRIM(RTRIM(@PermissionCode)),N'''') IS NULL
        OR NULLIF(LTRIM(RTRIM(@ResourceKey)),N'''') IS NULL
-       OR (@MakerId IS NOT NULL AND @MakerId = @ActorId)
         THROW 51602, N''B5_BOUNDARY_DENIED'', 1;
     -- UPDLOCK/HOLDLOCK retained until the caller''s protected effect COMMIT.
     -- Revoke/suspend must update the same row, so they cannot overtake it.
@@ -139,6 +179,28 @@ BEGIN
           AND r.Enabled=1 AND p.PermissionCode=@PermissionCode
           AND p.ResourceKey=@ResourceKey)
         THROW 51605, N''B5_PERMISSION_DENIED'', 1;
+
+    DECLARE @kind varchar(16);
+    SELECT @kind=ActionKind FROM dbo.B5ActionCatalog WITH (HOLDLOCK)
+        WHERE PermissionCode=@PermissionCode;
+    IF @kind IS NULL THROW 51606,N''B5_UNCLASSIFIED_ACTION_DENIED'',1;
+    IF @kind=''APPROVAL''
+    BEGIN
+        IF @ApprovalSourceId IS NULL THROW 51607,N''B5_APPROVAL_SOURCE_REQUIRED'',1;
+        INSERT dbo.B5ApprovalDecision
+          (TenantId,ApprovalSourceId,CheckerId,SourceHash,FenceEpoch)
+        SELECT s.TenantId,s.ApprovalSourceId,@ActorId,s.SourceHash,@FenceEpoch
+        FROM dbo.B5ApprovalSource s WITH (UPDLOCK,HOLDLOCK)
+        WHERE s.TenantId=@TenantId AND s.ApprovalSourceId=@ApprovalSourceId
+          AND s.PermissionCode=@PermissionCode AND s.ResourceKey=@ResourceKey
+          AND s.MakerId<>@ActorId AND s.InitiatorId<>@ActorId
+          AND NOT EXISTS (
+              SELECT 1 FROM dbo.B5ApprovalDecision d WITH (UPDLOCK,HOLDLOCK)
+              WHERE d.TenantId=s.TenantId AND d.ApprovalSourceId=s.ApprovalSourceId);
+        IF @@ROWCOUNT <> 1 THROW 51608,N''B5_APPROVAL_DENIED'',1;
+    END
+    ELSE IF @ApprovalSourceId IS NOT NULL
+        THROW 51609,N''B5_UNEXPECTED_APPROVAL_SOURCE_DENIED'',1;
 END');
     EXEC(N'CREATE PROCEDURE dbo.b5_RevokeMember
     @TenantId uniqueidentifier, @ActorId uniqueidentifier,
