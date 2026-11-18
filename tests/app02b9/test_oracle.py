@@ -226,6 +226,22 @@ class OracleTests(unittest.TestCase):
         self.seal()
         self.assertEqual(self.assess()["classification"], "NOT_VERIFIED")
 
+    def test_cli_rejects_signed_but_superseded_checkout_head(self):
+        # The signed synthetic bundle is internally consistent with 'aaaa...';
+        # production CLI must compare it to the ACTUAL Git checkout HEAD.
+        output = self.root / "stale-head-report.json"
+        cmd = [
+            sys.executable, str(REPO / "tools" / "app02b9" / "oracle.py"),
+            "--bundle", str(self.bundle), "--expected-head", HEAD,
+            "--trust-roots", str(self.trust_file),
+            "--fixture", str(FIXTURE), "--output", str(output),
+        ]
+        process = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(process.returncode, 2, process.stdout + process.stderr)
+        report = json.loads(output.read_text(encoding="utf-8"))
+        self.assertIn("EXACT_CHECKOUT_HEAD_MISMATCH", report["errors"])
+        self.assertEqual(report["decision"], "NO_GO")
+
     def test_reject_missing_witness_and_traversal(self):
         target = self.bundle / self.manifest["witnesses"][0]["path"]
         target.unlink()
