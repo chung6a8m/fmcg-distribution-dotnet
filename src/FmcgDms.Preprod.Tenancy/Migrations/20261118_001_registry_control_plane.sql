@@ -573,13 +573,18 @@ BEGIN
     SET NOCOUNT ON;
     IF NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
         WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND
-        (CanRequest=1 OR CanApprove=1 OR CanProvision=1 OR CanFinalize=1 OR CanVerify=1 OR CanSuspend=1))
+        (CanRequest=1 OR CanApprove=1 OR CanProvision=1 OR CanFinalize=1 OR CanRetireFinalizer=1 OR CanVerify=1 OR CanSuspend=1))
         THROW 51401, ''TENANT_OPERATOR_DENIED'', 1;
     IF EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
         WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND CanFinalize=1)
       AND NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
         WHERE TenantId=@TenantId AND ApprovedFinalizerLogin=SUSER_SNAME())
         THROW 51421, ''TENANT_FINALIZER_PEER_METADATA_DENIED'', 1;
+    IF EXISTS (SELECT 1 FROM dbo.PreprodTenantOperators
+        WHERE LoginName=SUSER_SNAME() AND Enabled=1 AND CanRetireFinalizer=1)
+      AND NOT EXISTS (SELECT 1 FROM dbo.PreprodTenantRegistry
+        WHERE TenantId=@TenantId AND ApprovedRetirerLogin=SUSER_SNAME())
+        THROW 51429, ''TENANT_RETIRER_PEER_METADATA_DENIED'', 1;
     SELECT TenantId,DatabaseName,BindingId,BindingVersion,SecurityEpoch,State,
         RowVer,OperationId,LeaseToken,LeaseUntilUtc,VerifiedBy,VerifiedUtc,
         ApprovedOwnerLogin,ApprovedProvisionerLogin,ApprovedFinalizerLogin,ApprovedRetirerLogin,
