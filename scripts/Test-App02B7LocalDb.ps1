@@ -42,7 +42,11 @@ try {
     }
     Sql "ALTER DATABASE [$a] SET RECOVERY FULL;" | Out-Null
     Sql "USE [$a]; INSERT dbo.B7Witness VALUES (1);" | Out-Null
-    $peerBefore = Sql "SELECT CHECKSUM_AGG(BINARY_CHECKSUM(RunNonce)) FROM [$b].dbo.__B7CiOwned;"
+    Sql "USE [$b]; INSERT dbo.B7Witness VALUES (900),(901);" | Out-Null
+    # Hash both peer CI user tables: changing a witness row must change the digest.
+    $peerFingerprintSql = "SELECT CONVERT(varchar(64), HASHBYTES('SHA2_256', CONVERT(varbinary(max), CONCAT((SELECT RunNonce FROM [$b].dbo.__B7CiOwned FOR JSON PATH), N'|', (SELECT Seq FROM [$b].dbo.B7Witness ORDER BY Seq FOR JSON PATH)))), 2);"
+    $peerBefore = Sql $peerFingerprintSql
+    if ($peerBefore -notmatch '^[a-fA-F0-9]{64}$') { throw 'B7_PEER_SHA256_MISSING' }
     Sql "BACKUP DATABASE [$a] TO DISK=N'$f' WITH INIT,CHECKSUM;" | Out-Null
     Sql "USE [$a]; INSERT dbo.B7Witness VALUES (2);" | Out-Null
     Sql "BACKUP DATABASE [$a] TO DISK=N'$d' WITH DIFFERENTIAL,INIT,CHECKSUM;" | Out-Null
@@ -64,7 +68,7 @@ try {
     Sql "RESTORE LOG [$restored] FROM DISK=N'$l' WITH RECOVERY;" | Out-Null
     $count = Sql "SELECT COUNT_BIG(*) FROM [$restored].dbo.B7Witness;"
     if ($count -cne '3') { throw "B7_RESTORED_WITNESS_MISMATCH: $count" }
-    $peerAfter = Sql "SELECT CHECKSUM_AGG(BINARY_CHECKSUM(RunNonce)) FROM [$b].dbo.__B7CiOwned;"
+    $peerAfter = Sql $peerFingerprintSql
     if ($peerAfter -cne $peerBefore) { throw 'B7_PEER_MUTATED' }
     $setCount = Sql "SELECT COUNT_BIG(*) FROM msdb.dbo.backupset WHERE database_name=N'$a' AND type IN ('D','I','L') AND backup_start_date >= DATEADD(HOUR,-1,GETDATE());"
     if ([int]$setCount -lt 3) { throw 'B7_MSDB_CHAIN_INCOMPLETE' }
