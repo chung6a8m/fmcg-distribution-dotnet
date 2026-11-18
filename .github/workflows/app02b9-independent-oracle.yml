@@ -1,0 +1,107 @@
+name: APP-02B.9 Independent Oracle (source-only NO-GO)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/app02b9/**'
+      - 'tests/app02b9/**'
+      - '.github/workflows/app02b9-independent-oracle.yml'
+      - 'docs/roadmap/app-02b9-independent-preprod-oracle.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  b9-source-validator-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Pin exact source HEAD and Python/OpenSSL availability
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          python3 --version
+          openssl version
+          test ! -e tests/app02b9/approved-preprod-trust.json
+          test ! -e tests/app02b9/live-preprod-manifest.json
+
+      - name: Independent oracle signed-mock and mutation tests (NOT physical PREPROD)
+        shell: bash
+        env:
+          APP02B9_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 -m unittest discover -s tests/app02b9 -p 'test_*.py' -v
+
+      - name: Require all eleven independent mutation negatives and no PREPROD claim
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('TestResults/APP-02B9-MUTATIONS.json')
+          if not p.is_file(): raise SystemExit('B9_MUTATIONS_MISSING')
+          x=json.loads(p.read_text())
+          expected={'EXPECTED','ACTUAL','SIGNED_DIFFERENCE','MATCH_FLAG',
+                    'PEER_HASH','SOURCE_HEAD','MISSING_PHYSICAL',
+                    'API_ONLY_FORGED_SUCCESS','SKIPPED_REQUIRED_CI',
+                    'STALE_REVIEW','FROZEN_FIXTURE_SHA'}
+          if (set(x['Mutations'])!=expected or
+              not all(row['Rejected'] is True for row in x['Mutations'].values()) or
+              x['EvidenceClass']!='SYNTHETIC_VALIDATOR_TEST_ONLY' or
+              x['RealPreprod']!='NOT_VERIFIED' or x['Gates']!='NOT_RUN' or
+              x['SourceHeadSha']!=os.environ['SOURCE_HEAD']):
+              raise SystemExit('B9_MUTATION_GATES_INVALID')
+          print('B9_SOURCE_ONLY_MUTATIONS_REJECTED',len(expected))
+          PY
+
+      - name: Exercise final gate default NO-GO with zero physical artifacts
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          python3 tools/app02b9/oracle.py --bundle tests/app02b9/physical-not-provisioned \
+            --expected-head "$SOURCE_HEAD" --output TestResults/APP-02B9-NOGO.json
+          status=$?
+          set -e
+          test "$status" -eq 2
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('TestResults/APP-02B9-NOGO.json').read_text())
+          assert x['decision']=='NO_GO'
+          assert x['classification']=='NOT_VERIFIED'
+          assert x['requiredCases']==30 and x['passedCases']==0
+          assert len(x['cases'])==30
+          assert set(x['cases'].values())=={'NOT_RUN'}
+          assert len(x['gates'])==5 and set(x['gates'].values())=={'NOT_VERIFIED'}
+          assert x['productionAndPilot']=='NOT_AUTHORIZED'
+          assert x['actualEv08']=='NOT_VERIFIED'
+          PY
+
+      - name: Retain explicitly synthetic source-bound evidence, never physical attestation
+        if: always()
+        shell: bash
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=b9-source-%s-%s\nSourceHeadSha=%s\nEvidenceClass=GITHUB_HOSTED_SYNTHETIC_VALIDATOR_ONLY\nPhysicalPREPROD=NOT_VERIFIED\nG-B01..05=NOT_RUN\nProductionAndPilot=NOT_AUTHORIZED\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" > TestResults/APP-02B9-SOURCE.txt
+          sha256sum tools/app02b9/oracle.py tools/app02b9/expected-v1.json \
+            tests/app02b9/test_oracle.py .github/workflows/app02b9-independent-oracle.yml \
+            >> TestResults/APP-02B9-SOURCE.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b9-synthetic-validator-no-go
+          path: TestResults/APP-02B9-*
+          if-no-files-found: warn
