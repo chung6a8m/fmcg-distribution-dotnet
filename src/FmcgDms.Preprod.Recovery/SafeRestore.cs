@@ -71,6 +71,10 @@ public static class B7SafeRestore
         {
             if (p.Outcomes.Select(x => x.MessageId).Distinct().Count() != p.Outcomes.Count)
                 Deny("DUPLICATE_MESSAGE_ID");
+            // Keep the original outbound identity after restoration; never remap SourceId.
+            if (p.Outcomes.GroupBy(x => x.SourceId).Any(g =>
+                g.Select(x => x.MessageId).Distinct().Count() > 1))
+                Deny("SOURCE_ID_MESSAGE_ID_CONFLICT");
             foreach (var o in p.Outcomes)
             {
                 if (o.SourceId == Guid.Empty || o.MessageId == Guid.Empty ||
