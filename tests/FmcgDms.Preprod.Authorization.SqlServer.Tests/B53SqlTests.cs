@@ -71,7 +71,7 @@ public sealed class B53SqlTests
         async Task AddSessionAsync(Guid sid)
         {
             await f.RunAsync(identity, $"""
-                EXECUTE AS LOGIN=[{f.RuntimeLogin}];
+                EXECUTE AS LOGIN=N'{f.RuntimeLogin}';
                 INSERT dbo.PreprodLoginSessions(Id,UserId,Epoch,SecurityStamp,CreatedUtc)
                 VALUES(@sid,@actor,0,N'B53-STAMP',SYSUTCDATETIME());
                 REVERT;
@@ -84,7 +84,7 @@ public sealed class B53SqlTests
 
         // Both tenants bootstrap SUSPENDED regardless of the B4 request state.
         await f.RunAsync(registry, $"""
-            EXECUTE AS LOGIN=[{f.RegistrySecurityLogin}];
+            EXECUTE AS LOGIN=N'{f.RegistrySecurityLogin}';
             INSERT dbo.PreprodTenantRegistry
               (TenantId,TenantKey,DatabaseName,BindingId,State,RequestRef,RequestedBy)
             VALUES(@a,N'b53-a',@dbA,@bindA,'REQUESTED',N'ci-source','ci-requester'),
@@ -100,14 +100,14 @@ public sealed class B53SqlTests
         // Only the independently authenticated B53 approver can issue a
         // five-minute, exact-binding, exact-next-epoch permit for activation.
         await f.RunAsync(fence, $"""
-            EXECUTE AS LOGIN=[{f.SecurityLogin}];
+            EXECUTE AS LOGIN=N'{f.SecurityLogin}';
             EXEC dbo.b53_ApproveActivation @TenantId=@tenant,
               @BindingId=@binding,@TargetRegistryEpoch=2,
               @EvidenceRef=N'B53-CI-INDEPENDENT-APPROVAL';
             REVERT;
             """, ct, P("@tenant", f.TenantA), P("@binding", bindingA));
         await f.RunAsync(registry, $"""
-            EXECUTE AS LOGIN=[{f.RegistrySecurityLogin}];
+            EXECUTE AS LOGIN=N'{f.RegistrySecurityLogin}';
             UPDATE dbo.PreprodTenantRegistry
               SET State='ACTIVE',SecurityEpoch=SecurityEpoch+1
             WHERE TenantId=@tenant;
@@ -165,7 +165,7 @@ public sealed class B53SqlTests
 
         // B3 revoke is one statement/transaction with independent B53 advance.
         async Task RevokeSessionAsync(Guid sid) => await f.RunAsync(identity,$"""
-            EXECUTE AS LOGIN=[{f.RuntimeLogin}];
+            EXECUTE AS LOGIN=N'{f.RuntimeLogin}';
             UPDATE dbo.PreprodLoginSessions
               SET Epoch=Epoch+1,RevokedUtc=SYSUTCDATETIME()
             WHERE Id=@sid AND RevokedUtc IS NULL;
@@ -210,7 +210,7 @@ public sealed class B53SqlTests
 
         // B4 suspend atomically advances separately durable B5 fence epoch.
         await f.RunAsync(registry,$"""
-            EXECUTE AS LOGIN=[{f.RegistrySecurityLogin}];
+            EXECUTE AS LOGIN=N'{f.RegistrySecurityLogin}';
             UPDATE dbo.PreprodTenantRegistry
               SET State='SUSPENDED',SecurityEpoch=SecurityEpoch+1
             WHERE TenantId=@tenant;
@@ -235,7 +235,7 @@ public sealed class B53SqlTests
             sqlFence.ExecuteAsync(freshAuth,guards,
               (db,tx,token)=>f.WriteAsync(db,tx,f.TenantADatabase,token),ct));
         await Assert.ThrowsAsync<SqlException>(()=>f.RunAsync(registry,$"""
-            EXECUTE AS LOGIN=[{f.RegistrySecurityLogin}];
+            EXECUTE AS LOGIN=N'{f.RegistrySecurityLogin}';
             UPDATE dbo.PreprodTenantRegistry
               SET State='SUSPENDED',SecurityEpoch=SecurityEpoch+1
             WHERE TenantId=@tenant;
