@@ -17,7 +17,8 @@
   },
   "requiredApprovals": {
     "owner": "CONDITIONAL_DIRECTION_APPROVED_2026-11-19",
-    "independentSecurityReview": "REQUIRED_BEFORE_MERGE",
+    "independentSecurityReview": "NOT_OBTAINED_SOLO_OWNER_EXCEPTION_PR61_ONLY",
+    "soloOwnerSecurityRiskAcceptance": "EXPLICIT_APPROVED_2026-11-19",
     "finalHeadAcceptance": "REQUIRED_BEFORE_MERGE"
   },
   "prohibitions": {
@@ -27,5 +28,14 @@
     "frontendArtifactPublication": true,
     "physicalPreprodDeployment": true,
     "productionOrPilotAdmission": true
+  },
+  "reviewSeparationException": {
+    "decisionId": "OWN-ISSUE59-SOLO-OWNER-20261119",
+    "gate": "C59-B06",
+    "scope": "PR61_ISSUE59_SOURCE_ONLY",
+    "reviewType": "SOLO_OWNER_RISK_ACCEPTANCE_NOT_INDEPENDENT_SECURITY_REVIEW",
+    "independentApprovalRecorded": false,
+    "ownerAcceptsResidualHighScannerRisk": true,
+    "cannotAuthorizeDeployment": true
   }
 }

@@ -14,8 +14,12 @@ const policy = JSON.parse(readFileSync(
 const decision = readFileSync(
   new URL('../../docs/decisions/owner-issue59-conditional-risk-reclassification-2026-11-19.md', import.meta.url),
   'utf8')
+const soloOwnerDecision = readFileSync(
+  new URL('../../docs/decisions/owner-issue59-solo-owner-security-acceptance-2026-11-19.md', import.meta.url),
+  'utf8')
 
 const DECISION = 'OWN-ISSUE59-B-20261119'
+const SOLO_DECISION = 'OWN-ISSUE59-SOLO-OWNER-20261119'
 const EXPIRY_UTC = '2026-12-19T00:00:00Z'
 const OFFICIAL = {
   path: 'node_modules/picomatch',
@@ -76,12 +80,22 @@ function verifyConditionalPolicy(record, nowMs = Date.now()) {
   assert.equal(record.expiresAtUtc, EXPIRY_UTC, 'No automatic expiry extension')
   assert.ok(Number.isFinite(nowMs))
   assert.ok(nowMs < Date.parse(EXPIRY_UTC),
-    'Issue #59 risk acceptance EXPIRED: explicit independent review and new Owner decision required')
+    'Issue #59 risk acceptance EXPIRED: explicit new Owner decision and security reassessment required')
   assert.deepEqual(record.permittedPackage, OFFICIAL)
   assert.deepEqual(record.requiredApprovals, {
     owner: 'CONDITIONAL_DIRECTION_APPROVED_2026-11-19',
-    independentSecurityReview: 'REQUIRED_BEFORE_MERGE',
+    independentSecurityReview: 'NOT_OBTAINED_SOLO_OWNER_EXCEPTION_PR61_ONLY',
+    soloOwnerSecurityRiskAcceptance: 'EXPLICIT_APPROVED_2026-11-19',
     finalHeadAcceptance: 'REQUIRED_BEFORE_MERGE'
+  })
+  assert.deepEqual(record.reviewSeparationException, {
+    decisionId: SOLO_DECISION,
+    gate: 'C59-B06',
+    scope: 'PR61_ISSUE59_SOURCE_ONLY',
+    reviewType: 'SOLO_OWNER_RISK_ACCEPTANCE_NOT_INDEPENDENT_SECURITY_REVIEW',
+    independentApprovalRecorded: false,
+    ownerAcceptsResidualHighScannerRisk: true,
+    cannotAuthorizeDeployment: true
   })
   assert.deepEqual(record.prohibitions, {
     dynamicOrUntrustedGlobPatterns: true,
@@ -125,8 +139,12 @@ function verifyPinnedDevelopmentDependency(data) {
 test('C59-B01/B03: exact Owner decision, unchanged unpatched classification and review expiry', () => {
   verifyConditionalPolicy(policy)
   assert.match(decision, /OWN-ISSUE59-B-20261119/)
-  assert.match(decision, /Independent Security reviewer/)
+  assert.match(decision, /C59-B06/)
   assert.match(decision, /NO_GO/)
+  assert.match(soloOwnerDecision, /OWN-ISSUE59-SOLO-OWNER-20261119/)
+  assert.match(soloOwnerDecision, /NOT_OBTAINED|NOT_MET/)
+  assert.match(soloOwnerDecision, /NOT_PATCHED/)
+  assert.match(soloOwnerDecision, /NO.*PREPROD|PREPROD.*NOT_VERIFIED|do not deploy physical PREPROD/)
 })
 
 test('C59-B01: only the official picomatch 4.0.7 dev-only exact npm tarball is admitted', () => {
@@ -180,5 +198,13 @@ test('C59-B03 negative cases: expired, extended, widened or missing risk decisio
   mutate(p => { p.softwareState = 'PATCH_VERIFIED' })
   mutate(p => { p.prohibitions.frontendArtifactPublication = false })
   mutate(p => { p.requiredApprovals.independentSecurityReview = 'WAIVED' })
+  mutate(p => { p.requiredApprovals.soloOwnerSecurityRiskAcceptance = 'NOT_APPROVED' })
+  mutate(p => { p.requiredApprovals.finalHeadAcceptance = 'WAIVED' })
+  mutate(p => { p.reviewSeparationException.scope = 'ALL_SECURITY_PRS' })
+  mutate(p => { p.reviewSeparationException.independentApprovalRecorded = true })
+  mutate(p => { p.reviewSeparationException.ownerAcceptsResidualHighScannerRisk = false })
+  mutate(p => { p.reviewSeparationException.decisionId = 'SELF_ATTESTED' })
+  mutate(p => { p.reviewSeparationException.cannotAuthorizeDeployment = false })
+  mutate(p => { delete p.reviewSeparationException })
   mutate(p => { delete p.permittedPackage })
 })
