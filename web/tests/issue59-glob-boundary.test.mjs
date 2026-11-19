@@ -3,43 +3,116 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import ts from 'typescript'
 
-// Source-scope guard for Issue #59. This is NOT a picomatch patch or exploitability proof.
-// Any new dynamic glob source demands independent security review and a new threat assessment.
+// OWN-ISSUE59-B-20261119: AST-verified, narrowly scoped build-only input boundary.
+// This checks first-party source, NOT general picomatch ReDoS resistance.
 const web = new URL('../', import.meta.url)
 const source = readFileSync(new URL('vite.config.ts', web), 'utf8')
 const pkg = JSON.parse(readFileSync(new URL('package.json', web), 'utf8'))
 const lock = JSON.parse(readFileSync(new URL('package-lock.json', web), 'utf8'))
-const ci = readFileSync(new URL('../../.github/workflows/app00a.yml', import.meta.url), 'utf8')
+const app00a = readFileSync(new URL('../../.github/workflows/app00a.yml', import.meta.url), 'utf8')
+const securityCI = readFileSync(
+  new URL('../../.github/workflows/security-picomatch-issue59.yml', import.meta.url), 'utf8')
 
-test('Issue #59: Vite/Workbox glob source stays a single static trusted literal', () => {
-  assert.equal((source.match(/\bglobPatterns\s*:/g) || []).length, 1,
-    'Review additional Workbox glob pattern inputs')
-  assert.ok(source.includes("globPatterns: ['**/*.{js,css,html,svg,ico,png}']"),
-    'A different or dynamic Workbox precache glob requires threat review')
-  assert.ok(source.includes('navigateFallbackDenylist: [/^\\/api\\//]'),
-    'API navigation exclusion must remain a fixed expression')
-  assert.match(source, /runtimeCaching:\s*\[\s*\]/,
-    'Dynamic Workbox runtime caching needs an independent input boundary review')
-  assert.equal((source.match(/\bVitePWA\s*\(/g) || []).length, 1)
-  assert.doesNotMatch(source, /\b(?:process\.env|import\.meta\.env|request\.body|req\.body)\b/,
-    'Environment or request-derived patterns cannot be silently introduced')
-})
+const literalGlob = '**/*.{js,css,html,svg,ico,png}'
 
-test('Issue #59: picomatch and Workbox build tooling stay outside first-party runtime dependencies', () => {
-  for (const moduleName of ['picomatch', 'fdir', 'tinyglobby', 'workbox-build', 'vite', 'vite-plugin-pwa']) {
-    assert.equal(pkg.dependencies?.[moduleName], undefined,
-      moduleName + ' must not become a first-party runtime dependency without review')
+function properties(node, file) {
+  assert.ok(ts.isObjectLiteralExpression(node), 'Scope changed: expected literal object')
+  const result = new Map()
+  for (const property of node.properties) {
+    assert.ok(ts.isPropertyAssignment(property), 'No spreads, methods or computed properties permitted')
+    assert.ok(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name),
+      'No dynamic config property name permitted')
+    const name = property.name.text
+    assert.ok(!result.has(name), 'No duplicate config property: ' + name)
+    result.set(name, property.initializer)
   }
-  assert.ok(pkg.devDependencies?.vite && pkg.devDependencies?.['vite-plugin-pwa'])
-  for (const [path, item] of Object.entries(lock.packages || {})) {
-    if (/(?:^|\/)node_modules\/(?:picomatch|workbox-build)$/.test(path)) {
-      assert.equal(item.dev, true, path + ' is no longer build/development-only')
+  return result
+}
+function exactKeys(map, names) {
+  assert.deepEqual([...map.keys()].sort(), [...names].sort(), 'New config property needs a security review')
+}
+function singleNamedCall(expr, name) {
+  assert.ok(ts.isCallExpression(expr) && ts.isIdentifier(expr.expression)
+    && expr.expression.text === name && expr.arguments.length === 1,
+  'Unexpected call/input for ' + name)
+  return expr.arguments[0]
+}
+
+function verifyViteSource(text) {
+  const file = ts.createSourceFile('vite.config.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  assert.equal(file.parseDiagnostics.length, 0, 'Configuration parse errors are not accepted')
+  const imports = []
+  const exports = []
+  for (const statement of file.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      assert.ok(ts.isStringLiteral(statement.moduleSpecifier))
+      imports.push(statement.moduleSpecifier.text)
+    } else {
+      assert.ok(ts.isExportAssignment(statement) && !statement.isExportEquals,
+        'Unexpected executable top-level configuration')
+      exports.push(statement)
     }
   }
+  assert.deepEqual(imports.sort(),
+    ['vite', '@vitejs/plugin-react', '@tailwindcss/vite', 'vite-plugin-pwa'].sort(),
+    'New import/plugin needs independent risk review')
+  assert.equal(exports.length, 1)
+  const root = properties(singleNamedCall(exports[0].expression, 'defineConfig'), file)
+  exactKeys(root, ['plugins', 'server'])
+  const plugins = root.get('plugins')
+  assert.ok(ts.isArrayLiteralExpression(plugins))
+  assert.equal(plugins.elements.length, 3, 'Additional Vite plugins require security review')
+  assert.ok(ts.isCallExpression(plugins.elements[0]) &&
+    ts.isIdentifier(plugins.elements[0].expression) && plugins.elements[0].expression.text === 'react')
+  assert.ok(ts.isCallExpression(plugins.elements[1]) &&
+    ts.isIdentifier(plugins.elements[1].expression) && plugins.elements[1].expression.text === 'tailwindcss')
+  const pwa = properties(singleNamedCall(plugins.elements[2], 'VitePWA'), file)
+  exactKeys(pwa, ['registerType', 'manifest', 'workbox'])
+  const register = pwa.get('registerType')
+  assert.ok(ts.isStringLiteral(register) && register.text === 'prompt')
+  const workbox = properties(pwa.get('workbox'), file)
+  exactKeys(workbox, ['navigateFallbackDenylist', 'runtimeCaching', 'globPatterns'])
+  const globs = workbox.get('globPatterns')
+  assert.ok(ts.isArrayLiteralExpression(globs) && globs.elements.length === 1)
+  assert.ok(ts.isStringLiteral(globs.elements[0]) && globs.elements[0].text === literalGlob,
+    'Dynamic or changed precache glob is outside the conditional risk acceptance')
+  const caching = workbox.get('runtimeCaching')
+  assert.ok(ts.isArrayLiteralExpression(caching) && caching.elements.length === 0,
+    'Runtime caching must stay disabled')
+  const deny = workbox.get('navigateFallbackDenylist')
+  assert.ok(ts.isArrayLiteralExpression(deny) && deny.elements.length === 1)
+  assert.ok(ts.isRegularExpressionLiteral(deny.elements[0]))
+  assert.equal(deny.elements[0].getText(file), '/^\\/api\\//')
+}
+
+test('C59-B02: Vite/PWA/Workbox uses only the inspected literal glob AST', () => {
+  verifyViteSource(source)
 })
 
-test('Issue #59: first-party browser code does not import build-only glob parsers', () => {
+test('C59-B02 negative tests: injected input, computed globs, extra plugins, spread, new caching DENIED', () => {
+  const canonical = "globPatterns: ['" + literalGlob + "']"
+  assert.ok(source.includes(canonical))
+  const mutated = [
+    source.replace(canonical, 'globPatterns: [process.env.UNTRUSTED_PATTERN]'),
+    source.replace(canonical, 'globPatterns: [...process.env.EXTRA_PATTERNS]'),
+    source.replace(canonical, "globPatterns: ['" + literalGlob + "', request.body.pattern]"),
+    source.replace(canonical, "globPatterns: [getPatternFromTenant()]"),
+    source.replace('runtimeCaching: []', 'runtimeCaching: [customerRule]'),
+    source.replace('workbox: {', 'workbox: { ...extraConfig,'),
+    source.replace('plugins: [', 'plugins: [ untrustedPlugin(),'),
+    source.replace('VitePWA({', 'VitePWA(getUntrustedConfig() || {'),
+    source.replace(canonical, '/*' + canonical + '*/ globPatterns: [process.env.PATTERN]'),
+    source + '\nprocess.env.BAD_PATTERN\n'
+  ]
+  for (let i = 0; i < mutated.length; i++) {
+    assert.notEqual(mutated[i], source, 'Mutation was ineffective: ' + i)
+    assert.throws(() => verifyViteSource(mutated[i]), 'Unexpectedly accepted glob ingress mutation: ' + i)
+  }
+})
+
+test('C59-B01/B02: production/browser source does not directly import build-only glob parsers', () => {
   const srcDir = fileURLToPath(new URL('src/', web))
   let inspected = 0
   const walk = directory => {
@@ -50,18 +123,28 @@ test('Issue #59: first-party browser code does not import build-only glob parser
       } else if (/\.[cm]?[jt]sx?$/.test(item.name)) {
         inspected++
         const body = readFileSync(path, 'utf8')
-        assert.doesNotMatch(body,
-          /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)['"](?:picomatch|tinyglobby|fdir|workbox-build)(?:\/|['"])/,
-          'Unexpected runtime glob-parsing import: ' + path)
+        assert.doesNotMatch(body, /\b(?:picomatch|tinyglobby|fdir|workbox-build)\b/,
+          'Build-time glob dependency referenced by frontend runtime source: ' + path)
       }
     }
   }
   walk(srcDir)
-  assert.ok(inspected > 0, 'Missing first-party runtime source inventory')
+  assert.ok(inspected > 0, 'Empty runtime source inventory')
+  for (const name of ['picomatch', 'fdir', 'tinyglobby', 'workbox-build', 'vite', 'vite-plugin-pwa']) {
+    assert.equal(pkg.dependencies?.[name], undefined, 'Build-only package moved into runtime deps: ' + name)
+  }
+  assert.equal(lock.packages['node_modules/picomatch']?.dev, true)
+  assert.equal(lock.packages['node_modules/workbox-build']?.dev, true)
 })
 
-test('Issue #59: mandatory full-tree audit has not been replaced by a dev-only check', () => {
-  assert.match(ci, /npm audit --omit=dev --audit-level=low/)
-  assert.match(ci, /npm audit --audit-level=moderate/)
-  assert.match(ci, /npm ci --no-audit --no-fund/)
+test('C59-B04: original APP-00A audits and separate full-audit security job remain mandatory', () => {
+  for (const workflow of [app00a, securityCI]) {
+    assert.match(workflow, /npm ci --no-audit --no-fund/)
+    assert.match(workflow, /npm audit --omit=dev --audit-level=low/)
+    assert.match(workflow, /npm audit --audit-level=moderate/)
+    assert.doesNotMatch(workflow, /audit-level=(?:high|critical)|--omit=dev --audit-level=moderate/,
+      'No weaker full-tree npm audit gates permitted')
+  }
+  assert.match(securityCI, /node --test web\/tests\/picomatch-advisory\.test\.mjs/)
+  assert.match(securityCI, /node --test web\/tests\/issue59-glob-boundary\.test\.mjs/)
 })
