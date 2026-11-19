@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 // OWN-ISSUE59-B-20261119: an expiring, source-only withdrawn-advisory
 // classification, NOT a patched picomatch. Never suppress npm audit.
-const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'))
-const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const lockSource = readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8')
+const pkgSource = readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+const lock = JSON.parse(lockSource)
+const pkg = JSON.parse(pkgSource)
 const policy = JSON.parse(readFileSync(
   new URL('../../docs/security/issue59-conditional-risk-policy.json', import.meta.url), 'utf8'))
 const decision = readFileSync(
@@ -21,6 +24,45 @@ const OFFICIAL = {
   integrity: 'sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==',
   devOnly: true
 }
+
+
+/**
+ * C59-B01: Owner B accepts a reviewed, exact dependency graph, not merely
+ * the picomatch node in isolation. Git blob IDs below are for the two
+ * unchanged files at the independently inspected main base.
+ *
+ * Any manifest OR transitive lockfile byte drift invalidates this conditional
+ * classification until a new security review explicitly updates these pins.
+ */
+const FROZEN_GIT_BLOBS = {
+  manifest: '2ed2fb8337d5c93bcb524ace36b5c2a06437fe54',
+  lockfile: 'f6c909b2240df9cb25a10916dc4778d86ab4afe3'
+}
+
+function gitBlobSha(text) {
+  const bytes = Buffer.from(text, 'utf8')
+  return createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex')
+}
+
+function verifyFrozenDependencyGraph(manifestText, lockText) {
+  assert.equal(gitBlobSha(manifestText), FROZEN_GIT_BLOBS.manifest,
+    'Any web/package.json drift requires independent reclassification review')
+  assert.equal(gitBlobSha(lockText), FROZEN_GIT_BLOBS.lockfile,
+    'Any web/package-lock.json drift (including transitive changes) requires independent review')
+}
+
+test('C59-B01: the entire reviewed manifest and transitive lockfile are immutable', () => {
+  verifyFrozenDependencyGraph(pkgSource, lockSource)
+})
+
+test('C59-B01 negative cases: unrelated transitive and manifest drift DENIED', () => {
+  assert.ok(lock.packages['node_modules/tinyglobby'], 'Expected reviewed transitive dependency')
+  const shifted = structuredClone(lock)
+  shifted.packages['node_modules/tinyglobby'].integrity = 'sha512-UNREVIEWED'
+  assert.throws(() => verifyFrozenDependencyGraph(pkgSource, JSON.stringify(shifted)))
+  assert.throws(() => verifyFrozenDependencyGraph(pkgSource, lockSource + '\n'))
+  assert.throws(() => verifyFrozenDependencyGraph(pkgSource.replace('"19.3.1"', '"19.3.2"'), lockSource))
+})
 
 function verifyConditionalPolicy(record, nowMs = Date.now()) {
   assert.equal(record.schema, 'ISSUE59_WITHDRAWN_ADVISORY_RISK_V1')
