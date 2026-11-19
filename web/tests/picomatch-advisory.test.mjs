@@ -83,7 +83,7 @@ function verifyPinnedDevelopmentDependency(data) {
 test('C59-B01/B03: exact Owner decision, unchanged unpatched classification and review expiry', () => {
   verifyConditionalPolicy(policy)
   assert.match(decision, /OWN-ISSUE59-B-20261119/)
-  assert.match(decision, /NOT_YET_RECORDED/)
+  assert.match(decision, /Independent Security reviewer/)
   assert.match(decision, /NO_GO/)
 })
 
