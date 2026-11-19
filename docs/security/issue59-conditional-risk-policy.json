@@ -1,0 +1,31 @@
+{
+  "schema": "ISSUE59_WITHDRAWN_ADVISORY_RISK_V1",
+  "decisionId": "OWN-ISSUE59-B-20261119",
+  "ownerDecision": "CONDITIONAL_SCOPED_RECLASSIFICATION",
+  "advisoryId": "GHSA-fc5q-39xc-vjpf",
+  "cveId": "CVE-2026-112366",
+  "advisoryState": "WITHDRAWN_2026-11-18",
+  "softwareState": "UNPATCHED_NO_PATCH_CLAIM",
+  "scope": "APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY",
+  "expiresAtUtc": "2026-12-19T00:00:00Z",
+  "permittedPackage": {
+    "path": "node_modules/picomatch",
+    "version": "4.0.7",
+    "resolved": "https://registry.npmjs.org/picomatch/-/picomatch-4.0.7.tgz",
+    "integrity": "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==",
+    "devOnly": true
+  },
+  "requiredApprovals": {
+    "owner": "CONDITIONAL_DIRECTION_APPROVED_2026-11-19",
+    "independentSecurityReview": "REQUIRED_BEFORE_MERGE",
+    "finalHeadAcceptance": "REQUIRED_BEFORE_MERGE"
+  },
+  "prohibitions": {
+    "dynamicOrUntrustedGlobPatterns": true,
+    "dependencyAliasOrUnreviewedFork": true,
+    "auditIgnoreOrSeverityReduction": true,
+    "frontendArtifactPublication": true,
+    "physicalPreprodDeployment": true,
+    "productionOrPilotAdmission": true
+  }
+}
