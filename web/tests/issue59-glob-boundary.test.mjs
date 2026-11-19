@@ -47,7 +47,13 @@ function verifyViteSource(text) {
   for (const statement of file.program.body) {
     if (statement.type === 'ImportDeclaration') {
       assert.equal(statement.source?.type, 'StringLiteral')
-      imports.push(statement.source.value)
+      const bindings = statement.specifiers.map(specifier => {
+        if (specifier.type === 'ImportDefaultSpecifier') return 'default:' + specifier.local.name
+        assert.equal(specifier.type, 'ImportSpecifier', 'New namespace import requires review')
+        const imported = specifier.imported.name ?? specifier.imported.value
+        return imported + ':' + specifier.local.name
+      })
+      imports.push(statement.source.value + '|' + bindings.join(','))
     } else {
       assert.equal(statement.type, 'ExportDefaultDeclaration',
         'Unexpected executable top-level configuration')
@@ -55,7 +61,8 @@ function verifyViteSource(text) {
     }
   }
   assert.deepEqual(imports.sort(),
-    ['vite', '@vitejs/plugin-react', '@tailwindcss/vite', 'vite-plugin-pwa'].sort(),
+    ['vite|defineConfig:defineConfig', '@vitejs/plugin-react|default:react',
+      '@tailwindcss/vite|default:tailwindcss', 'vite-plugin-pwa|VitePWA:VitePWA'].sort(),
     'New import/plugin needs independent risk review')
   assert.equal(exports.length, 1)
   const root = properties(singleNamedCall(exports[0].declaration, 'defineConfig'), file)
@@ -103,6 +110,8 @@ test('C59-B02 negative tests: injected input, computed globs, extra plugins, spr
     source.replace('runtimeCaching: []', 'runtimeCaching: [customerRule]'),
     source.replace('workbox: {', 'workbox: { ...extraConfig,'),
     source.replace('plugins: [', 'plugins: [ untrustedPlugin(),'),
+    source.replace("import { VitePWA } from 'vite-plugin-pwa'",
+      "import { VitePWA as untrusted } from 'vite-plugin-pwa'"),
     source.replace('VitePWA({', 'VitePWA(getUntrustedConfig() || {'),
     source.replace(canonical, '/*' + canonical + '*/ globPatterns: [process.env.PATTERN]'),
     source + '\nprocess.env.BAD_PATTERN\n'
