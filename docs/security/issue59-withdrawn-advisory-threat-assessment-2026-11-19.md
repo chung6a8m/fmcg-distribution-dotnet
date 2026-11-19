@@ -40,4 +40,15 @@ The Owner has now explicitly selected **B — conditional withdrawn-advisory ris
 
 **AST compatibility:** TypeScript 7.0.2 no longer exports the former compiler API through the main npm package. The source-only CI test instead uses the already locked build-time `@babel/parser@7.29.14` with the TypeScript parser plugin; version and exact npm integrity are pinned by the gate. No package manifest, lockfile, npm audit command or product runtime was changed for this adaptation.
 
+## 5. Independent advisory-feed divergence checked 2026-11-19
+
+This is **not** a universally clean vulnerability feed. Review the following differing public records before any acceptance decision:
+
+- [GitHub reviewed GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) states **WITHDRAWN 2026-11-18**; affected versions through 4.0.7 still listed; no patched release.
+- [NIST NVD CVE-2026-112366](https://nvd.nist.gov/vuln/detail/CVE-2026-112366) remains a **PUBLISHED / Awaiting Enrichment** CVE with CNA-supplied **HIGH CVSS 8.7**, not marked REJECTED in the inspected record.
+- [OSV GHSA-fc5q-39xc-vjpf](https://osv.dev/vulnerability/GHSA-fc5q-39xc-vjpf) still renders the original **HIGH** advisory record (last displayed modification 2026-11-17); a lagging/mismatched downstream feed is not proof the executable package was fixed.
+- APP-00A Node 26 full `npm audit --audit-level=moderate` now reports **zero** findings at fixed source HEAD, after the GitHub withdrawal. That is a **npm registry advisory state observation** only. It does not supersede an NVD/OSV independent advisory risk assessment.
+
+**Security disposition:** `DOWNSTREAM_HIGH_FEEDS_PRESENT / APPLICABILITY_REVIEW_REQUIRED`. A truly independent Security reviewer must sign a **scoped exploitability assessment**, explain why untrusted glob expressions cannot reach the source-only build boundary, document why OSV/NVD HIGH signals are not release-blocking for *that scope only*, and confirm no fork/override or deployment. Until then, Owner B approval alone is insufficient for a merge, issue closure, or artifact publication. Re-run if any scanner entry, user-controlled glob flow or tooling graph changes.
+
 **Current disposition:** `OWNER_B_CONDITIONAL_APPROVED / SECURITY_INDEPENDENT_REVIEW_PENDING / NO_AUTO_CLOSE / NO_PREPROD_OR_PRODUCTION_DEPLOYMENT / G-B01..05_NOT_VERIFIED`. Do not inherit narrow APP-02B source-only merge exceptions to a frontend security or deployment decision.
