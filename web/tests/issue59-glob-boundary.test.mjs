@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
-import ts from 'typescript'
+import babelParser from '@babel/parser'
 
 // OWN-ISSUE59-B-20261119: AST-verified, narrowly scoped build-only input boundary.
 // This checks first-party source, NOT general picomatch ReDoS resistance.
@@ -18,15 +18,15 @@ const securityCI = readFileSync(
 const literalGlob = '**/*.{js,css,html,svg,ico,png}'
 
 function properties(node, file) {
-  assert.ok(ts.isObjectLiteralExpression(node), 'Scope changed: expected literal object')
+  assert.equal(node?.type, 'ObjectExpression', 'Scope changed: expected literal object')
   const result = new Map()
   for (const property of node.properties) {
-    assert.ok(ts.isPropertyAssignment(property), 'No spreads, methods or computed properties permitted')
-    assert.ok(ts.isIdentifier(property.name) || ts.isStringLiteral(property.name),
+    assert.equal(property?.type, 'ObjectProperty', 'No spreads, methods or computed properties permitted')
+    assert.ok(!property.computed && ['Identifier', 'StringLiteral'].includes(property.key?.type),
       'No dynamic config property name permitted')
-    const name = property.name.text
+    const name = property.key.name ?? property.key.value
     assert.ok(!result.has(name), 'No duplicate config property: ' + name)
-    result.set(name, property.initializer)
+    result.set(name, property.value)
   }
   return result
 }
@@ -34,23 +34,22 @@ function exactKeys(map, names) {
   assert.deepEqual([...map.keys()].sort(), [...names].sort(), 'New config property needs a security review')
 }
 function singleNamedCall(expr, name) {
-  assert.ok(ts.isCallExpression(expr) && ts.isIdentifier(expr.expression)
-    && expr.expression.text === name && expr.arguments.length === 1,
+  assert.ok(expr?.type === 'CallExpression' && expr.callee?.type === 'Identifier'
+    && expr.callee.name === name && expr.arguments.length === 1,
   'Unexpected call/input for ' + name)
   return expr.arguments[0]
 }
 
 function verifyViteSource(text) {
-  const file = ts.createSourceFile('vite.config.ts', text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-  assert.equal(file.parseDiagnostics.length, 0, 'Configuration parse errors are not accepted')
+  const file = babelParser.parse(text, { sourceType: 'module', plugins: ['typescript'] })
   const imports = []
   const exports = []
-  for (const statement of file.statements) {
-    if (ts.isImportDeclaration(statement)) {
-      assert.ok(ts.isStringLiteral(statement.moduleSpecifier))
-      imports.push(statement.moduleSpecifier.text)
+  for (const statement of file.program.body) {
+    if (statement.type === 'ImportDeclaration') {
+      assert.equal(statement.source?.type, 'StringLiteral')
+      imports.push(statement.source.value)
     } else {
-      assert.ok(ts.isExportAssignment(statement) && !statement.isExportEquals,
+      assert.equal(statement.type, 'ExportDefaultDeclaration',
         'Unexpected executable top-level configuration')
       exports.push(statement)
     }
@@ -59,32 +58,34 @@ function verifyViteSource(text) {
     ['vite', '@vitejs/plugin-react', '@tailwindcss/vite', 'vite-plugin-pwa'].sort(),
     'New import/plugin needs independent risk review')
   assert.equal(exports.length, 1)
-  const root = properties(singleNamedCall(exports[0].expression, 'defineConfig'), file)
+  const root = properties(singleNamedCall(exports[0].declaration, 'defineConfig'), file)
   exactKeys(root, ['plugins', 'server'])
   const plugins = root.get('plugins')
-  assert.ok(ts.isArrayLiteralExpression(plugins))
+  assert.equal(plugins?.type, 'ArrayExpression')
   assert.equal(plugins.elements.length, 3, 'Additional Vite plugins require security review')
-  assert.ok(ts.isCallExpression(plugins.elements[0]) &&
-    ts.isIdentifier(plugins.elements[0].expression) && plugins.elements[0].expression.text === 'react')
-  assert.ok(ts.isCallExpression(plugins.elements[1]) &&
-    ts.isIdentifier(plugins.elements[1].expression) && plugins.elements[1].expression.text === 'tailwindcss')
+  assert.ok(plugins.elements[0]?.type === 'CallExpression' &&
+    plugins.elements[0].callee?.type === 'Identifier' && plugins.elements[0].callee.name === 'react' &&
+    plugins.elements[0].arguments.length === 0)
+  assert.ok(plugins.elements[1]?.type === 'CallExpression' &&
+    plugins.elements[1].callee?.type === 'Identifier' && plugins.elements[1].callee.name === 'tailwindcss' &&
+    plugins.elements[1].arguments.length === 0)
   const pwa = properties(singleNamedCall(plugins.elements[2], 'VitePWA'), file)
   exactKeys(pwa, ['registerType', 'manifest', 'workbox'])
   const register = pwa.get('registerType')
-  assert.ok(ts.isStringLiteral(register) && register.text === 'prompt')
+  assert.ok(register?.type === 'StringLiteral' && register.value === 'prompt')
   const workbox = properties(pwa.get('workbox'), file)
   exactKeys(workbox, ['navigateFallbackDenylist', 'runtimeCaching', 'globPatterns'])
   const globs = workbox.get('globPatterns')
-  assert.ok(ts.isArrayLiteralExpression(globs) && globs.elements.length === 1)
-  assert.ok(ts.isStringLiteral(globs.elements[0]) && globs.elements[0].text === literalGlob,
+  assert.ok(globs?.type === 'ArrayExpression' && globs.elements.length === 1)
+  assert.ok(globs.elements[0]?.type === 'StringLiteral' && globs.elements[0].value === literalGlob,
     'Dynamic or changed precache glob is outside the conditional risk acceptance')
   const caching = workbox.get('runtimeCaching')
-  assert.ok(ts.isArrayLiteralExpression(caching) && caching.elements.length === 0,
+  assert.ok(caching?.type === 'ArrayExpression' && caching.elements.length === 0,
     'Runtime caching must stay disabled')
   const deny = workbox.get('navigateFallbackDenylist')
-  assert.ok(ts.isArrayLiteralExpression(deny) && deny.elements.length === 1)
-  assert.ok(ts.isRegularExpressionLiteral(deny.elements[0]))
-  assert.equal(deny.elements[0].getText(file), '/^\\/api\\//')
+  assert.ok(deny?.type === 'ArrayExpression' && deny.elements.length === 1)
+  assert.equal(deny.elements[0]?.type, 'RegExpLiteral')
+  assert.equal(text.slice(deny.elements[0].start, deny.elements[0].end), '/^\\/api\\//')
 }
 
 test('C59-B02: Vite/PWA/Workbox uses only the inspected literal glob AST', () => {
@@ -134,6 +135,8 @@ test('C59-B01/B02: production/browser source does not directly import build-only
     assert.equal(pkg.dependencies?.[name], undefined, 'Build-only package moved into runtime deps: ' + name)
   }
   assert.equal(lock.packages['node_modules/picomatch']?.dev, true)
+  assert.equal(lock.packages['node_modules/@babel/parser']?.version, '7.29.14',
+    'Transitive parser changed: re-review AST test provenance')
   assert.equal(lock.packages['node_modules/workbox-build']?.dev, true)
 })
 
