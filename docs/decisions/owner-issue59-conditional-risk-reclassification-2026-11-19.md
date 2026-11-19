@@ -27,6 +27,10 @@ The existing full npm audit command and production audit retain exactly their or
 7. **C59-B07 — Change/review trigger:** immediate re-evaluation when GitHub/npm/OSV/NVD/Snyk/VulnCheck changes applicability, upstream publishes a fix, dependency/publisher/version/lock integrity changes, new runtime glob matching or untrusted pattern input is introduced, or CI/deployment topology changes. A discrepant active HIGH signal is triaged as OPEN security risk, not silently ignored.
 8. **C59-B08 — Truthful disposition:** no false claim of patched bytes, no PREPROD/production admission, no automatic issue close while Security signoff or final-HEAD gates remain missing. A subsequent closeout, if approved, must say **WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED (NOT_PATCHED)** and retain a review-by date.
 
+## Current cross-source security divergence (2026-11-19)
+
+The inspected [GitHub GHSA](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) is WITHDRAWN, whereas [NVD CVE-2026-112366](https://nvd.nist.gov/vuln/detail/CVE-2026-112366) still shows a PUBLISHED, HIGH CNA finding and [OSV](https://osv.dev/vulnerability/GHSA-fc5q-39xc-vjpf) still shows the original HIGH advisory. The independent Security reviewer must explicitly assess **applicability to the trusted build-only glob boundary**, and document the residual scanner discrepancy; npm audit zero findings is not enough for security signoff. This paragraph is a review finding, **not** a new Owner grant to override unrelated scanners.
+
 ## Historical evidence and open review
 
 - Main source commit `216ce71995e036b453775ccaa0097aaad98ea2c9`: [APP-00A run #44323688504 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44323688504) SUCCESS, full/production npm audit 0 and 296/296 SQL/.NET, 1440/1440 A11 SQL cells.
