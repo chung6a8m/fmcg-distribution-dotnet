@@ -94,8 +94,13 @@ test('C59-B01: only the official picomatch 4.0.7 dev-only exact npm tarball is a
   assert.equal(pkg.engines?.node, '>=26.13.1 <27')
   assert.equal(pkg.devDependencies?.vite, '8.3.8')
   assert.equal(pkg.devDependencies?.['vite-plugin-pwa'], '2.0.0')
-  assert.equal(pkg.overrides?.['workbox-build']?.glob, '14.0.6')
-  assert.equal(pkg.overrides?.picomatch, undefined, 'No picomatch override/alias permitted')
+  assert.deepEqual(pkg.overrides, { 'workbox-build': { glob: '14.0.6' } },
+    'Unexpected nested/global dependency override needs a new review')
+  assert.deepEqual(Object.keys(pkg.dependencies || {}).sort(), ['react', 'react-dom'])
+  assert.equal(pkg.dependencies.react, '19.3.1')
+  assert.equal(pkg.dependencies['react-dom'], '19.3.1')
+  assert.equal(pkg.scripts?.build, 'tsc -b && vite build',
+    'Build script must not accept uncontrolled glob inputs')
   const [major, minor, patch] = process.versions.node.split('.').map(Number)
   assert.equal(major, 26, 'Risk verification requires Node.js 26 LTS')
   assert.ok(minor > 13 || (minor === 13 && patch >= 1),
