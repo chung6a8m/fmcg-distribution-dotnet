@@ -6,6 +6,16 @@ on:
 permissions:
   contents: read
 jobs:
+  web-glob-input-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Fail closed on unreviewed first-party glob input paths
+        run: node --test web/tests/issue59-glob-boundary.test.mjs
   picomatch-lock-security:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
