@@ -135,8 +135,12 @@ test('C59-B01/B02: production/browser source does not directly import build-only
     assert.equal(pkg.dependencies?.[name], undefined, 'Build-only package moved into runtime deps: ' + name)
   }
   assert.equal(lock.packages['node_modules/picomatch']?.dev, true)
-  assert.equal(lock.packages['node_modules/@babel/parser']?.version, '7.29.14',
-    'Transitive parser changed: re-review AST test provenance')
+  const parser = lock.packages['node_modules/@babel/parser']
+  assert.equal(parser?.version, '7.29.14', 'Transitive parser changed: re-review AST test provenance')
+  assert.equal(parser?.integrity,
+    'sha512-VL220vXuyO2z3rNIQwY7ftj9UwpqOt+33sH+sBWkOekbsSR2g7EEMnOx24ZlCH0xOA3DM/33SifVFGbnJD8r/w==',
+    'AST parser bytes changed: review required')
+  assert.equal(parser?.dev, true, 'AST parser must be build-time-only')
   assert.equal(lock.packages['node_modules/workbox-build']?.dev, true)
 })
 
