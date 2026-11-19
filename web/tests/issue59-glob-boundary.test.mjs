@@ -33,6 +33,18 @@ function properties(node, file) {
 function exactKeys(map, names) {
   assert.deepEqual([...map.keys()].sort(), [...names].sort(), 'New config property needs a security review')
 }
+function verifyLiteralTree(node) {
+  if (['StringLiteral', 'NumericLiteral', 'BooleanLiteral'].includes(node?.type)) return
+  if (node?.type === 'ArrayExpression') {
+    for (const element of node.elements) verifyLiteralTree(element)
+    return
+  }
+  if (node?.type === 'ObjectExpression') {
+    for (const value of properties(node).values()) verifyLiteralTree(value)
+    return
+  }
+  assert.fail('Manifest or config contains a dynamic expression requiring independent review')
+}
 function singleNamedCall(expr, name) {
   assert.ok(expr?.type === 'CallExpression' && expr.callee?.type === 'Identifier'
     && expr.callee.name === name && expr.arguments.length === 1,
@@ -78,6 +90,7 @@ function verifyViteSource(text) {
     plugins.elements[1].arguments.length === 0)
   const pwa = properties(singleNamedCall(plugins.elements[2], 'VitePWA'), file)
   exactKeys(pwa, ['registerType', 'manifest', 'workbox'])
+  verifyLiteralTree(pwa.get('manifest'))
   const register = pwa.get('registerType')
   assert.ok(register?.type === 'StringLiteral' && register.value === 'prompt')
   const workbox = properties(pwa.get('workbox'), file)
@@ -93,6 +106,14 @@ function verifyViteSource(text) {
   assert.ok(deny?.type === 'ArrayExpression' && deny.elements.length === 1)
   assert.equal(deny.elements[0]?.type, 'RegExpLiteral')
   assert.equal(text.slice(deny.elements[0].start, deny.elements[0].end), '/^\\/api\\//')
+  const server = properties(root.get('server'), file)
+  exactKeys(server, ['proxy'])
+  const proxy = properties(server.get('proxy'), file)
+  exactKeys(proxy, ['/health', '/api'])
+  for (const target of proxy.values()) {
+    assert.ok(target?.type === 'StringLiteral' && target.value === 'http://localhost:5116',
+      'Unexpected dynamic Vite proxy target')
+  }
 }
 
 test('C59-B02: Vite/PWA/Workbox uses only the inspected literal glob AST', () => {
@@ -113,6 +134,10 @@ test('C59-B02 negative tests: injected input, computed globs, extra plugins, spr
     source.replace("import { VitePWA } from 'vite-plugin-pwa'",
       "import { VitePWA as untrusted } from 'vite-plugin-pwa'"),
     source.replace('VitePWA({', 'VitePWA(getUntrustedConfig() || {'),
+    source.replace('server: { proxy:', 'server: { configureServer() { return import("picomatch") }, proxy:'),
+    source.replace("'/api': 'http://localhost:5116'", "'/api': process.env.DYNAMIC_TARGET"),
+    source.replace("name: 'FMCG DMS — APP-00A (Synthetic)'",
+      "name: process.env.TENANT_GLOB"),
     source.replace(canonical, '/*' + canonical + '*/ globPatterns: [process.env.PATTERN]'),
     source + '\nprocess.env.BAD_PATTERN\n'
   ]
