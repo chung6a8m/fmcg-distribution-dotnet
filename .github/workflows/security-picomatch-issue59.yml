@@ -14,7 +14,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '26'
-      - name: Fail closed on unreviewed first-party glob input paths
+      - name: Install exact lockfile for TypeScript AST verification
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Fail closed on unreviewed first-party glob input paths and mutations
         run: node --test web/tests/issue59-glob-boundary.test.mjs
   picomatch-lock-security:
     runs-on: ubuntu-24.04
@@ -24,7 +27,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '26'
-      - name: Fail closed on affected picomatch lockfile resolution
+      - name: Install exact lockfile for approved developer-only dependency resolution
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Record installed picomatch tree for review
+        working-directory: web
+        run: npm ls picomatch --all
+      - name: Fail closed on unapproved picomatch or expired conditional Owner decision
         run: node --test web/tests/picomatch-advisory.test.mjs
 
   full-npm-security-audit:
@@ -103,7 +112,7 @@ jobs:
           echo 'CANDIDATE_SOURCE_DIFF_ONLY: PATCH_NOT_YET_INDEPENDENTLY_APPROVED'
           wc -l TestResults/parse-source.diff
           sed -n '1,160p' TestResults/parse-source.diff
-          printf '%s\n' 'SOURCE_DIFF_REVIEW_PENDING' 'NO_NPM_OVERRIDE' 'FULL_NPM_AUDIT_STILL_FAILS' > TestResults/CANDIDATE-NOT-ACCEPTED.txt
+          printf '%s\n' 'SOURCE_DIFF_REVIEW_PENDING' 'NO_NPM_OVERRIDE' 'FULL_NPM_AUDIT_REMAINS_SEPARATELY_REQUIRED' > TestResults/CANDIDATE-NOT-ACCEPTED.txt
       - name: Upload candidate patch diff for independent security review
         if: always()
         uses: actions/upload-artifact@v7
