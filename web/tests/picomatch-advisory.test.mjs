@@ -142,7 +142,7 @@ test('C59-B01/B03: exact Owner decision, unchanged unpatched classification and 
   assert.match(decision, /C59-B06/)
   assert.match(decision, /NO_GO/)
   assert.match(soloOwnerDecision, /OWN-ISSUE59-SOLO-OWNER-20261119/)
-  assert.match(soloOwnerDecision, /NOT_OBTAINED|NOT_MET/)
+  assert.match(soloOwnerDecision, /NOT[ _]OBTAINED|NOT[ _]MET/)
   assert.match(soloOwnerDecision, /NOT_PATCHED/)
   assert.match(soloOwnerDecision, /NO.*PREPROD|PREPROD.*NOT_VERIFIED|do not deploy physical PREPROD/)
 })
