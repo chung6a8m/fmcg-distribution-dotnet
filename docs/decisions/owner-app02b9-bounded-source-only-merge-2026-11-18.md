@@ -1,0 +1,15 @@
+# OWN-APP02B9-SOURCE-01 — Bounded source-only merge of PR #72
+
+**Owner decision — 18 November 2026.** The Owner explicitly requested independent review, findings resolution, full final-HEAD CI inspection and merge of [PR #72](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/72), stating **"Tôi chấp nhận source-only."** This is the **new B.9-specific merge-timing decision** called for by the PR; earlier B.4–B.8 exceptions do not transfer.
+
+## Exact authorization and limitations
+
+1. **Source-only integration ceiling:** The repository may incorporate the inert B.9 evidence validator, immutable expected-case source fixture, adversarial unit tests, CI-only workflow and operator documents **after an independent review on the exact final source HEAD**. No production routing, SQL migrations, jobs, service registration, tenant activation, real provider call or physical PREPROD verification is authorized by this decision.
+2. **Full CI inspected, not falsely all-green:** Every existing APP-00A and APP-02B.2–B.9 workflow must be explicitly inspected on that exact final HEAD, including required jobs, artifacts and audit failures. The existing full-tree APP-00A npm audit **11 HIGH / issue #59** is a **recorded, still failing security gate**. If source-only merge proceeds with that inherited debt, it is a **bounded merge-timing exception for PR #72 only**, not full APP-00A PASS, a waiver of #59, or a signoff on any physical B.1 case. The dedicated B.9 signed-mock/mutation/no-bundle NO_GO suite and other source/SQL/isolated runtime regression checks must PASS with zero required skips; no new failures or findings may be ignored.
+3. **Physical acceptance strictly blocked:** B.1 **30/30 B01-01..B05-06** and **G-B01..G-B05** all remain `NOT_RUN / NOT_VERIFIED`. The independent physical Security and DBA reviewers, distinct operator-controlled tenant databases, external pinned trust, genuine Vault/SQL/restore/alert witnesses, real RUNTIME-01/02, full APP-00A audit PASS, zero blocking findings, and actually measured RPO <=900s / RTO <=14400s are still mandatory before any `PREPROD_FOUNDATION_VERIFIED`.
+4. **Open debt retained:** #53 (durable revocation fence), #59 (HIGH npm audit), #60 (physical SQL privilege), #52/#54/#55/#56/#64/#65/#67/#68 and any independently found blockers stay OPEN until separately evidenced. The source-only merge **must not close issue #56**.
+5. **No wider mode authorization:** Real AC-11/EV-08, all five production P0 gates, APP-02C/D/E, business posting, A/B/Mixed admission, production, Pilot and Go-Live remain `NOT_VERIFIED / NOT_AUTHORIZED`.
+
+**Approved result if conditions are met:** `MERGED / B9_SOURCE_ONLY_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED / NO_GO`. This is not `APP-02B.9 VERIFIED` or `PREPROD_FOUNDATION_VERIFIED`.
+
+The PR review/CI checklist and exact source SHA, failing audit run, synthetic artifact digest and final merge SHA belong in the PR closeout record after the final checks; no prospective PASS is asserted here.

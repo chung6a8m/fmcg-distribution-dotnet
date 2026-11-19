@@ -1,0 +1,158 @@
+name: APP-02B.5 authorization and revocation (CI-only)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  b5-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Build B5 core and boundary tests without enabling business routes
+        run: |
+          test "$(dotnet --version)" = "10.0.404"
+          dotnet restore tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj -c Release --no-restore
+          dotnet build src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj -c Release
+          dotnet build src/FmcgDms.Preprod.Worker/FmcgDms.Preprod.Worker.csproj -c Release
+          dotnet test tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Record CI-only source provenance
+        if: always()
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'TestRunId=app02b5-unit-%s-%s\nSourceHeadSha=%s\nWorkflowSha=%s\nScope=GITHUB_HOSTED_CI_ONLY\nRealPreprod=NOT_VERIFIED\nG-B01..05=NOT_RUN\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/APP-02B5-UNIT.txt
+      - name: Upload source-only test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b5-source-ci-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Authorization.Tests/TestResults/
+          if-no-files-found: warn
+
+  b5-two-tenant-sql:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify local-only disposable Windows SQL Server
+        shell: pwsh
+        run: |
+          if ((dotnet --version).Trim() -ne '10.0.404') { throw 'SDK mismatch' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION'
+      - name: Build and execute two-tenant B5 SQL fault matrix
+        shell: pwsh
+        env:
+          APP02B5_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B5_TEST_RUN_ID: b5-sql-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B5_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Require source-bound independent SQL witness
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $all = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-SQL-WITNESS.json)
+          if ($all.Count -ne 1) { throw 'Missing or ambiguous B5 SQL witness' }
+          $e = Get-Content -Raw $all[0].FullName | ConvertFrom-Json
+          if ($e.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              $e.SchemaVersion -cne 'B5_20261118_001' -or
+              $e.EvidenceClass -cne 'GITHUB_HOSTED_LOCALDB_ONLY' -or
+              $e.PhysicalTenantDatabases -ne 2 -or
+              !$e.IndependentFenceDatabase -or !$e.DifferentDatabaseIds -or
+              !$e.CrossTenantDenied -or !$e.WrongBindingDenied -or
+              !$e.ValidAContextWrongPhysicalTargetDenied -or
+              !$e.RuntimeDirectPeerWriteDenied -or !$e.RegistryDatabaseMismatchDenied -or
+              [string]::IsNullOrWhiteSpace($e.TenantSqlHashBefore) -or
+              $e.TenantSqlHashBefore -cne $e.TenantSqlHashAfter -or
+              [string]::IsNullOrWhiteSpace($e.PeerSqlHashBefore) -or
+              $e.PeerSqlHashBefore -cne $e.PeerSqlHashAfter -or
+              !$e.MakerCheckerDenied -or !$e.SessionUnavailableDenied -or
+              !$e.RuntimeDirectSqlReadDenied -or !$e.RevokeWaitedForProtectedCommit -or
+              !$e.StaleAuthorityDenied -or !$e.SuspendedTenantDenied -or
+              $e.TenantAEffects -ne 2 -or $e.PeerTenantEffects -ne 0 -or
+              $e.RealPreprod -cne 'NOT_VERIFIED' -or $e.GB01ToGB05 -cne 'NOT_RUN') {
+            throw 'B5 SQL witness missing mandatory assertions'
+          }
+          $controlFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-CONTROL-RACES.json)
+          if ($controlFiles.Count -ne 1) { throw 'Missing/ambiguous B3/B4 commit race evidence' }
+          $c = Get-Content -Raw $controlFiles[0].FullName | ConvertFrom-Json
+          if ($c.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$c.ActualB3SqlSessionRevokeSerialized -or
+              !$c.ActualB4TransitionSerialized -or
+              !$c.StaleJwtAndRegistryEpochDenied -or
+              $c.PeerTenantEffects -ne 0 -or
+              $c.RestoreResurrectionProof -cne 'NOT_VERIFIED' -or
+              $c.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B3/B4 current authority SQL race witness mismatch'
+          }
+          $approvalFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-APPROVAL.json)
+          if ($approvalFiles.Count -ne 1) { throw 'Missing B5 approval SQL witness' }
+          $a = Get-Content -Raw $approvalFiles[0].FullName | ConvertFrom-Json
+          if ($a.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$a.ActionCatalogRequired -or !$a.MissingSourceDenied -or
+              !$a.ForgedSourceDenied -or !$a.SelfMakerDenied -or
+              !$a.CheckerInitiatorDenied -or !$a.WrongResourceDenied -or
+              !$a.ApprovalRollbackAtomic -or !$a.SourceImmutable -or
+              !$a.DecisionImmutable -or !$a.ApprovalReplayDenied -or
+              $a.DecisionCommitCount -ne 1 -or
+              [string]::IsNullOrWhiteSpace($a.PeerHashBefore) -or
+              $a.PeerHashBefore -cne $a.PeerHashAfter -or
+              $a.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B5 approval SQL witness mismatch'
+          }
+
+          $schemaFiles = @(Get-ChildItem -Path . -Recurse -File -Filter APP-02B5-SCHEMA-INTEGRITY.json)
+          if ($schemaFiles.Count -ne 1) { throw 'Missing B5 schema replay witness' }
+          $s = Get-Content -Raw $schemaFiles[0].FullName | ConvertFrom-Json
+          if ($s.SourceHeadSha -cne $env:SOURCE_HEAD -or
+              !$s.FenceHistoryTamperDenied -or !$s.IdentityHistoryTamperDenied -or
+              !$s.RegistryHistoryTamperDenied -or
+              $s.RealPreprod -cne 'NOT_VERIFIED') {
+            throw 'B5 schema history accepted corrupted migration objects'
+          }
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          Copy-Item $all[0].FullName TestResults/APP-02B5-SQL-WITNESS.json
+          Copy-Item $controlFiles[0].FullName TestResults/APP-02B5-CONTROL-RACES.json
+          Copy-Item $approvalFiles[0].FullName TestResults/APP-02B5-APPROVAL.json
+          Copy-Item $schemaFiles[0].FullName TestResults/APP-02B5-SCHEMA-INTEGRITY.json
+          $identityHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_002_identity_guard.sql -Algorithm SHA256).Hash
+          $registryHash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_003_registry_guard.sql -Algorithm SHA256).Hash
+          $hash=(Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_001_independent_fence.sql -Algorithm SHA256).Hash
+          @("TestRunId=$($e.TestRunId)","SourceHeadSha=$env:SOURCE_HEAD",
+            "WorkflowSha=$env:GITHUB_SHA","MigrationSha256=$hash",
+            "IdentityGuardMigrationSha256=$identityHash",
+            "RegistryGuardMigrationSha256=$registryHash",
+            "Scope=GITHUB_HOSTED_LOCALDB_NOT_PHYSICAL_PREPROD",
+            "G-B01..05=NOT_RUN") | Set-Content TestResults/APP-02B5-SQL-PROVENANCE.txt -Encoding utf8
+      - name: Upload LocalDB evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b5-two-tenant-sql-ci-only
+          path: |
+            TestResults/APP-02B5-SQL-WITNESS.json
+            TestResults/APP-02B5-CONTROL-RACES.json
+            TestResults/APP-02B5-APPROVAL.json
+            TestResults/APP-02B5-SCHEMA-INTEGRITY.json
+            TestResults/APP-02B5-SQL-PROVENANCE.txt
+            tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/TestResults/
+          if-no-files-found: warn

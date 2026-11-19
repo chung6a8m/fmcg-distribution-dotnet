@@ -1,6 +1,8 @@
 # Issue #59 — Independent evaluation of patched picomatch candidates
 
-> **Historical candidate evaluation, updated 2026-11-19:** GitHub withdrew GHSA-fc5q-39xc-vjpf on 2026-11-18; [APP-00A #44323688504 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44323688504) now reports **0 full-tree audit vulnerabilities and SUCCESS** at unchanged `main` HEAD. This is advisory-feed reclassification, **NOT** an upstream/third-party parser patch. All candidate/version and failed-audit observations below refer to **2026-11-18**. Review [current glob ingress and Owner decision assessment](issue59-withdrawn-advisory-threat-assessment-2026-11-19.md) before acting; no replacement fork has been accepted and PR #61 remains DRAFT.\n\n**2026-11-18 | EVALUATION_ONLY / NO_DEPENDENCY_CHANGE / SECURITY_GATE_FAILING.**
+> **Historical candidate evaluation, updated 2026-11-19:** GitHub withdrew GHSA-fc5q-39xc-vjpf on 2026-11-18; [APP-00A #44323688504 attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44323688504) now reports **0 full-tree audit vulnerabilities and SUCCESS** at unchanged `main` HEAD. This is advisory-feed reclassification, **NOT** an upstream/third-party parser patch. All candidate/version and failed-audit observations below refer to **2026-11-18**. Review [current glob ingress and Owner decision assessment](issue59-withdrawn-advisory-threat-assessment-2026-11-19.md) before acting; no replacement fork has been accepted and PR #61 remains DRAFT.
+
+**2026-11-18 | EVALUATION_ONLY / NO_DEPENDENCY_CHANGE / SECURITY_GATE_FAILING.**
 Source [issue #59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/59), independent [draft PR #61](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/61), retained APP-00A required full npm audit.
 
 ## Verified current state

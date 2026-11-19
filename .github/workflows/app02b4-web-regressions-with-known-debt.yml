@@ -1,0 +1,73 @@
+name: APP-02B.4 bounded web regressions (npm audit debt remains OPEN)
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  web-regressions-with-known-audit-debt:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node 26 security baseline
+        shell: pwsh
+        run: |
+          $v = [version](node --version).TrimStart('v')
+          if ($v.Major -ne 26 -or $v -lt [version]'26.13.1') { throw "Node security baseline mismatch: $v" }
+      - name: Reproduce exact frontend lockfile
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Production npm dependency audit remains mandatory
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=low
+      - name: Workbox glob and Node dependency baseline tests
+        working-directory: web
+        run: npm run test:dependencies
+      - name: Tailwind CSS version check
+        working-directory: web
+        run: npm ls tailwindcss @tailwindcss/vite --depth=0
+      - name: Frontend health tests
+        working-directory: web
+        run: npm run test
+      - name: TypeScript/Vite and Workbox build
+        working-directory: web
+        run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Browser/PWA Playwright regressions
+        working-directory: web
+        run: npm run test:e2e
+      - name: Generated PWA and user-confirmed update contract
+        working-directory: web
+        run: npm run test:pwa-build
+      - name: Record truthful bounded regression evidence
+        shell: pwsh
+        if: always()
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          New-Item -ItemType Directory -Path TestResults -Force | Out-Null
+          @("TestRunId=b4-web-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT",
+            "SourceHeadSha=$env:SOURCE_HEAD","WorkflowSha=$env:GITHUB_SHA",
+            "KnownSecurityDebt=ISSUE_59_OPEN_CVE_2026_112366",
+            "RequiredFullTreeNpmAudit=NOT_PASSED",
+            "APP00A_FullRegression=NOT_PASSED",
+            "EvidenceScope=FRONTEND_PWA_PLAYWRIGHT_ONLY_NOT_PREPROD",
+            "PhysicalG_B01_05=NOT_VERIFIED") |
+            Set-Content TestResults/APP-02B4-BOUNDED-WEB.txt -Encoding utf8
+      - name: Upload bounded CI evidence (not full APP-00A acceptance)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app02b4-bounded-web-regressions-ci-only
+          path: |
+            TestResults/APP-02B4-BOUNDED-WEB.txt
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: warn

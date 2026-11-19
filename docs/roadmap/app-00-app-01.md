@@ -90,3 +90,8 @@ On **2026-11-17** the Owner approved eight decisions: P=`CashHandoverOffered` (S
 ### APP-02B.2 limited CI merge decision (2026-11-17)
 
 [OWN-APP02B2-01..03](../decisions/owner-app02b2-2026-11-17.md) approve GitHub-hosted Compose/Vault **only**, an independent fresh-context AI technical review, and conditional PR #50 merge after zero blockers + both exact-final-HEAD Linux/Windows CI PASS. Allowed code merge label: `MERGED / EPHEMERAL_CI_RUNTIME_TESTED`; actual PREPROD RUNTIME-01/02, original B.9 gates and real AC-11/EV-08 remain `NOT_VERIFIED`/`NOT_RUN`, production/Pilot still `NOT_AUTHORIZED`. This is a [versioned B.2 acceptance addendum](../security/app-02b2-ci-acceptance-addendum.md), not a retrospective rewrite of historical APP-01/APP-02A gates.
+
+
+### APP-02B.9 source-only oracle handoff (18/11/2026)
+
+[PR #72](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/72) adds [B.9 independent signed 30-case PREPROD oracle](app-02b9-independent-preprod-oracle.md), not a physical gate PASS. B.8 PR #71 is MERGED / GITHUB_HOSTED_CI_TESTED only, with mandatory APP-00A full npm audit still FAILED (#59) and real G-B04 NOT_RUN. **B.9 DRAFT / ORACLE_SOURCE_IN_PR / PHYSICAL_PREPROD_NOT_VERIFIED / G-B01..05 NOT_RUN / NO_GO**; issue #56 remains open. Earlier APP-01E/APP-02A synthetic evidence stays bounded, production P0/actual EV-08 NOT_VERIFIED and APP-02C/D/E/production/Pilot NOT_AUTHORIZED.
