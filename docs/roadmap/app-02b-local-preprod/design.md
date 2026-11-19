@@ -63,6 +63,8 @@ The security workstream defines a separate explicitly scoped lab entrypoint over
 
 Default activation is disabled. Before a mutating run, an operator supplies an approved, externally retained environment manifest identifying exact hosts, databases, permitted operations, source/images and fault window. The preflight/runner can author and validate a proposal but cannot manufacture approval signatures or grant itself a broader target. Already authorized operations may proceed without repeated approval prompts; scope changes require a new concrete disposition.
 
+Tenant SQL provisioning, B3 accounts and B5 membership/RBAC are separate responsibilities. I05 owns B53 permit issuance before initial activation/reactivation; S09 owns the bounded fixture account and authority enrollment lifecycle before S04 can admit a positive command. Existing CI-only DBA inserts and B6 policy actors do not satisfy B5 ADMIN-01. S09 prepares an explicit lab-only approval candidate and leaves original independent-human/physical ADMIN-01 open; an environment manifest alone is not implicit permission to create users or grants.
+
 ## 4. Common file ownership and interfaces
 
 All paths in this table are **proposed new paths**, unless explicitly marked existing. Their owner increment is assigned in the roadmap. Existing source paths cited by individual tasks are verified against the baseline tree.
@@ -83,7 +85,7 @@ All paths in this table are **proposed new paths**, unless explicitly marked exi
 
 Environment configuration contains addresses, database bindings, approved roots, tool pins and **secret references only**. Raw credentials are never repository/config/report fields. Pin host SSH identity and TLS trust independently; first-seen discovery is not automatically trusted.
 
-LAB-E05 owns the exact JSON schemas and Python types; LAB-S04 owns the matching C# LabRunContext DTO and serialization contract tests. Common semantic fields are:
+LAB-E05 owns the exact JSON schemas and Python types; LAB-S09 owns the matching shared C# LabRunContext DTO and serialization contract tests, consumed by LAB-S04/S06. Common semantic fields are:
 
 `LabRunContext = { runId, environmentId, sourceHeadSha, fixtureSha256, configurationSha256, startedUtc, hostSha256, mode }`
 

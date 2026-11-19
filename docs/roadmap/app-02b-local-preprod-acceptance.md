@@ -1,6 +1,6 @@
 # APP-02B — Roadmap Windows Local PREPROD Acceptance
 
-**Trạng thái:** ROADMAP_PROPOSED / DOCS_ONLY. **31 implementation increments đều PLANNED.**
+**Trạng thái:** ROADMAP_PROPOSED / DOCS_ONLY. **32 implementation increments đều PLANNED.**
 **Baseline:** `main` [`16d96c71a7967c216ebfa599693807a2b54e7435`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/16d96c71a7967c216ebfa599693807a2b54e7435), đối chiếu 19/11/2026.
 **Goal:** solo developer dùng Windows laptop để triển khai lab có kiểm soát, chạy scenario thật và thu evidence có thể đối chiếu; chuẩn bị các điều kiện còn thiếu cho original APP-02B physical acceptance.
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
@@ -15,7 +15,7 @@ Mỗi ID `LAB-*` tương ứng **một PR có trách nhiệm, interface và tiê
 | Tài liệu | Nội dung |
 |---|---|
 | [01 — Platform/recovery](app-02b-local-preprod/01-platform-and-recovery.md) | 8 PR: Windows, VMs, Vault/TLS, SQL, tenants, backup, outcome, PITR |
-| [02 — Security/runtime](app-02b-local-preprod/02-security-and-runtime.md) | 8 PR: #53, session, keys, typed API, durable intake, Worker, CASE, audit |
+| [02 — Security/runtime](app-02b-local-preprod/02-security-and-runtime.md) | 9 PR: #53, session, keys, actor/RBAC enrollment, typed API, durable intake, Worker, CASE, audit |
 | [03 — Operations](app-02b-local-preprod/03-operations.md) | 2 PR: telemetry/alert/incident, legal hold/archive/purge |
 | [04 — Evidence/CI/closeout](app-02b-local-preprod/04-evidence-and-closeout.md) | 13 PR: status, #75, contracts/collectors/CI, 5 gate drivers, closeout |
 | [Case matrix](app-02b-local-preprod/case-matrix.md) | Exact 30 expected symbols/negative invariants/kinds + 2 runtime probes |
@@ -50,10 +50,11 @@ Dependency dưới đây là **source/API prerequisite**. Live run còn cần en
 | [LAB-I03](app-02b-local-preprod/01-platform-and-recovery.md#lab-i03) | Vault bền, TLS và credentials | LAB-I02 | Raft/ACL/rotation/recovery | PLANNED |
 | [LAB-S01](app-02b-local-preprod/02-security-and-runtime.md#lab-s01) | B53 bridges và monotonic fence | LAB-E01 | Review PR #74, transaction atomicity | PLANNED |
 | [LAB-I04](app-02b-local-preprod/01-platform-and-recovery.md#lab-i04) | SQL thật và operator transport | LAB-I03, LAB-S01 | TLS, migration, least privilege | PLANNED |
-| [LAB-I05](app-02b-local-preprod/01-platform-and-recovery.md#lab-i05) | Tenant lifecycle và privilege probes | LAB-I04 | A/B enrollment, retirement denial | PLANNED |
+| [LAB-I05](app-02b-local-preprod/01-platform-and-recovery.md#lab-i05) | Tenant lifecycle và privilege probes | LAB-I04 | A/B enrollment, B53 permit, retirement denial | PLANNED |
 | [LAB-S02](app-02b-local-preprod/02-security-and-runtime.md#lab-s02) | Login/refresh/JWT durable authority | LAB-S01 | Cùng transaction với B53 | PLANNED |
 | [LAB-S03](app-02b-local-preprod/02-security-and-runtime.md#lab-s03) | Key lifecycle và MFA posture | LAB-S02, LAB-I03 | Rotation/history, deny posture | PLANNED |
-| [LAB-S04](app-02b-local-preprod/02-security-and-runtime.md#lab-s04) | Typed command executor và Lab.Api | LAB-S02, LAB-E05 | Current authority + atomic audit intent | PLANNED |
+| [LAB-S09](app-02b-local-preprod/02-security-and-runtime.md#lab-s09) | B3 fixture actors và B5 authority enrollment | LAB-S02, LAB-I05, LAB-E05 | Approved lab accounts/RBAC, monotonic change receipts | PLANNED |
+| [LAB-S04](app-02b-local-preprod/02-security-and-runtime.md#lab-s04) | Typed command executor và Lab.Api | LAB-S09, LAB-E05 | Current authority + atomic audit intent | PLANNED |
 | [LAB-S05](app-02b-local-preprod/02-security-and-runtime.md#lab-s05) | Shared durable intake/source adapter | LAB-S04, LAB-I05 | Journal thật, canonical v1 giữ nguyên | PLANNED |
 | [LAB-I06](app-02b-local-preprod/01-platform-and-recovery.md#lab-i06) | Backup schedule và retained copies | LAB-I05, LAB-E05 | FULL/DIFF/LOG, LSN/key/transfer receipts | PLANNED |
 | [LAB-I07](app-02b-local-preprod/01-platform-and-recovery.md#lab-i07) | Durable outcome receiver | LAB-I03, LAB-E05 | Same-ID dedup, lost ACK, UNKNOWN | PLANNED |
@@ -77,7 +78,7 @@ Dependency dưới đây là **source/API prerequisite**. Live run còn cần en
 
 **Đợt 1 — status, chẩn đoán và hợp đồng.** Làm E01, E02, E05; sau đó I01 và E03/E04 theo bằng chứng. E01 có thể thực hiện ngay, không cần máy PREPROD. E05 chốt schema trước khi nhiều collector/script cùng sinh artifact. E02 tách quan sát lỗi khỏi fix để tránh “rerun xanh = fixed”.
 
-**Đợt 2 — dựng lab và đường authority.** I02→I03, review S01/#74, rồi I04→I05. Song song theo dependency: S02→S03/S04; I06/I07; E06. S04 giữ các host foundation hiện tại và tạo host lab riêng, có approved source/config/operation manifest.
+**Đợt 2 — dựng lab và đường authority.** I02→I03, review S01/#74, rồi I04→I05. Song song theo dependency: S02→S03, (S02 + I05 + E05)→S09→S04; I06/I07; E06. S09 bổ sung account/membership/RBAC lifecycle có phê duyệt; không dùng CI seed làm live authority. S04 giữ các host foundation hiện tại và tạo host lab riêng, có approved source/config/operation manifest.
 
 **Đợt 3 — end-to-end runtime và recovery.** S05→S06→S07; S08 có thể bắt đầu ngay sau S04. O01 nối telemetry/alert thật; I08 triển khai cutover và safe return; O02 làm retention mechanism. Đừng chạy full gate trước khi API→journal→Worker→CASE→outcome/audit có đường thực thi thật.
 
@@ -87,8 +88,8 @@ Dependency dưới đây là **source/API prerequisite**. Live run còn cần en
 
 ```mermaid
 flowchart TD
-    C["E01/E02/E05: status, diagnostics, contracts"] --> I["I01-I05: platform and identity setup"]
-    C --> S["S01-S08: authority and durable runtime"]
+    C["E01/E02/E05: status, diagnostics, contracts"] --> I["I01-I05: platform and tenant setup"]
+    C --> S["S01-S09: authority and durable runtime"]
     I --> R["I06-I08: backup, outcome, restore"]
     S --> R
     S --> O["O01-O02: operations"]
@@ -114,15 +115,15 @@ Diagram là phase summary; bảng dependency và từng spec là nguồn chính 
 
 | Milestone | Hoàn tất khi | Nhãn/phạm vi tối đa |
 |---|---|---|
-| M0 — planning | Design, 31 dependency-scoped PR specs, exact case map, handoff và docs review | ROADMAP_PROPOSED; chưa triển khai |
+| M0 — planning | Design, 32 dependency-scoped PR specs, exact case map, handoff và docs review | ROADMAP_PROPOSED; chưa triển khai |
 | M1 — reproducible lab | I01–I05 đạt live setup checks trên đúng laptop; scope/credentials/targets enrolled | LOCAL_LAB_READY; chưa gate acceptance |
-| M2 — real execution path | S01–S08, O01–O02, I06–I08 có source/relevant CI và lab positive/negative measurements | LOCAL mechanism evidence với gaps cụ thể |
+| M2 — real execution path | S01–S09, O01–O02, I06–I08 có source/relevant CI và lab positive/negative measurements | LOCAL mechanism evidence với gaps cụ thể |
 | M3 — full coverage report | E05–E13 thu đủ 30+2 rows, actual attempts/CI; FAIL/BLOCKED không bị che | LOCAL_OPERATOR_LAB_TESTED chỉ cho phần thực sự đo; SOLO_OWNER_SELF_ATTESTED |
 | M4 — original physical closeout | Original all30/all5 + runtime2, approved external trust, actual witnesses/reviewers, recovery/off-host custody, exact-source CI và Owner disposition | Có thể đề xuất PREPROD_FOUNDATION_VERIFIED cho #56; không tự mở production/Pilot |
 
 Một code PR chỉ gọi SOURCE_READY/SOURCE_MERGED khi: phạm vi đúng increment; regression chứng minh invariant; relevant retained CI đúng HEAD; independent technical review không còn blocker; migration/config/admission defaults an toàn; PR body ghi live tests đã chạy/chưa chạy. Thiếu applicable source-merge disposition thì giữ Draft có lý do, không thừa kế exception cũ.
 
-Trạng thái register sau này: `PLANNED → IN_PROGRESS → SOURCE_REVIEW → SOURCE_MERGED → LAB_EXECUTED → LAB_REVIEWED`; BLOCKED luôn kèm dependency/artifact/reason. Original physical ledger giữ riêng NOT_RUN/NOT_VERIFIED. Một docs PR hoàn tất không chuyển 31 implementation rows thành done.
+Trạng thái register sau này: `PLANNED → IN_PROGRESS → SOURCE_REVIEW → SOURCE_MERGED → LAB_EXECUTED → LAB_REVIEWED`; BLOCKED luôn kèm dependency/artifact/reason. Original physical ledger giữ riêng NOT_RUN/NOT_VERIFIED. Một docs PR hoàn tất không chuyển 32 implementation rows thành done.
 
 ## 7. Điều kiện trước khi đóng #56
 

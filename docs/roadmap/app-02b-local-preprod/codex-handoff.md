@@ -36,7 +36,7 @@ PR body tối thiểu:
 - **Remaining gates:** các case cần raw execution, Owner decisions/custodians còn thiếu và issue tiếp tục OPEN.
 - **Rollback/recovery:** source revert không đồng nghĩa DB downgrade; migration đã apply dùng forward repair, suspend trước khi thay binding/authority.
 
-File owners: LAB-E05 owns Python/JSON provenance contract; LAB-S04 owns matching C# DTO/admission/atomic audit intent; LAB-S05 owns shared canonical journal and immutable identity mapping; LAB-S08 owns relay/anchor; LAB-I05 owns lifecycle orchestration; LAB-I08 owns restore cutover extension; LAB-O01/O02 own live ops; LAB-E08..E12 own scenarios, không tạo runtime mechanism thay các owner đó. File dùng chung đổi theo PR tuần tự, tránh hai agent cùng ghi.
+File owners: LAB-E05 owns Python/JSON provenance contract; LAB-S09 owns matching shared C# DTO, B3 fixture actors, B5 authority enrollment and versioned permission catalog; LAB-S04 owns admission/typed handlers/atomic command audit intent; LAB-S05 owns shared canonical journal and immutable identity mapping; LAB-S08 owns relay/anchor; LAB-I05 owns lifecycle orchestration and the B53 activation-permit adapter; LAB-I08 owns restore cutover extension; LAB-O01/O02 own live ops; LAB-E08..E12 own scenarios, không tạo runtime mechanism thay các owner đó. File dùng chung đổi theo PR tuần tự, tránh hai agent cùng ghi. S09 chạy trước S04 theo dependency, không theo thứ tự số ID; original ADMIN-01 physical acceptance chưa được đóng bởi fixture enrollment.
 
 ## 3. Windows tools và host placement
 
@@ -86,8 +86,8 @@ dotnet test --project tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.
 |---|---|
 | E02–E04, S05–S07 shared kernel | `tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj`; toàn bộ APP00A workflow |
 | I02/I03, S04/S06 host/admission | `tests/FmcgDms.Preprod.Runtime.Tests/FmcgDms.Preprod.Runtime.Tests.csproj`; B2 container/ingress/Vault checks |
-| S01–S03, S04 session guard | `tests/FmcgDms.Preprod.Identity.Tests/FmcgDms.Preprod.Identity.Tests.csproj` và `tests/FmcgDms.Preprod.Identity.SqlServer.Tests/FmcgDms.Preprod.Identity.SqlServer.Tests.csproj` |
-| S01/S04/S06/S07, I08 | `tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj` và `tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj` |
+| S01–S03, S09 enrollment, S04 session guard | `tests/FmcgDms.Preprod.Identity.Tests/FmcgDms.Preprod.Identity.Tests.csproj` và `tests/FmcgDms.Preprod.Identity.SqlServer.Tests/FmcgDms.Preprod.Identity.SqlServer.Tests.csproj` |
+| S01/S04/S06/S07/S09, I05 permit, I08 | `tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj` và `tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj` |
 | I05/I08, S04 | `tests/FmcgDms.Preprod.Tenancy.Tests/FmcgDms.Preprod.Tenancy.Tests.csproj` và `tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests/FmcgDms.Preprod.Tenancy.SqlServer.Tests.csproj` |
 | S07 | `tests/FmcgDms.Preprod.Policy.Tests/FmcgDms.Preprod.Policy.Tests.csproj` và `tests/FmcgDms.Preprod.Policy.SqlServer.Tests/FmcgDms.Preprod.Policy.SqlServer.Tests.csproj` |
 | I06–I08 | `tests/FmcgDms.Preprod.Recovery.Tests/FmcgDms.Preprod.Recovery.Tests.csproj` |

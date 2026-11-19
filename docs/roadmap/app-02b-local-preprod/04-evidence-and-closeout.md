@@ -264,7 +264,7 @@
 - [ ] Closeout local có thể ghi local mechanism verification và solo attestation; #56 vẫn OPEN cho đến khi original all30/all5 + runtime2 + independent reviews + off-host recovery + exact-source CI đáp ứng, hoặc Owner có amendment rõ ràng và truthful disposition riêng. Roadmap hiện tại không tự ban hành amendment.
 - [ ] Với actual physical run, invoke original `python tools/app02b9/oracle.py --bundle <secure> --fixture tools/app02b9/expected-v1.json --trust-roots <outside-repo-and-bundle> --expected-head <H> --output <secure-report>`. Exit0 chỉ là gate candidate; cần actual evidence inspection/Owner disposition. Production/Pilot, APP02C/D/E, real EV08/P0 giữ nguyên restrictions.
 
-**Closeout checklist:** all 31 source increments have explicit status/PR/SHA; 30 case rows and 2 runtime rows are present; known FAIL/BLOCKED and observer limitations stay visible; #59 scope/expiry is reread at report time; #75 root-cause disposition is linked; #73/B.9 docs are synchronized before any physical closure proposal. Report actual completed subset as local mechanism verification. Do not set a suite-wide PASS when B05-02 or another required case remains BLOCKED.
+**Closeout checklist:** all 32 source increments have explicit status/PR/SHA; 30 case rows and 2 runtime rows are present; known FAIL/BLOCKED and observer limitations stay visible; #59 scope/expiry is reread at report time; #75 root-cause disposition is linked; #73/B.9 docs are synchronized before any physical closure proposal. Report actual completed subset as local mechanism verification. Do not set a suite-wide PASS when B05-02 or another required case remains BLOCKED.
 
 ## Primary project sources
 
