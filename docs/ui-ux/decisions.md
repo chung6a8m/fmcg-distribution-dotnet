@@ -49,6 +49,11 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 - [APP-02C.0 contract](../roadmap/app-02c0-a-online-e2e-contract.md).
 - [Prototype mapping và provenance](prototype-mapping.md).
 
+## UI-04 direct implementation request (20/11/2026)
+
+The Owner asked “Triển khai UI-04” after UI-03 closeout. [Recorded request and authority boundary](../decisions/owner-ui04-2026-11-20.md) establishes `OWNER_REQUESTED / IMPLEMENTATION_BLOCKED / E2E_NOT_RUN`, **not** APP-02C C-DEV authorization. [Readiness/ADR](ui-04-readiness.md), [Sales A screen spec](ui-04-sales-a-screen.md) and [verification](ui-04-verification.md) are preparatory DOCS_ONLY documents. APP-02B physical foundation and C0-R01..06/C.1–C.4 prerequisites still apply before C.5 source work; UI-05 remains NOT_AUTHORIZED.
+
+
 ## Ủy quyền UI-03 riêng (20/11/2026)
 
 Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. UI-03 đã được review/merge qua [PR #84](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/84), trạng thái **`MERGED / UI03_100_PERCENT_CI_VERIFIED`** chỉ trong synthetic/nonproduction browser CI. Final source `dcd2870`, merge `f17397e`, 10/10 workflows và 20/20 jobs SUCCESS; [closeout](../closeout/2026-11-20-ui-03.md). [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Không được tích hợp APP-02C, tự coi client fixture là durable server evidence hoặc mở UI-04/05.
