@@ -1,6 +1,6 @@
 # UI-01 — Runtime Foundations
 
-**Status.** Design v0.1 is `ADOPTED` via [PR #79](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/79). UI-01 under OWN-UX-09 is `IMPLEMENTED_IN_PR` in [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80). The [verification guide](ui-01-verification.md) locates source-bound results. UI-02..05 remain `NOT_AUTHORIZED`.
+**Status.** Design v0.1 is `ADOPTED` via [PR #79](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/79). UI-01 under OWN-UX-09 is `MERGED / CI_VERIFIED` (synthetic/nonproduction) via [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80); reviewed source `2575651ae18e2e765b8072ef0b82409afce3319e`, merge `a0081b081221de725279e1d81b7d3dd8f4f93488`. See [post-merge closeout](../closeout/2026-11-20-ui-01.md). The [verification guide](ui-01-verification.md) locates source-bound results. UI-02..05 remain `NOT_AUTHORIZED`.
 
 ## 1. Purpose, users and entry points
 

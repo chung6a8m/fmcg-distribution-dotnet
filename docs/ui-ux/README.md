@@ -4,7 +4,7 @@
 
 Bộ quy chuẩn chuyển ngôn ngữ thiết kế của năm bộ prototype thành tài liệu có thể dùng khi đặc tả, triển khai và review UI của `fmcg-distribution-dotnet`. Hướng đã được người dùng yêu cầu là **gọn, nhiều dữ liệu hữu ích trên cùng màn hình**, bao phủ Sales A, Kho/điều phối, Hiện trường, Thủ quỹ/kế toán và Chủ NPP/vận hành.
 
-Owner chọn teal/navy, Noto Sans self-hosted, Desktop Compact, Field-first, Light/Dark/System, adaptive list/detail và chiến lược library theo ADR. UI-01 foundations/demo là `IMPLEMENTED_IN_PR` trong [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80). UI-02…05 vẫn `NOT_AUTHORIZED`. [Sổ quyết định](decisions.md).
+Owner chọn teal/navy, Noto Sans self-hosted, Desktop Compact, Field-first, Light/Dark/System, adaptive list/detail và chiến lược library theo ADR. UI-01 foundations/demo đã `MERGED / CI_VERIFIED` (synthetic/nonproduction) qua [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80); [closeout và bằng chứng](../closeout/2026-11-20-ui-01.md). UI-02…05 vẫn `NOT_AUTHORIZED`. [Sổ quyết định](decisions.md).
 
 ## Đọc và áp dụng
 
@@ -55,6 +55,6 @@ OWN-UX-07 chốt Sidebar + Adaptive List/Detail; OWN-UX-08 chốt **ADR theo t�
 
 ## Giới hạn bằng chứng
 
-PR #78 đã bàn giao tài liệu, tokens tham chiếu và bằng chứng render UI-00. Việc phê duyệt Design Baseline không chứng minh ứng dụng đã có component hoặc đạt usability/accessibility/runtime E2E. Không nâng trạng thái APP/PREPROD/EV/P0, không sửa `business/` hoặc `business.lock.json`, và không mở offline business writes.
+PR #78 đã bàn giao tài liệu, tokens tham chiếu và bằng chứng render UI-00. Việc phê duyệt Design Baseline đơn thuần không chứng minh runtime acceptance; UI-01 sau đó có kiểm chứng CI trên source HEAD riêng và chỉ cho foundations/demo synthetic, không xác nhận usability/accessibility toàn sản phẩm hay E2E nghiệp vụ. Không nâng trạng thái APP/PREPROD/EV/P0, không sửa `business/` hoặc `business.lock.json`, và không mở offline business writes.
 
 Ngoại lệ [OWN-APP00B-13-02](../decisions/owner-app00b-13-02-125-scale-exception.md) về 125% tiếp tục có hiệu lực trong phạm vi được ghi. Chuẩn này không đưa lại kiểm tra 125% thành gate bắt buộc hoặc backlog bắt buộc của APP-00B/C.

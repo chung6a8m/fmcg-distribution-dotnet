@@ -2,7 +2,7 @@
 
 ## UX-G01 - Trạng thái và trách nhiệm
 
-Design Baseline v0.1 là `ADOPTED` sau merge PR #79. Owner duyệt 9/9 ngày 20/11/2026 và cấp quyền UI-01 foundations/demo. UI-01 `IMPLEMENTED_IN_PR` trong PR #80. [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md) · [Kiểm chứng runtime](ui-01-verification.md).
+Design Baseline v0.1 là `ADOPTED` sau merge PR #79. Owner duyệt 9/9 ngày 20/11/2026 và cấp quyền UI-01 foundations/demo. UI-01 `MERGED / CI_VERIFIED` (synthetic/nonproduction) qua PR #80; [closeout](../closeout/2026-11-20-ui-01.md) ghi chính xác source CI và ranh giới chưa nghiệm thu. [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md) · [Kiểm chứng runtime](ui-01-verification.md).
 
 Designer/implementer chuẩn bị đặc tả và evidence. Reviewer kiểm tính nhất quán với hợp đồng và chuẩn được chấp nhận. Với solo developer, AI review được ghi đúng là independent technical review nếu dùng ngữ cảnh riêng; không giả danh người vận hành, Human Security hay người phê duyệt độc lập nghiệp vụ.
 
