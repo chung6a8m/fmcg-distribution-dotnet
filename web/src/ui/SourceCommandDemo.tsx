@@ -78,7 +78,8 @@ function SourcePanel({ permission }: { permission: Workflow['permission'] }) {
     <div className="panel-heading">
       <h2 id="ui03-source-title">Nguồn, phạm vi và độ đầy đủ</h2>
       <Badge tone={accessible ? complete ? 'success' : 'warning' : 'danger'}>
-        {!accessible ? 'Không có quyền đọc' : source.stale ? 'Bản chụp cũ' : complete ? 'Đủ nguồn mẫu' : 'Chưa đủ nguồn'}
+        {!accessible ? 'Không có quyền đọc' : source.stale ? 'Bản chụp cũ' : count === 0 ? 'Chưa có dữ liệu'
+          : complete ? 'Đủ nguồn mẫu' : 'Chưa đủ nguồn'}
       </Badge>
     </div>
     <div className="panel-content">
@@ -104,9 +105,10 @@ function SourcePanel({ permission }: { permission: Workflow['permission'] }) {
           <div><dt>Phạm vi</dt><dd>{source.scope}</dd></div>
           <div><dt>Nguồn</dt><dd>Báo cáo chuyến · dữ liệu fixture, không phải API</dd></div>
           <div><dt>As of (theo nguồn)</dt><dd><time dateTime={source.asOf}>{source.clock}</time></dd></div>
-          <div><dt>Độ đầy đủ</dt><dd>{source.expected === null
-            ? count + ' nguồn đã biết · chưa xác định tổng số nguồn'
-            : count + '/' + source.expected + ' báo cáo chuyến'}</dd></div>
+          <div><dt>Độ đầy đủ</dt><dd>{count === 0 && source.expected === 0
+            ? 'Không có báo cáo trong phạm vi này'
+            : source.expected === null ? count + ' nguồn đã biết · chưa xác định tổng số nguồn'
+              : count + '/' + source.expected + ' báo cáo chuyến'}</dd></div>
           <div><dt>Doanh thu báo cáo</dt><dd>{count === 0 ? 'Chưa có dữ liệu'
             : complete ? formatter.format(knownTotal) + ' ₫ · tổng đầy đủ'
               : formatter.format(knownTotal) + ' ₫ · tổng phần đã biết'}</dd></div>
