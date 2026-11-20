@@ -175,7 +175,9 @@ export function tryRestoreWorkflow(raw: string | null): Workflow | null {
       !Array.isArray(value.history) || value.history.length > 24 ||
       !value.history.every(h => typeof h === 'string' && h.length < 200)) return null
     // A persisted browser fixture must not invent an ACK on a draft or forget a known ACK.
-    if ((['draft', 'checked', 'pending'].includes(value.phase!) && value.intakeAcknowledged) ||
+    // UNKNOWN means no durable intake ACK is established in the state machine.
+    // Do not restore a contradictory browser snapshot as business truth.
+    if ((['draft', 'checked', 'pending', 'unknown'].includes(value.phase!) && value.intakeAcknowledged) ||
       (['ack', 'waiting', 'posted'].includes(value.phase!) && !value.intakeAcknowledged)) return null
     const sent = value.sent
     if (value.phase !== 'draft' && value.phase !== 'checked') {
