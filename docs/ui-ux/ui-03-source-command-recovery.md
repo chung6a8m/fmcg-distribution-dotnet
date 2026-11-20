@@ -20,7 +20,7 @@ Detail disclosure shows known report IDs and missing IDs. The no-read fixture al
 
 ## Command workflow — UX-B03…B07
 
-1. Draft: quantity/version editable. Preflight checks only positive decimal buffer, simulated assignment and connectivity. Changing any of these invalidates the previous preflight.
+1. Draft: quantity/version editable. Preflight checks only positive decimal buffer, simulated assignment and connectivity. Changing any of these **or reloading the page** invalidates the previous client-side preflight; draft buffer and request ID survive valid same-tab reload.
 2. Checked: one explicit synthetic send is allowed; server must independently recheck authority, version, stock and policies at commit.
 3. Pending: ID, quantity and revision freeze; duplicate send is rejected at reducer level. No transport ACK, business posting or ledger effect is implied.
 4. UNKNOWN: lost ACK or lookup with no result is not rollback/rejection. The only continuation is **Kiểm tra kết quả lần gửi này**, referencing the same ID. No alternate ID, replay or offline queue is offered.
