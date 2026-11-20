@@ -188,9 +188,12 @@ export function tryRestoreWorkflow(raw: string | null): Workflow | null {
     if (value.phase === 'checked' &&
       value.checkedSignature !== [value.id, value.quantity, value.revision].join('|')) return null
     return {
-      phase: value.phase!, id: value.id!, sequence: value.sequence!, quantity: value.quantity!,
+      // A client-only preflight is not authoritative across navigation/reload.
+      // Keep the draft identity and buffer, but require a fresh explicit check.
+      phase: value.phase === 'checked' ? 'draft' : value.phase!,
+      id: value.id!, sequence: value.sequence!, quantity: value.quantity!,
       revision: value.revision!, permission: value.permission!, connection: value.connection!,
-      checkedSignature: value.phase === 'checked' ? value.checkedSignature! : null,
+      checkedSignature: null,
       sent: value.phase === 'draft' || value.phase === 'checked' ? null : sent!,
       intakeAcknowledged: value.intakeAcknowledged!, history: value.history
     }
