@@ -112,6 +112,8 @@ Focus ring đề xuất: **2px, offset 2px**, dùng `color.focus.ring` của the
 
 “Tối thiểu” không có nghĩa khóa chiều cao. Lỗi nhiều dòng, nhãn dài, nội dung bổ sung và text zoom phải làm vùng tương ứng tăng chiều cao.
 
+Áp dụng theo layout thực: control/wrapper dùng `min-height`; bảng native có recipe row `height` như mức sàn và tính đủ padding/border tại [hợp đồng mật độ bảng](components.md#compact-table-sizing). Không suy class `min-h-*` trên `tr`/`td` đã giữ được hàng 36px. Hàng đang sửa và focus phải được kiểm cùng hàng đọc; tránh cộng padding form vào cell làm mật độ thay đổi ngoài ý muốn.
+
 Chế độ mật độ là tùy chọn trình bày; không đổi số liệu, quyền, bộ lọc hay dòng đang chọn. Không tự chuyển sang compact chỉ vì viewport hẹp. Người dùng cảm ứng cần vùng thao tác phù hợp dù đang xem bảng desktop.
 
 Icon nhỏ có thể nằm trong target lớn hơn. Các target cạnh nhau phải có khoảng tách và không chồng lấn; việc tăng vùng bấm không được làm người dùng kích hoạt nhầm hàng kế bên.

@@ -83,6 +83,65 @@ Sort/filter không âm thầm chuyển nguồn đang sửa. Refresh giữ lựa 
 
 Chuyển bảng thành thẻ trên mobile khi mục đích là xử lý từng nguồn. Giữ bảng cuộn có kiểm soát khi nhiệm vụ thực sự cần so sánh nhiều cột; không thu nhỏ chữ để ép vừa.
 
+<a id="compact-table-sizing"></a>
+
+### Mật độ bảng: hàng đọc, editor và nội dung dài
+
+Các số dưới đây vẫn là **DESIGNER_PROPOSED**, dùng lại token hiện có. Compact phải được đo ở hàng/cell đã render; giá trị token riêng lẻ chưa chứng minh bảng gọn hoặc dễ thao tác.
+
+| Trạng thái | Compact | Comfortable | Quy tắc |
+|---|---:|---:|---|
+| Hàng đọc một dòng | Mức sàn 36px, chữ 13/18 | Mức sàn 44px, chữ 13/18 | Không thêm padding dọc làm mọi hàng cao hơn mức sàn mà thiếu lý do |
+| Editor một dòng | Control tối thiểu 32px | Control tối thiểu 40px | Dùng border-box; tính cả padding/border của cell, không cộng nguyên padding của form ngoài bảng |
+| Nhiều dòng / validation | Tăng theo nội dung | Tăng theo nội dung | Lỗi liên kết với ô, giữ focus và dữ liệu; không clip để giữ số dòng trên màn |
+| Bảng dùng cảm ứng | Theo spec cảm ứng | Theo spec cảm ứng | Target 48px của Field không được đặt trong hàng 36/44px rồi chồng vùng bấm sang hàng bên |
+
+`min-height` phù hợp với control/wrapper block/flex/grid, nhưng không là cách bảo đảm mức sàn cho `tr`/`td` native. Trong table layout, `height` của row là một đầu vào tối thiểu: nội dung cell cao hơn vẫn làm hàng tăng. Nguồn: [CSS minimum/maximum heights](https://www.w3.org/TR/CSS22/visudet.html#min-max-heights) và [table height algorithms](https://www.w3.org/TR/CSS22/tables.html#height-layout).
+
+Recipe layout dưới đây là tham chiếu cho **bảng native, cell không rowspan**, chưa là component có đủ theme/state/keyboard. `data-density` là selector minh họa cục bộ, không là API runtime đã chốt. Không đặt tổng chiều cao cố định cho table, không đổi `tr` thành block và không thêm `overflow: hidden` để giữ hàng thấp:
+
+```css
+.reference-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--fmcg-font-family);
+  font-size: var(--fmcg-font-size-table);
+  line-height: var(--fmcg-font-line-height-table);
+}
+.reference-table tr {
+  height: var(--fmcg-density-compact-row-min);
+}
+.reference-table[data-density="comfortable"] tr {
+  height: var(--fmcg-density-comfortable-row-min);
+}
+.reference-table :is(th, td) {
+  box-sizing: border-box;
+  padding-block: var(--fmcg-space-0);
+  padding-inline: var(--fmcg-space-8);
+  border-block-end: var(--fmcg-border-width) solid var(--fmcg-color-border-subtle);
+  vertical-align: middle;
+}
+.reference-table .cell-editor {
+  display: block; /* Không thêm khoảng baseline của inline input vào cell. */
+  box-sizing: border-box;
+  min-height: var(--fmcg-density-compact-control-min);
+  margin: 0;
+  padding-block: var(--fmcg-space-0);
+  padding-inline: var(--fmcg-space-8);
+  border: var(--fmcg-border-width) solid var(--fmcg-color-border-control);
+  font: inherit;
+}
+.reference-table[data-density="comfortable"] .cell-editor {
+  min-height: var(--fmcg-density-comfortable-control-min);
+}
+```
+
+Với recipe này, nội dung một dòng hoặc editor 32px cộng border dưới 1px đều nằm trong mức sàn hàng 36px; comfortable tương ứng 40px trong 44px. Ngược lại, cell có padding trên/dưới 8px cần ít nhất `32 + 8 + 8 + 1 = 49px` khi mở editor. Vì vậy phải đặc tả đồng thời row, control và cell padding. Đây là phân tích box model của recipe, chưa là số đo browser.
+
+Outline không tham gia phép tính chiều cao: control 32px với outline 2px/offset 2px có vùng vẽ ngoài 40px. Component spec phải chỉ rõ cách giữ focus không bị clip/che hoặc đè nội dung hàng bên: bố trí vùng vẽ và thứ tự paint phù hợp, hoặc tăng khoảng trống/hàng khi cần. Không thu nhỏ target hoặc tắt outline để giữ 36px. Popup/lookup không bị giới hạn bởi chiều cao hàng; chỉ mount editor khi thực sự sửa theo UX-I03.
+
+Với grid/virtualization, dùng hợp đồng sizing của library và đo kết quả thực; không mặc định `rowHeight=36` vẫn cho nội dung tăng. Fixture nghiệm thu phải có hàng đọc, editor đang focus, tên dài, lỗi nhiều dòng và target của input mode đã chọn. Screen spec ghi số hàng/cột **hữu ích** đang thấy cùng nguồn, trạng thái, tiền/lượng và hành động; không đặt một quota số hàng chung cho mọi màn hoặc mở lại ngoại lệ 125%.
+
 ## 7. List/detail và hàng đợi công việc
 
 **Anatomy:** danh sách nguồn, trạng thái chọn, panel chi tiết, bằng chứng/điều kiện, bước tiếp theo và người xử lý khi có bàn giao.

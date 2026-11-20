@@ -39,6 +39,7 @@ Ghi theme matrix Light/Dark, lựa chọn explicit/System, portal/native control
 - Table hay grid; Enter/Tab/Escape; IME và lookup commit:
 - Dirty state, đổi dòng/filter, concurrency/version và background refresh:
 - Focus, accessible names, sticky footer/safe area:
+- Mật độ bảng: hàng đọc/editor/lỗi nhiều dòng, padding/border và focus; theo [recipe](../components.md#compact-table-sizing):
 
 ## 6. Review trước ghi và kết quả
 
@@ -56,6 +57,7 @@ Ghi theme matrix Light/Dark, lựa chọn explicit/System, portal/native control
 ## 8. Evidence và quyết định
 
 - Hình/state cần review; link bản vẽ và phiên bản:
+- Compact tại viewport đã chọn: số hàng/cột hữu ích cùng nguồn, trạng thái, tiền/lượng và CTA còn thấy; kích thước đo thực ở chế độ đọc/sửa; không là quota số hàng hoặc gate zoom mới:
 - Ca tương tác có rủi ro và kết quả thực:
 - Rule UI/UX áp dụng, ngoại lệ có ID/phạm vi/người chấp nhận:
 - NOT_RUN/BLOCKED và dependency; không ghi PASS từ ảnh tĩnh:

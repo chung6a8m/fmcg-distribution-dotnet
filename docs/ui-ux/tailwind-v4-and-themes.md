@@ -40,10 +40,12 @@ Component dùng màu theo vai trò, không dùng primitive để bỏ qua theme.
 | Màu | `--color-fmcg-*` tham chiếu `--fmcg-color-*` của 29 vai trò ngữ nghĩa; class giữ nguyên khi đổi theme |
 | Font | `--font-fmcg-body` ánh xạ font family; `--text-fmcg-body/table/...` đi cùng biến `--line-height` của từng cỡ |
 | Spacing/radius | Namespace `fmcg-*` giữ scale đề xuất; không reset toàn bộ theme mặc định của Tailwind |
-| Density/layout | Dùng custom properties với thuộc tính phù hợp, ví dụ `min-h-(--fmcg-density-compact-control-min)`; không đổi thành height cố định |
+| Density/layout | Control/wrapper dùng `min-h-(--fmcg-density-compact-control-min)`; native `tr` dùng `h-(--fmcg-density-compact-row-min)` như mức sàn của table layout, theo [recipe](components.md#compact-table-sizing); không khóa chiều cao block/grid hoặc cắt nội dung |
 | Responsive | `fmcg-medium:` = 48rem, `fmcg-large:` = 64rem, `fmcg-wide:` = 80rem; là viewport variant, không phải container variant |
 
 Kích thước token hiện giữ CSS px tham chiếu. Không tự chia mọi giá trị cho 16 để đổi thành rem khi root đang là 14px: `0.875rem` lúc đó chỉ là 12.25px, không giữ body 14px. Thay root hoặc chiến lược đơn vị cần kiểm lại typography, density, spacing và utility hiện hành trong increment tương ứng.
+
+Spacing compact dùng namespace đúng: `px-fmcg-8` là 8px theo token, không phải `px-8` của scale mặc định Tailwind. Recipe bảng dùng `py-fmcg-0`, `border-separate border-spacing-0` và không thêm chiều cao tổng cho table; chỉ compile được `h-*`/`min-h-*` chưa chứng minh row, editor hoặc focus render đúng.
 
 Breakpoint là **literal được resolve lúc build**, không dùng `var(--fmcg-layout-breakpoint-medium)` trong media query. `48rem/64rem/80rem` tương ứng `768/1024/1280` CSS px khi initial font của browser là 16px; rem trong media query không lấy root 14px của ứng dụng. Mốc chuyển layout vì vậy phụ thuộc thiết lập font ban đầu của browser.
 

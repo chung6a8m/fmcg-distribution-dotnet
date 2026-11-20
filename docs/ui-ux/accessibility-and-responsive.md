@@ -59,7 +59,7 @@ Bảng có nhu cầu so sánh hai chiều có thể cuộn ngang trong vùng b�
 
 ## UX-A06 - Chữ, chuyển động và kiểm chứng
 
-Cỡ chữ là mặc định, không là cấm người dùng phóng to. Row/control dùng min-height; tăng chiều cao khi chữ hoặc nội dung cần. Không cắt dấu tiếng Việt, error message hoặc label dài bằng chiều cao cứng.
+Cỡ chữ là mặc định, không là cấm người dùng phóng to. Control và wrapper block/flex/grid dùng `min-height` hoặc `min-block-size`; tăng chiều cao khi chữ hoặc nội dung cần. Với bảng HTML native, không dựa vào `min-height` trên `tr`/`td` để giữ chiều cao hàng: dùng recipe `height` của table row như mức sàn theo [hợp đồng mật độ bảng](components.md#compact-table-sizing), hoặc wrapper bên trong cell có tính đủ padding/border. Đây không phải chiều cao block bị khóa; nội dung nhiều dòng vẫn làm hàng tăng. Không cắt dấu tiếng Việt, error message hoặc label dài.
 
 Hỗ trợ reduced motion; chuyển động nhẹ chỉ phản hồi trạng thái. Không chớp nháy hoặc tự di chuyển focus khi dữ liệu nền cập nhật.
 

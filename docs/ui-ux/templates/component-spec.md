@@ -32,7 +32,8 @@
 - Tab/Enter/Escape/arrows; IME; focus vào/ra; không keyboard trap:
 - Light/Dark state matrix; explicit theme/System; color-scheme và portal/native control; forced-colors/reduced-motion trong phạm vi:
 - Contrast cặp thật, target, chữ dài, safe area và cách dùng khi hover không có:
-- Responsive và mode cảm ứng; min-height thay height cứng khi cần:
+- Responsive và mode cảm ứng; sizing theo layout (block/grid min-height; native table theo [recipe](../components.md#compact-table-sizing)), nội dung tăng chiều cao:
+- Hàng đọc/editor/validation: row và control đo thực, cell padding/border, focus clearance; target không chồng hàng:
 
 ## 5. Dữ liệu và an toàn tác vụ
 
