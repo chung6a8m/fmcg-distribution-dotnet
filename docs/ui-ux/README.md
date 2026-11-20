@@ -20,7 +20,7 @@ Owner chọn teal/navy, Noto Sans self-hosted, Desktop Compact, Field-first, Lig
 | [Quản trị và review](governance-and-review.md) | MUST/SHOULD, ngoại lệ, phiên bản và bằng chứng PR |
 | [Mapping prototype](prototype-mapping.md) | Truy nguồn 52 bản màn hình và các điểm đã chuẩn hóa |
 | [Sổ quyết định](decisions.md) / [Owner Decisions](../decisions/owner-uiux-2026-11-20.md) | 9 quyết định đã chốt, các mục còn mở và giới hạn cấp quyền |
-| [Kiểm tra reference UI-00](verification.md) / [Kiểm chứng runtime UI-01](ui-01-verification.md) | Compiler/token parity và evidence runtime theo source HEAD của PR |
+| [Kiểm tra reference UI-00](verification.md) / [Kiểm chứng runtime UI-01](ui-01-verification.md) / [UI-02 component ADR](ui-02-data-entry.md) / [UI-02 verification](ui-02-verification.md) | Compiler/token parity và evidence runtime theo source HEAD của PR |
 | [Adoption roadmap](adoption-roadmap.md) | Các increment áp dụng độc lập, chưa tự được cấp phép thực thi |
 | [Screen spec template](templates/screen-spec.md) | Đặc tả một màn hình/luồng trước khi code |
 | [Component spec template](templates/component-spec.md) | Đặc tả thành phần trước khi tạo hoặc mở rộng |
@@ -49,9 +49,9 @@ Trong baseline đã được áp dụng, **MUST** là yêu cầu trong phạm vi
 
 ## Phạm vi kỹ thuật hiện tại
 
-Health/PWA shell tại `/` và demo `/ui/foundations` dùng chung [CSS entry](../../web/src/style.css), Noto Sans WOFF2 self-hosted 400/700, token Light và 29 Dark overrides. Bootstrap [theme-runtime.js](../../web/public/theme-runtime.js) resolve trước React; selector trong shell, demo và native dialog dùng cùng controller. [Đặc tả UI-01](ui-01-runtime-foundations.md) · [Kiểm chứng](ui-01-verification.md).
+Health/PWA shell tại `/`, UI-01 `/ui/foundations` và synthetic UI-02 `/ui/data-entry` dùng chung [CSS entry](../../web/src/style.css), Noto Sans WOFF2 self-hosted 400/700, token Light và 29 Dark overrides. Bootstrap [theme-runtime.js](../../web/public/theme-runtime.js) resolve trước React; selector trong shell, demo và native dialog dùng cùng controller. [Đặc tả UI-01](ui-01-runtime-foundations.md) · [Kiểm chứng](ui-01-verification.md).
 
-OWN-UX-07 chốt Sidebar + Adaptive List/Detail; OWN-UX-08 chốt **ADR theo từng increment** chứ chưa chọn thư viện component/grid/icon/docking cụ thể. OWN-UX-09 **chỉ** cho phép UI-01 foundations/demo controls sau merge hồ sơ quyết định, không cho phép grid phức tạp, API nghiệp vụ hoặc các increment UI-02…05.
+OWN-UX-07 chốt Sidebar + Adaptive List/Detail; OWN-UX-08 chốt **ADR theo từng increment** chứ chưa chọn thư viện component/grid/icon/docking cụ thể. OWN-UX-09 **chỉ** cho phép UI-01 foundations/demo controls. [Lệnh trực tiếp của Owner ngày 20/11/2026](../decisions/owner-ui02-2026-11-20.md) mở riêng UI-02 synthetic Lab với native ADR, không cho phép API nghiệp vụ, production grid hoặc UI-03…05; UI-02 chưa được CI/review final-HEAD nghiệm thu.
 
 ## Giới hạn bằng chứng
 
