@@ -118,3 +118,12 @@ test('UI03-C06 invalid saved UNKNOWN is not silently accepted as a new request',
   // this null result and block command actions without overwriting storage.
   assert.deepEqual(restoreWorkflow(invalid), newWorkflow())
 })
+
+test('UI03-C08 contradictory UNKNOWN with durable ACK never restores as valid evidence', () => {
+  const unknown = reduce(submitted(), { type: 'lost-ack' })
+  const invalid = JSON.stringify({ ...unknown, schema: 1, intakeAcknowledged: true })
+  assert.equal(tryRestoreWorkflow(invalid), null)
+  assert.equal(tryRestoreWorkflow(JSON.stringify({ ...unknown, schema: 1 }))?.phase, 'unknown')
+  const ack = reduce(unknown, { type: 'lookup', outcome: 'ack' })
+  assert.equal(tryRestoreWorkflow(JSON.stringify({ ...ack, schema: 1 }))?.phase, 'ack')
+})
