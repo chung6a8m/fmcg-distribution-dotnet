@@ -6,7 +6,10 @@ const path = '/ui/data-entry'
 test('LAB link, selected lookup identity, comma decimal, form validation and no API writes', async ({ page }) => {
   const apiRequests: string[] = []
   page.on('request', request => {
-    if (['fetch', 'xhr'].includes(request.resourceType())) apiRequests.push(request.url())
+    // The APP-00A landing shell intentionally probes /health/live before navigation.
+    if (['fetch', 'xhr'].includes(request.resourceType()) && !request.url().endsWith('/health/live')) {
+      apiRequests.push(request.method() + ' ' + request.url())
+    }
   })
   await page.goto('/')
   await page.getByRole('link', { name: 'UI-02 · Form & Grid Lab' }).click()
