@@ -4,7 +4,7 @@
 
 ## Phạm vi hiện tại: UI-00
 
-**UI-00 - Design baseline và reference tokens:** bộ tài liệu `docs/ui-ux/`, JSON/CSS reference, bảng thị giác, template, mapping 52 hình, đường dẫn từ README/AGENTS. Trạng thái bàn giao là đề xuất để review. Không import token vào runtime, không đổi `web/src`, package/lockfile, business hoặc CI gate hiện hữu.
+**UI-00 - Design baseline và reference tokens:** bộ tài liệu `docs/ui-ux/`, JSON/CSS reference, adapter Tailwind v4, Light/Dark palette, bảng thị giác Light, template, mapping 52 hình, đường dẫn từ README/AGENTS. Trạng thái bàn giao là đề xuất để review. Không import token vào runtime, không đổi `web/src`, package/lockfile, business hoặc CI gate hiện hữu.
 
 Kiểm tra phù hợp thay đổi: JSON/alias/CSS parity, contrast của cặp màu đã khai báo, liên kết đến cây Git nền, không đổi business/lock, render visual reference và independent review. Đó là kiểm tra artifact, không kiểm thử sản phẩm.
 
@@ -12,7 +12,7 @@ Kiểm tra phù hợp thay đổi: JSON/alias/CSS parity, contrast của cặp m
 
 | Increment | Kết quả có thể review độc lập | Vùng file dự kiến | Điều kiện / evidence |
 |---|---|---|---|
-| UI-01 Foundations runtime | Token adapter, font được cấp phép, Light theme, density và các control cơ bản trong demo có trạng thái | `web/src/ui/`, `web/src/style.css`, tests liên quan | Owner chấp nhận baseline; chốt adapter/library khi cần; build/PWA regression, contrast/focus/keyboard trên control thật |
+| UI-01 Foundations runtime | Áp dụng adapter Tailwind v4, font được cấp phép, Light/Dark/System theo baseline được chấp nhận, density và các control cơ bản trong demo có trạng thái | `web/src/ui/`, `web/src/style.css`, tests liên quan | Owner chấp nhận baseline; chốt adapter/library khi cần; build/PWA regression; theme bootstrap/native controls/portal; Light/Dark contrast/focus/keyboard trên control thật |
 | UI-02 Form, lookup và bảng | Input, validation, lookup identity và table/grid contract dùng chung | `web/src/ui/`, `web/e2e/` và unit/state tests khi phù hợp | Chốt grid/library bằng ADR nếu có; kiểm IME/caret, Enter/Tab/Escape, filter/selection, dữ liệu dài/decimal |
 | UI-03 Source, command và recovery UX | Scope/asOf, result panel, pending/UNKNOWN, preflight/conflict và permission states | UI wrappers + API adapter được module cho phép | API contract và runtime scope được cấp phép; lookup cùng identity, không double write; tách ảnh demo với API integration evidence |
 | UI-04 Một vertical slice | Một luồng nghiệp vụ trọn vẹn dùng component đã có | Màn/route/module API theo screen spec | Chọn luồng đã đủ authorization; riêng A phải giải quyết blockers APP-02C liên quan; review theo contract, không theo screenshot đơn lẻ |

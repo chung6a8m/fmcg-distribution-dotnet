@@ -12,10 +12,14 @@
 | UX-D06 | Noto Sans 400/700; fallback Segoe UI/system sans | DESIGNER_PROPOSED; artifact dùng Noto Sans, runtime hiện tại Segoe UI |
 | UX-D07 | Desktop body14/table13, row min36/control min32; comfortable row44/control40 | DESIGNER_PROPOSED; không coi cỡ 11,2–12 của bản vẽ là chuẩn sản phẩm |
 | UX-D08 | Field body16, control/target48; bố cục một cột | DESIGNER_PROPOSED; khớp định hướng Field, cần kiểm thiết bị thật |
-| UX-D09 | Light là reference theme v0.1; token theo nghĩa để có thể thêm theme sau | DESIGNER_PROPOSED; chưa tuyên bố Dark/high-contrast đã có |
+| UX-D09 | Light kế thừa prototype; thêm Dark semantic reference và hợp đồng Light/Dark/System trong review PR #78 | DESIGNER_PROPOSED theo trọng tâm review của người dùng; chưa là Owner adoption hoặc runtime/forced-colors acceptance |
 | UX-D10 | Sidebar + trang/list-detail; không tự chọn thư viện grid/component/icon/docking | DESIGNER_PROPOSED; library choice cần ADR khi thực sự triển khai |
 | UX-D11 | Giữ ngoại lệ 125% APP-00B/C đúng phạm vi | EXISTING_OWNER_DECISION, OWN-APP00B-13-02 |
 | UX-D12 | Không lấy prototype làm máy trạng thái/permission/policy đã duyệt | EXISTING_CONTRACT + ranh giới artifact; đặc biệt C0-R01…06 |
+
+### Phạm vi bổ sung khi review PR #78
+
+Người dùng yêu cầu chú ý Tailwind CSS v4 và Light/Dark. Review bổ sung hợp đồng adapter, Dark semantic values, generator/checker và checklist theme trong cùng phạm vi tài liệu. Đây là đề xuất kỹ thuật có thể review; không ghi rằng Owner đã chọn palette Dark cụ thể hoặc cấp quyền triển khai UI-01. Giữ nguyên các kích thước/font đề xuất và business authorization.
 
 ## Các cách áp dụng đã cân nhắc
 
@@ -31,7 +35,7 @@ Không có lựa chọn người dùng trả về cho hai câu hỏi tùy chọn
 | Thiết bị thực tế, Android/iOS, kho có cảm ứng/scanner | Owner khi chốt acceptance của UI tương ứng | Chưa suy thiết bị từ kích thước ảnh |
 | Mức kiểm zoom/phóng chữ ngoài phạm vi đã có | Owner ghi rõ phạm vi, giữ lịch sử ngoại lệ | Không mở lại 125% APP-00B/C |
 | Component/grid/icon library | ADR so sánh nhu cầu, license, accessibility, keyboard và chi phí | Không chọn thư viện chỉ vì dùng ở repo khác |
-| Dark mode/brand override | Owner + spec/tokens/theme verification | Light reference |
+| Runtime theme selection / brand override | Owner chốt adoption và scope UI-01; spec, bootstrap, portal/native controls và theme verification | Light/Dark reference đã có; System là quy tắc resolve đề xuất; chưa có switcher runtime; brand override chưa chốt |
 | Confirm/Reserve, ShipTo, policy validity, partial/repeated load | Contract increments của APP-02C và C0-R01…06 | Giữ trạng thái blocking/deferred ở baseline |
 | Mốc stale, SLA, tuổi nợ, KPI, giá/thuế, hạn mức | Business/policy contract được phê duyệt | Chưa thiết lập; không lấy số demo |
 | Offline drafts, GPS/ảnh/chữ ký bắt buộc, scan | Product/security contract riêng | Không hứa các năng lực chưa có |

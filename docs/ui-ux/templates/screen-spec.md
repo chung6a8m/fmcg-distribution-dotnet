@@ -29,6 +29,8 @@ Nêu rõ tổng trang, tổng filter, tổng phần đã biết và mẫu số n
 |---|---|---|---|
 | <điền> | <điền> | <điền> | <điền> |
 
+Ghi theme matrix Light/Dark, lựa chọn explicit/System, portal/native control, first paint/reload/PWA; đánh dấu NOT_RUN khi chưa kiểm. Palette tham chiếu không là evidence màn này.
+
 Đánh dấu áp dụng/không áp dụng và lý do cho: loading, empty, error, invalid, readonly, disabled, partial, stale, pending, UNKNOWN, rejected, conflict, permission revoked, offline trước gửi, physical action đã xảy ra.
 
 ## 5. Form, bảng và bàn phím

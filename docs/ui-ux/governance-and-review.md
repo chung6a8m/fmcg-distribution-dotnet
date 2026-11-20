@@ -10,13 +10,13 @@ MUST = bắt buộc trong bản chuẩn được chấp nhận và phạm vi li�
 
 ## UX-G02 - Một nguồn token và phiên bản
 
-`tokens/tokens.json` là nguồn giá trị. `tokens/tokens.css` là bản tham chiếu được sinh từ JSON; không sửa riêng CSS, không import thẳng vào ứng dụng trước increment UI-01.
+`tokens/tokens.json` là nguồn giá trị: 101 token nền Light và `themes.dark.values` cho toàn bộ 29 semantic color. `tokens/tokens.css` và `tokens/tailwind-v4.css` được sinh bằng `node docs/ui-ux/tools/sync-tokens.mjs --write`; chạy lại với `--check` để kiểm parity, aliases, completeness và contrast. Không sửa riêng CSS, không import vào ứng dụng trước increment UI-01.
 
 Schema token là **schema dự án**, không tuyên bố tương thích DTCG hay công cụ Figma. Mỗi token có type, value và CSS variable; `provenance` phân biệt inherited/proposed. Tham chiếu giữa token dùng `{token.name}` và phải được resolve/kiểm vòng lặp trước xuất.
 
 Thay đổi phá hành vi, nghĩa token hoặc default tương tác cần changelog/migration notes và review các màn dùng nó. Thêm token/component phải chứng minh nhu cầu dùng chung; không tạo hàng chục biến thể chỉ để khớp một screenshot.
 
-Dark theme, brand override hoặc density mới cần bộ cặp contrast và trạng thái riêng. Không suy tất cả theme pass từ Light.
+Dark reference có bộ kiểm contrast riêng; việc có palette không chứng minh theme runtime. Brand override hoặc density mới cần cặp contrast/trạng thái riêng. Không suy tất cả theme pass từ Light. [Hợp đồng adapter/theme](tailwind-v4-and-themes.md) quy định CSS-first, root selector, breakpoint và Light/Dark/System.
 
 ## UX-G03 - Checklist cho Codex trước khi viết UI
 
@@ -37,6 +37,7 @@ Dark theme, brand override hoặc density mới cần bộ cặp contrast và tr
 | Trạng thái | Initial load/empty/error, refresh cũ, pending, rejected, UNKNOWN và conflict |
 | Thực tế | Checkbox nhận/chi không tự tick; thông báo đã ghi có kết quả nguồn; tách physical event và posting |
 | Responsive | Các viewport/thiết bị đã chốt cho màn, vùng chạm, safe area, bàn phím mobile |
+| Theme | Light/Dark; System resolve; explicit choice thắng OS; color-scheme, portal, native control, reload và PWA không bị lệch theme |
 | Accessibility | Contrast cặp thực, accessible name, semantics, focus/keyboard, kiểm bổ sung trong phạm vi được duyệt |
 | Regression | Kiểm component/luồng có rủi ro cụ thể và PWA behavior liên quan; exact final commit evidence |
 | Đầy đủ | Screenshot đúng trạng thái + kết quả tương tác; không chỉ happy path hoặc ảnh tĩnh |

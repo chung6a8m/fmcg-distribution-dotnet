@@ -16,7 +16,9 @@ Mọi ma trận nghiệm thu mới có thể xung đột ngoại lệ này phả
 - Thành phần/biểu tượng/dấu hiệu cần để nhận biết control hoặc trạng thái: **3:1** với màu kề tương ứng. Không phải mọi đường kẻ trang trí đều phải đạt 3:1.
 - Không dùng màu làm dấu hiệu duy nhất: trạng thái có chữ, lỗi có nội dung, dòng chọn có dấu hiệu ngoài nền nhạt nếu cần nhận biết selection.
 - `border.subtle=#DCE3EC` chỉ để phân cách nhẹ; contrast với trắng khoảng 1,29:1. `border.control=#7D899A` là đề xuất cho ranh giới input cần nhận biết, khoảng 3,55:1 trên trắng và 3,34:1 trên nền trang.
-- Focus đề xuất 2 px màu `#315DA8`, offset 2 px; kiểm trên mọi nền thực tế, không suy pass từ một cặp màu.
+- Focus đề xuất 2 px theo token theme (Light `#315DA8`, Dark `#93C5FD`), offset 2 px; kiểm trên mọi nền thực tế, không suy pass từ một cặp màu.
+
+Light và Dark được kiểm riêng trên mọi trạng thái thực, kể cả selected/invalid/readonly/disabled, popup và native controls. Theme tối không thay thế forced-colors/high-contrast của hệ điều hành. Trong forced colors, giữ outline/dấu chọn và nhãn theo system colors; không vô hiệu bằng `forced-color-adjust: none` trên toàn ứng dụng. Reduced motion cũng là preference riêng. Chi tiết adapter và kiểm theme ở [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md).
 
 Nguồn: [WCAG 1.4.3 Contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html), [WCAG 1.4.11 Non-text Contrast](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html). Tỷ lệ palette trong gói này do tính từ RGB token; chưa bao gồm overlay, opacity, trạng thái thực và render của ứng dụng.
 

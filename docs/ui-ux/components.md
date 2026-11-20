@@ -12,6 +12,7 @@ Các trạng thái ghi nghiệp vụ, permission, UNKNOWN và phục hồi theo 
 
 - Mỗi control có tên truy cập, nhãn và mục đích ổn định; dùng đúng ngữ nghĩa link, button, input hoặc bảng.
 - Phân biệt focus, hover, pressed, selected, disabled và read-only; không dùng một style cho tất cả.
+- Mọi semantic color lấy theo Light/Dark hiện tại, gồm foreground của action/status, viền input và focus; kiểm cả hai theme khi áp dụng. Popup/dialog render qua portal phải kế thừa theme trên `html`, theo [hợp đồng theme](tailwind-v4-and-themes.md).
 - Hover chỉ hỗ trợ; thông tin cần thiết phải đọc được bằng bàn phím và cảm ứng.
 - Disabled cần lý do nhìn thấy hoặc truy cập được và đường xử lý phù hợp; không chỉ làm nhạt nút.
 - Read-only vẫn cho đọc/copy dữ liệu được phép; không làm dữ liệu khó đọc như control disabled.

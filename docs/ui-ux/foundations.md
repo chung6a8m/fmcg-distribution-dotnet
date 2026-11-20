@@ -52,7 +52,9 @@ Palette nền tảng được giữ từ cả năm bộ prototype. Tên vai trò
 
 Mỗi trạng thái cần có nhãn chữ. Lỗi tại trường có nội dung lỗi; lựa chọn có chỉ dấu rõ; focus có vòng bao; không chỉ đổi màu nền hoặc màu chữ.
 
-**v0.1 chỉ đặc tả giao diện sáng.** Token ngữ nghĩa cho phép bổ sung theme sau này; chưa có bảng màu, trạng thái hoặc bằng chứng kiểm tra cho dark mode.
+**Light là bảng tham chiếu kế thừa prototype; Dark là bảng bổ sung DESIGNER_PROPOSED trong review PR #78.** `tokens.json` giữ 101 token nền và thêm 29 giá trị Dark cho toàn bộ semantic color. Component dùng vai trò ngữ nghĩa, không dùng primitive trực tiếp. Palette Dark và adapter đã có kiểm riêng trong [verification](verification.md); khả năng đổi theme của ứng dụng vẫn chưa triển khai. Xem [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) trước khi áp dụng.
+
+Nhãn trong notice/badge dùng đúng cặp `status.*.foreground/background`. Không đặt `text.secondary` vào mọi nền màu: trên `status.info.background` của Light, cặp đó chỉ đạt 4,487:1. Không suy contrast từ một theme hoặc từ màu chưa thêm opacity sang trạng thái khác.
 
 ## 4. Typography
 
@@ -97,7 +99,7 @@ Bo góc đề xuất: **4 / 6 / 8**; **999** chỉ cho dạng pill khi có mục
 
 Viền cơ sở 1px. Phân cấp nội dung chủ yếu bằng vị trí, khoảng cách, tiêu đề và bề mặt; không thêm nhiều shadow để bù bố cục thiếu rõ ràng. Dialog/popover có thể cần phân tách khỏi nền theo đặc tả component sau này.
 
-Focus ring đề xuất: **2px `#315DA8`, offset 2px**. Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
+Focus ring đề xuất: **2px, offset 2px**, dùng `color.focus.ring` của theme hiện tại (Light `#315DA8`, Dark `#93C5FD`). Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
 
 ## 6. Mật độ và kích thước thao tác
 

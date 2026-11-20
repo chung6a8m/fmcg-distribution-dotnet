@@ -10,6 +10,7 @@ Các con số kích thước, font chuẩn hóa và cách chia breakpoint trong 
 
 | Tài liệu | Dùng khi nào |
 |---|---|
+| [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) | Adapter CSS-first, theme selection, portal/native controls và giới hạn kiểm chứng |
 | [Foundations](foundations.md) | Màu, chữ, khoảng cách, mật độ, shell và semantic tokens |
 | [Component contracts](components.md) | Cấu trúc và trạng thái thành phần dùng chung |
 | [Interaction patterns](interaction-patterns.md) | Bàn phím, bảng, lookup, form, focus và cập nhật dữ liệu |
@@ -23,7 +24,7 @@ Các con số kích thước, font chuẩn hóa và cách chia breakpoint trong 
 | [Adoption roadmap](adoption-roadmap.md) | Các increment áp dụng độc lập, chưa tự được cấp phép thực thi |
 | [Screen spec template](templates/screen-spec.md) | Đặc tả một màn hình/luồng trước khi code |
 | [Component spec template](templates/component-spec.md) | Đặc tả thành phần trước khi tạo hoặc mở rộng |
-| [Tokens JSON](tokens/tokens.json) / [CSS reference](tokens/tokens.css) | Giá trị dùng chung; CSS chưa được import vào ứng dụng |
+| [Tokens JSON](tokens/tokens.json) / [CSS reference](tokens/tokens.css) / [Tailwind v4 adapter](tokens/tailwind-v4.css) | Giá trị dùng chung; CSS chưa được import vào ứng dụng |
 | [Bảng tham chiếu thị giác](assets/design-system-sheet.svg) | Review nhanh palette, typography, density và trạng thái |
 
 ![Bảng tham chiếu Design System v0.1](assets/design-system-sheet.svg)
@@ -48,7 +49,7 @@ Trong bản đề xuất này, **MUST** diễn đạt điều kiện của chu�
 
 ## Phạm vi kỹ thuật hiện tại
 
-Repository đã chốt React + TypeScript + Vite + PWA online-first và Tailwind v4. UI hiện hành trong `web/src/main.tsx` là shell health/PWA; `web/src/style.css` đang dùng Segoe UI 14 px. v0.1 đề xuất font Noto Sans từ prototype, có fallback Segoe UI; việc đưa font/tokens vào runtime thuộc UI-01 riêng.
+Repository đã chốt React + TypeScript + Vite + PWA online-first và Tailwind v4. UI hiện hành trong `web/src/main.tsx` là shell health/PWA; `web/src/style.css` đang dùng Segoe UI 14 px. v0.1 đề xuất font Noto Sans từ prototype, có fallback Segoe UI; việc đưa font/tokens vào runtime thuộc UI-01 riêng. Review PR #78 bổ sung adapter Tailwind v4 và palette Dark tham chiếu: Light kế thừa prototype, Dark là DESIGNER_PROPOSED. Quy tắc Light/Dark/System, nguồn theme trên `html` và ma trận kiểm được ghi trong [hợp đồng theme](tailwind-v4-and-themes.md); chưa có theme switcher trong ứng dụng.
 
 Không có lựa chọn thư viện component, grid, icon hoặc workspace tabs được phê duyệt bởi tài liệu này. Các stack của repository khác không tự áp dụng sang project này.
 

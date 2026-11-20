@@ -30,6 +30,7 @@
 
 - Accessible name, role, state/value và thông báo cập nhật:
 - Tab/Enter/Escape/arrows; IME; focus vào/ra; không keyboard trap:
+- Light/Dark state matrix; explicit theme/System; color-scheme và portal/native control; forced-colors/reduced-motion trong phạm vi:
 - Contrast cặp thật, target, chữ dài, safe area và cách dùng khi hover không có:
 - Responsive và mode cảm ứng; min-height thay height cứng khi cần:
 

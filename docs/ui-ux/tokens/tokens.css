@@ -1,8 +1,9 @@
-/* FMCG UI/UX v0.1 - PROPOSED reference tokens.
- * Source: tokens.json; not imported by the application.
- * Regenerate all declarations from the source; do not change this file alone.
+/* FMCG UI/UX v0.1 - PROPOSED / DOCS_ONLY.
+ * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.
+ * Not imported by the application. Runtime adoption belongs to UI-01.
  */
 :root {
+  color-scheme: light;
   --fmcg-color-primitive-page: #F6F8FB;
   --fmcg-color-primitive-white: #FFFFFF;
   --fmcg-color-primitive-ink: #172B4D;
@@ -104,4 +105,38 @@
   --fmcg-motion-fast: 120ms;
   --fmcg-motion-normal: 180ms;
   --fmcg-motion-reduced: 0ms;
+}
+
+/* Theme is resolved on html only; missing/invalid preference falls back to Light. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fmcg-color-surface-page: #101827;
+  --fmcg-color-surface-card: #182438;
+  --fmcg-color-surface-subtle: #223047;
+  --fmcg-color-surface-row-alternate: #1C293E;
+  --fmcg-color-text-primary: #E7EDF5;
+  --fmcg-color-text-secondary: #A8B6C9;
+  --fmcg-color-text-inverse: #101827;
+  --fmcg-color-border-subtle: #34445B;
+  --fmcg-color-border-control: #7F91AA;
+  --fmcg-color-action-primary-background: #5EEAD4;
+  --fmcg-color-action-primary-hover: #99F6E4;
+  --fmcg-color-action-primary-pressed: #2DD4BF;
+  --fmcg-color-action-primary-foreground: #102522;
+  --fmcg-color-action-destructive-background: #FCA5A5;
+  --fmcg-color-action-destructive-foreground: #3D1217;
+  --fmcg-color-action-disabled-background: #223047;
+  --fmcg-color-action-disabled-foreground: #A8B6C9;
+  --fmcg-color-selection-background: #163E3A;
+  --fmcg-color-selection-indicator: #5EEAD4;
+  --fmcg-color-focus-ring: #93C5FD;
+  --fmcg-color-link-text: #93C5FD;
+  --fmcg-color-status-success-foreground: #5EEAD4;
+  --fmcg-color-status-success-background: #163E3A;
+  --fmcg-color-status-info-foreground: #93C5FD;
+  --fmcg-color-status-info-background: #1E3555;
+  --fmcg-color-status-warning-foreground: #FCD34D;
+  --fmcg-color-status-warning-background: #44351B;
+  --fmcg-color-status-danger-foreground: #FDA4AF;
+  --fmcg-color-status-danger-background: #4A2631;
 }
