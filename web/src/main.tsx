@@ -2,15 +2,14 @@ import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import { isLiveApiResponse } from './health'
+import { Button, ThemeSelect } from './ui/controls'
+import { FoundationsDemo } from './ui/FoundationsDemo'
 import './style.css'
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
 
-function App() {
+function HealthShell() {
   const [status, setStatus] = useState<Health>('Đang kiểm tra API…')
-  const [updateAvailable, setUpdateAvailable] = useState(false)
-  const updateWorker = useRef<ReturnType<typeof registerSW> | null>(null)
-
   useEffect(() => {
     let active = true
     const controller = new AbortController()
@@ -24,6 +23,32 @@ function App() {
     }
   }, [])
 
+  return <main className="page health-page">
+    <header className="page-heading">
+      <h1>FMCG Distribution · APP-00A</h1>
+      <p>Application foundation — Synthetic / Nonproduction</p>
+    </header>
+    <section className="panel panel-content" aria-labelledby="connection">
+      <h2 id="connection">Trạng thái kết nối</h2>
+      <p role="status">{status}</p>
+      <p><strong>Online-first.</strong> Chưa có business write hoặc offline command queue.</p>
+    </section>
+    <section className="panel panel-content">
+      <h2>Nền tảng giao diện</h2>
+      <ThemeSelect />
+      <a className="page-link" href="/ui/foundations">Nền tảng giao diện</a>
+    </section>
+    <section className="panel panel-content">
+      <h2>Increment tiếp theo</h2>
+      <p>APP-01A: Tenant/Customer/SKU/Trip, source/command ledger và isolation tests.</p>
+    </section>
+  </main>
+}
+
+function App() {
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const updateWorker = useRef<ReturnType<typeof registerSW> | null>(null)
+
   useEffect(() => {
     updateWorker.current = registerSW({
       onNeedRefresh() { setUpdateAvailable(true) }
@@ -31,26 +56,14 @@ function App() {
     return () => { updateWorker.current = null }
   }, [])
 
-  return <main className="mx-auto w-full max-w-[760px] px-4 py-10 font-sans">
-    <h1 className="text-2xl font-semibold tracking-tight">FMCG Distribution · APP-00A</h1>
-    <p className="mt-2 text-sm text-slate-500">Application foundation — Synthetic / Nonproduction</p>
-    <section className="my-4 space-y-2 rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-      <h2 className="text-base font-semibold">Trạng thái kết nối</h2>
-      <p role="status">{status}</p>
-      <p><strong>Online-first.</strong> Chưa có business write hoặc offline command queue.</p>
-    </section>
-    {updateAvailable && <section className="my-4 space-y-2 rounded-lg border border-slate-300 bg-white p-5 shadow-sm" role="status">
-      <h2 className="text-base font-semibold">Có phiên bản mới</h2>
+  return <>
+    {updateAvailable && <section className="update-prompt panel panel-content" role="status">
+      <h2>Có phiên bản mới</h2>
       <p>Ứng dụng đã sẵn sàng cập nhật. Các thay đổi chưa lưu cần được hoàn tất trước khi tải lại.</p>
-      <button className="rounded-md bg-brand-600 px-4 py-2 font-semibold text-white hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600" type="button" onClick={() => { void updateWorker.current?.(true) }}>
-        Cập nhật ứng dụng
-      </button>
+      <Button variant="primary" onClick={() => { void updateWorker.current?.(true) }}>Cập nhật ứng dụng</Button>
     </section>}
-    <section className="my-4 space-y-2 rounded-lg border border-slate-300 bg-white p-5 shadow-sm">
-      <h2 className="text-base font-semibold">Increment tiếp theo</h2>
-      <p>APP-01A: Tenant/Customer/SKU/Trip, source/command ledger và isolation tests.</p>
-    </section>
-  </main>
+    {location.pathname === '/ui/foundations' ? <FoundationsDemo /> : <HealthShell />}
+  </>
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
