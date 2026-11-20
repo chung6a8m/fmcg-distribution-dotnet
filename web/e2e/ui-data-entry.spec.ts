@@ -83,6 +83,13 @@ test('lookup exposes loading, error, forbidden and empty states without identity
   await input.fill('Không có tên này')
   await expect(page.getByRole('listbox')).toContainText('Không có kết quả')
   await expect(page.getByRole('listbox').getByRole('option')).toHaveCount(0)
+  await input.fill('Minh Anh')
+  await input.press('ArrowDown')
+  await input.press('Enter')
+  await expect(input).toHaveValue(/KH-101/)
+  await source.selectOption('forbidden')
+  await page.getByRole('button', { name: 'Kiểm tra nháp mẫu' }).click()
+  await expect(input).toHaveAccessibleDescription(/Nguồn danh mục chưa sẵn sàng/)
 })
 
 test('decimal buffer validates on blur, keeps incomplete edits and accepts a point', async ({ page }) => {
@@ -152,6 +159,7 @@ test('selection uses stable row ID; filter and sort are staged while editing', a
   await expect(editor).toHaveValue('9,5')
   await editor.press('Enter')
   await expect(grid.getByRole('gridcell', { name: /^Mã hàng SP-003:/ })).toBeVisible()
+  await expect(grid.getByRole('gridcell', { name: /^Mã hàng SP-003:/ })).toHaveAttribute('tabindex', '0')
   await expect(grid.getByRole('gridcell', { name: /^Mã hàng SP-001:/ })).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: 'line-001' })).toContainText('Dòng đang ẩn bởi bộ lọc')
   await page.getByRole('button', { name: 'Xóa bộ lọc' }).click()
