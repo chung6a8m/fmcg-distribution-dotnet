@@ -282,3 +282,23 @@ test('UI03-P02 read revocation redacts resolved POSTED label but preserves opaqu
   await expect(page.getByRole('region', { name: 'Kết quả theo lớp và lịch sử nguồn' }))
     .toContainText('POSTED (mô phỏng)')
 })
+
+test('UI03-C09 reload requires fresh preflight before toy send', async ({ page }) => {
+  await page.goto(path)
+  const check = page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' })
+  const send = page.getByRole('button', { name: 'Gửi command mẫu' })
+  const quantity = page.getByRole('textbox', { name: 'Số lượng trong payload mẫu' })
+  await quantity.fill('2,5')
+  await check.click()
+  await expect(send).toBeEnabled()
+  const id = await page.getByTestId('ui03-id').textContent()
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    sessionStorage.getItem('fmcg.ui03.synthetic.v1') ?? '{}'
+  ).phase)).toBe('checked')
+  await page.reload()
+  await expect(page.getByTestId('ui03-id')).toHaveText(id ?? '')
+  await expect(quantity).toHaveValue('2,5')
+  await expect(send).toBeDisabled()
+  await check.click()
+  await expect(send).toBeEnabled()
+})
