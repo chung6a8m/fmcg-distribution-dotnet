@@ -2,7 +2,7 @@ import { useEffect, useId, useReducer, useState } from 'react'
 import { Badge, Button, Field, Notice, ThemeSelect, type Density } from './controls'
 import { parseDemoQuantity } from './decimal'
 import {
-  canCheck, canLookup, canSend, isLocked, newWorkflow, restoreWorkflow, workflowReducer,
+  canCheck, canLookup, canSend, isLocked, newWorkflow, tryRestoreWorkflow, workflowReducer,
   type LookupFixture, type Phase, type Workflow
 } from './command-recovery'
 
@@ -84,15 +84,17 @@ function SourcePanel({ permission }: { permission: Workflow['permission'] }) {
     <div className="panel-content">
       <div className="field">
         <label htmlFor="ui03-source-scenario">Tình huống nguồn (mô phỏng)</label>
-        <select id="ui03-source-scenario" value={mode} onChange={e => {
+        <select id="ui03-source-scenario" value={mode} disabled={!accessible} onChange={e => {
           setMode(e.currentTarget.value as SourceKey)
           setDetails(false)
         }}>
-          <option value="partial">2/3 báo cáo (một nguồn bằng 0)</option>
-          <option value="zero">2/2 báo cáo, tổng thực bằng 0</option>
-          <option value="unknown-total">N chưa biết; không hiển thị n/N</option>
-          <option value="stale">Không làm mới được; giữ asOf cũ</option>
-          <option value="empty">Chưa có dữ liệu (không phải tổng 0)</option>
+          {!accessible ? <option value={mode}>Không có quyền xem kịch bản nguồn</option> : <>
+            <option value="partial">2/3 báo cáo (một nguồn bằng 0)</option>
+            <option value="zero">2/2 báo cáo, tổng thực bằng 0</option>
+            <option value="unknown-total">N chưa biết; không hiển thị n/N</option>
+            <option value="stale">Không làm mới được; giữ asOf cũ</option>
+            <option value="empty">Chưa có dữ liệu (không phải tổng 0)</option>
+          </>}
         </select>
       </div>
       {!accessible ? <Notice tone="danger" title="Quyền đọc bị từ chối">
@@ -120,22 +122,32 @@ function SourcePanel({ permission }: { permission: Workflow['permission'] }) {
           onClick={() => setDetails(value => !value)}>
           {details ? 'Ẩn nguồn chi tiết' : 'Xem nguồn và phần còn thiếu'}
         </Button>
-        {details && <div id="ui03-source-details" className="ui03-detail" aria-label="Nguồn dữ liệu mẫu">
+        <div id="ui03-source-details" className="ui03-detail" aria-label="Nguồn dữ liệu mẫu" hidden={!details}>
           {source.reports.length === 0 ? <p>Chưa nhận báo cáo nào trong phạm vi này.</p>
             : <ul>{source.reports.map(report => <li key={report.id}>
               {report.id}: {formatter.format(report.amount)} ₫ (đã biết)
             </li>)}</ul>}
           {source.missing.length > 0 && <p>Chờ nguồn: {source.missing.join(', ')}.</p>}
           {source.expected === null && <p>Tập nguồn đầy đủ chưa được xác định.</p>}
-        </div>}
+        </div>
       </>}
     </div>
   </section>
 }
 
-function readSession(): Workflow {
-  try { return restoreWorkflow(sessionStorage.getItem('fmcg.ui03.synthetic.v1')) }
-  catch { return newWorkflow() }
+const sessionKey = 'fmcg.ui03.synthetic.v1'
+function readSession(): { workflow: Workflow; corrupt: boolean; inaccessible: boolean } {
+  try {
+    const raw = sessionStorage.getItem(sessionKey)
+    if (raw === null) return { workflow: newWorkflow(), corrupt: false, inaccessible: false }
+    const workflow = tryRestoreWorkflow(raw)
+    // A present but invalid snapshot could contain an unresolved request. Never
+    // silently overwrite it with a fresh identity or enable a new send.
+    return { workflow: workflow ?? newWorkflow(), corrupt: workflow === null, inaccessible: false }
+  } catch {
+    // Browser storage may be unavailable; this fixture then works in memory only.
+    return { workflow: newWorkflow(), corrupt: false, inaccessible: true }
+  }
 }
 
 function OutcomeRows({ state }: { state: Workflow }) {
@@ -158,24 +170,28 @@ function OutcomeRows({ state }: { state: Workflow }) {
 
 export function SourceCommandDemo() {
   const [density, setDensity] = useState<Density>('compact')
-  const [state, dispatch] = useReducer(workflowReducer, undefined, readSession)
+  const [initial] = useState(readSession)
+  const [state, dispatch] = useReducer(workflowReducer, initial.workflow)
   const [scenario, setScenario] = useState<LookupFixture>('no-result')
-  const [storageOk, setStorageOk] = useState(true)
+  const [storageOk, setStorageOk] = useState(!initial.inaccessible)
+  const recoveryBlocked = initial.corrupt
   const helpId = useId()
   useEffect(() => {
+    if (recoveryBlocked) return // Preserve the invalid original for deliberate inspection.
     try {
-      sessionStorage.setItem('fmcg.ui03.synthetic.v1', JSON.stringify({ ...state, schema: 1 }))
+      sessionStorage.setItem(sessionKey, JSON.stringify({ ...state, schema: 1 }))
       setStorageOk(true)
     } catch {
       setStorageOk(false)
     }
-  }, [state])
+  }, [state, recoveryBlocked])
   const sent = isLocked(state)
   const quantityError = !sent && parseDemoQuantity(state.quantity) === null
     ? 'Nhập số dương hợp lệ, tối đa ba chữ số thập phân; không chấp nhận giá trị chưa nhập xong.'
     : undefined
   const currentPhase = phaseText[state.phase]
-  const preflightHelp = state.permission === 'none' ? 'Thiếu quyền đọc và gửi trong fixture.'
+  const preflightHelp = recoveryBlocked ? 'Không xác định được yêu cầu trước đó: các hành động command tạm khóa.'
+    : state.permission === 'none' ? 'Thiếu quyền đọc và gửi trong fixture.'
     : state.permission === 'read' ? 'Chỉ có quyền đọc; không có assignment gửi.'
       : state.connection === 'offline' ? 'Offline: không gửi hoặc tra business command.'
         : quantityError ?? 'Preflight UI chỉ kiểm nháp và trạng thái mô phỏng, không xác nhận stock/credit/policy.'
@@ -244,16 +260,21 @@ export function SourceCommandDemo() {
             </select>
           </div>}
           <p id={helpId} className="field-help">{preflightHelp}</p>
+          {recoveryBlocked && <Notice tone="danger" title="Không thể khôi phục yêu cầu gốc">
+            Bản lưu session không hợp lệ. Lab giữ nguyên bản lưu lỗi và khóa các hành động command,
+            không tự tạo ID mới khi chưa rõ kết quả. Chỉ đặt lại fixture sau khi kiểm tra có chủ đích;
+            đây không phải bằng chứng hay cơ chế khôi phục từ server.
+          </Notice>}
           <div className="ui03-command-identity">
             <span>Mã yêu cầu gốc (session-only)</span>
-            <strong data-testid="ui03-id">{state.id}</strong>
+            <strong data-testid="ui03-id">{recoveryBlocked ? "Không xác định" : state.id}</strong>
             {sent && state.permission !== 'none' && <p>Payload khóa: {state.sent!.quantity} đơn vị · {state.sent!.revision}.
               Không tự sinh request ID khác khi chưa rõ kết quả.</p>}
           </div>
           <div className="button-row">
-            <Button onClick={() => dispatch({ type: 'check' })} disabled={!canCheck(state)}>
+            <Button onClick={() => dispatch({ type: 'check' })} disabled={recoveryBlocked || !canCheck(state)}>
               Kiểm tra điều kiện (demo)</Button>
-            <Button variant="primary" onClick={() => dispatch({ type: 'send' })} disabled={!canSend(state)}>
+            <Button variant="primary" onClick={() => dispatch({ type: 'send' })} disabled={recoveryBlocked || !canSend(state)}>
               Gửi command mẫu</Button>
           </div>
           {state.phase === 'checked' && <Notice tone="info" title="Preflight UI đã qua">
@@ -268,12 +289,12 @@ export function SourceCommandDemo() {
             <div className="field">
               <label htmlFor="ui03-scenario">Phản hồi tra cứu giả lập</label>
               <select id="ui03-scenario" value={scenario}
-                disabled={!canLookup(state)}
+                disabled={recoveryBlocked || !canLookup(state)}
                 onChange={e => setScenario(e.currentTarget.value as LookupFixture)}>
                 {scenarios.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
             </div>
-            <Button variant="primary" disabled={!canLookup(state)}
+            <Button variant="primary" disabled={recoveryBlocked || !canLookup(state)}
               onClick={() => dispatch({ type: 'lookup', outcome: scenario })}>
               Kiểm tra kết quả lần gửi này</Button>
             {!canLookup(state) && <p className="field-help">
@@ -294,7 +315,9 @@ export function SourceCommandDemo() {
       <div className="panel-heading"><h2 id="ui03-result-title">Kết quả theo lớp và lịch sử nguồn</h2>
         <Badge tone={currentPhase.tone}>{currentPhase.label}</Badge></div>
       <div className="panel-content">
-        {state.permission === 'none' ? <Notice tone="danger" title="Đã thu hồi quyền đọc">
+        {recoveryBlocked ? <Notice tone="danger" title="Không có trạng thái phục hồi hợp lệ">
+          Không diễn giải bản lưu session lỗi như một kết quả server. Identity và lịch sử trước đó chưa thể xác minh.
+        </Notice> : state.permission === 'none' ? <Notice tone="danger" title="Đã thu hồi quyền đọc">
           Giá trị và lịch sử yêu cầu bị che trong Lab; không dùng trạng thái UI làm quyền truy cập.
         </Notice> : <>
           <p>Yêu cầu <strong>{state.id}</strong> · phiên bản nguồn {state.sent?.revision ?? state.revision}.
@@ -312,7 +335,7 @@ export function SourceCommandDemo() {
           không phải durable inbox, audit, bản ghi quyền hoặc offline business queue.
           Nếu trình duyệt chặn/đã xóa storage, identity mẫu không còn được giữ.</p>
         <div className="button-row">
-          <Button disabled={!['posted', 'rejected'].includes(state.phase)}
+          <Button disabled={recoveryBlocked || !['posted', 'rejected'].includes(state.phase)}
             onClick={() => { dispatch({ type: 'next' }); setScenario('no-result') }}>
             Tạo nháp demo tiếp theo sau kết quả cuối</Button>
         </div>
