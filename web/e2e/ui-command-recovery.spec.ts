@@ -1,0 +1,182 @@
+import { expect, test, type Page } from '@playwright/test'
+
+test.use({ serviceWorkers: 'block' })
+const path = '/ui/command-recovery'
+
+async function sendFixture(page: Page) {
+  await page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' }).click()
+  await expect(page.getByText('Preflight UI đã qua')).toBeVisible()
+  await page.getByRole('button', { name: 'Gửi command mẫu' }).click()
+  await expect(page.getByRole('region', { name: 'Command, preflight và quyền' }))
+    .toContainText('PENDING · chưa có ACK')
+}
+
+test('UI03-F01 link, partial 2/3, source detail and no business network writes', async ({ page }) => {
+  const requests: string[] = []
+  page.on('request', request => {
+    if (['fetch', 'xhr'].includes(request.resourceType()) &&
+      !request.url().endsWith('/health/live')) requests.push(request.method() + ' ' + request.url())
+  })
+  await page.goto('/')
+  await page.getByRole('link', { name: 'UI-03 · Source & Recovery Lab' }).click()
+  await expect(page).toHaveURL(new RegExp(path + '$'))
+  const source = page.getByRole('region', { name: 'Nguồn, phạm vi và độ đầy đủ' })
+  await expect(source).toContainText('3 chuyến đã chọn')
+  await expect(source).toContainText('2/3 báo cáo chuyến')
+  await expect(source).toContainText('250.000 ₫ · tổng phần đã biết')
+  await expect(source).toContainText('20/11/2026 09:25 +07:00')
+  await source.getByRole('button', { name: 'Xem nguồn và phần còn thiếu' }).click()
+  await expect(source).toContainText('SIM-TRIP-01: 0 ₫ (đã biết)')
+  await expect(source).toContainText('Chờ nguồn: SIM-TRIP-03')
+  await sendFixture(page)
+  await page.getByRole('button', { name: 'Mô phỏng mất ACK' }).click()
+  await expect(page.getByRole('region', { name: 'Command, preflight và quyền' }))
+    .toContainText('UNKNOWN · chưa rõ kết quả')
+  expect(requests).toEqual([])
+})
+
+test('UI03-S01 zero, no data, N unknown, stale asOf and permission redaction', async ({ page }) => {
+  await page.goto(path)
+  const source = page.getByRole('region', { name: 'Nguồn, phạm vi và độ đầy đủ' })
+  const selector = page.getByLabel('Tình huống nguồn (mô phỏng)')
+  await selector.selectOption('zero')
+  await expect(source).toContainText('2/2 báo cáo chuyến')
+  await expect(source).toContainText('0 ₫ · tổng đầy đủ')
+  await selector.selectOption('empty')
+  await expect(source).toContainText('Chưa có dữ liệu')
+  await expect(source).not.toContainText('0 ₫ · tổng đầy đủ')
+  await selector.selectOption('unknown-total')
+  await expect(source).toContainText('2 nguồn đã biết · chưa xác định tổng số nguồn')
+  await expect(source).not.toContainText('2/0')
+  await selector.selectOption('stale')
+  await expect(source).toContainText('19/11/2026 17:15 +07:00')
+  await expect(source).toContainText('Không làm mới được')
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('none')
+  await expect(source).toContainText('Quyền đọc bị từ chối')
+  await expect(source).not.toContainText('19/11/2026 17:15 +07:00')
+})
+
+test('UI03-C01 preflight invalidated by edit/version/permission/connection', async ({ page }) => {
+  await page.goto(path)
+  const check = page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' })
+  const send = page.getByRole('button', { name: 'Gửi command mẫu' })
+  const quantity = page.getByRole('textbox', { name: 'Số lượng trong payload mẫu' })
+  await expect(send).toBeDisabled()
+  await check.click()
+  await expect(send).toBeEnabled()
+  await quantity.fill('12,')
+  await expect(send).toBeDisabled()
+  await expect(check).toBeDisabled()
+  await quantity.fill('2,5')
+  await check.click()
+  await expect(send).toBeEnabled()
+  await page.getByLabel('Phiên bản nguồn cho payload').selectOption('rev-08')
+  await expect(send).toBeDisabled()
+  await check.click()
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('read')
+  await expect(check).toBeDisabled()
+  await expect(send).toBeDisabled()
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('write')
+  await check.click()
+  await page.getByLabel('Kết nối (mô phỏng)').selectOption('offline')
+  await expect(check).toBeDisabled()
+  await expect(send).toBeDisabled()
+  await expect(page.getByText('Offline: không gửi hoặc tra business command.')).toBeVisible()
+})
+
+test('UI03-C02 PENDING→UNKNOWN, same-tab reload, same-ID lookup ACK/waiting/POSTED', async ({ page }) => {
+  await page.goto(path)
+  await sendFixture(page)
+  const id = page.getByTestId('ui03-id')
+  await expect(id).toHaveText('UI03-LOCAL-0001')
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Mô phỏng mất ACK' }).click()
+  await expect(page.getByRole('button', { name: 'Tạo nháp demo tiếp theo sau kết quả cuối' })).toBeDisabled()
+  await expect.poll(() => page.evaluate(() => JSON.parse(
+    sessionStorage.getItem('fmcg.ui03.synthetic.v1') ?? '{}'
+  ).phase)).toBe('unknown')
+  await page.reload()
+  await expect(id).toHaveText('UI03-LOCAL-0001')
+  const lookup = page.getByRole('button', { name: 'Kiểm tra kết quả lần gửi này' })
+  await lookup.click()
+  await expect(page.getByRole('region', { name: 'Command, preflight và quyền' }))
+    .toContainText('UNKNOWN · chưa rõ kết quả')
+  await page.getByLabel('Phản hồi tra cứu giả lập').selectOption('ack')
+  await lookup.click()
+  const result = page.getByRole('region', { name: 'Kết quả theo lớp và lịch sử nguồn' })
+  await expect(result).toContainText('Đã ACK tiếp nhận bền (mô phỏng)')
+  await expect(result).toContainText('Chưa xác định')
+  await page.getByLabel('Phản hồi tra cứu giả lập').selectOption('no-result')
+  await lookup.click()
+  await expect(page.getByRole('region', { name: 'Command, preflight và quyền' })).toContainText('Đã ACK tiếp nhận')
+  await page.getByLabel('Phản hồi tra cứu giả lập').selectOption('waiting')
+  await lookup.click()
+  await expect(result).toContainText('Chờ dependency')
+  await page.getByLabel('Phản hồi tra cứu giả lập').selectOption('posted')
+  await lookup.click()
+  await expect(result).toContainText('POSTED (mô phỏng)')
+  await expect(result).toContainText('Chưa có bằng chứng; không suy từ ACK/POSTED')
+  await expect(result).toContainText('Chưa xác định; không lấy số trước gửi làm số sau')
+  await expect(id).toHaveText('UI03-LOCAL-0001')
+  await page.getByRole('button', { name: 'Tạo nháp demo tiếp theo sau kết quả cuối' }).click()
+  await expect(id).toHaveText('UI03-LOCAL-0002')
+})
+
+test('UI03-P01 revocation after UNKNOWN blocks lookup; offline retains identity', async ({ page }) => {
+  await page.goto(path)
+  await sendFixture(page)
+  await page.getByRole('button', { name: 'Mô phỏng mất ACK' }).click()
+  const lookup = page.getByRole('button', { name: 'Kiểm tra kết quả lần gửi này' })
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('none')
+  await expect(lookup).toBeDisabled()
+  await expect(page.getByRole('region', { name: 'Kết quả theo lớp và lịch sử nguồn' }))
+    .toContainText('Giá trị và lịch sử yêu cầu bị che')
+  await expect(page.getByTestId('ui03-id')).toHaveText('UI03-LOCAL-0001')
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('read')
+  await expect(lookup).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await page.getByLabel('Kết nối (mô phỏng)').selectOption('offline')
+  await expect(lookup).toBeDisabled()
+  await expect(page.getByText('Offline: không tra cứu hoặc phát lại, chờ online.')).toBeVisible()
+})
+
+test('UI03-C03 conflict cannot be bypassed with new ID or duplicate send', async ({ page }) => {
+  await page.goto(path)
+  await sendFixture(page)
+  await page.getByLabel('Phản hồi tra cứu giả lập').selectOption('conflict')
+  await page.getByRole('button', { name: 'Kiểm tra kết quả lần gửi này' }).click()
+  await expect(page.getByRole('region', { name: 'Command, preflight và quyền' })).toContainText('Identity conflict')
+  await expect(page.getByRole('button', { name: 'Tạo nháp demo tiếp theo sau kết quả cuối' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await expect(page.getByTestId('ui03-id')).toHaveText('UI03-LOCAL-0001')
+})
+
+for (const width of [1440, 320]) {
+  test('UI03-V01 Dark ' + width + 'px Compact/Field geometry', async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(path)
+    await page.getByLabel('Mật độ').selectOption(width === 320 ? 'field' : 'compact')
+    await page.getByLabel('Chế độ hiển thị').selectOption('dark')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await sendFixture(page)
+    const geometry = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth
+    }))
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth)
+    if (width === 320) {
+      const targets = await page.locator('main button, main input, main select, main a').evaluateAll(elements =>
+        elements.filter(e => e.getClientRects().length && !(e as HTMLButtonElement).disabled)
+          .map(e => {
+            const box = e.getBoundingClientRect()
+            return { width: box.width, height: box.height }
+          }))
+      for (const box of targets) {
+        expect(box.width).toBeGreaterThanOrEqual(48)
+        expect(box.height).toBeGreaterThanOrEqual(48)
+      }
+    }
+    await info.attach('ui03-' + width + '-geometry', { body: JSON.stringify(geometry), contentType: 'application/json' })
+    await info.attach('ui03-' + width + '-dark', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+  })
+}
