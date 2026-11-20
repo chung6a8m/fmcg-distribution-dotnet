@@ -295,14 +295,14 @@ export function SourceCommandDemo() {
             Mô phỏng mất ACK</Button>}
           {sent && <section className="ui03-outcome" aria-labelledby="ui03-outcome-title">
             <h3 id="ui03-outcome-title">Tra đúng lần gửi gốc</h3>
-            <div className="field">
+            {state.permission !== 'none' && <div className="field">
               <label htmlFor="ui03-scenario">Phản hồi tra cứu giả lập</label>
               <select id="ui03-scenario" value={scenario}
                 disabled={recoveryBlocked || !canLookup(state)}
                 onChange={e => setScenario(e.currentTarget.value as LookupFixture)}>
                 {scenarios.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
-            </div>
+            </div>}
             <Button variant="primary" disabled={recoveryBlocked || !canLookup(state)}
               onClick={() => dispatch({ type: 'lookup', outcome: scenario })}>
               Kiểm tra kết quả lần gửi này</Button>
