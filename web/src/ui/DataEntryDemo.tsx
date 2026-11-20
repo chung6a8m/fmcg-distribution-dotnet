@@ -63,7 +63,7 @@ export function DataEntryDemo() {
   const selectedLine = lines.find(line => line.id === selection)
   const selectedVisible = visible.some(line => line.id === selection)
   const quantityInvalid = parseDemoQuantity(quantity) === null
-  const formInvalid = attempted && !customer
+  const formInvalid = attempted && (!customer || lookupState !== 'ready')
   const quantityError = (touched || attempted) && quantityInvalid ? demoQuantityError : undefined
 
   function checkForm(event: FormEvent<HTMLFormElement>) {
@@ -71,7 +71,7 @@ export function DataEntryDemo() {
     setAttempted(true)
     setTouched(true)
     setReviewed(false)
-    if (!customer) { customerRef.current?.focus(); return }
+    if (!customer || lookupState !== 'ready') { customerRef.current?.focus(); return }
     if (quantityInvalid) { quantityRef.current?.focus(); return }
     setReviewed(true)
   }
@@ -118,7 +118,10 @@ export function DataEntryDemo() {
         <div className="field entry-source">
           <label htmlFor="lookup-state">Nguồn danh mục (mô phỏng)</label>
           <select id="lookup-state" value={lookupState}
-            onChange={event => setLookupState(event.currentTarget.value as LookupSourceState)}>
+            onChange={event => {
+              setLookupState(event.currentTarget.value as LookupSourceState)
+              setReviewed(false)
+            }}>
             <option value="ready">Sẵn sàng</option><option value="loading">Đang tải</option>
             <option value="error">Lỗi đọc</option><option value="forbidden">Không đủ quyền</option>
           </select>
@@ -127,7 +130,9 @@ export function DataEntryDemo() {
           <LookupField key={lookupKey} label="Khách hàng" options={customers} selected={customer}
             onSelect={value => { setCustomer(value); setReviewed(false) }}
             onCommit={() => quantityRef.current?.focus()} inputRef={customerRef}
-            error={formInvalid ? 'Hãy chọn một khách hàng bằng mã từ danh sách.' : undefined}
+            error={formInvalid ? (lookupState === 'ready'
+              ? 'Hãy chọn một khách hàng bằng mã từ danh sách.'
+              : 'Nguồn danh mục chưa sẵn sàng để kiểm chứng identity.') : undefined}
             sourceState={lookupState} />
           <Field label="Số lượng minh họa (thùng)" ref={quantityRef} type="text"
             inputMode="decimal" value={quantity} error={quantityError}
@@ -142,7 +147,7 @@ export function DataEntryDemo() {
           <Button variant="primary" type="submit">Kiểm tra nháp mẫu</Button>
           <Button onClick={resetForm}>Đặt lại form</Button>
         </div>
-        {attempted && (!customer || quantityInvalid) && <p className="field-error" role="alert">
+        {attempted && (!customer || lookupState !== 'ready' || quantityInvalid) && <p className="field-error" role="alert">
           Nháp chưa hợp lệ. Sửa các trường có thông báo; dữ liệu đã nhập được giữ nguyên.
         </p>}
         {reviewed && customer && <Notice tone="success" title="Dữ liệu mẫu hợp lệ">
