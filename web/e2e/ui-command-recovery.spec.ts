@@ -54,6 +54,8 @@ test('UI03-S01 zero, no data, N unknown, stale asOf and permission redaction', a
   await expect(source).not.toContainText('0 ₫ · tổng đầy đủ')
   await selector.selectOption('unknown-total')
   await expect(source).toContainText('2 nguồn đã biết · chưa xác định tổng số nguồn')
+  await expect(source).toContainText('Chưa xác định độ đầy đủ')
+  await expect(source).not.toContainText('Chưa đủ nguồn')
   await expect(source).not.toContainText('2/0')
   await selector.selectOption('stale')
   await expect(source).toContainText('19/11/2026 17:15 +07:00')
