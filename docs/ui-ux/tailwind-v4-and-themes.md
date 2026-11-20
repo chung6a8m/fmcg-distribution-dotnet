@@ -1,18 +1,18 @@
 # Tailwind CSS v4 và hợp đồng Light/Dark/System
 
-**PROPOSED_FOR_ADOPTION / DOCS_ONLY — v0.1.** Đây là reference có thể kiểm tra khi review, không là Owner approval, theme đã được triển khai hoặc authorization UI-01. PR này không import token vào ứng dụng, không đổi dependency, `web/src/`, PWA hay business contract.
+**v0.1 OWNER_APPROVED / DOCS_ONLY.** OWN-UX-02/06 đã phê duyệt Light, 29 Dark semantic overrides và Light/Dark/System; có hiệu lực `ADOPTED` sau khi PR quyết định Owner được merge. **Theme chưa triển khai hoặc nghiệm thu runtime**. UI-01 chỉ được triển khai trong PR riêng sau merge, đúng OWN-UX-09. PR #78 vẫn là UI-00 reference.
 
 ## 1. Baseline và nguồn token
 
 Repository đang pin `tailwindcss` và `@tailwindcss/vite` **4.3.5** trong [package](../../web/package.json); [Vite config](../../web/vite.config.ts) đã dùng plugin v4. [CSS hiện hành](../../web/src/style.css) dùng `@import "tailwindcss"` và `@theme`, với root font 14px.
 
-[tokens.json](tokens/tokens.json) là nguồn chuẩn: 101 token cơ sở, Light làm reference; `themes.dark.values` đề xuất override đủ 29 token màu ngữ nghĩa. [tokens.css](tokens/tokens.css) xuất custom properties; [tailwind-v4.css](tokens/tailwind-v4.css) ánh xạ chúng thành utility/variant. Hai tệp CSS đều chưa được ứng dụng sử dụng.
+[tokens.json](tokens/tokens.json) là nguồn chuẩn: 101 token cơ sở, Light làm reference; `themes.dark.values` chứa đủ 29 token màu ngữ nghĩa Dark đã được Owner phê duyệt (OWN-UX-06). Các CSS reference vẫn chưa import vào runtime. [tokens.css](tokens/tokens.css) xuất custom properties; [tailwind-v4.css](tokens/tailwind-v4.css) ánh xạ chúng thành utility/variant. Hai tệp CSS đều chưa được ứng dụng sử dụng.
 
 Custom properties trong `:root` không tự tạo utility Tailwind. Adapter dùng `@theme inline` cho giá trị tham chiếu biến khác, giữ màu ngữ nghĩa được đọc tại phần tử sử dụng. Không đưa `@theme` vào selector Light/Dark hoặc media query; thay đổi theme nằm ở custom properties thông thường. Xem [Theme variables](https://tailwindcss.com/docs/theme).
 
 ## 2. Cách tích hợp dự kiến trong UI-01
 
-Ví dụ dưới đây chỉ mô tả import tại `web/src/style.css` **khi increment triển khai được cấp phạm vi**; không phải thay đổi đã thực hiện:
+Ví dụ dưới đây chỉ mô tả import tại `web/src/style.css` **trong PR UI-01 độc lập sau merge PR quyết định Owner**; không phải thay đổi đã thực hiện:
 
 ```css
 @layer theme, base, components, utilities;
@@ -55,7 +55,7 @@ Giữ cùng đơn vị rem với breakpoint mặc định của Tailwind để t
 
 `tokens.css` mặc định Light tại `:root`, với `color-scheme: light`. `:root[data-theme="dark"]` đổi đủ 29 màu ngữ nghĩa và đặt `color-scheme: dark`. Không có media query tự đổi palette. Không đảo màu bằng filter và không suy Dark từ màu primitive Light.
 
-Hợp đồng runtime dự kiến dùng đúng một theme toàn tài liệu tại `<html data-theme="light">` hoặc `<html data-theme="dark">`. Không gắn theme ở wrapper React, component hoặc subtree. Portal của dialog/popover đặt dưới `document.body` sẽ kế thừa cùng root; portal vào iframe/document khác cần hợp đồng riêng.
+Hợp đồng runtime đã được Owner chấp thuận cho UI-01 dùng đúng một theme toàn tài liệu tại `<html data-theme="light">` hoặc `<html data-theme="dark">`. Không gắn theme ở wrapper React, component hoặc subtree. Portal của dialog/popover đặt dưới `document.body` sẽ kế thừa cùng root; portal vào iframe/document khác cần hợp đồng riêng.
 
 Adapter khai báo variant `dark` theo root đã resolve. `dark:` chỉ dùng cho khác biệt trình bày cần riêng; semantic color thông thường không cần nhân đôi `bg-... dark:bg-...`. Không trộn selector root với variant mặc định theo OS. Nguồn: [Dark mode](https://tailwindcss.com/docs/dark-mode).
 
