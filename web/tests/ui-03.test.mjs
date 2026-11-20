@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   canCheck, canLookup, canSend, draftSignature, isLocked, newWorkflow,
-  restoreWorkflow, workflowReducer
+  restoreWorkflow, tryRestoreWorkflow, workflowReducer
 } from '../src/ui/command-recovery.ts'
 
 function reduce(state, ...events) {
@@ -105,4 +105,16 @@ test('UI03-C05 versioned same-tab restore validates frozen identity and fails cl
     JSON.stringify({ ...unknown, schema: 1, sent: { ...unknown.sent, quantity: '3' } }),
     JSON.stringify({ ...unknown, schema: 1, history: ['A'.repeat(201)] })
   ]) assert.deepEqual(restoreWorkflow(raw), newWorkflow())
+})
+
+test('UI03-C06 invalid saved UNKNOWN is not silently accepted as a new request', () => {
+  const unknown = reduce(submitted(), { type: 'lost-ack' })
+  const valid = JSON.stringify({ ...unknown, schema: 1 })
+  assert.deepEqual(tryRestoreWorkflow(valid), unknown)
+  const invalid = JSON.stringify({ ...unknown, schema: 1,
+    sent: { ...unknown.sent, quantity: '999' } })
+  assert.equal(tryRestoreWorkflow(invalid), null)
+  // The compatibility helper alone returns a toy draft. The UI must detect
+  // this null result and block command actions without overwriting storage.
+  assert.deepEqual(restoreWorkflow(invalid), newWorkflow())
 })
