@@ -31,6 +31,11 @@ export function EditableGrid({
   const cellRefs = useRef<Record<string, HTMLTableCellElement | null>>({})
   const focusPending = useRef<string | null>(null)
 
+  // When filtering hides the roving cell, the first visible cell becomes tabbable.
+  // Selection remains ID-based and is never silently changed.
+  const tabbable = rows.some(row => row.id === active.rowId)
+    ? active : { rowId: rows[0]?.id ?? '', column: 0 as Column }
+
   function cellKey(id: string, column: Column) { return id + ':' + column }
 
   useLayoutEffect(() => {
@@ -125,7 +130,7 @@ export function EditableGrid({
           const column = columnIndex as Column
           const key = cellKey(row.id, column)
           const isEditing = editingId === row.id && column === 3
-          return <td key={key} role="gridcell" tabIndex={!isEditing && active.rowId === row.id && active.column === column ? 0 : -1}
+          return <td key={key} role="gridcell" tabIndex={!isEditing && tabbable.rowId === row.id && tabbable.column === column ? 0 : -1}
             ref={node => { cellRefs.current[key] = node }} aria-label={
               ['Mã hàng ', 'Tên mặt hàng ', 'Đơn vị ', 'Số lượng '][column] + row.code + ': ' + value
             } data-col={column} data-row={row.id}
