@@ -222,3 +222,127 @@
     :is(button, a, select, input, textarea):focus-visible { outline-color: Highlight; }
   }
 }
+
+
+/* UI-02 synthetic data-entry patterns. No new primitive colors or runtime theme roots. */
+@layer components {
+  .entry-form-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: var(--fmcg-space-16);
+    align-items: start;
+    @variant field-layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  .entry-source { max-width: 280px; }
+  .lookup-field { position: relative; }
+  .lookup-input-row { display: flex; gap: 8px; min-width: 0; }
+  .lookup-input-row input { flex: 1; min-width: 0; }
+  .lookup-clear { flex: none; }
+  .lookup-menu {
+    position: absolute;
+    z-index: 20;
+    top: 100%;
+    inset-inline: 0;
+    overflow: auto;
+    max-height: min(320px, 56dvh);
+    background: var(--fmcg-color-surface-card);
+    color: var(--fmcg-color-text-primary);
+    border: 1px solid var(--fmcg-color-border-control);
+    border-radius: var(--fmcg-radius-small);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--fmcg-color-text-primary) 12%, transparent);
+  }
+  .lookup-menu > p { padding: 12px; }
+  .lookup-option {
+    min-height: var(--control-min);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--fmcg-color-border-subtle);
+    cursor: pointer;
+    overflow-wrap: anywhere;
+  }
+  .lookup-option strong, .lookup-option span { display: block; }
+  .lookup-option span { color: var(--fmcg-color-text-secondary); }
+  .lookup-option[data-active="true"], .lookup-option:hover {
+    background: var(--fmcg-color-selection-background);
+    outline: 2px solid var(--fmcg-color-selection-indicator);
+    outline-offset: -2px;
+  }
+  .entry-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    align-items: end;
+    @variant field-layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  .entry-warning {
+    color: var(--fmcg-color-status-warning-foreground);
+    background: var(--fmcg-color-status-warning-background);
+    padding: 8px 12px;
+    border-inline-start: 3px solid var(--fmcg-color-status-warning-foreground);
+  }
+  .grid-scroll { max-width: 100%; overflow-x: auto; }
+  .entry-grid {
+    width: 100%;
+    min-width: 620px;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: var(--fmcg-font-size-table);
+    line-height: var(--fmcg-font-line-height-table);
+  }
+  .entry-grid :is(th,td) {
+    box-sizing: border-box;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--fmcg-color-border-subtle);
+    vertical-align: middle;
+  }
+  .entry-grid th {
+    height: var(--row-min);
+    background: var(--fmcg-color-surface-subtle);
+    text-align: start;
+    font-weight: var(--fmcg-font-weight-bold);
+  }
+  .entry-grid tbody tr { height: var(--row-min); }
+  .entry-grid tbody tr:nth-child(even) { background: var(--fmcg-color-surface-row-alternate); }
+  .entry-grid tbody tr[data-selected="true"] { background: var(--fmcg-color-selection-background); }
+  .entry-grid td[role="gridcell"] { cursor: default; }
+  .entry-grid td[role="gridcell"]:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 2px solid var(--fmcg-color-focus-ring);
+    outline-offset: -3px;
+  }
+  .entry-grid [data-col="3"] { text-align: end; font-variant-numeric: tabular-nums; }
+  .entry-grid td:has(.grid-editor) { padding-block: 4px; }
+  .grid-editor { display: block; }
+  .grid-editor input { display: block; max-width: 160px; margin-inline-start: auto; font: inherit; text-align: end; }
+  .grid-editor .field-error { display: block; margin-top: 4px; text-align: start; }
+  .grid-card-label { display: none; }
+  .grid-state { padding: 16px; }
+  .entry-footer { border-top: 1px solid var(--fmcg-color-border-subtle); }
+  .entry-grid {
+    @variant field-layout {
+      display: block;
+      min-width: 0;
+      font: inherit;
+      & thead { @apply sr-only; }
+      & tbody { display: grid; }
+      & tbody tr { display: grid; height: auto; gap: 4px; padding: 8px 16px; }
+      & tbody td[role="gridcell"] {
+        display: grid;
+        grid-template-columns: minmax(82px, 30%) minmax(0, 1fr);
+        gap: 8px;
+        min-height: 48px;
+        padding: 4px 0;
+        border: 0;
+        text-align: start;
+        align-items: center;
+      }
+      & .grid-card-label { display: inline; color: var(--fmcg-color-text-secondary); }
+      & .grid-editor { min-width: 0; }
+      & .grid-editor input { width: 100%; max-width: none; font-size: inherit; }
+    }
+  }
+  @media (forced-colors: active) {
+    .lookup-menu, .lookup-option, .entry-grid :is(th,td) { border-color: CanvasText; }
+    .lookup-option[data-active="true"], .entry-grid tr[data-selected="true"] { outline: 2px solid Highlight; }
+  }
+}

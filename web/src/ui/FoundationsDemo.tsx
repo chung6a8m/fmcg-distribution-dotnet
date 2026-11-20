@@ -67,7 +67,7 @@ export function FoundationsDemo() {
     : 'Giá trị mẫu chưa hợp lệ.\nNhập số nguyên dương, lớn hơn 0 và không có phần thập phân.'
   return <main className="page demo-page" data-density={density}>
     <header className="page-heading">
-      <nav aria-label="Điều hướng trang"><a className="page-link" href="/">Trạng thái kết nối</a></nav>
+      <nav className="button-row" aria-label="Điều hướng trang"><a className="page-link" href="/">Trạng thái kết nối</a><a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a></nav>
       <div className="title-row">
         <h1>Nền tảng giao diện</h1>
         <span className="environment">UI-01 · Synthetic / Nonproduction</span>
