@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
-    "test": "node --experimental-strip-types --test tests/health.test.mjs",
+    "test": "node --experimental-strip-types --test tests/health.test.mjs tests/ui-02.test.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test:dependencies": "node --test tests/dependencies.test.mjs",
     "test:pwa-build": "node --test tests/pwa-build.test.mjs",
