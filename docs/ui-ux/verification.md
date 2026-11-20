@@ -22,7 +22,7 @@ Compiler checker bổ sung bảy utility contracts của recipe, từ 20 lên **
 
 ## Kiểm render UI-00 — 20/11/2026
 
-Chromium trên Windows đã truy cập fixture qua HTTP loopback. Mở [hướng dẫn chạy lại](reference-tests/README.md). Trạng thái bàn giao là **PROPOSED_FOR_ADOPTION / DOCS_ONLY**.
+Chromium trên Windows đã truy cập fixture qua HTTP loopback. Xem [hướng dẫn chạy lại](reference-tests/README.md) và [ảnh, trace, số đo](reference-tests/evidence/README.md). Trạng thái bàn giao là **PROPOSED_FOR_ADOPTION / DOCS_ONLY**.
 
 | Case | CSS viewport | Theme / mật độ | Kết quả | Hàng đọc / editor / tên dài / lỗi (px) | Control (px) | Hàng trọn × cột |
 |---|---|---|---|---|---:|---|
