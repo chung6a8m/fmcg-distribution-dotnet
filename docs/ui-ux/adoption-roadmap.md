@@ -11,12 +11,14 @@ Design Baseline v0.1 là **`ADOPTED`** qua [PR #79](https://github.com/chung6a8m
 | Increment | Quyền thực thi | Deliverables và evidence |
 |---|---|---|
 | **UI-01 — Runtime Foundations** | **MERGED / CI_VERIFIED** (synthetic/nonproduction, [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80)), theo OWN-UX-09. | Shell và demo dùng tokens, Noto 400/700, theme chung, Compact/Comfortable/Field. [Đặc tả](ui-01-runtime-foundations.md) và [ma trận kiểm chứng](ui-01-verification.md). |
-| **UI-02 — Form, lookup, table/grid** | **AUTHORIZED_BY_DIRECT_OWNER_REQUEST / IMPLEMENTATION_REVIEW_PENDING** (20/11/2026; [hồ sơ](../decisions/owner-ui02-2026-11-20.md)) | Synthetic Lab `/ui/data-entry`: input/validation, identity lookup, IME/caret/Enter/Tab/Escape, filtered editable grid, decimal, density. [Spec/ADR](ui-02-data-entry.md) · [verification](ui-02-verification.md). |
+| **UI-02 — Form, lookup, table/grid** | **MERGED / UI02_100_PERCENT_CI_VERIFIED** (synthetic/nonproduction, zoom 100%; [PR #82](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/82), [Owner authorization](../decisions/owner-ui02-2026-11-20.md)). | Lab `/ui/data-entry`: input/validation, identity lookup, keyboard/IME event handling, caret, editable grid, staged filter/sort, decimal, density. [Spec/ADR](ui-02-data-entry.md) · [verification](ui-02-verification.md) · [post-merge closeout](../closeout/2026-11-20-ui-02.md). Physical IME/device/125% vẫn NOT_TESTED. |
 | **UI-03 — Source, command & recovery UX** | **NOT_AUTHORIZED** | Scope/asOf, result panel, pending/UNKNOWN, preflight/conflict, permission states theo contract/API được cấp phép. |
 | **UI-04 — Vertical slice nghiệp vụ** | **NOT_AUTHORIZED** | Một luồng E2E chỉ sau khi hợp đồng nghiệp vụ, APP-02C blockers và source authorization đã chốt; không suy từ screenshot. |
 | **UI-05 — Mở rộng năm nhóm vai trò** | **NOT_AUTHORIZED** | Mỗi role một spec/PR, nghiệm thu riêng Field/Finance/Owner trên browser/thiết bị phù hợp. |
 
-UI-01 đặt primitives/theme adapter trong `web/src/ui/` và evidence browser trong `web/e2e/`. Source HEAD `2575651ae18e2e765b8072ef0b82409afce3319e` có 10/10 workflows và 20/20 checks thành công, merge `a0081b081221de725279e1d81b7d3dd8f4f93488`; [post-merge closeout](../closeout/2026-11-20-ui-01.md) giữ rõ phạm vi CI và các `NOT_VERIFIED`. Mỗi increment sau vẫn cần scope và quyết định riêng.
+UI-01 đặt primitives/theme adapter trong `web/src/ui/` và evidence browser trong `web/e2e/`. Source HEAD `2575651ae18e2e765b8072ef0b82409afce3319e` có 10/10 workflows và 20/20 checks thành công, merge `a0081b081221de725279e1d81b7d3dd8f4f93488`; [post-merge closeout](../closeout/2026-11-20-ui-01.md) giữ rõ phạm vi CI và các `NOT_VERIFIED`.
+
+UI-02 có reviewed final source HEAD `8d3d38309d4f77b7936578839a8a84ce4f2bbd3e`, 10/10 workflows và 20/20 checks SUCCESS; Playwright 38/38, SQL/.NET 296/296, 4/4 technical findings đã sửa. Merge commit `51388a040ca500743ad8d95591a3e8c56b8d433e` có source tree trùng bản đã review; [closeout và evidence](../closeout/2026-11-20-ui-02.md). Đây chỉ là CI synthetic ở 100% browser zoom; 125%, IME/thiết bị thực và production business E2E chưa nghiệm thu. Mỗi increment sau vẫn cần scope và quyết định riêng.
 
 ## Baseline Owner đã chốt cho UI-01
 
@@ -39,6 +41,6 @@ UI-01 đặt primitives/theme adapter trong `web/src/ui/` và evidence browser t
 
 ## Giới hạn cấp quyền
 
-- **UI-01 không cấp phép** UI-02…05. Lệnh trực tiếp của Owner ngày 20/11/2026 chỉ mở UI-02 synthetic Lab trong PR độc lập; UI-03…05, màn nghiệp vụ, API/business posting thật, offline business writes, GPS/scan/ảnh/chữ ký và tenant brand override vẫn chưa được ủy quyền.
+- **UI-01 không tự cấp phép** UI-02…05. Lệnh trực tiếp của Owner ngày 20/11/2026 đã mở riêng UI-02 synthetic Lab và PR #82 đã merge trong phạm vi này. UI-03…05, màn nghiệp vụ, API/business posting thật, offline business writes, GPS/scan/ảnh/chữ ký và tenant brand override vẫn chưa được ủy quyền.
 - **Không** thay `business/`, `business.lock.json`, tenant/security policies hoặc APP-02C blockers C0-R01..06; không nâng PREPROD/EV/P0, Pilot, Go-Live hoặc production.
 - UI-01 foundations/demo không tương đương accessibility certification, E2E nghiệp vụ hay acceptance thiết bị Field thực.

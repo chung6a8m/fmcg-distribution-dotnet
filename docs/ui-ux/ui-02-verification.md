@@ -1,6 +1,6 @@
 # UI-02 verification matrix (synthetic / nonproduction)
 
-**State:** TESTS_ADDED / FINAL_HEAD_CI_PENDING. Independent PR technical review and CI results must be recorded against the **final source HEAD** before any `CI_VERIFIED` claim. This document describes executable checks, not evidence already observed.
+**State: `MERGED / UI02_100_PERCENT_CI_VERIFIED` — SYNTHETIC_NONPRODUCTION, browser CI at 100% zoom.** PR #82's reviewed source HEAD and merge tree match; independent technical review and applicable final-source CI were observed. The matrix remains an executable contract; actual evidence is linked below and in the [post-merge UI-02 closeout](../closeout/2026-11-20-ui-02.md). No extension to physical, 125%, PREPROD or production acceptance.
 
 ## Commands (Node 26.13.1, lockfile-pinned web dependencies)
 
@@ -18,6 +18,15 @@ From `web/` after `npm ci`:
 `npx playwright test e2e/ui-foundations.spec.ts e2e/theme.spec.ts`
 
 Existing workflows additionally run broader .NET/SQL, PWA/security/tenant regressions; record actual GitHub workflow and check-run identities, no substitutions.
+
+## Observed final-source CI and review (20 November 2026)
+
+- [Implementation PR #82](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/82): exact reviewed source `8d3d38309d4f77b7936578839a8a84ce4f2bbd3e`, merge `51388a040ca500743ad8d95591a3e8c56b8d433e`; both have tree `868df53504c1d113f5c832d1de6ec9700b518514`. The source HEAD is the CI identity, not the merge SHA.
+- [APP-00A foundation run #44737867771](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44737867771): SUCCESS, SQL/.NET test gate 296/296 (0 failed/skipped), Playwright 38/38, web build and PWA checks. [Playwright artifact #14629492695](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44737867771/artifacts/14629492695); [test evidence #14629203050](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44737867771/artifacts/14629203050).
+- [Bounded web regression run #44737867746](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44737867746): SUCCESS, Playwright 38/38, parser/theme/TypeScript/Vite/PWA checks. [Artifact #14629876220](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44737867746/artifacts/14629876220). Applicable final-source GitHub Actions: **10/10 SUCCESS**; check-runs **20/20 SUCCESS**.
+- Four independent-review findings UI02-RV01..04 (1 P1, 3 P2) were fixed in commit `8d3d383` with browser regressions; [review closeout](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/82#pullrequestreview-5992931445). No blocking findings or unresolved threads at merge. Full findings matrix: [closeout](../closeout/2026-11-20-ui-02.md).
+
+These are CI-observed browser and source checks, **not** end-user physical IME/assistive-tech/device verification. In particular, UI-02's own 125% browser zoom is `NOT_TESTED`; APP-00B/C's historical exception is not extended.
 
 ## Browser and unit cases
 
