@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { isLiveApiResponse } from '../src/health.ts'
 import './ui-02.test.mjs'
+import './ui-03.test.mjs'
 
 const live = { status: 'live', scope: 'APP-00A', businessWrites: false }
 const jsonResponse = (payload, status = 200) =>
