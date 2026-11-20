@@ -1,0 +1,113 @@
+name: 'APP-02B #53 durable revocation fence (source-only NO-GO)'
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  b53-static-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Require source-only and build boundary
+        run: |
+          test "$(dotnet --version)" = "10.0.404"
+          dotnet restore tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Authorization.Tests/FmcgDms.Preprod.Authorization.Tests.csproj -c Release --no-build -- --report-trx
+          grep -q 'internal async Task<T> ExecuteAsync' src/FmcgDms.Preprod.Authorization/AuthorizationFence.cs
+          grep -q 'PermitsTenantActivation => false' src/FmcgDms.Preprod.Recovery/SafeRestore.cs
+          test -f src/FmcgDms.Preprod.Authorization/Migrations/20261118_004_monotonic_revocation.sql
+          test -f src/FmcgDms.Preprod.Authorization/Migrations/20261118_005_identity_revocation_bridge.sql
+          test -f src/FmcgDms.Preprod.Authorization/Migrations/20261118_006_registry_revocation_bridge.sql
+      - name: Preserve source-only provenance
+        if: always()
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          mkdir -p TestResults
+          printf 'SourceHeadSha=%s\nWorkflowSha=%s\nScope=GITHUB_HOSTED_SOURCE_ONLY\nB53_RUNTIME=NO_GO\nPHYSICAL_PREPROD=NOT_VERIFIED\nG-B01..05=NOT_RUN\n' \
+            "$SOURCE_HEAD" "$GITHUB_SHA" > TestResults/B53-SOURCE-PROVENANCE.txt
+          sha256sum src/FmcgDms.Preprod.Authorization/Migrations/20261118_00{4,5,6}_*.sql >> TestResults/B53-SOURCE-PROVENANCE.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b53-source-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Authorization.Tests/TestResults/
+          if-no-files-found: warn
+
+  b53-two-tenant-sql:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Start disposable Windows SQL Server LocalDB
+        shell: pwsh
+        run: |
+          if ((dotnet --version).Trim() -ne '10.0.404') { throw 'SDK mismatch' }
+          sqllocaldb info MSSQLLocalDB
+          sqllocaldb start MSSQLLocalDB
+          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION'
+      - name: Execute B53 cross-db atomicity and old-snapshot deny matrix
+        shell: pwsh
+        env:
+          APP02B5_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02B5_TEST_RUN_ID: b53-b5-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B5_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP02B53_TEST_RUN_ID: b53-sql-${{ github.run_id }}-${{ github.run_attempt }}
+          APP02B53_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dotnet restore tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj
+          dotnet build tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj -c Release --no-restore
+          dotnet test tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/FmcgDms.Preprod.Authorization.SqlServer.Tests.csproj -c Release --no-build -- --report-trx
+      - name: Validate mandatory physical LocalDB source witness and hashes
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $files=@(Get-ChildItem -Path . -Recurse -File -Filter APP-02B53-LOCALDB.json)
+          if($files.Count -ne 1){ throw 'B53 witness missing or ambiguous' }
+          $w=Get-Content -Raw $files[0].FullName | ConvertFrom-Json
+          if($w.SourceHeadSha -cne $env:SOURCE_HEAD -or
+             $w.EvidenceClass -cne 'GITHUB_HOSTED_LOCALDB_ONLY' -or
+             !$w.IndependentFenceDatabase -or $w.SeparatePhysicalTenantDatabases -ne 2 -or
+             !$w.SessionRevokeSameCommit -or !$w.TenantSuspendSameCommit -or
+             !$w.IndependentActivationSelfApprovalDenied -or !$w.ExpiredPermitReapprovalSucceeded -or
+             !$w.DeniedB3OnlyCommitOnFencePrivilegeLoss -or
+             !$w.RestoredOldSessionJwtDenied -or !$w.RestoredOldRegistryEpochDenied -or
+             !$w.CorruptedBridgeHistoryDenied -or !$w.DisabledB3B4BridgesDenied -or !$w.PeerTenantNoWrite -or
+             [string]::IsNullOrWhiteSpace($w.PeerSqlHashBefore) -or
+             $w.PeerSqlHashBefore -cne $w.PeerSqlHashAfter -or
+             !$w.SimulatedOldSnapshotOnly -or
+             $w.RealPhysicalPitr -cne 'NOT_VERIFIED' -or
+             $w.RuntimeActivation -cne 'NO_GO' -or
+             $w.GB01ToGB05 -cne 'NOT_RUN'){
+            throw 'B53 witness failed strict source-only acceptance'
+          }
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          Copy-Item $files[0].FullName TestResults/APP-02B53-LOCALDB.json
+          $sha=(Get-FileHash TestResults/APP-02B53-LOCALDB.json -Algorithm SHA256).Hash
+          @("SourceHeadSha=$env:SOURCE_HEAD","WitnessSha256=$sha",
+            "B53FenceMigrationSha256=$((Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_004_monotonic_revocation.sql -Algorithm SHA256).Hash)",
+            "B53IdentityBridgeSha256=$((Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_005_identity_revocation_bridge.sql -Algorithm SHA256).Hash)",
+            "B53RegistryBridgeSha256=$((Get-FileHash src/FmcgDms.Preprod.Authorization/Migrations/20261118_006_registry_revocation_bridge.sql -Algorithm SHA256).Hash)",
+            'RealPhysicalPitr=NOT_VERIFIED','G-B01..05=NOT_RUN','RuntimeActivation=NO_GO') |
+            Set-Content TestResults/B53-SQL-PROVENANCE.txt -Encoding utf8
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: app02b53-localdb-source-only
+          path: |
+            TestResults/
+            tests/FmcgDms.Preprod.Authorization.SqlServer.Tests/TestResults/
+          if-no-files-found: warn

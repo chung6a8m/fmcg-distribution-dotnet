@@ -60,7 +60,11 @@ public sealed class PreprodIdentityDb(DbContextOptions<PreprodIdentityDb> option
         });
         builder.Entity<LoginSession>(e =>
         {
-            e.ToTable("PreprodLoginSessions");
+            // B53 operator-applied bridge attaches a SQL trigger to this table.
+            // SQL Server's default OUTPUT DML is invalid for trigger targets;
+            // record trigger metadata without auto-creating a migration.
+            e.ToTable("PreprodLoginSessions", table =>
+                table.HasTrigger("b53_SessionMonotonicTrigger"));
             e.HasKey(x => x.Id);
             e.Property(x => x.SecurityStamp).IsRequired().HasMaxLength(256);
             e.HasIndex(x => new { x.UserId, x.RevokedUtc });
