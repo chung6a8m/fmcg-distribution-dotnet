@@ -30,6 +30,7 @@ Existing workflows also run .NET/SQL and security gates. Record actual source SH
 | UI03-C05 | Rejected/conflict and blocking of new-ID bypass; no silent retry/offline queue |
 | UI03-C06 | Invalid present session (including contradictory UNKNOWN + ACK) cannot silently mint a new request; preserve invalid snapshot and block send |
 | UI03-C07 | Browser denies session storage writes: warn explicitly, keep current in-memory fixture only |
+| UI03-C09 | Client-only checked/preflight state is invalidated after reload; draft buffer/ID remain, explicit recheck required |
 | UI03-V01 | Dark, desktop 1440 and Field 320 without overflow and field target sizing |
 | UI03-V02 | Light/System, OS theme changes, keyboard Tab/focus and Enter in input does not submit |
 | UI03-R01 | UI-01/02, PWA, SQL/.NET, tenant/security regressions and independent final-HEAD review |
