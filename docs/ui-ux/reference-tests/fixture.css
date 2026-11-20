@@ -1,0 +1,55 @@
+/* Test-only font. The unmodified OFL resource is separate from the SVG's subset. */
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/NotoSans.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: block;
+}
+
+html { font-size: var(--fmcg-font-size-body); }
+main { margin: var(--fmcg-space-24); }
+.intro { margin-block: var(--fmcg-space-4) var(--fmcg-space-16); }
+.reference-table { width: 100%; }
+.reference-table :is(th, td) {
+  box-sizing: border-box;
+  padding-block: var(--fmcg-space-0);
+  padding-inline: var(--fmcg-space-8);
+  border-block-end: var(--fmcg-border-width) solid var(--fmcg-color-border-subtle);
+  vertical-align: middle;
+  text-align: start;
+}
+.reference-table .numeric { text-align: end; font-variant-numeric: tabular-nums; }
+.reference-table tbody tr:nth-child(even) { background: var(--fmcg-color-surface-row-alternate); }
+.reference-table .product > span { display: block; max-inline-size: 32ch; }
+.status {
+  display: inline-block;
+  padding-inline: var(--fmcg-space-8);
+  border-radius: var(--fmcg-radius-small);
+}
+.target {
+  box-sizing: border-box;
+  min-height: var(--fmcg-density-compact-control-min);
+  padding-block: var(--fmcg-space-0);
+  padding-inline: var(--fmcg-space-8);
+  border: var(--fmcg-border-width) solid var(--fmcg-color-border-control);
+  border-radius: var(--fmcg-radius-small);
+  background: var(--fmcg-color-surface-card);
+  font: inherit;
+}
+[data-density="comfortable"] .target { min-height: var(--fmcg-density-comfortable-control-min); }
+.cell-editor {
+  display: block;
+  inline-size: 10ch;
+  margin: 0;
+  margin-inline-start: auto;
+  text-align: end;
+}
+.cell-editor[aria-invalid="true"] { border-color: var(--fmcg-color-status-danger-foreground); }
+#quantity-error { margin-block-start: var(--fmcg-space-4); max-inline-size: 24ch; margin-inline-start: auto; }
+
+/* The baseline measurement switches this addition off. Reserve the whole
+   2px outline + 2px offset inside the cell before and after each control. */
+.reference-table[data-clearance="true"] .editor-cell {
+  padding-block: var(--fmcg-space-4);
+}

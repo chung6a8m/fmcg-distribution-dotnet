@@ -20,6 +20,29 @@ Compiler checker bổ sung bảy utility contracts của recipe, từ 20 lên **
 
 **Browser reference vòng 2: NOT_RUN/BLOCKED.** Browser kết nối và Cloud Browser đều không truy cập được HTTP fixture cục bộ (`ERR_CONNECTION_REFUSED`); bước đọc trang lỗi trên Cloud Browser tiếp tục bị URL policy từ chối. Không dùng workaround, không báo rendered row/focus/Light-Dark PASS. Recipe và tài liệu được đối chiếu đặc tả CSS; browser/device acceptance vẫn thuộc increment triển khai được cấp phạm vi.
 
+## Kiểm render UI-00 — 20/11/2026
+
+Chromium trên Windows đã truy cập fixture qua HTTP loopback. Mở [hướng dẫn chạy lại](reference-tests/README.md). Trạng thái bàn giao là **PROPOSED_FOR_ADOPTION / DOCS_ONLY**.
+
+| Case | CSS viewport | Theme / mật độ | Kết quả | Hàng đọc / editor / tên dài / lỗi (px) | Control (px) | Hàng trọn × cột |
+|---|---|---|---|---|---:|---|
+| REF-01 | 1440 × 900 | Light / compact | PASS | 36 / 41 / 91 / 135 | 32 | 16 × 7 |
+| REF-02 | 1440 × 900 | Dark / compact | PASS | 36 / 41 / 91 / 135 | 32 | 16 × 7 |
+| REF-03 | 1440 × 900 | Light / comfortable | PASS | 44 / 49 / 91 / 143 | 40 | 13 × 7 |
+| REF-04 | 1440 × 900 | Dark / comfortable | PASS | 44 / 49 / 91 / 143 | 40 | 13 × 7 |
+| REF-05 | 1024 × 768 | Light / compact | PASS | 36 / 41 / 91 / 135 | 32 | 13 × 7 |
+| BASE-01 | 1440 × 900 | Light / compact, padding dọc 0 | FAIL dự kiến | 36 / 36 / 91 / 127 | 32 | 17 × 7 |
+
+REF-05 kiểm nguy cơ cắt tên/lỗi hoặc mất cột số liệu ở desktop hẹp. Cả 7 cột đọc được và trang không tràn ngang. Số hàng/cột là kết quả của 24 dòng dữ liệu fixture.
+
+**R3-F01 — focus clearance.** BASE-01 đo hàng editor từ y=204 đến 240 và vùng vẽ outline từ y=201,5 đến 241,5. Ảnh cho thấy outline chạy qua đường phân cách hàng. Phương án bổ sung 4px mỗi đầu theo chiều dọc của ô editor giữ vùng vẽ 40px/48px trong hàng 41px/49px. Tab và Shift+Tab vào đúng editor. So ảnh trước/sau xác nhận màu outline ở cả bốn cạnh. Ảnh focus cho thấy toàn bộ đường viền trong ô, không che nội dung hàng bên.
+
+**Chữ và theme.** Browser tính đúng `color-scheme` trên root và editor kể cả khi preference mô phỏng đối nghịch. Cell padding ngang 8px, border dưới 1px, chữ bảng/editor 13px/18px. Tên tiếng Việt dài và lỗi đều hiển thị đủ 5 dòng trong fixture. Chromium báo Noto Sans thực dùng qua glyph, không thấy fallback ở các vùng được lấy mẫu.
+
+**SVG-01 — PASS cho Light static reference.** Chromium mở SVG gốc độc lập ở 1600 × 1280. Đã xem ảnh tiêu đề, dấu tiếng Việt, palette, trạng thái và chân trang. Không thấy chữ cắt hoặc chồng nhau; 84 text element nằm trong canvas. Renderer báo glyph từ Noto Sans Regular và Bold nhúng trong SVG.
+
+**R3-F02 — parity khi checkout trên Windows.** `sync-tokens.mjs --check` ban đầu báo drift do Git checkout CSS thành CRLF trong khi generator xuất LF. Checker chuẩn hóa CRLF khi đọc và tiếp tục so sánh toàn nội dung. Kiểm lại đạt; CSS và JSON token giữ nguyên.
+
 ## Kiểm tra có thể chạy lại
 
 Chạy tại repository root, dùng Node 26.13.1+ trong major 26 theo baseline project:
@@ -72,7 +95,7 @@ Viền nhẹ chỉ để trang trí; không dùng làm dấu hiệu duy nhất n
 ## Regression và giới hạn
 
 - `web/`, dependency/lockfile, business snapshot và workflow không đổi trong phần bổ sung này. Build TypeScript/Vite/PWA, bốn health tests và ba PWA-build tests đã chạy với Node 26.13.1; PASS chỉ áp dụng ứng dụng hiện hành.
-- **Browser/visual reference: NOT_RUN/BLOCKED.** Vòng 1: Chromium cục bộ không khởi chạy do môi trường từ chối `socket()`; Browser kết nối từ chối URL `data:` của fixture. Vòng 2: HTTP fixture không truy cập được, như ghi ở trên. Không thử vượt giới hạn hoặc coi compile/contrast là browser PASS.
+- Lịch sử browser/visual **NOT_RUN/BLOCKED**. Vòng 1: Chromium cục bộ không khởi chạy do môi trường từ chối `socket()`; Browser kết nối từ chối URL `data:` của fixture. Vòng 2: HTTP fixture không truy cập được, như ghi ở trên. Kết quả hiện hành trên Chromium Windows được ghi trong mục kiểm render UI-00.
 - UI component/theme controller chưa được triển khai; bootstrap trước paint, System/OS listener, storage failure, PWA launch/cache và acceptance thiết bị vẫn phải kiểm ở UI-01.
 - Chưa chạy luồng nghiệp vụ thật, lost-ACK/recovery trên UI, hoặc receipt/stock/invoice/accounting integration.
 - Năm PDF prototype và SHA-256 trong mapping là provenance của lần lập tài liệu; review này không tải lại và không tuyên bố đã tái kiểm hash PDF.

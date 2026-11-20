@@ -97,6 +97,10 @@ for (const theme of ['light', 'dark']) {
 for (const [filename, generated] of [['tokens.css', css], ['tailwind-v4.css', adapter]]) {
   const url = new URL(`../tokens/${filename}`, import.meta.url)
   if (mode === '--write') await writeFile(url, generated)
-  else assert.equal(await readFile(url, 'utf8'), generated, `${filename} drift; run with --write and review the diff`)
+  else {
+    // Git may check out the same generated LF artifact as CRLF on Windows.
+    const checkedOut = (await readFile(url, 'utf8')).replaceAll('\r\n', '\n')
+    assert.equal(checkedOut, generated, `${filename} drift; run with --write and review the diff`)
+  }
 }
 console.log(`${entries.length} base tokens; ${semanticColors.length} complete Dark overrides; ${bindings.length} inline bindings; ${breakpoints.length} literal breakpoints; ${mode} PASS`)

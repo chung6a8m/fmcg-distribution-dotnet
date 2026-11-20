@@ -140,6 +140,8 @@ Với recipe này, nội dung một dòng hoặc editor 32px cộng border dư�
 
 Outline không tham gia phép tính chiều cao: control 32px với outline 2px/offset 2px có vùng vẽ ngoài 40px. Component spec phải chỉ rõ cách giữ focus không bị clip/che hoặc đè nội dung hàng bên: bố trí vùng vẽ và thứ tự paint phù hợp, hoặc tăng khoảng trống/hàng khi cần. Không thu nhỏ target hoặc tắt outline để giữ 36px. Popup/lookup không bị giới hạn bởi chiều cao hàng; chỉ mount editor khi thực sự sửa theo UX-I03.
 
+Trong [fixture UI-00](reference-tests/README.md), cấu hình đối chứng với padding dọc 0px cho thấy outline vượt khỏi hàng compact 36px. Cách bố trí tham chiếu đã kiểm dành 4px ở mỗi đầu theo chiều dọc của riêng ô có editor, kể cả khi editor chưa nhận focus. Với border cuối ô 1px, hàng editor có mức đo 41px (compact) hoặc 49px (comfortable). Hàng đọc vẫn ở mức sàn tương ứng. Đây là một phương án bố trí cho fixture; component spec sau này cần kiểm vùng vẽ trong bố cục thực tế.
+
 Với grid/virtualization, dùng hợp đồng sizing của library và đo kết quả thực; không mặc định `rowHeight=36` vẫn cho nội dung tăng. Fixture nghiệm thu phải có hàng đọc, editor đang focus, tên dài, lỗi nhiều dòng và target của input mode đã chọn. Screen spec ghi số hàng/cột **hữu ích** đang thấy cùng nguồn, trạng thái, tiền/lượng và hành động; không đặt một quota số hàng chung cho mọi màn hoặc mở lại ngoại lệ 125%.
 
 ## 7. List/detail và hàng đợi công việc
