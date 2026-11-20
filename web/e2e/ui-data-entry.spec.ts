@@ -35,6 +35,10 @@ test('LAB link, selected lookup identity, comma decimal, form validation and no 
   await submit.click()
   await expect(page.getByText('Dữ liệu mẫu hợp lệ')).toBeVisible()
   await expect(page.getByText(/KH-101 · Tạp hóa Minh Anh; số lượng 2,125/)).toBeVisible()
+  await page.getByRole('button', { name: 'Đặt lại form' }).click()
+  await expect(lookup).toBeFocused()
+  await expect(lookup).toHaveValue('')
+  await expect(qty).toHaveValue('')
   expect(apiRequests).toEqual([])
 })
 
@@ -48,6 +52,7 @@ test('lookup does not auto-select on Tab or composition; Escape restores committ
     key: 'Enter', bubbles: true, cancelable: true, isComposing: true
   })))
   await expect(lookup).toHaveValue('Minh Anh')
+  await expect(page.getByRole('alert')).toHaveCount(0)
   await lookup.press('Tab')
   await expect(page.getByText(/Chưa chọn mã hợp lệ/)).toBeVisible()
   await page.getByRole('button', { name: 'Kiểm tra nháp mẫu' }).click()

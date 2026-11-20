@@ -88,14 +88,18 @@ export function LookupField({
         if (typeof inputRef === 'function') inputRef(node)
         else if (inputRef) inputRef.current = node
       }} id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
-        aria-controls={listId} aria-expanded={open} aria-activedescendant={
+        aria-controls={open ? listId : undefined} aria-expanded={open} aria-activedescendant={
           open && active >= 0 && matches[active] ? listId + '-' + matches[active].id : undefined
         } aria-invalid={Boolean(error)} aria-describedby={description} value={query}
         autoComplete="off" placeholder="Nhập mã hoặc tên để tìm"
         onFocus={() => setOpen(true)}
         onChange={event => edit(event.currentTarget.value)}
         onKeyDown={event => {
-          if (event.nativeEvent.isComposing || event.keyCode === 229) return
+          if (event.nativeEvent.isComposing || event.keyCode === 229) {
+            // An IME confirmation is not an implicit form submit or an option activation.
+            if (event.key === 'Enter') event.preventDefault()
+            return
+          }
           if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault()
             setOpen(true)

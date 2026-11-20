@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Field, Notice, ThemeSelect, type Density } from './controls'
 import { demoQuantityError, parseDemoQuantity } from './decimal'
@@ -32,6 +32,11 @@ export function DataEntryDemo() {
   const [reviewed, setReviewed] = useState(false)
   const customerRef = useRef<HTMLInputElement>(null)
   const quantityRef = useRef<HTMLInputElement>(null)
+
+  // Reset remounts the uncontrolled lookup query; move focus after React mounts its new input.
+  useLayoutEffect(() => {
+    if (lookupKey !== 0) customerRef.current?.focus()
+  }, [lookupKey])
 
   const [lines, setLines] = useState<DraftLine[]>(originalLines)
   const [selection, setSelection] = useState<string | null>(null)
@@ -83,7 +88,6 @@ export function DataEntryDemo() {
     setTouched(false)
     setReviewed(false)
     setLookupKey(key => key + 1)
-    customerRef.current?.focus()
   }
 
   return <main className="page entry-page" data-density={density}>
@@ -140,7 +144,7 @@ export function DataEntryDemo() {
             onChange={event => { setQuantity(event.currentTarget.value); setReviewed(false) }}
             onBlur={() => setTouched(true)}
             onKeyDown={event => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault()
+              if (event.key === 'Enter') event.preventDefault()
             }} />
         </div>
         <div className="button-row">
