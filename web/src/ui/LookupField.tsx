@@ -72,7 +72,11 @@ export function LookupField({
   }
 
   const hasUncommittedText = query.trim().length > 0 && (!selected || lookupLabel(selected) !== query)
-  const description = [error ? id + '-error' : null, hasUncommittedText ? id + '-unselected' : null]
+  // A previously selected ID must not appear verified while the source is unavailable.
+  const effectiveError = error ?? (selected && sourceState !== 'ready'
+    ? 'Nguồn danh mục chưa sẵn sàng; cần xác minh lại identity trước khi sử dụng.'
+    : undefined)
+  const description = [effectiveError ? id + '-error' : null, hasUncommittedText ? id + '-unselected' : null]
     .filter(Boolean).join(' ') || undefined
 
   return <div className="field lookup-field" onBlurCapture={event => {
@@ -90,7 +94,7 @@ export function LookupField({
       }} id={id} role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
         aria-controls={open ? listId : undefined} aria-expanded={open} aria-activedescendant={
           open && active >= 0 && matches[active] ? listId + '-' + matches[active].id : undefined
-        } aria-invalid={Boolean(error)} aria-describedby={description} value={query}
+        } aria-invalid={Boolean(effectiveError)} aria-describedby={description} value={query}
         autoComplete="off" placeholder="Nhập mã hoặc tên để tìm"
         onFocus={() => setOpen(true)}
         onChange={event => edit(event.currentTarget.value)}
@@ -131,7 +135,7 @@ export function LookupField({
     {hasUncommittedText && <p id={id + '-unselected'} className="field-help">
       Chưa chọn mã hợp lệ; gõ tên không xác nhận identity.
     </p>}
-    {error && <p id={id + '-error'} className="field-error">{error}</p>}
+    {effectiveError && <p id={id + '-error'} className="field-error">{effectiveError}</p>}
     {open && <div className="lookup-menu" id={listId} role="listbox" aria-label={'Kết quả ' + label}>
       {sourceState === 'loading' ? <p role="status">Đang tải danh mục mẫu…</p>
         : sourceState === 'error' ? <p role="status">Không đọc được danh mục mẫu.</p>

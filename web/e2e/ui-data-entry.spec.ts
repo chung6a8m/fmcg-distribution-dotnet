@@ -96,6 +96,8 @@ test('lookup exposes loading, error, forbidden and empty states without identity
   await input.press('Enter')
   await expect(input).toHaveValue(/KH-101/)
   await source.selectOption('forbidden')
+  await expect(source).toHaveValue('forbidden')
+  await expect(input).toHaveAccessibleDescription(/Nguồn danh mục chưa sẵn sàng/)
   await page.getByRole('button', { name: 'Kiểm tra nháp mẫu' }).click()
   await expect(input).toHaveAccessibleDescription(/Nguồn danh mục chưa sẵn sàng/)
 })
