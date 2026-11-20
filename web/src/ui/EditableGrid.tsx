@@ -119,7 +119,7 @@ export function EditableGrid({
       </tr></thead>
       <tbody>{rows.length === 0 ? <tr><td colSpan={4}>
         {filtered ? 'Không khớp bộ lọc; dữ liệu gốc không bị xóa.' : 'Chưa có dòng mẫu.'}
-      </td></tr> : rows.map((row, rowIndex) => <tr key={row.id} aria-selected={selectedId === row.id}
+      </td></tr> : rows.map(row => <tr key={row.id} aria-selected={selectedId === row.id}
         data-selected={selectedId === row.id}>
         {([row.code, row.name, row.unit, row.quantity] as const).map((value, columnIndex) => {
           const column = columnIndex as Column
@@ -134,7 +134,7 @@ export function EditableGrid({
             }}
             onClick={event => {
               if (editingId && editingId !== row.id) return
-              if (!isEditing && event.target === event.currentTarget) {
+              if (!isEditing) {
                 onSelect(row.id)
                 event.currentTarget.focus()
               }
