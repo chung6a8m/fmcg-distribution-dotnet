@@ -158,12 +158,11 @@ export function workflowReducer(workflow: Workflow, event: WorkflowEvent): Workf
 
 // SessionStorage is a convenience for a synthetic lab only. Never trust it as
 // evidence of server ACK/POSTED, current identity, policy or write permission.
-export function restoreWorkflow(raw: string | null): Workflow {
-  const fallback = newWorkflow()
-  if (!raw || raw.length > 10000) return fallback
+export function tryRestoreWorkflow(raw: string | null): Workflow | null {
+  if (!raw || raw.length > 10000) return null
   try {
     const item: unknown = JSON.parse(raw)
-    if (!item || typeof item !== 'object') return fallback
+    if (!item || typeof item !== 'object') return null
     const value = item as Partial<Workflow> & { schema?: unknown }
     if (value.schema !== 1 || !phases.includes(value.phase as Phase) ||
       !permissions.includes(value.permission as PermissionFixture) ||
@@ -174,18 +173,18 @@ export function restoreWorkflow(raw: string | null): Workflow {
       !['rev-07', 'rev-08'].includes(value.revision ?? '') ||
       typeof value.intakeAcknowledged !== 'boolean' ||
       !Array.isArray(value.history) || value.history.length > 24 ||
-      !value.history.every(h => typeof h === 'string' && h.length < 200)) return fallback
+      !value.history.every(h => typeof h === 'string' && h.length < 200)) return null
     // A persisted browser fixture must not invent an ACK on a draft or forget a known ACK.
     if ((['draft', 'checked', 'pending'].includes(value.phase!) && value.intakeAcknowledged) ||
-      (['ack', 'waiting', 'posted'].includes(value.phase!) && !value.intakeAcknowledged)) return fallback
+      (['ack', 'waiting', 'posted'].includes(value.phase!) && !value.intakeAcknowledged)) return null
     const sent = value.sent
     if (value.phase !== 'draft' && value.phase !== 'checked') {
       if (!sent || typeof sent !== 'object' || sent.id !== value.id ||
         sent.quantity !== value.quantity || sent.revision !== value.revision ||
-        sent.signature !== [sent.id, sent.quantity, sent.revision].join('|')) return fallback
-    } else if (sent !== null) return fallback
+        sent.signature !== [sent.id, sent.quantity, sent.revision].join('|')) return null
+    } else if (sent !== null) return null
     if (value.phase === 'checked' &&
-      value.checkedSignature !== [value.id, value.quantity, value.revision].join('|')) return fallback
+      value.checkedSignature !== [value.id, value.quantity, value.revision].join('|')) return null
     return {
       phase: value.phase!, id: value.id!, sequence: value.sequence!, quantity: value.quantity!,
       revision: value.revision!, permission: value.permission!, connection: value.connection!,
@@ -194,6 +193,12 @@ export function restoreWorkflow(raw: string | null): Workflow {
       intakeAcknowledged: value.intakeAcknowledged!, history: value.history
     }
   } catch {
-    return fallback
+    return null
   }
+}
+
+// Existing callers may choose a new demo draft; the UI separately refuses to
+// overwrite a present but invalid session, since its original outcome is unknown.
+export function restoreWorkflow(raw: string | null): Workflow {
+  return tryRestoreWorkflow(raw) ?? newWorkflow()
 }
