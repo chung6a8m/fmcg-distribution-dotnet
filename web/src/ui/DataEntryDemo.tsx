@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Field, Notice, ThemeSelect, type Density } from './controls'
 import { demoQuantityError, parseDemoQuantity } from './decimal'
@@ -47,7 +47,12 @@ export function DataEntryDemo() {
   const [editing, setEditing] = useState(false)
   const [gridState, setGridState] = useState<GridSourceState>('ready')
   const filterRef = useRef<HTMLInputElement>(null)
+  const gridSourceRef = useRef<HTMLSelectElement>(null)
   const exitRef = useRef<HTMLButtonElement>(null)
+  // Stable focus callbacks are important: changing onExit during a parent render would
+  // re-run the grid's layout effect and steal focus from a filter being typed mid-edit.
+  const focusAfterGrid = useCallback(() => exitRef.current?.focus(), [])
+  const focusBeforeGrid = useCallback(() => gridSourceRef.current?.focus(), [])
 
   // A filter/sort request during editing is staged, never silently unmounting the draft editor.
   useEffect(() => {
@@ -179,7 +184,7 @@ export function DataEntryDemo() {
           </div>
           <div className="field">
             <label htmlFor="grid-state">Nguồn dòng (mô phỏng)</label>
-            <select id="grid-state" value={gridState} disabled={editing}
+            <select id="grid-state" ref={gridSourceRef} value={gridState} disabled={editing}
               onChange={event => setGridState(event.currentTarget.value as GridSourceState)}>
               <option value="ready">Sẵn sàng</option><option value="loading">Đang tải</option>
               <option value="error">Lỗi đọc</option><option value="forbidden">Không đủ quyền</option>
@@ -195,7 +200,8 @@ export function DataEntryDemo() {
       </div>
       <EditableGrid label="Dòng hàng mẫu" rows={visible} selectedId={selection}
         onRowsChange={changed => setLines(current => current.map(line => changed.find(item => item.id === line.id) ?? line))}
-        onSelect={setSelection} onEditingChange={setEditing} onExit={() => exitRef.current?.focus()}
+        onSelect={setSelection} onEditingChange={setEditing}
+        onExit={focusAfterGrid} onExitPrevious={focusBeforeGrid}
         state={gridState} filtered={Boolean(appliedFilter.trim())} />
       <div className="panel-content entry-footer">
         <p role="status">{selectedLine
@@ -203,7 +209,7 @@ export function DataEntryDemo() {
             (selectedVisible ? '' : ' Dòng đang ẩn bởi bộ lọc; lựa chọn chưa bị chuyển sang dòng khác.')
           : 'Chưa chọn dòng. Enter hoặc Space ở ô đọc để chọn đúng identity.'}</p>
         <div className="button-row">
-          <Button ref={exitRef} onClick={() => {
+          <Button ref={exitRef} disabled={editing} onClick={() => {
             setLines(originalLines)
             setSelection(null)
             setFilter('')
@@ -214,6 +220,9 @@ export function DataEntryDemo() {
           }}>Đặt lại các dòng mẫu</Button>
           <Button onClick={() => { setFilter(''); setSortChoice('code') }}>Xóa bộ lọc</Button>
         </div>
+        {editing && <p className="field-help" role="status">
+          Hoàn tất Enter/Tab hoặc hủy Escape ở ô số lượng trước khi đặt lại các dòng mẫu.
+        </p>}
       </div>
     </section>
   </main>

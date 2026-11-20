@@ -32,6 +32,7 @@ Existing workflows additionally run broader .NET/SQL, PWA/security/tenant regres
 | UI02-G01 | Roving grid arrows; Enter/F2 enter editor; editor arrows adjust caret; Escape cancels, Enter commits local draft |
 | UI02-G02 | Invalid editor buffer stays visible with accessible error; Tab advances valid draft; last Tab exits grid |
 | UI02-G03 | Selection keyed by row identity; filter/sort staged until editor ends; hidden selected ID disclosed |
+| UI02-G04 | Per-keystroke filter typing while editing retains focus; reset disabled during editing with reason; single grid Tab stop; first-row Shift+Tab exits backward |
 | UI02-V01 | 1440 desktop Compact and 320 Field; control/editor min sizing, page overflow, long Vietnamese text, Light/Dark tokens |
 | UI02-R01 | No regression of UI-01 theme, first paint, native dialog, PWA consent/update and existing suite |
 
@@ -42,4 +43,4 @@ Test implementation: [unit parser](../../web/tests/ui-02.test.mjs) and [browser]
 - Source PR and CI validation demonstrate synthetic browser/DOM behavior only; they cannot show correctness against an authorized A_ONLINE command.
 - Local form and grid data are deliberately not stored through reload. PWA remains online-first; no offline write queue.
 - Physical devices, installed-app launcher, real IME/scanner/accessibility-assistive tech and end-user testing are **NOT_RUN** unless separately observed.
-- 125% APP-00B/C remains its historical `EXCEPTION_ACCEPTED / NOT_TESTED` scope, not an automatic UI-02 compliance waiver.
+- 125% APP-00B/C remains its historical `EXCEPTION_ACCEPTED / NOT_TESTED` scope, not an automatic UI-02 compliance waiver. Native UI-02 125% browser zoom acceptance is `NOT_TESTED`; the 100%-scale Compact/Field geometry checks cannot substitute for it.

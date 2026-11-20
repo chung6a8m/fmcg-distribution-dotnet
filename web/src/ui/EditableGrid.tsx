@@ -15,12 +15,13 @@ type Props = {
   onSelect: (id: string) => void
   onEditingChange: (editing: boolean) => void
   onExit: () => void
+  onExitPrevious: () => void
   state?: GridSourceState
   filtered?: boolean
 }
 
 export function EditableGrid({
-  label, rows, onRowsChange, selectedId, onSelect, onEditingChange, onExit,
+  label, rows, onRowsChange, selectedId, onSelect, onEditingChange, onExit, onExitPrevious,
   state = 'ready', filtered = false
 }: Props) {
   const [active, setActive] = useState<Cell>(() => ({ rowId: rows[0]?.id ?? '', column: 0 }))
@@ -46,8 +47,9 @@ export function EditableGrid({
     const key = focusPending.current
     focusPending.current = null
     if (key === '__exit__') onExit()
+    else if (key === '__exit_previous__') onExitPrevious()
     else if (key) cellRefs.current[key]?.focus()
-  }, [editingId, active.rowId, active.column, onExit])
+  }, [editingId, active.rowId, active.column, onExit, onExitPrevious])
 
   function goTo(id: string, column: Column) {
     focusPending.current = cellKey(id, column)
@@ -81,7 +83,7 @@ export function EditableGrid({
     const other = direction === 'next' ? rows[index + 1]
       : direction === 'previous' ? rows[index - 1] : row
     if (other) goTo(other.id, 3)
-    else focusPending.current = '__exit__'
+    else focusPending.current = direction === 'previous' ? '__exit_previous__' : '__exit__'
   }
 
   function navigate(row: DraftLine, col: Column, key: string) {
@@ -116,7 +118,7 @@ export function EditableGrid({
     return <p className="grid-state" role="status">{labels[state]}</p>
   }
 
-  return <div className="grid-scroll" role="region" aria-label={'Cuộn ngang ' + label} tabIndex={0}>
+  return <div className="grid-scroll" role="region" aria-label={'Cuộn ngang ' + label}>
     <table role="grid" aria-label={label} className="entry-grid" aria-rowcount={rows.length + 1}>
       <thead><tr>
         {['Mã hàng', 'Tên mặt hàng', 'ĐVT', 'Số lượng'].map(text =>
