@@ -1,6 +1,7 @@
-/* FMCG UI/UX v0.1 - PROPOSED / DOCS_ONLY.
+/* FMCG UI/UX v0.1 - OWNER_APPROVED / DOCS_ONLY reference.
  * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.
- * Not imported by the application. Runtime adoption belongs to UI-01.
+ * Adoption follows docs/decisions/owner-uiux-2026-11-20.md and PR #79 review/CI/merge.
+ * Not imported by the application. Runtime integration belongs to a separate UI-01 PR.
  */
 /* Import Tailwind once from the consuming web entry, then this mapping. */
 @custom-variant dark (&:where(html[data-theme="dark"], html[data-theme="dark"] *));

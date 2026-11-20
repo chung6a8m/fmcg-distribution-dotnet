@@ -4,6 +4,8 @@
 
 **Quyết định:** `OWNER_APPROVED_9_OF_9`. Design Baseline v0.1 chính thức `ADOPTED` **sau khi PR hồ sơ quyết định được independent review, xác nhận CI trên HEAD cuối và merge vào main**. Trước merge: `ADOPTION_PENDING_DECISION_PR_MERGE`. Đây là phê duyệt thiết kế, **không** là xác nhận triển khai/nghiệm thu runtime.
 
+**Hồ sơ quyết định:** [PR #79](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/79). Khi PR này đã merge sau các gate trên, baseline trong `main` có hiệu lực `ADOPTED` và điều kiện cấp quyền UI-01 tại OWN-UX-09 được đáp ứng. Các nhãn proposed trong evidence PR #78 và `provenance` token mô tả lịch sử tạo reference, không phải trạng thái phê duyệt hiện tại.
+
 ## Quyết định đã chốt
 
 | ID | Lựa chọn | Hợp đồng được phê duyệt |

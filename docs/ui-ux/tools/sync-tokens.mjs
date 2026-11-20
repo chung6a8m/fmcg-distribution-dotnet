@@ -44,7 +44,7 @@ function cssValue(token) {
   const target = typeof token.value === 'string' && token.value.match(alias)?.[1]
   return target ? `var(${source.tokens[target].cssVariable})` : token.value
 }
-const header = `/* FMCG UI/UX v0.1 - PROPOSED / DOCS_ONLY.\n * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.\n * Not imported by the application. Runtime adoption belongs to UI-01.\n */\n`
+const header = `/* FMCG UI/UX v0.1 - OWNER_APPROVED / DOCS_ONLY reference.\n * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.\n * Adoption follows docs/decisions/owner-uiux-2026-11-20.md and PR #79 review/CI/merge.\n * Not imported by the application. Runtime integration belongs to a separate UI-01 PR.\n */\n`
 const css = `${header}:root {\n  color-scheme: light;\n${entries.map(([, token]) => `  ${token.cssVariable}: ${cssValue(token)};`).join('\n')}\n}\n\n/* Theme is resolved on html only; missing/invalid preference falls back to Light. */\n:root[data-theme="dark"] {\n  color-scheme: dark;\n${semanticColors.map(([name, token]) => `  ${token.cssVariable}: ${dark[name]};`).join('\n')}\n}\n`
 
 const bindings = semanticColors.map(([, token]) => [`--color-fmcg-${token.cssVariable.slice('--fmcg-color-'.length)}`, token.cssVariable])

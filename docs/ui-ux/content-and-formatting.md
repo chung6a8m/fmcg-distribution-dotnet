@@ -1,6 +1,6 @@
 # Nội dung, số liệu và định dạng
 
-**PROPOSED UI/UX v0.1.** Ngôn ngữ giao diện mặc định đề xuất: tiếng Việt. Dữ liệu và chính sách theo source/module contract.
+**OWNER_APPROVED UI/UX v0.1 / DOCS_ONLY.** Hiệu lực `ADOPTED` sau review, CI HEAD cuối và merge PR #79 theo [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md). Ngôn ngữ giao diện mặc định: tiếng Việt. Dữ liệu và chính sách theo source/module contract.
 
 ## UX-C01 - Từ ngữ và nhãn hành động
 

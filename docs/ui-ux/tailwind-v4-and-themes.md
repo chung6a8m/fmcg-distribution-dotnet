@@ -31,7 +31,7 @@ Ví dụ class tĩnh sau minh họa cách tiêu thụ; chưa là component có �
 </button>
 ```
 
-Component dùng màu theo vai trò, không dùng primitive để bỏ qua theme. Font Noto Sans vẫn cần quyết định đóng gói/license/loading và kiểm layout trong UI-01; class `font-fmcg-body` chỉ chọn font stack, không tải font.
+Component dùng màu theo vai trò, không dùng primitive để bỏ qua theme. OWN-UX-03 đã chốt Noto Sans 400/700 self-hosted; UI-01 còn cần đặc tả cách đóng gói/loading, kiểm license và layout. Class `font-fmcg-body` chỉ chọn font stack, không tải font.
 
 ## 3. Mapping, đơn vị và breakpoint
 

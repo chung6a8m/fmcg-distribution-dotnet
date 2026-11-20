@@ -36,7 +36,7 @@ Palette nền tảng được giữ từ cả năm bộ prototype. Tên vai trò
 | Chữ chính | `#172B4D` | Nội dung, tiêu đề, số liệu cần đọc |
 | Chữ phụ | `#5F6F84` | Nhãn phụ, hướng dẫn, metadata vẫn cần đọc |
 | Viền nhẹ | `#DCE3EC` | Phân cách nhóm và hàng; không là dấu hiệu duy nhất của control |
-| Viền control — mới đề xuất | `#7D899A` | Nhận biết input/control tương tác trên nền sáng |
+| Viền control | `#7D899A` | Nhận biết input/control tương tác trên nền sáng |
 | Hành động chính / tích cực | `#0F766E` | Primary action và trạng thái tích cực có nhãn chữ riêng |
 | Nền tích cực / lựa chọn | `#E7F5F1` | Badge tích cực, dòng đang chọn; bổ sung chỉ dấu lựa chọn |
 | Thông tin / focus | `#315DA8` | Thông tin và focus ring; hai vai trò có token riêng |
@@ -84,7 +84,7 @@ Chữ bảng 11,2–12 và hàng 26 của một số bản vẽ là mật độ 
 
 ## 5. Khoảng cách, viền và hình dạng
 
-Spacing scale đề xuất, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48**.
+Spacing scale tham chiếu, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48**.
 
 | Mục đích | Giá trị khởi điểm |
 |---|---|
@@ -95,11 +95,11 @@ Spacing scale đề xuất, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 
 | Padding ngang trang | 16 ở màn nhỏ; 24 khi có đủ không gian |
 | Tách nhóm lớn | 24 hoặc 32 |
 
-Bo góc đề xuất: **4 / 6 / 8**; **999** chỉ cho dạng pill khi có mục đích rõ. Control ưu tiên 4; card/panel dùng 6 hoặc 8. Trạng thái không được chỉ phân biệt bằng hình dạng góc.
+Bo góc tham chiếu: **4 / 6 / 8**; **999** chỉ cho dạng pill khi có mục đích rõ. Control ưu tiên 4; card/panel dùng 6 hoặc 8. Trạng thái không được chỉ phân biệt bằng hình dạng góc.
 
 Viền cơ sở 1px. Phân cấp nội dung chủ yếu bằng vị trí, khoảng cách, tiêu đề và bề mặt; không thêm nhiều shadow để bù bố cục thiếu rõ ràng. Dialog/popover có thể cần phân tách khỏi nền theo đặc tả component sau này.
 
-Focus ring đề xuất: **2px, offset 2px**, dùng `color.focus.ring` của theme hiện tại (Light `#315DA8`, Dark `#93C5FD`). Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
+Focus ring tham chiếu: **2px, offset 2px**, dùng `color.focus.ring` của theme hiện tại (Light `#315DA8`, Dark `#93C5FD`). Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
 
 ## 6. Mật độ và kích thước thao tác
 
@@ -129,7 +129,7 @@ Desktop tham chiếu **1440×900**, sidebar khoảng **200**, topbar khoảng **
 - Dải chỉ số xuống dòng theo không gian; không cắt số, đơn vị hoặc trạng thái thiếu.
 - Bảng so sánh có thể cuộn ngang trong vùng bảng, giữ nguồn và tiêu đề cần thiết; trang không được tràn ngang ngoài ý muốn.
 
-Field tham chiếu **430×932**, chiều ngang hỗ trợ tối thiểu đề xuất **320 CSS px**. Chiều cao trang do nội dung quyết định; không đặt chiều cao cố định theo 932 hoặc 900.
+Field tham chiếu **430×932**, chiều ngang hỗ trợ từ **320 CSS px** theo OWN-UX-05. Chiều cao trang do nội dung quyết định; không đặt chiều cao cố định theo 932 hoặc 900.
 
 Header, bottom navigation và action bar phải tính safe area, bàn phím ảo và text zoom. Chỉ dùng vị trí sticky/fixed khi nội dung cuối trang và control đang focus vẫn có thể nhìn thấy, cuộn tới và thao tác.
 

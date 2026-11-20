@@ -1,6 +1,6 @@
 # Patterns UI/UX gắn với nghiệp vụ
 
-**Trạng thái: PROPOSED UI/UX v0.1.** Phạm vi: chuẩn trình bày và tương tác dùng chung cho Sales A, Kho/Điều phối, Field, Finance và Owner/Operations.
+**Trạng thái: OWNER_APPROVED UI/UX v0.1 / DOCS_ONLY.** Hiệu lực `ADOPTED` sau review, CI HEAD cuối và merge PR #79 theo [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md). Phạm vi: chuẩn trình bày và tương tác dùng chung cho Sales A, Kho/Điều phối, Field, Finance và Owner/Operations; phê duyệt baseline không cấp quyền triển khai các luồng nghiệp vụ này.
 
 Baseline đã đối chiếu: [`6abafe25d21678579122c11d0c206818fb1cb0fd`](https://github.com/chung6a8m/fmcg-distribution-dotnet/tree/6abafe25d21678579122c11d0c206818fb1cb0fd).
 Đây là tài liệu thiết kế; không xác nhận tính năng đã triển khai, kết quả E2E, điều kiện production hoặc quyền ghi của một tenant.

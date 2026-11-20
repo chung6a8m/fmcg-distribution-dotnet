@@ -1,6 +1,6 @@
 # Interaction patterns
 
-**PROPOSED UI/UX v0.1.** Quy tắc này mô tả tương tác; không thêm command hoặc quyền nghiệp vụ. Đối chiếu [business patterns](business-patterns.md) và hợp đồng module trước khi chốt hành động.
+**OWNER_APPROVED UI/UX v0.1 / DOCS_ONLY.** Hiệu lực `ADOPTED` sau review, CI HEAD cuối và merge PR #79 theo [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md). Quy tắc này mô tả tương tác; không thêm command hoặc quyền nghiệp vụ. Đối chiếu [business patterns](business-patterns.md) và hợp đồng module trước khi chốt hành động.
 
 ## UX-I01 - Điều hướng và giữ ngữ cảnh
 
