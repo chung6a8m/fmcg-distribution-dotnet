@@ -10,13 +10,13 @@ Design Baseline v0.1 là **`ADOPTED`** qua [PR #79](https://github.com/chung6a8m
 
 | Increment | Quyền thực thi | Deliverables và evidence |
 |---|---|---|
-| **UI-01 — Runtime Foundations** | **IMPLEMENTED_IN_PR** ([PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80)), theo OWN-UX-09. | Shell và demo dùng tokens, Noto 400/700, theme chung, Compact/Comfortable/Field. [Đặc tả](ui-01-runtime-foundations.md) và [ma trận kiểm chứng](ui-01-verification.md). |
+| **UI-01 — Runtime Foundations** | **MERGED / CI_VERIFIED** (synthetic/nonproduction, [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80)), theo OWN-UX-09. | Shell và demo dùng tokens, Noto 400/700, theme chung, Compact/Comfortable/Field. [Đặc tả](ui-01-runtime-foundations.md) và [ma trận kiểm chứng](ui-01-verification.md). |
 | **UI-02 — Form, lookup, table/grid** | **NOT_AUTHORIZED** bằng OWN-UX-01..09 | Input, validation, lookup identity, keyboard/IME/caret, Enter/Tab/Escape, filter/selection, decimal, dữ liệu dài; ADR grid/library nếu cần. |
 | **UI-03 — Source, command & recovery UX** | **NOT_AUTHORIZED** | Scope/asOf, result panel, pending/UNKNOWN, preflight/conflict, permission states theo contract/API được cấp phép. |
 | **UI-04 — Vertical slice nghiệp vụ** | **NOT_AUTHORIZED** | Một luồng E2E chỉ sau khi hợp đồng nghiệp vụ, APP-02C blockers và source authorization đã chốt; không suy từ screenshot. |
 | **UI-05 — Mở rộng năm nhóm vai trò** | **NOT_AUTHORIZED** | Mỗi role một spec/PR, nghiệm thu riêng Field/Finance/Owner trên browser/thiết bị phù hợp. |
 
-UI-01 đặt primitives/theme adapter trong `web/src/ui/` và evidence browser trong `web/e2e/`. Mỗi increment sau vẫn cần scope và quyết định riêng.
+UI-01 đặt primitives/theme adapter trong `web/src/ui/` và evidence browser trong `web/e2e/`. Source HEAD `2575651ae18e2e765b8072ef0b82409afce3319e` có 10/10 workflows và 20/20 checks thành công, merge `a0081b081221de725279e1d81b7d3dd8f4f93488`; [post-merge closeout](../closeout/2026-11-20-ui-01.md) giữ rõ phạm vi CI và các `NOT_VERIFIED`. Mỗi increment sau vẫn cần scope và quyết định riêng.
 
 ## Baseline Owner đã chốt cho UI-01
 

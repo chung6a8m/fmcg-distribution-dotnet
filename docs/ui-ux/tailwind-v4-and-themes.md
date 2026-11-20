@@ -1,6 +1,6 @@
 # Tailwind CSS v4 và hợp đồng Light/Dark/System
 
-Design Baseline v0.1 `ADOPTED` qua PR #79. Light, 29 Dark overrides và Light/Dark/System được chuẩn hóa trong OWN-UX-02/06. UI-01 `IMPLEMENTED_IN_PR` trong [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80). [Phạm vi kiểm chứng runtime](ui-01-verification.md).
+Design Baseline v0.1 `ADOPTED` qua PR #79. Light, 29 Dark overrides và Light/Dark/System được chuẩn hóa trong OWN-UX-02/06. UI-01 `MERGED / CI_VERIFIED` (synthetic/nonproduction) qua [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80); [closeout](../closeout/2026-11-20-ui-01.md). [Phạm vi kiểm chứng runtime](ui-01-verification.md).
 
 ## 1. Baseline và nguồn token
 

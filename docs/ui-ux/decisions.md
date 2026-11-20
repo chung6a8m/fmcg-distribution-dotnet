@@ -1,6 +1,6 @@
 # Sổ quyết định UI/UX
 
-> Hồ sơ lịch sử tại thời điểm quyết định. PR #79 sau đó đã merge, baseline là `ADOPTED`. Xem [UI-01 và bằng chứng của PR triển khai](ui-01-verification.md) cho trạng thái runtime hiện tại.
+> Hồ sơ giữ quyết định và provenance lịch sử. PR #79 đã merge, baseline là `ADOPTED`; UI-01 đã `MERGED / CI_VERIFIED` trong phạm vi synthetic/nonproduction theo [closeout](../closeout/2026-11-20-ui-01.md) và [bằng chứng](ui-01-verification.md).
 
 **Ngày lập 20/11/2026; `OWNER_APPROVED_9_OF_9`.** Baseline v0.1 chính thức `ADOPTED` **sau khi PR ghi nhận [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md) được review, CI trên HEAD cuối và merge**; trước merge: `ADOPTION_PENDING_DECISION_PR_MERGE`. Phân biệt design approval, implementation và runtime evidence.
 
@@ -9,12 +9,12 @@
 | UX-D01 | Kế thừa năm vai trò và ngôn ngữ thị giác của prototype | USER_REQUESTED trong cuộc trao đổi thiết kế |
 | UX-D02 | Ưu tiên giao diện gọn, nhiều dữ liệu hữu ích cùng màn | USER_SELECTED trước khi dựng các bộ sau |
 | UX-D03 | React + TypeScript + Vite + PWA online-first; Tailwind v4 | EXISTING_REPO_DECISION; xem AGENTS và Owner APP/APP-00B |
-| UX-D04 | Quy chuẩn, token tham chiếu, templates/review; triển khai component theo increment | OWNER_APPROVED: OWN-UX-01/09; UI-01 chỉ trong PR riêng sau merge quyết định |
+| UX-D04 | Quy chuẩn, token tham chiếu, templates/review; triển khai component theo increment | OWNER_APPROVED: OWN-UX-01/09; PR #80 UI-01 đã merge/CI-verified trong phạm vi đã ủy quyền |
 | UX-D05 | Palette teal/navy Light hiện hành, semantic tokens và viền control nhận biết được | OWNER_APPROVED: OWN-UX-02 |
-| UX-D06 | Noto Sans 400/700 self-hosted, fallback Segoe UI/system-ui/sans-serif | OWNER_APPROVED: OWN-UX-03; chưa tích hợp runtime |
+| UX-D06 | Noto Sans 400/700 self-hosted, fallback Segoe UI/system-ui/sans-serif | OWNER_APPROVED: OWN-UX-03; Noto Sans runtime UI-01 đã source-bound CI-verified |
 | UX-D07 | Desktop Compact body14/20, table13/18, row đọc min36/control min32; comfortable row44/control40 | OWNER_APPROVED: OWN-UX-04; editor/focus/nội dung dài được tăng cao |
 | UX-D08 | Field-first body16/24, target48×48, một cột, từ 320 CSS px | OWNER_APPROVED: OWN-UX-05; thiết bị thực chốt sau |
-| UX-D09 | Light và 29 Dark semantic overrides; preference Light/Dark/System, missing/invalid → Light | OWNER_APPROVED: OWN-UX-02/06; theme runtime chưa nghiệm thu |
+| UX-D09 | Light và 29 Dark semantic overrides; preference Light/Dark/System, missing/invalid → Light | OWNER_APPROVED: OWN-UX-02/06; theme UI-01 CI-verified; physical devices chưa nghiệm thu |
 | UX-D10 | Sidebar ~200px/collapse~64px, topbar~52px, adaptive list/detail; thư viện theo ADR | OWNER_APPROVED: OWN-UX-07/08; chưa chọn library cụ thể |
 | UX-D11 | Giữ ngoại lệ 125% APP-00B/C đúng phạm vi | EXISTING_OWNER_DECISION, OWN-APP00B-13-02 |
 | UX-D12 | Không lấy prototype làm máy trạng thái/permission/policy đã duyệt | EXISTING_CONTRACT + ranh giới artifact; đặc biệt C0-R01…06 |
@@ -37,7 +37,7 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 | Thiết bị thực tế, Android/iOS, kho có cảm ứng/scanner | Owner khi chốt acceptance của UI tương ứng | Chưa suy thiết bị từ kích thước ảnh |
 | Mức kiểm zoom/phóng chữ ngoài phạm vi đã có | Owner ghi rõ phạm vi, giữ lịch sử ngoại lệ | Không mở lại 125% APP-00B/C |
 | Component/grid/icon/docking library | Đã chốt ADR theo từng increment (OWN-UX-08) | Tên thư viện cụ thể vẫn chưa chọn; không kế thừa repo khác |
-| Runtime theme selection / brand override | Light/Dark/System đã được duyệt (OWN-UX-06); UI-01 được ủy quyền có điều kiện (OWN-UX-09) | Chưa có theme controller/switcher trong app hoặc brand override |
+| Runtime theme selection / brand override | Light/Dark/System đã được duyệt (OWN-UX-06); UI-01 được ủy quyền có điều kiện (OWN-UX-09) | Controller/switcher Light/Dark/System đã có trong UI-01 synthetic; chưa có tenant brand override hay nghiệm thu thiết bị thực |
 | Confirm/Reserve, ShipTo, policy validity, partial/repeated load | Contract increments của APP-02C và C0-R01…06 | Giữ trạng thái blocking/deferred ở baseline |
 | Mốc stale, SLA, tuổi nợ, KPI, giá/thuế, hạn mức | Business/policy contract được phê duyệt | Chưa thiết lập; không lấy số demo |
 | Offline drafts, GPS/ảnh/chữ ký bắt buộc, scan | Product/security contract riêng | Không hứa các năng lực chưa có |
