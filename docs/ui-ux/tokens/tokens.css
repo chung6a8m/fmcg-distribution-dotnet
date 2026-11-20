@@ -1,7 +1,6 @@
-/* FMCG UI/UX v0.1 - OWNER_APPROVED / DOCS_ONLY reference.
- * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.
- * Adoption follows docs/decisions/owner-uiux-2026-11-20.md and PR #79 review/CI/merge.
- * Not imported by the application. Runtime integration belongs to a separate UI-01 PR.
+/* FMCG UI/UX v0.1 - ADOPTED via PR #79.
+ * Generated from tokens.json by tools/sync-tokens.mjs and imported by web/src/style.css.
+ * Change the token source, regenerate both CSS files and check parity.
  */
 :root {
   color-scheme: light;

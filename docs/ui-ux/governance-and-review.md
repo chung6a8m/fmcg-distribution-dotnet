@@ -2,7 +2,7 @@
 
 ## UX-G01 - Trạng thái và trách nhiệm
 
-v0.1 đã được Owner **phê duyệt 9/9 quyết định ngày 20/11/2026** ([OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md)). `ADOPTED` **chỉ có hiệu lực sau khi PR hồ sơ quyết định được review, xác nhận CI HEAD cuối và merge**; trước merge là `ADOPTION_PENDING_DECISION_PR_MERGE`. Merge tài liệu không tự tạo component, nâng runtime gates hoặc cấp quyền ngoài UI-01 theo OWN-UX-09.
+Design Baseline v0.1 là `ADOPTED` sau merge PR #79. Owner duyệt 9/9 ngày 20/11/2026 và cấp quyền UI-01 foundations/demo. UI-01 `IMPLEMENTED_IN_PR` trong PR #80. [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md) · [Kiểm chứng runtime](ui-01-verification.md).
 
 Designer/implementer chuẩn bị đặc tả và evidence. Reviewer kiểm tính nhất quán với hợp đồng và chuẩn được chấp nhận. Với solo developer, AI review được ghi đúng là independent technical review nếu dùng ngữ cảnh riêng; không giả danh người vận hành, Human Security hay người phê duyệt độc lập nghiệp vụ.
 
@@ -10,7 +10,7 @@ MUST = bắt buộc trong bản chuẩn được chấp nhận và phạm vi li�
 
 ## UX-G02 - Một nguồn token và phiên bản
 
-`tokens/tokens.json` là nguồn giá trị: 101 token nền Light và `themes.dark.values` cho toàn bộ 29 semantic color. `tokens/tokens.css` và `tokens/tailwind-v4.css` được sinh bằng `node docs/ui-ux/tools/sync-tokens.mjs --write`; chạy lại với `--check` để kiểm parity, aliases, completeness và contrast. Không sửa riêng CSS. Chỉ import reference vào runtime trong **PR UI-01 độc lập sau khi PR quyết định Owner đã merge**; không tự áp dụng trong PR này.
+`tokens/tokens.json` là nguồn cho 101 token nền Light và 29 semantic color Dark. Sinh cả hai CSS bằng `node docs/ui-ux/tools/sync-tokens.mjs --write` rồi kiểm parity, aliases, completeness và contrast với `--check`. UI-01 import cả hai từ `web/src/style.css`.
 
 Schema token là **schema dự án**, không tuyên bố tương thích DTCG hay công cụ Figma. Mỗi token có type, value và CSS variable; `provenance` giữ lịch sử inherited/proposed tại thời điểm tạo. `status` của bộ token và Dark ghi phê duyệt Owner hiện tại; điều kiện hiệu lực adoption nằm trong [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md). Phê duyệt không sửa giá trị hoặc provenance lịch sử. Tham chiếu giữa token dùng `{token.name}` và phải được resolve/kiểm vòng lặp trước xuất.
 

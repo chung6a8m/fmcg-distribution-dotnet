@@ -1,5 +1,7 @@
 # Sổ quyết định UI/UX
 
+> Hồ sơ lịch sử tại thời điểm quyết định. PR #79 sau đó đã merge, baseline là `ADOPTED`. Xem [UI-01 và bằng chứng của PR triển khai](ui-01-verification.md) cho trạng thái runtime hiện tại.
+
 **Ngày lập 20/11/2026; `OWNER_APPROVED_9_OF_9`.** Baseline v0.1 chính thức `ADOPTED` **sau khi PR ghi nhận [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md) được review, CI trên HEAD cuối và merge**; trước merge: `ADOPTION_PENDING_DECISION_PR_MERGE`. Phân biệt design approval, implementation và runtime evidence.
 
 | ID | Nội dung | Trạng thái / căn cứ |

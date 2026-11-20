@@ -1,4 +1,4 @@
-// Docs-only compiler contract. No application imports, browser test, or CI gate.
+// Compiler contract for the shared Tailwind adapter; browser rendering has separate checks.
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'

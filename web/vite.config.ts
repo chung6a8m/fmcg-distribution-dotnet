@@ -13,7 +13,7 @@ export default defineConfig({
         name: 'FMCG DMS — APP-00A (Synthetic)',
         short_name: 'FMCG DMS',
         description: 'Application foundation only. No offline business writes.',
-        theme_color: '#0f766e', background_color: '#ffffff',
+        theme_color: '#F6F8FB', background_color: '#F6F8FB',
         display: 'standalone', start_url: '/',
         icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }]
       },
