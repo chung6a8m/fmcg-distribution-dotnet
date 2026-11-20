@@ -4,7 +4,7 @@
 
 ## 1. Vertical slice selected and source contract
 
-**Sales A / A_ONLINE:** Customer debtor and optional Outlet → registered or approved ad-hoc ShipTo → ConfirmAOrder → ReserveAStock → LoadManifest MAIN→TRIP → PostDelivery of actual quantity → per-Delivery Customer AR and due-date report. The desired path is [APP-02C.0 `1–4](../roadmap/app-02c0-a-online-e2e-contract.md) and the sequential C.1–C.6 [roadmap](../roadmap/app-02c-a-online-e2e.md).
+**Sales A / A_ONLINE:** Customer debtor and optional Outlet → registered or approved ad-hoc ShipTo → ConfirmAOrder → ReserveAStock → LoadManifest MAIN→TRIP → PostDelivery of actual quantity → per-Delivery Customer AR and due-date report. The desired path is [APP-02C.0 sections 1–4](../roadmap/app-02c0-a-online-e2e-contract.md) and the sequential C.1–C.6 [roadmap](../roadmap/app-02c-a-online-e2e.md).
 
 Do not make the UI invent resolved C.0 source semantics. Current APP-01A reserves **before** Confirm, while C.0 requires Confirm→Reserve; current Load/right counters, partial-load re-entry and policy-validity-at-Confirm require separately approved compatibility work. A UI façade does not repair a broken SQL source contract.
 
