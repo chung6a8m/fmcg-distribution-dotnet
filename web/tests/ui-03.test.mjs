@@ -125,3 +125,15 @@ test('UI03-C08 contradictory UNKNOWN with durable ACK never restores as valid ev
   const ack = reduce(unknown, { type: 'lookup', outcome: 'ack' })
   assert.equal(tryRestoreWorkflow(JSON.stringify({ ...ack, schema: 1 }))?.phase, 'ack')
 })
+
+test('UI03-C09 reload invalidates client-only preflight without losing original draft identity', () => {
+  const checked = reduce(newWorkflow(), { type: 'quantity', value: '2,5' }, { type: 'check' })
+  assert.equal(canSend(checked), true)
+  const restored = tryRestoreWorkflow(JSON.stringify({ ...checked, schema: 1 }))
+  assert.equal(restored.phase, 'draft')
+  assert.equal(restored.id, checked.id)
+  assert.equal(restored.quantity, checked.quantity)
+  assert.equal(restored.checkedSignature, null)
+  assert.equal(canSend(restored), false)
+  assert.equal(canSend(reduce(restored, { type: 'check' })), true)
+})
