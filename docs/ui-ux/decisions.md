@@ -48,3 +48,7 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 - [Ngoại lệ 125%](../decisions/owner-app00b-13-02-125-scale-exception.md).
 - [APP-02C.0 contract](../roadmap/app-02c0-a-online-e2e-contract.md).
 - [Prototype mapping và provenance](prototype-mapping.md).
+
+## Ủy quyền UI-02 riêng (20/11/2026)
+
+Owner đã yêu cầu trực tiếp **“Triển khai UI-02”** sau UI-01. [Biên bản giới hạn](../decisions/owner-ui02-2026-11-20.md) cấp quyền implementation cho synthetic Lab riêng; [UI02-ADR-01](ui-02-data-entry.md) chọn native form/table/combobox để kiểm hành vi mà không thêm dependency. Trạng thái implementation là `REVIEW_PENDING`, chưa xác nhận CI final HEAD, sản phẩm thực hay UI-03..05. Các Owner decisions 01..09 và lịch sử UI-01 không bị viết lại.

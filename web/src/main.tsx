@@ -4,6 +4,7 @@ import { registerSW } from 'virtual:pwa-register'
 import { isLiveApiResponse } from './health'
 import { Button, ThemeSelect } from './ui/controls'
 import { FoundationsDemo } from './ui/FoundationsDemo'
+import { DataEntryDemo } from './ui/DataEntryDemo'
 import './style.css'
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
@@ -37,6 +38,7 @@ function HealthShell() {
       <h2>Nền tảng giao diện</h2>
       <ThemeSelect />
       <a className="page-link" href="/ui/foundations">Nền tảng giao diện</a>
+      <a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a>
     </section>
     <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
@@ -62,7 +64,8 @@ function App() {
       <p>Ứng dụng đã sẵn sàng cập nhật. Các thay đổi chưa lưu cần được hoàn tất trước khi tải lại.</p>
       <Button variant="primary" onClick={() => { void updateWorker.current?.(true) }}>Cập nhật ứng dụng</Button>
     </section>}
-    {location.pathname === '/ui/foundations' ? <FoundationsDemo /> : <HealthShell />}
+    {location.pathname === '/ui/foundations' ? <FoundationsDemo />
+      : location.pathname === '/ui/data-entry' ? <DataEntryDemo /> : <HealthShell />}
   </>
 }
 

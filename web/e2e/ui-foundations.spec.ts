@@ -82,7 +82,8 @@ test('native portal dialog shares theme and returns keyboard focus', async ({ pa
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
   await expect(opener).toBeFocused()
-  await expect(page.getByLabel(theme)).toHaveValue('dark')
+  // A closing native dialog may still exist for one React commit; scope to the main page.
+  await expect(page.getByRole('main').getByLabel(theme)).toHaveValue('dark')
   await opener.click()
   await dialog.getByRole('button', { name: 'Đóng hộp thoại' }).click()
   await expect(opener).toBeFocused()
