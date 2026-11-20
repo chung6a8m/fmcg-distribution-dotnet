@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   canCheck, canLookup, canSend, draftSignature, isLocked, newWorkflow,
-  restoreWorkflow, tryRestoreWorkflow, workflowReducer
+  tryRestoreWorkflow, workflowReducer
 } from '../src/ui/command-recovery.ts'
 
 function reduce(state, ...events) {
@@ -98,13 +98,13 @@ test('UI03-C04 identity conflict never rotates ID to evade reconciliation', () =
 
 test('UI03-C05 versioned same-tab restore validates frozen identity and fails closed', () => {
   const unknown = reduce(submitted(), { type: 'lost-ack' }, { type: 'permission', value: 'none' })
-  assert.deepEqual(restoreWorkflow(JSON.stringify({ ...unknown, schema: 1 })), unknown)
+  assert.deepEqual(tryRestoreWorkflow(JSON.stringify({ ...unknown, schema: 1 })), unknown)
   for (const raw of [
     '{invalid', JSON.stringify({ ...unknown, schema: 2 }),
     JSON.stringify({ ...unknown, schema: 1, id: 'FORGED' }),
     JSON.stringify({ ...unknown, schema: 1, sent: { ...unknown.sent, quantity: '3' } }),
     JSON.stringify({ ...unknown, schema: 1, history: ['A'.repeat(201)] })
-  ]) assert.deepEqual(restoreWorkflow(raw), newWorkflow())
+  ]) assert.equal(tryRestoreWorkflow(raw), null)
 })
 
 test('UI03-C06 invalid saved UNKNOWN is not silently accepted as a new request', () => {
@@ -114,9 +114,7 @@ test('UI03-C06 invalid saved UNKNOWN is not silently accepted as a new request',
   const invalid = JSON.stringify({ ...unknown, schema: 1,
     sent: { ...unknown.sent, quantity: '999' } })
   assert.equal(tryRestoreWorkflow(invalid), null)
-  // The compatibility helper alone returns a toy draft. The UI must detect
-  // this null result and block command actions without overwriting storage.
-  assert.deepEqual(restoreWorkflow(invalid), newWorkflow())
+  // Callers cannot accidentally use a permissive restore helper; only null is returned.
 })
 
 test('UI03-C08 contradictory UNKNOWN with durable ACK never restores as valid evidence', () => {
