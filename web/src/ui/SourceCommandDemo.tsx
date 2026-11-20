@@ -192,6 +192,12 @@ export function SourceCommandDemo() {
     ? 'Nhập số dương hợp lệ, tối đa ba chữ số thập phân; không chấp nhận giá trị chưa nhập xong.'
     : undefined
   const currentPhase = phaseText[state.phase]
+  // The status badge is part of the business snapshot; read revocation must
+  // hide it just as it hides amounts/history, while retaining the opaque ID.
+  const visiblePhase = state.permission === 'none'
+    ? { label: 'Quyền đọc bị từ chối', tone: 'danger' as const,
+      explanation: 'Thông tin trạng thái bị che vì không có quyền đọc.' }
+    : currentPhase
   const preflightHelp = recoveryBlocked ? 'Không xác định được yêu cầu trước đó: các hành động command tạm khóa.'
     : state.permission === 'none' ? 'Thiếu quyền đọc và gửi trong fixture.'
     : state.permission === 'read' ? 'Chỉ có quyền đọc; không có assignment gửi.'
@@ -228,7 +234,7 @@ export function SourceCommandDemo() {
       <section className="panel" aria-labelledby="ui03-command-title">
         <div className="panel-heading">
           <h2 id="ui03-command-title">Command, preflight và quyền</h2>
-          <Badge tone={currentPhase.tone}>{currentPhase.label}</Badge>
+          <Badge tone={visiblePhase.tone}>{visiblePhase.label}</Badge>
         </div>
         <div className="panel-content">
           <div className="ui03-guard-grid">
@@ -283,8 +289,9 @@ export function SourceCommandDemo() {
             Quyền, kết nối và nháp chỉ được kiểm tại client giả lập. Commit thật phải kiểm lại
             quyền, version, stock và policy trên server.
           </Notice>}
-          {state.phase !== 'draft' && <p className="field-help" role="status">{currentPhase.explanation}</p>}
-          {state.phase === 'pending' && <Button onClick={() => dispatch({ type: 'lost-ack' })}>
+          {state.phase !== 'draft' && <p className="field-help" role="status">{visiblePhase.explanation}</p>}
+          {state.phase === 'pending' && state.permission !== 'none' &&
+            <Button onClick={() => dispatch({ type: 'lost-ack' })}>
             Mô phỏng mất ACK</Button>}
           {sent && <section className="ui03-outcome" aria-labelledby="ui03-outcome-title">
             <h3 id="ui03-outcome-title">Tra đúng lần gửi gốc</h3>
@@ -304,7 +311,8 @@ export function SourceCommandDemo() {
                 : state.connection === 'offline' ? 'Offline: không tra cứu hoặc phát lại, chờ online.'
                   : 'Kết quả đã được chốt trong fixture; không gửi lại.'}
             </p>}
-            {(state.phase === 'unknown' || state.phase === 'conflict') && <Notice tone="warning"
+            {state.permission !== 'none' && (state.phase === 'unknown' || state.phase === 'conflict') &&
+              <Notice tone="warning"
               title={state.phase === 'conflict' ? 'Conflict cần xử lý' : 'Chưa rõ kết quả'}>
               Không gửi lệnh mới/ID mới để vượt trạng thái này. Nếu sự việc đã xảy ra ngoài đời,
               chuyển case kèm bằng chứng cho người có thẩm quyền; Lab không tạo case thật.
@@ -315,7 +323,7 @@ export function SourceCommandDemo() {
     </div>
     <section className="panel" aria-labelledby="ui03-result-title">
       <div className="panel-heading"><h2 id="ui03-result-title">Kết quả theo lớp và lịch sử nguồn</h2>
-        <Badge tone={currentPhase.tone}>{currentPhase.label}</Badge></div>
+        <Badge tone={visiblePhase.tone}>{visiblePhase.label}</Badge></div>
       <div className="panel-content">
         {recoveryBlocked ? <Notice tone="danger" title="Không có trạng thái phục hồi hợp lệ">
           Không diễn giải bản lưu session lỗi như một kết quả server. Identity và lịch sử trước đó chưa thể xác minh.
