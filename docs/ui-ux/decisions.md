@@ -51,7 +51,7 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 
 ## Ủy quyền UI-03 riêng (20/11/2026)
 
-Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Không được tích hợp APP-02C, tự coi client fixture là durable server evidence hoặc mở UI-04/05.
+Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. UI-03 đã được review/merge qua [PR #84](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/84), trạng thái **`MERGED / UI03_100_PERCENT_CI_VERIFIED`** chỉ trong synthetic/nonproduction browser CI. Final source `dcd2870`, merge `f17397e`, 10/10 workflows và 20/20 jobs SUCCESS; [closeout](../closeout/2026-11-20-ui-03.md). [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Không được tích hợp APP-02C, tự coi client fixture là durable server evidence hoặc mở UI-04/05.
 
 ## Ủy quyền UI-02 riêng (20/11/2026)
 
