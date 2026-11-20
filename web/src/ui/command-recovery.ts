@@ -199,8 +199,3 @@ export function tryRestoreWorkflow(raw: string | null): Workflow | null {
   }
 }
 
-// Existing callers may choose a new demo draft; the UI separately refuses to
-// overwrite a present but invalid session, since its original outcome is unknown.
-export function restoreWorkflow(raw: string | null): Workflow {
-  return tryRestoreWorkflow(raw) ?? newWorkflow()
-}
