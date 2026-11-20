@@ -79,7 +79,8 @@ function SourcePanel({ permission }: { permission: Workflow['permission'] }) {
       <h2 id="ui03-source-title">Nguồn, phạm vi và độ đầy đủ</h2>
       <Badge tone={accessible ? complete ? 'success' : 'warning' : 'danger'}>
         {!accessible ? 'Không có quyền đọc' : source.stale ? 'Bản chụp cũ' : count === 0 ? 'Chưa có dữ liệu'
-          : complete ? 'Đủ nguồn mẫu' : 'Chưa đủ nguồn'}
+          : source.expected === null ? 'Chưa xác định độ đầy đủ'
+            : complete ? 'Đủ nguồn mẫu' : 'Chưa đủ nguồn'}
       </Badge>
     </div>
     <div className="panel-content">
