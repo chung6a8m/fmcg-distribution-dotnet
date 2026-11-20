@@ -1,10 +1,10 @@
-# Nền tảng thị giác và bố cục — đề xuất v0.1
+# Nền tảng thị giác và bố cục — baseline v0.1 đã được Owner phê duyệt
 
 ## 1. Trạng thái và phạm vi
 
-Tài liệu này đề xuất nền tảng UI dùng chung cho `fmcg-distribution-dotnet`, kế thừa năm bộ prototype Sales A, Kho, Field, Finance và Owner. Các từ “phải” và “không được” dưới đây mô tả hợp đồng thiết kế dự kiến khi áp dụng v0.1; chúng không xác nhận ứng dụng hiện tại đã đáp ứng.
+Tài liệu này mô tả Design Baseline v0.1 được Owner phê duyệt theo [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md); chỉ có hiệu lực `ADOPTED` sau khi PR hồ sơ quyết định merge. Kế thừa năm bộ prototype Sales A, Kho, Field, Finance và Owner. Hợp đồng thiết kế **không** chứng minh ứng dụng hiện tại đã đáp ứng.
 
-Ưu tiên **gọn, có thêm dữ liệu hữu ích trong cùng ngữ cảnh** là yêu cầu đã có của Owner. Font, cỡ chữ, chiều cao dòng, sidebar và các kích thước production trong tài liệu này là đề xuất của designer, chưa phải các quyết định số học đã được Owner phê duyệt.
+Ưu tiên **gọn, có thêm dữ liệu hữu ích trong cùng ngữ cảnh** và các baseline Noto Sans, desktop compact, Field-first, Light/Dark/System, adaptive list/detail đã được Owner chốt. Các mức sàn là giá trị thiết kế, không khóa chiều cao nội dung và vẫn cần kiểm trên runtime/thiết bị thật.
 
 - Nguồn và khác biệt giữa các bản vẽ: [prototype-mapping.md](prototype-mapping.md).
 - Giá trị token dùng cho bước triển khai: [tokens/tokens.json](tokens/tokens.json).
@@ -52,13 +52,13 @@ Palette nền tảng được giữ từ cả năm bộ prototype. Tên vai trò
 
 Mỗi trạng thái cần có nhãn chữ. Lỗi tại trường có nội dung lỗi; lựa chọn có chỉ dấu rõ; focus có vòng bao; không chỉ đổi màu nền hoặc màu chữ.
 
-**Light là bảng tham chiếu kế thừa prototype; Dark là bảng bổ sung DESIGNER_PROPOSED trong review PR #78.** `tokens.json` giữ 101 token nền và thêm 29 giá trị Dark cho toàn bộ semantic color. Component dùng vai trò ngữ nghĩa, không dùng primitive trực tiếp. Palette Dark và adapter đã có kiểm riêng trong [verification](verification.md); khả năng đổi theme của ứng dụng vẫn chưa triển khai. Xem [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) trước khi áp dụng.
+**Light kế thừa prototype và Dark semantic palette đã được Owner chốt tại OWN-UX-02/06; Dark mang nhãn `DESIGNER_PROPOSED` tại thời điểm tạo PR #78.** `tokens.json` giữ 101 token nền và thêm 29 giá trị Dark cho toàn bộ semantic color. Component dùng vai trò ngữ nghĩa, không dùng primitive trực tiếp. Palette Dark và adapter đã có kiểm riêng trong [verification](verification.md); khả năng đổi theme của ứng dụng vẫn chưa triển khai. Xem [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) trước khi áp dụng.
 
 Nhãn trong notice/badge dùng đúng cặp `status.*.foreground/background`. Không đặt `text.secondary` vào mọi nền màu: trên `status.info.background` của Light, cặp đó chỉ đạt 4,487:1. Không suy contrast từ một theme hoặc từ màu chưa thêm opacity sang trạng thái khác.
 
 ## 4. Typography
 
-Font đề xuất là **Noto Sans**, weight **400/700**, giữ khả năng hiển thị tiếng Việt của bộ prototype. Fallback: `"Noto Sans", "Segoe UI", system-ui, sans-serif`.
+Font được Owner phê duyệt là **Noto Sans**, self-hosted weight **400/700**, phù hợp hiển thị tiếng Việt. Fallback: `"Noto Sans", "Segoe UI", system-ui, sans-serif`. Font chưa được tích hợp vào runtime.
 
 Ứng dụng hiện tại dùng Segoe UI trong [web/src/style.css](../../web/src/style.css). Việc đưa Noto Sans vào runtime, đóng gói font, font loading và kiểm tra lại bố cục là một increment triển khai riêng; tài liệu này không thực hiện migration đó.
 
@@ -103,7 +103,7 @@ Focus ring đề xuất: **2px, offset 2px**, dùng `color.focus.ring` của the
 
 ## 6. Mật độ và kích thước thao tác
 
-| Thuộc tính | Desktop compact — mặc định đề xuất | Desktop comfortable | Field / thao tác cảm ứng |
+| Thuộc tính | Desktop compact — mặc định Owner chọn | Desktop comfortable | Field / thao tác cảm ứng |
 |---|---:|---:|---:|
 | Chiều cao control tối thiểu | 32 | 40 | 48 |
 | Chiều cao dòng dữ liệu tối thiểu | 36 | 44 | Theo nội dung; vùng thao tác tối thiểu 48 |
@@ -120,7 +120,7 @@ Icon nhỏ có thể nằm trong target lớn hơn. Các target cạnh nhau ph�
 
 ## 7. Khung trang và responsive
 
-Desktop tham chiếu **1440×900**, sidebar **200**, topbar **52** là đề xuất chuẩn hóa. Sales trước đây dùng 208/64; các bộ desktop sau dùng 188/52. Không trình bày 200 là giá trị đã có trong cả năm prototype.
+Desktop tham chiếu **1440×900**, sidebar khoảng **200**, topbar khoảng **52** là baseline từ OWN-UX-07, được phép điều chỉnh khi layout/nội dung yêu cầu. Sales trước đây dùng 208/64; các bộ desktop sau dùng 188/52. Không trình bày 200 là giá trị đã có trong cả năm prototype.
 
 - Sidebar có thể thu gọn khoảng 64 khi hữu ích; icon vẫn phải có tên truy cập và đường đọc nhãn bằng bàn phím/cảm ứng.
 - Không bắt buộc navigation chỉ có icon; dùng menu mở được nếu nhãn hoặc ngữ cảnh cần thiết.
