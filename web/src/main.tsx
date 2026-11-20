@@ -5,6 +5,7 @@ import { isLiveApiResponse } from './health'
 import { Button, ThemeSelect } from './ui/controls'
 import { FoundationsDemo } from './ui/FoundationsDemo'
 import { DataEntryDemo } from './ui/DataEntryDemo'
+import { SourceCommandDemo } from './ui/SourceCommandDemo'
 import './style.css'
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
@@ -39,6 +40,7 @@ function HealthShell() {
       <ThemeSelect />
       <a className="page-link" href="/ui/foundations">Nền tảng giao diện</a>
       <a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a>
+      <a className="page-link" href="/ui/command-recovery">UI-03 · Source & Recovery Lab</a>
     </section>
     <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
@@ -65,7 +67,8 @@ function App() {
       <Button variant="primary" onClick={() => { void updateWorker.current?.(true) }}>Cập nhật ứng dụng</Button>
     </section>}
     {location.pathname === '/ui/foundations' ? <FoundationsDemo />
-      : location.pathname === '/ui/data-entry' ? <DataEntryDemo /> : <HealthShell />}
+      : location.pathname === '/ui/data-entry' ? <DataEntryDemo />
+        : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo /> : <HealthShell />}
   </>
 }
 

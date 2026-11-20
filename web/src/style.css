@@ -346,3 +346,57 @@
     .lookup-option[data-active="true"], .entry-grid tr[data-selected="true"] { outline: 2px solid Highlight; }
   }
 }
+
+/* UI-03 synthetic source and command recovery Lab; no new palette or CSS theme roots. */
+@layer components {
+  .ui03-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+    @variant field-layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  .ui03-source-facts, .ui03-guard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+  }
+  .ui03-source-facts div {
+    min-width: 0;
+    border-bottom: 1px solid var(--fmcg-color-border-subtle);
+    padding: 6px 0;
+  }
+  .ui03-source-facts dt {
+    color: var(--fmcg-color-text-secondary);
+    font-size: var(--fmcg-font-size-table);
+  }
+  .ui03-source-facts dd {
+    margin: 3px 0 0;
+    font-weight: var(--fmcg-font-weight-bold);
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+  .ui03-detail, .ui03-command-identity {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--fmcg-color-border-subtle);
+    border-radius: var(--fmcg-radius-small);
+    background: var(--fmcg-color-surface-subtle);
+  }
+  .ui03-detail ul, .ui03-history { padding-inline-start: 24px; }
+  .ui03-command-identity { display: grid; gap: 4px; }
+  .ui03-command-identity > span { color: var(--fmcg-color-text-secondary); }
+  .ui03-command-identity strong { font-variant-numeric: tabular-nums; }
+  .ui03-outcome { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--fmcg-color-border-subtle); }
+  .ui03-outcome h3, .ui03-page h3 { font-weight: var(--fmcg-font-weight-bold); }
+  .ui03-outcome .button { justify-self: start; }
+  .ui03-history { display: grid; gap: 6px; }
+  .ui03-page button:disabled { cursor: not-allowed; }
+  .ui03-page :is(.ui03-command-identity, .ui03-detail) { overflow-wrap: anywhere; }
+  .ui03-source-facts, .ui03-guard-grid {
+    @variant field-layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (forced-colors: active) {
+    .ui03-detail, .ui03-command-identity, .ui03-source-facts div { border-color: CanvasText; }
+  }
+}

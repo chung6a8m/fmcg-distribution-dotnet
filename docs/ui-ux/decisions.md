@@ -49,6 +49,10 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 - [APP-02C.0 contract](../roadmap/app-02c0-a-online-e2e-contract.md).
 - [Prototype mapping và provenance](prototype-mapping.md).
 
+## Ủy quyền UI-03 riêng (20/11/2026)
+
+Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Không được tích hợp APP-02C, tự coi client fixture là durable server evidence hoặc mở UI-04/05.
+
 ## Ủy quyền UI-02 riêng (20/11/2026)
 
 Owner đã yêu cầu trực tiếp **“Triển khai UI-02”** sau UI-01. [Biên bản giới hạn](../decisions/owner-ui02-2026-11-20.md) cấp quyền implementation cho synthetic Lab riêng; [UI02-ADR-01](ui-02-data-entry.md) chọn native form/table/combobox để kiểm hành vi mà không thêm dependency. Triển khai đã được review và merge qua [PR #82](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/82), trạng thái **`MERGED / UI02_100_PERCENT_CI_VERIFIED`** trong phạm vi synthetic Lab, chỉ với 100% browser zoom; [post-merge closeout](../closeout/2026-11-20-ui-02.md) lưu đúng source/merge SHA, bốn findings đã sửa, CI và những điều chưa kiểm chứng. Không xác nhận sản phẩm thực, physical 125% hay UI-03..05. Các Owner decisions 01..09 và lịch sử UI-01 không bị viết lại.

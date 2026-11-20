@@ -12,7 +12,7 @@ Design Baseline v0.1 là **`ADOPTED`** qua [PR #79](https://github.com/chung6a8m
 |---|---|---|
 | **UI-01 — Runtime Foundations** | **MERGED / CI_VERIFIED** (synthetic/nonproduction, [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80)), theo OWN-UX-09. | Shell và demo dùng tokens, Noto 400/700, theme chung, Compact/Comfortable/Field. [Đặc tả](ui-01-runtime-foundations.md) và [ma trận kiểm chứng](ui-01-verification.md). |
 | **UI-02 — Form, lookup, table/grid** | **MERGED / UI02_100_PERCENT_CI_VERIFIED** (synthetic/nonproduction, zoom 100%; [PR #82](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/82), [Owner authorization](../decisions/owner-ui02-2026-11-20.md)). | Lab `/ui/data-entry`: input/validation, identity lookup, keyboard/IME event handling, caret, editable grid, staged filter/sort, decimal, density. [Spec/ADR](ui-02-data-entry.md) · [verification](ui-02-verification.md) · [post-merge closeout](../closeout/2026-11-20-ui-02.md). Physical IME/device/125% vẫn NOT_TESTED. |
-| **UI-03 — Source, command & recovery UX** | **NOT_AUTHORIZED** | Scope/asOf, result panel, pending/UNKNOWN, preflight/conflict, permission states theo contract/API được cấp phép. |
+| **UI-03 — Source, command & recovery UX** | **OWNER_AUTHORIZED / SYNTHETIC_UI_LAB_ONLY** ([direct instruction](../decisions/owner-ui03-2026-11-20.md); [implementation PR #84](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/84)) | `/ui/command-recovery`: source asOf and n/N, distinct ACK/result, PENDING/UNKNOWN and same-ID lookup, permission/offline/preflight/conflict fixtures. [Spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). No business API/posting. |
 | **UI-04 — Vertical slice nghiệp vụ** | **NOT_AUTHORIZED** | Một luồng E2E chỉ sau khi hợp đồng nghiệp vụ, APP-02C blockers và source authorization đã chốt; không suy từ screenshot. |
 | **UI-05 — Mở rộng năm nhóm vai trò** | **NOT_AUTHORIZED** | Mỗi role một spec/PR, nghiệm thu riêng Field/Finance/Owner trên browser/thiết bị phù hợp. |
 
@@ -41,6 +41,6 @@ UI-02 có reviewed final source HEAD `8d3d38309d4f77b7936578839a8a84ce4f2bbd3e`,
 
 ## Giới hạn cấp quyền
 
-- **UI-01 không tự cấp phép** UI-02…05. Lệnh trực tiếp của Owner ngày 20/11/2026 đã mở riêng UI-02 synthetic Lab và PR #82 đã merge trong phạm vi này. UI-03…05, màn nghiệp vụ, API/business posting thật, offline business writes, GPS/scan/ảnh/chữ ký và tenant brand override vẫn chưa được ủy quyền.
+- **UI-01 không tự cấp phép** UI-02…05. Lệnh trực tiếp của Owner ngày 20/11/2026 đã mở riêng UI-02 synthetic Lab và PR #82 đã merge trong phạm vi này. Lệnh Owner tiếp theo mở UI-03 **chỉ cho synthetic Lab**, không tự mở API/business writes. UI-04…05, màn nghiệp vụ, API/business posting thật, offline business writes, GPS/scan/ảnh/chữ ký và tenant brand override vẫn chưa được ủy quyền.
 - **Không** thay `business/`, `business.lock.json`, tenant/security policies hoặc APP-02C blockers C0-R01..06; không nâng PREPROD/EV/P0, Pilot, Go-Live hoặc production.
 - UI-01 foundations/demo không tương đương accessibility certification, E2E nghiệp vụ hay acceptance thiết bị Field thực.

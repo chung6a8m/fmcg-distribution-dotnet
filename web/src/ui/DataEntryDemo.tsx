@@ -100,6 +100,7 @@ export function DataEntryDemo() {
       <nav className="button-row" aria-label="Điều hướng UI Lab">
         <a className="page-link" href="/">Trạng thái kết nối</a>
         <a className="page-link" href="/ui/foundations">UI-01 · Foundations</a>
+        <a className="page-link" href="/ui/command-recovery">UI-03 · Source & Recovery</a>
       </nav>
       <div className="title-row">
         <h1>Biểu mẫu và bảng tương tác</h1>
