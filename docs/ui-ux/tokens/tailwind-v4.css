@@ -1,0 +1,77 @@
+/* FMCG UI/UX v0.1 - PROPOSED / DOCS_ONLY.
+ * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.
+ * Not imported by the application. Runtime adoption belongs to UI-01.
+ */
+/* Import Tailwind once from the consuming web entry, then this mapping. */
+@custom-variant dark (&:where(html[data-theme="dark"], html[data-theme="dark"] *));
+
+@theme inline {
+  --color-fmcg-surface-page: var(--fmcg-color-surface-page);
+  --color-fmcg-surface-card: var(--fmcg-color-surface-card);
+  --color-fmcg-surface-subtle: var(--fmcg-color-surface-subtle);
+  --color-fmcg-surface-row-alternate: var(--fmcg-color-surface-row-alternate);
+  --color-fmcg-text-primary: var(--fmcg-color-text-primary);
+  --color-fmcg-text-secondary: var(--fmcg-color-text-secondary);
+  --color-fmcg-text-inverse: var(--fmcg-color-text-inverse);
+  --color-fmcg-border-subtle: var(--fmcg-color-border-subtle);
+  --color-fmcg-border-control: var(--fmcg-color-border-control);
+  --color-fmcg-action-primary-background: var(--fmcg-color-action-primary-background);
+  --color-fmcg-action-primary-hover: var(--fmcg-color-action-primary-hover);
+  --color-fmcg-action-primary-pressed: var(--fmcg-color-action-primary-pressed);
+  --color-fmcg-action-primary-foreground: var(--fmcg-color-action-primary-foreground);
+  --color-fmcg-action-destructive-background: var(--fmcg-color-action-destructive-background);
+  --color-fmcg-action-destructive-foreground: var(--fmcg-color-action-destructive-foreground);
+  --color-fmcg-action-disabled-background: var(--fmcg-color-action-disabled-background);
+  --color-fmcg-action-disabled-foreground: var(--fmcg-color-action-disabled-foreground);
+  --color-fmcg-selection-background: var(--fmcg-color-selection-background);
+  --color-fmcg-selection-indicator: var(--fmcg-color-selection-indicator);
+  --color-fmcg-focus-ring: var(--fmcg-color-focus-ring);
+  --color-fmcg-link-text: var(--fmcg-color-link-text);
+  --color-fmcg-status-success-foreground: var(--fmcg-color-status-success-foreground);
+  --color-fmcg-status-success-background: var(--fmcg-color-status-success-background);
+  --color-fmcg-status-info-foreground: var(--fmcg-color-status-info-foreground);
+  --color-fmcg-status-info-background: var(--fmcg-color-status-info-background);
+  --color-fmcg-status-warning-foreground: var(--fmcg-color-status-warning-foreground);
+  --color-fmcg-status-warning-background: var(--fmcg-color-status-warning-background);
+  --color-fmcg-status-danger-foreground: var(--fmcg-color-status-danger-foreground);
+  --color-fmcg-status-danger-background: var(--fmcg-color-status-danger-background);
+  --font-fmcg-body: var(--fmcg-font-family);
+  --font-weight-fmcg-regular: var(--fmcg-font-weight-regular);
+  --font-weight-fmcg-bold: var(--fmcg-font-weight-bold);
+  --text-fmcg-body: var(--fmcg-font-size-body);
+  --text-fmcg-body--line-height: var(--fmcg-font-line-height-body);
+  --text-fmcg-table: var(--fmcg-font-size-table);
+  --text-fmcg-table--line-height: var(--fmcg-font-line-height-table);
+  --text-fmcg-caption: var(--fmcg-font-size-caption);
+  --text-fmcg-caption--line-height: var(--fmcg-font-line-height-caption);
+  --text-fmcg-page-title: var(--fmcg-font-size-page-title);
+  --text-fmcg-page-title--line-height: var(--fmcg-font-line-height-page-title);
+  --text-fmcg-section-title: var(--fmcg-font-size-section-title);
+  --text-fmcg-section-title--line-height: var(--fmcg-font-line-height-section-title);
+  --text-fmcg-metric: var(--fmcg-font-size-metric);
+  --text-fmcg-metric--line-height: var(--fmcg-font-line-height-metric);
+  --text-fmcg-field-body: var(--fmcg-font-size-field-body);
+  --text-fmcg-field-body--line-height: var(--fmcg-font-line-height-field-body);
+  --spacing-fmcg-0: var(--fmcg-space-0);
+  --spacing-fmcg-2: var(--fmcg-space-2);
+  --spacing-fmcg-4: var(--fmcg-space-4);
+  --spacing-fmcg-8: var(--fmcg-space-8);
+  --spacing-fmcg-12: var(--fmcg-space-12);
+  --spacing-fmcg-16: var(--fmcg-space-16);
+  --spacing-fmcg-20: var(--fmcg-space-20);
+  --spacing-fmcg-24: var(--fmcg-space-24);
+  --spacing-fmcg-32: var(--fmcg-space-32);
+  --spacing-fmcg-40: var(--fmcg-space-40);
+  --spacing-fmcg-48: var(--fmcg-space-48);
+  --radius-fmcg-small: var(--fmcg-radius-small);
+  --radius-fmcg-medium: var(--fmcg-radius-medium);
+  --radius-fmcg-large: var(--fmcg-radius-large);
+  --radius-fmcg-pill: var(--fmcg-radius-pill);
+}
+
+/* Build-time literals; CSS custom properties cannot be media-query thresholds. */
+@theme {
+  --breakpoint-fmcg-medium: 48rem;
+  --breakpoint-fmcg-large: 64rem;
+  --breakpoint-fmcg-wide: 80rem;
+}
