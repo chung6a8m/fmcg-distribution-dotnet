@@ -106,7 +106,7 @@
   .title-row, .panel-heading, .button-row, .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .title-row, .panel-heading { justify-content: space-between; }
   .environment, .section-detail { @apply text-fmcg-caption; }
-  .page-link {
+  :is(.page-link, .entry-link) {
     display: inline-flex;
     justify-self: start;
     align-items: center;
@@ -116,8 +116,8 @@
     text-decoration: underline;
     text-underline-offset: 3px;
   }
-  .page-link:hover { text-decoration-thickness: 2px; }
-  .page-link:active { color: var(--fmcg-color-text-primary); }
+  :is(.page-link, .entry-link):hover { text-decoration-thickness: 2px; }
+  :is(.page-link, .entry-link):active { color: var(--fmcg-color-text-primary); }
   .display-settings {
     display: flex;
     flex-wrap: wrap;

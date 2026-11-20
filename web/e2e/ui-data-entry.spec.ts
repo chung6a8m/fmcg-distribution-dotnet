@@ -199,7 +199,7 @@ for (const width of [1440, 320]) {
       clientWidth: document.documentElement.clientWidth
     }))
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth)
-    const row = await measure(table.getByRole('row').filter({ has: editor }))
+    const row = await measure(table.locator('tbody tr').filter({ hasText: 'SP-001' }))
     const cell = await measure(first)
     const input = await measure(editor)
     const min = width === 320 ? 48 : 32
