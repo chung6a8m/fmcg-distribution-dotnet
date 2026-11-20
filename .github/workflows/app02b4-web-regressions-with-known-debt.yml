@@ -34,6 +34,12 @@ jobs:
       - name: Frontend health tests
         working-directory: web
         run: npm run test
+      - name: Verify UI-01 theme controller
+        run: node --test web/tests/theme.test.mjs
+      - name: Verify UI-01 token CSS and generated HTML/manifest metadata
+        run: node docs/ui-ux/tools/sync-tokens.mjs --check
+      - name: Verify UI-01 Tailwind compiler contract
+        run: node docs/ui-ux/tools/check-tailwind.mjs
       - name: TypeScript/Vite and Workbox build
         working-directory: web
         run: npm run build

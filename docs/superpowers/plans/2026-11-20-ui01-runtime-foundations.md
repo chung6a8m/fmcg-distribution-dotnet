@@ -30,34 +30,34 @@
 
 ### Task 1: Shared pre-paint theme controller
 
-**Files:** create `web/public/theme-runtime.js`, `web/src/ui/theme.ts`, `web/tests/theme.test.mjs`; modify `web/index.html`, `web/vite.config.ts`, `web/package.json`.
+**Files:** create `web/public/theme-runtime.js`, `web/src/ui/theme.ts`, `web/tests/theme.test.mjs`; modify `web/index.html` and literal manifest colors in `web/vite.config.ts`.
 
 **Interfaces:** `window.FmcgTheme.getSnapshot(): Readonly<{preference:'light'|'dark'|'system',resolved:'light'|'dark',persistent:boolean}>`; `setPreference(preference):void`; `subscribe(listener):()=>void`. React exports `useTheme()` and `setThemePreference`. Key `fmcg.ui.theme.v1`. Theme-color meta has generated `data-light`/`data-dark` from canonical page-surface tokens; runtime contains no palette literals.
 
 - [ ] Write Node VM tests that execute the public controller: Light on Dark OS, Dark on Light OS, System OS changes, invalid/missing/read-blocked values, media absent/throwing, write failure with older contrary storage, stable snapshot identity, same-resolved preference changes, single listener/multiple subscribers, cleanup/resubscribe.
 - [ ] Run tests before implementation and record the expected missing-feature failure.
-- [ ] Implement the controller, typed external-store adapter and head script; Vite injects palette metadata from token JSON. Preserve title/manifest app identity and existing PWA setup. Include theme tests explicitly in `npm test` alongside health tests.
+- [ ] Implement the controller, typed external-store adapter and head script; The offline token generator writes fixed palette metadata to HTML and literal manifest colors; CI verifies parity. Preserve title/manifest app identity and existing PWA setup. Execute the theme tests alongside the frozen health package command in both existing web CI jobs.
 - [ ] Run `npm test`, `npm run build`, `npm run test:pwa-build`, review the task diff and commit after tests pass.
 
 ### Task 2: Actual foundations and demo controls
 
-**Files:** create `web/src/ui/controls.tsx`, `web/src/ui/FoundationsDemo.tsx`, `web/public/fonts/{noto-sans-400.woff2,noto-sans-700.woff2,OFL.txt,README.md}`, `web/tools/build-fonts.py`, `web/e2e/ui-foundations.spec.ts`; modify `web/src/main.tsx`, `web/src/style.css`, `web/vite.config.ts` and optional local-browser override in `web/playwright.config.ts`.
+**Files:** create `web/src/ui/controls.tsx`, `web/src/ui/FoundationsDemo.tsx`, `web/src/assets/fonts/{noto-sans-400.woff2,noto-sans-700.woff2}`, `web/public/fonts/{OFL.txt,README.md}`, `web/tools/build-fonts.py`, `web/e2e/ui-foundations.spec.ts`; modify `web/src/main.tsx`, `web/src/style.css`, `web/vite.config.ts` and optional local-browser override in `web/playwright.config.ts`.
 
 **Interfaces:** consume `useTheme`/`setThemePreference` from Task1; `FoundationsDemo` owns local density and demonstration values. Export only small native wrappers used by the shell/demo. Theme selector label `Chế độ hiển thị`; demo heading `Nền tảng giao diện`; route `/ui/foundations`; health remains `/` with original APP-00A identity.
 
 - [ ] Add browser acceptance for a real demo entry, root theme changes, native input states, portal focus/Escape, compact/table/Field geometry and long Vietnamese text; observe initial failure against the existing shell.
-- [ ] Build deterministic static font subsets from the existing TTF, preserving needed Vietnamese/numeric glyphs; include license/provenance and font-display swap. Copy original copyright, no CDN/dependency updates.
+- [ ] Build deterministic static font subsets from the existing TTF, preserving needed Vietnamese/numeric glyphs; include license/provenance and font-display swap. Embed the source bytes in same-origin precached CSS using Vite’s explicit `?inline` asset handling. Retain the original copyright and frozen Workbox glob.
 - [ ] Import token CSS/adapter; implement semantic Light/Dark styles and the actual demo. Include a native modal portal, local pending action, readonly/disabled/invalid states, long-name sample rows and Field layout. Preserve existing health/SW behavior.
 - [ ] Run build, all Node/PWA tests and browser suite; inspect desktop Light/Dark and narrow screenshots. Correct actual visual/interaction failures; record font/geometry evidence and review the task before committing.
 
 ### Task 3: Runtime acceptance, regression and handoff
 
-**Files:** create `web/e2e/theme.spec.ts` and test helpers as needed; extend `web/e2e/pwa-update.spec.ts`, `web/tests/pwa-build.test.mjs`, package scripts; update `README.md`, UI/UX README/roadmap/theme/governance/reference comments and the UI-01 specification with implemented scope and evidence links. No new workflow needed unless existing scripts fail to execute an applicable gate.
+**Files:** create `web/e2e/theme.spec.ts` and test helpers as needed; extend `web/e2e/pwa-update.spec.ts`, `web/tests/pwa-build.test.mjs`, explicit steps in the two existing Windows web jobs; update `README.md`, UI/UX README/roadmap/theme/governance/reference comments and the UI-01 specification with implemented scope and evidence links. No new workflow needed unless existing scripts fail to execute an applicable gate.
 
 **Interfaces:** tests consume the production build, stable accessible names and the Task1 controller; generated evidence goes to the existing ignored `web/test-results/` and CI artifacts.
 
 - [ ] Write delayed-entry strict-CSP browser tests; exercise storage errors, explicit/System switching, actual root/native/portal colors, both font weights and fallback; add literal expected contrast thresholds and geometry.
 - [ ] Extend real PWA V1→V2 consent test with retained Dark, bounded keyboard navigation to the update action and font/cache assertions; add an offline controlled reload and feasible standalone evidence without mocking display-mode as acceptance.
-- [ ] Run token parity/compiler in an executed package script and extend generated PWA tests to require bootstrap/fonts. Preserve all original health and update assertions.
+- [ ] Run token/metadata parity and compiler checks in the existing web jobs. Verify the bootstrap and exact font bytes in the linked, precached CSS. Test-only CSP admits data URLs only for fonts; a separate font-blocked fixture verifies fallback. Preserve all original health and update assertions.
 - [ ] Run the complete frontend verification under Node26, collect screenshots/measurements, and record local browser limits separately from CI. Independent whole-branch review; fix findings and repeat only affected verification plus required gates.
 - [ ] Open the independent UI-01 PR, verify all applicable CI workflows on the final source HEAD, and provide evidence/handoff. Keep unobserved physical-device and installed OS-launch scopes explicit.

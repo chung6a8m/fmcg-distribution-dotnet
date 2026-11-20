@@ -1,18 +1,18 @@
 # Tailwind CSS v4 và hợp đồng Light/Dark/System
 
-**v0.1 OWNER_APPROVED / DOCS_ONLY.** OWN-UX-02/06 đã phê duyệt Light, 29 Dark semantic overrides và Light/Dark/System; có hiệu lực `ADOPTED` sau khi PR quyết định Owner được merge. **Theme chưa triển khai hoặc nghiệm thu runtime**. UI-01 chỉ được triển khai trong PR riêng sau merge, đúng OWN-UX-09. PR #78 vẫn là UI-00 reference.
+Design Baseline v0.1 `ADOPTED` qua PR #79. Light, 29 Dark overrides và Light/Dark/System được chuẩn hóa trong OWN-UX-02/06. UI-01 `IMPLEMENTED_IN_PR` trong [PR #80](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/80). [Phạm vi kiểm chứng runtime](ui-01-verification.md).
 
 ## 1. Baseline và nguồn token
 
-Repository đang pin `tailwindcss` và `@tailwindcss/vite` **4.3.5** trong [package](../../web/package.json); [Vite config](../../web/vite.config.ts) đã dùng plugin v4. [CSS hiện hành](../../web/src/style.css) dùng `@import "tailwindcss"` và `@theme`, với root font 14px.
+[Package](../../web/package.json) pin `tailwindcss` và `@tailwindcss/vite` **4.3.5**. [CSS entry](../../web/src/style.css) import Tailwind, token layer và adapter. Body Compact dùng 14/20px.
 
-[tokens.json](tokens/tokens.json) là nguồn chuẩn: 101 token cơ sở, Light làm reference; `themes.dark.values` chứa đủ 29 token màu ngữ nghĩa Dark đã được Owner phê duyệt (OWN-UX-06). Các CSS reference vẫn chưa import vào runtime. [tokens.css](tokens/tokens.css) xuất custom properties; [tailwind-v4.css](tokens/tailwind-v4.css) ánh xạ chúng thành utility/variant. Hai tệp CSS đều chưa được ứng dụng sử dụng.
+[tokens.json](tokens/tokens.json) khai báo 101 token cơ sở và 29 màu ngữ nghĩa Dark. [tokens.css](tokens/tokens.css) xuất custom properties; [tailwind-v4.css](tokens/tailwind-v4.css) ánh xạ utility/variant.
 
 Custom properties trong `:root` không tự tạo utility Tailwind. Adapter dùng `@theme inline` cho giá trị tham chiếu biến khác, giữ màu ngữ nghĩa được đọc tại phần tử sử dụng. Không đưa `@theme` vào selector Light/Dark hoặc media query; thay đổi theme nằm ở custom properties thông thường. Xem [Theme variables](https://tailwindcss.com/docs/theme).
 
-## 2. Cách tích hợp dự kiến trong UI-01
+## 2. Tích hợp UI-01
 
-Ví dụ dưới đây chỉ mô tả import tại `web/src/style.css` **trong PR UI-01 độc lập sau merge PR quyết định Owner**; không phải thay đổi đã thực hiện:
+Các import trong `web/src/style.css`:
 
 ```css
 @layer theme, base, components, utilities;
@@ -21,7 +21,7 @@ Ví dụ dưới đây chỉ mô tả import tại `web/src/style.css` **trong P
 @import "../../docs/ui-ux/tokens/tailwind-v4.css";
 ```
 
-Đặt các import trước rule thông thường. Tailwind được resolve từ package `web`; adapter chỉ chứa mapping và variant. Layer `theme` giữ reference token cùng thứ tự cascade với theme mặc định. Khi chọn vị trí production, cập nhật đường dẫn import và kiểm generation; không duy trì hai bản token sửa tay độc lập.
+Các import đứng trước rule thông thường. Tailwind resolve từ package `web`. Adapter chứa mapping và variant. Layer `theme` giữ thứ tự cascade của custom properties.
 
 Ví dụ class tĩnh sau minh họa cách tiêu thụ; chưa là component có đủ hành vi/accessibility:
 
@@ -31,7 +31,7 @@ Ví dụ class tĩnh sau minh họa cách tiêu thụ; chưa là component có �
 </button>
 ```
 
-Component dùng màu theo vai trò, không dùng primitive để bỏ qua theme. OWN-UX-03 đã chốt Noto Sans 400/700 self-hosted; UI-01 còn cần đặc tả cách đóng gói/loading, kiểm license và layout. Class `font-fmcg-body` chỉ chọn font stack, không tải font.
+Component dùng màu theo vai trò. UI-01 nhúng hai static WOFF2 weight 400/700 từ `web/src/assets/fonts/` vào CSS ngoài cùng origin qua `?inline`, dùng normal width, `font-display: swap` và fallback Segoe UI/system-ui/sans-serif. [Font provenance và license](../../web/public/fonts/README.md).
 
 ## 3. Mapping, đơn vị và breakpoint
 
@@ -43,11 +43,11 @@ Component dùng màu theo vai trò, không dùng primitive để bỏ qua theme.
 | Density/layout | Control/wrapper dùng `min-h-(--fmcg-density-compact-control-min)`; native `tr` dùng `h-(--fmcg-density-compact-row-min)` như mức sàn của table layout, theo [recipe](components.md#compact-table-sizing); không khóa chiều cao block/grid hoặc cắt nội dung |
 | Responsive | `fmcg-medium:` = 48rem, `fmcg-large:` = 64rem, `fmcg-wide:` = 80rem; là viewport variant, không phải container variant |
 
-Kích thước token hiện giữ CSS px tham chiếu. Không tự chia mọi giá trị cho 16 để đổi thành rem khi root đang là 14px: `0.875rem` lúc đó chỉ là 12.25px, không giữ body 14px. Thay root hoặc chiến lược đơn vị cần kiểm lại typography, density, spacing và utility hiện hành trong increment tương ứng.
+Kích thước token hiện giữ CSS px đã duyệt. Kiểm lại typography, density, spacing và utility khi thay root hoặc đổi đơn vị trong increment sau.
 
 Spacing compact dùng namespace đúng: `px-fmcg-8` là 8px theo token, không phải `px-8` của scale mặc định Tailwind. Recipe bảng dùng `py-fmcg-0`, `border-separate border-spacing-0` và không thêm chiều cao tổng cho table; chỉ compile được `h-*`/`min-h-*` chưa chứng minh row, editor hoặc focus render đúng.
 
-Breakpoint là **literal được resolve lúc build**, không dùng `var(--fmcg-layout-breakpoint-medium)` trong media query. `48rem/64rem/80rem` tương ứng `768/1024/1280` CSS px khi initial font của browser là 16px; rem trong media query không lấy root 14px của ứng dụng. Mốc chuyển layout vì vậy phụ thuộc thiết lập font ban đầu của browser.
+Breakpoint là literal lúc build. `48rem/64rem/80rem` tương ứng `768/1024/1280` CSS px khi initial font của browser là 16px. Các media query phụ thuộc initial font của browser.
 
 Giữ cùng đơn vị rem với breakpoint mặc định của Tailwind để thứ tự variant ổn định. Không suy viewport variant thành container query và không lấy kích thước PNG làm breakpoint. Nguồn: [Responsive design](https://tailwindcss.com/docs/responsive-design), [CSS media query units](https://www.w3.org/TR/mediaqueries-4/#units), [giới hạn var()](https://www.w3.org/TR/css-variables-1/#using-variables).
 
@@ -76,9 +76,9 @@ Không ghi `data-theme="system"`. Nếu API kiểm OS không khả dụng, Syste
 
 Chỉ phản hồi sự kiện đổi OS khi preference hiện tại là System; Light/Dark tường minh giữ nguyên. Khi đổi lựa chọn, cập nhật root và trạng thái control nhất quán, rồi lưu theo cơ chế được spec chọn. Listener cần cleanup; đồng bộ nhiều tab nếu được hỗ trợ phải dùng cùng quy tắc validate/resolve.
 
-UI-01 cần một resolver chung cho bootstrap và ứng dụng. Bootstrap đặt root trước lần paint đầu để tránh nháy Light khi preference là Dark; thiết kế script phải phù hợp CSP bằng cơ chế được phép, không thêm `unsafe-inline` để làm demo chạy. Cho tới khi bootstrap tồn tại, reference CSS chỉ mặc định Light; tài liệu này chưa chứng minh không có flash.
+Script ngoài cùng origin `web/public/theme-runtime.js` đọc `fmcg.ui.theme.v1` trước React, đặt root và meta. `web/src/ui/theme.ts` kết nối `useSyncExternalStore` vào cùng controller. Ghi storage lỗi giữ lựa chọn trong document đang mở. CI kiểm first paint trên build với CSP enforcing.
 
-PWA cần kiểm cold start, reload từ cache, cập nhật service worker và chế độ standalone. Màu launch screen/manifest và `theme-color` không tự đổi theo CSS; hiện chúng chưa được thay đổi. Không báo theme đã phủ toàn PWA chỉ từ ảnh một trang sau khi React mount.
+Manifest dùng màu Light tĩnh trong khi trang đang mở đồng bộ `theme-color` với root. Kiểm cached shell, consent V1→V2 và cửa sổ PWA standalone theo [ma trận UI-01](ui-01-verification.md).
 
 ## 6. State, focus và các chế độ khác
 

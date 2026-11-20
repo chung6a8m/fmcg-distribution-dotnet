@@ -1,5 +1,7 @@
 import { expect, test, type Locator } from '@playwright/test'
 
+import { attachEvidence } from './support/evidence'
+
 test.use({ serviceWorkers: 'block' })
 
 const demo = '/ui/foundations'
@@ -52,7 +54,7 @@ test('pending guards duplicate activations and reports one local simulation', as
   const run = page.getByRole('button', { name: 'Chạy tác vụ mẫu' })
   await page.clock.install()
   await page.clock.pauseAt(new Date(Date.now() + 60_000))
-  await run.evaluate(button => { button.click(); button.click() })
+  await run.evaluate((button: HTMLButtonElement) => { button.click(); button.click() })
   await expect(run).toBeDisabled()
   const status = page.getByRole('status')
   await expect(status).toContainText('Đang chạy')
@@ -94,7 +96,7 @@ for (const size of [
   { width: 1440, height: 900 }, { width: 1024, height: 768 },
   { width: 430, height: 932 }, { width: 320, height: 800 }
 ]) {
-  test('density, table and readable Vietnamese at ' + size.width + ' CSS px', async ({ page }, info) => {
+  test('density, table and readable Vietnamese at ' + size.width + ' CSS px', async ({ page, browser }, info) => {
     await page.setViewportSize(size)
     await page.goto(demo)
     const density = page.getByLabel('Mật độ')
@@ -106,42 +108,43 @@ for (const size of [
     await editor.fill('17')
     await page.evaluate(() => document.fonts.ready)
     const measurements = []
-    for (const choice of ['compact', 'comfortable', 'field']) {
-      await density.selectOption(choice)
-      const field = size.width < 768 || choice === 'field'
-      await expect(page.getByRole('main')).toHaveCSS('font-size', field ? '16px' : '14px')
-      await expect(page.getByRole('main')).toHaveCSS('line-height', field ? '24px' : '20px')
-      await expect(editor).toHaveValue('17')
-      const control = await height(density)
-      const row = await height(reader)
-      const editorRow = await height(table.getByRole('row').filter({ has: editor }))
-      const geometry = await page.evaluate(() => ({
-        pageWidth: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
-        targets: [...document.querySelectorAll<HTMLElement>('main a, main button, main input, main select')]
-          .filter(el => el.getClientRects().length > 0)
-          .map(el => ({ name: el.id || el.textContent?.trim(), width: el.offsetWidth, height: el.offsetHeight }))
-      }))
-      measurements.push({ choice, field, control, row, editorRow, ...geometry })
-      expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport)
-      if (field) {
-        for (const target of geometry.targets) {
-          expect(Math.min(target.width, target.height), target.name).toBeGreaterThanOrEqual(48)
+    try {
+      for (const choice of ['compact', 'comfortable', 'field']) {
+        await density.selectOption(choice)
+        const field = size.width < 768 || choice === 'field'
+        await expect(page.getByRole('main')).toHaveCSS('font-size', field ? '16px' : '14px')
+        await expect(page.getByRole('main')).toHaveCSS('line-height', field ? '24px' : '20px')
+        await expect(editor).toHaveValue('17')
+        const control = await height(density)
+        const row = await height(reader)
+        const editorRow = await height(table.getByRole('row').filter({ has: editor }))
+        const geometry = await page.evaluate(() => ({
+          pageWidth: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+          targets: [...document.querySelectorAll<HTMLElement>('main a, main button, main input, main select')]
+            .filter(el => el.getClientRects().length > 0)
+            .map(el => ({ name: el.id || el.textContent?.trim(), width: el.offsetWidth, height: el.offsetHeight }))
+        }))
+        measurements.push({ choice, field, control, row, editorRow, ...geometry })
+        expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport)
+        if (field) {
+          for (const target of geometry.targets) {
+            expect(Math.min(target.width, target.height), target.name).toBeGreaterThanOrEqual(48)
+          }
+          await expect(reader.getByText('Số lượng', { exact: true })).toBeVisible()
+        } else {
+          const compact = choice === 'compact'
+          expect(control).toBe(compact ? 32 : 40)
+          expect(row).toBeGreaterThanOrEqual(compact ? 36 : 44)
+          expect(editorRow).toBeGreaterThanOrEqual(compact ? 41 : 49)
+          await expect(reader).toHaveCSS('font-size', '13px')
+          await expect(reader).toHaveCSS('line-height', '18px')
         }
-        await expect(reader.getByText('Số lượng', { exact: true })).toBeVisible()
-      } else {
-        const compact = choice === 'compact'
-        expect(control).toBe(compact ? 32 : 40)
-        expect(row).toBeGreaterThanOrEqual(compact ? 36 : 44)
-        expect(editorRow).toBeGreaterThanOrEqual(compact ? 41 : 49)
-        await expect(reader).toHaveCSS('font-size', '13px')
-        await expect(reader).toHaveCSS('line-height', '18px')
+        if (choice === 'compact') await info.attach('foundations-' + size.width, {
+          body: await page.screenshot({ fullPage: true }), contentType: 'image/png'
+        })
       }
-      if (choice === 'compact') await info.attach('foundations-' + size.width, {
-        body: await page.screenshot({ fullPage: true }), contentType: 'image/png'
-      })
+    } finally {
+      await attachEvidence(info, 'measurements-' + size.width, browser.version(), measurements)
     }
-    await info.attach('measurements-' + size.width, {
-      body: Buffer.from(JSON.stringify(measurements, null, 2)), contentType: 'application/json'
-    })
   })
 }

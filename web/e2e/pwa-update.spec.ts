@@ -1,13 +1,11 @@
 import { expect, test } from '@playwright/test'
 import assert from 'node:assert/strict'
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve, sep, extname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { dist, serveBuild } from './support/production'
+import { assertTheme, attachEvidence, embeddedFonts, renderedFont, shellFonts, themeLabel } from './support/evidence'
 
-const dist = fileURLToPath(new URL('../dist/', import.meta.url))
 const titleV1 = 'FMCG DMS — APP-00A'
 const titleV2 = 'FMCG DMS — APP-00A [Playwright V2]'
 
@@ -37,59 +35,17 @@ test('a real service worker waits for consent, then updates and reloads', async 
   await writeFile(swPath, updatedSw)
 
   let activeRoot = v1
-  const server = createServer(async (request, response) => {
-    if (request.url === '/health/live') {
-      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-      response.end(JSON.stringify({ status: 'live', scope: 'APP-00A', businessWrites: false }))
-      return
-    }
-
-    let pathname: string
-    try {
-      pathname = decodeURIComponent(new URL(request.url || '/', 'http://127.0.0.1').pathname)
-    } catch {
-      response.writeHead(400).end()
-      return
-    }
-    const root = resolve(activeRoot)
-    const filename = resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname))
-    if (!filename.startsWith(root + sep)) {
-      response.writeHead(403).end()
-      return
-    }
-
-    const mime: Record<string, string> = {
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'text/javascript; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.svg': 'image/svg+xml',
-      '.webmanifest': 'application/manifest+json',
-      '.json': 'application/json'
-    }
-    try {
-      const body = await readFile(filename)
-      response.writeHead(200, {
-        'Content-Type': mime[extname(filename)] || 'application/octet-stream',
-        'Cache-Control': 'no-store'
-      })
-      response.end(body)
-    } catch {
-      response.writeHead(404).end()
-    }
-  })
-
+  const server = await serveBuild(() => activeRoot)
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined
   try {
-    await new Promise<void>((done, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => done())
-    })
-    const origin = 'http://127.0.0.1:' + (server.address() as AddressInfo).port
+    const { origin } = server
     context = await browser.newContext({ serviceWorkers: 'allow' })
     const page = await context.newPage()
 
     await page.goto(origin)
     await expect(page).toHaveTitle(titleV1)
+    await page.getByLabel(themeLabel).selectOption('dark')
+    await assertTheme(page, 'dark')
     await expect.poll(async () => page.evaluate(async () => {
       const registration = await navigator.serviceWorker.getRegistration()
       return registration?.active?.state === 'activated'
@@ -121,7 +77,10 @@ test('a real service worker waits for consent, then updates and reloads', async 
     expect(await page.evaluate(() => (window as Window & { __pwaRun?: string }).__pwaRun)).toBe('V1')
 
     const button = page.getByRole('button', { name: 'Cập nhật ứng dụng' })
-    await page.keyboard.press('Tab')
+    for (let tabs = 0; tabs < 8; tabs++) {
+      await page.keyboard.press('Tab')
+      if (await button.evaluate(el => el === document.activeElement)) break
+    }
     await expect(button).toBeFocused()
     const outline = await button.evaluate(element => {
       const style = getComputedStyle(element)
@@ -134,19 +93,81 @@ test('a real service worker waits for consent, then updates and reloads', async 
       contentType: 'image/png'
     })
 
-    await button.click()
+    await page.keyboard.press('Enter')
     await expect(page).toHaveTitle(titleV2, { timeout: 30_000 })
     await expect.poll(async () => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBeTruthy()
     expect(await page.evaluate(() => (window as Window & { __pwaRun?: string }).__pwaRun)).toBeUndefined()
+    await expect(page.getByLabel(themeLabel)).toHaveValue('dark')
+    await expect(page.getByLabel(themeLabel)).toHaveCSS('color-scheme', 'dark')
+    const theme = await assertTheme(page, 'dark')
+    await attachEvidence(testInfo, 'pwa-update-theme', browser.version(), { theme, fonts: await shellFonts(page) })
     await testInfo.attach('pwa-v2-activated', {
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png'
     })
   } finally {
     await context?.close()
-    if (server.listening) {
-      await new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()))
-    }
+    await server.close()
     await rm(work, { recursive: true, force: true })
+  }
+})
+
+test('controlled cached shell retains Dark and fonts while offline API is disconnected', async ({ browser }, info) => {
+  const server = await serveBuild()
+  const context = await browser.newContext({ serviceWorkers: 'allow' })
+  try {
+    const page = await context.newPage()
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Network.enable')
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true })
+    const writes: string[] = []
+    context.on('request', request => {
+      if (!['GET', 'HEAD'].includes(request.method())) writes.push(request.method() + ' ' + request.url())
+    })
+    await page.goto(server.origin)
+    await expect(page.getByRole('status')).toHaveText('API hoạt động')
+    await page.getByLabel(themeLabel).selectOption('dark')
+    await page.evaluate(async () => { await navigator.serviceWorker.ready })
+    await page.reload()
+    await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
+    const cachePaths = () => page.evaluate(async () => {
+      const entries = await Promise.all((await caches.keys()).map(async name => {
+        const cache = await caches.open(name)
+        return (await cache.keys()).map(key => new URL(key.url).pathname)
+      }))
+      return entries.flat().sort()
+    })
+    const before = await cachePaths()
+    expect(before).toEqual(expect.arrayContaining(['/index.html', '/theme-runtime.js']))
+    expect(before.filter(path => /^\/(health|api)(\/|$)/.test(path))).toEqual([])
+    await context.setOffline(true)
+    const servedByWorker = new Set<string>()
+    page.on('response', response => {
+      if (response.fromServiceWorker()) servedByWorker.add(response.url())
+    })
+    const response = await page.reload()
+    expect(response?.fromServiceWorker()).toBe(true)
+    await expect(page.getByRole('status')).toHaveText('Không kết nối API')
+    await expect(page.getByLabel(themeLabel)).toHaveValue('dark')
+    await expect(page.getByLabel(themeLabel)).toHaveCSS('color-scheme', 'dark')
+    const theme = await assertTheme(page, 'dark')
+    const fonts = await shellFonts(page)
+    const assets = await embeddedFonts(page)
+    const css = new URL(assets[0].stylesheet!)
+    expect(before).toContain(css.pathname)
+    expect([...servedByWorker]).toEqual(expect.arrayContaining([css.href, server.origin + '/theme-runtime.js']))
+    await info.attach('offline-shell', { body: await page.screenshot(), contentType: 'image/png' })
+    await page.getByRole('link', { name: 'Nền tảng giao diện' }).click()
+    const products = [
+      await renderedFont(page, '[data-font-sample="regular"]', '400'),
+      await renderedFont(page, '[data-font-sample="bold"]', '700'),
+      await renderedFont(page, '.sample-table tbody tr:first-child td:last-child', '400')
+    ]
+    expect(await cachePaths()).toEqual(before)
+    expect(writes).toEqual([])
+    await attachEvidence(info, 'offline-cached-shell', browser.version(), { theme, fonts, cachePaths: before, workerResponses: [...servedByWorker], assets, products, writes })
+  } finally {
+    await context.close()
+    await server.close()
   }
 })

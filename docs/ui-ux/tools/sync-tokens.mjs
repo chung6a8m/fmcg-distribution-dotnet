@@ -1,4 +1,4 @@
-// Docs-only reference generation/verification. Does not import into web/ or change CI gates.
+// Generate the shared runtime token CSS and verify the source palette and adapter.
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 
@@ -44,7 +44,7 @@ function cssValue(token) {
   const target = typeof token.value === 'string' && token.value.match(alias)?.[1]
   return target ? `var(${source.tokens[target].cssVariable})` : token.value
 }
-const header = `/* FMCG UI/UX v0.1 - OWNER_APPROVED / DOCS_ONLY reference.\n * Generated from tokens.json by tools/sync-tokens.mjs; do not edit alone.\n * Adoption follows docs/decisions/owner-uiux-2026-11-20.md and PR #79 review/CI/merge.\n * Not imported by the application. Runtime integration belongs to a separate UI-01 PR.\n */\n`
+const header = `/* FMCG UI/UX v0.1 - ADOPTED via PR #79.\n * Generated from tokens.json by tools/sync-tokens.mjs and imported by web/src/style.css.\n * Change the token source, regenerate both CSS files and check parity.\n */\n`
 const css = `${header}:root {\n  color-scheme: light;\n${entries.map(([, token]) => `  ${token.cssVariable}: ${cssValue(token)};`).join('\n')}\n}\n\n/* Theme is resolved on html only; missing/invalid preference falls back to Light. */\n:root[data-theme="dark"] {\n  color-scheme: dark;\n${semanticColors.map(([name, token]) => `  ${token.cssVariable}: ${dark[name]};`).join('\n')}\n}\n`
 
 const bindings = semanticColors.map(([, token]) => [`--color-fmcg-${token.cssVariable.slice('--fmcg-color-'.length)}`, token.cssVariable])
@@ -103,4 +103,22 @@ for (const [filename, generated] of [['tokens.css', css], ['tailwind-v4.css', ad
     assert.equal(checkedOut, generated, `${filename} drift; run with --write and review the diff`)
   }
 }
+// Generate literal metadata outside Vite. The Issue 59 contract freezes the Vite AST.
+const lightSurface = resolved('color.surface.page')
+const darkSurface = resolved('color.surface.page', 'dark')
+const metadata = [
+  ['../../../web/index.html', /<meta name="theme-color"[^>]*\/>/g,
+    `<meta name="theme-color" content="${lightSurface}" data-light="${lightSurface}" data-dark="${darkSurface}"/>`],
+  ['../../../web/vite.config.ts', /theme_color: '[^']*', background_color: '[^']*'/g,
+    `theme_color: '${lightSurface}', background_color: '${lightSurface}'`]
+]
+for (const [path, marker, expected] of metadata) {
+  const url = new URL(path, import.meta.url)
+  const current = await readFile(url, 'utf8')
+  assert.equal([...current.matchAll(marker)].length, 1, `Expected exactly one metadata anchor in ${path}`)
+  const generated = current.replace(marker, expected)
+  if (mode === '--write') await writeFile(url, generated)
+  else assert.equal(current, generated, `Metadata drift in ${path}; regenerate with --write`)
+}
+console.log('HTML theme metadata and static manifest colors match the canonical token source')
 console.log(`${entries.length} base tokens; ${semanticColors.length} complete Dark overrides; ${bindings.length} inline bindings; ${breakpoints.length} literal breakpoints; ${mode} PASS`)

@@ -9,7 +9,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 
 WEB = Path(__file__).resolve().parents[1]
 SOURCE = WEB.parent / "docs/ui-ux/reference-tests/fonts"
-OUTPUT = WEB / "public/fonts"
+OUTPUT = WEB / "src/assets/fonts"
 SOURCE_HASH = "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
 # Basic Latin through Latin Extended-B; combining marks; Latin Extended
 # Additional (including Vietnamese); punctuation, currencies and common symbols.
@@ -36,6 +36,6 @@ if __name__ == "__main__":
     if sha256((SOURCE / "NotoSans.ttf").read_bytes()).hexdigest() != SOURCE_HASH:
         raise SystemExit("Unexpected Noto Sans source SHA-256")
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    copyfile(SOURCE / "OFL.txt", OUTPUT / "OFL.txt")
+    copyfile(SOURCE / "OFL.txt", WEB / "public/fonts/OFL.txt")
     for static_weight in (400, 700):
         build(static_weight)

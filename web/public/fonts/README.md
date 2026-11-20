@@ -1,10 +1,10 @@
 # Noto Sans for UI-01
 
-Both normal-style WOFF2 files are static derivatives of Noto Sans 2.015.
+The two normal-style WOFF2 files in `web/src/assets/fonts/` are static derivatives of Noto Sans 2.015.
 The checked-in source is `docs/ui-ux/reference-tests/fonts/NotoSans.ttf` from
 the Google Fonts repository at commit `48133440178622e215912d34d386c5ee1682c677`.
 Copyright 2022 The Noto Project Authors. The accompanying `OFL.txt` is copied
-verbatim from the source directory.
+verbatim from the source directory. The production stylesheet embeds the exact WOFF2 bytes using Vite’s explicit inline asset handling. Workbox precaches that same-origin CSS with its existing reviewed literal glob.
 
 From the repository root, run `/usr/bin/python3 web/tools/build-fonts.py`.
 The recorded outputs use Python 3.13.5, fontTools 4.57.0 and Brotli 1.1.0.
