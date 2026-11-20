@@ -16,7 +16,7 @@ Reuse React 19, native semantic form/select/button, definition lists, UI-01 Badg
 | Read failure / stale | Keep the source's 19 November asOf while showing a failed-refresh notice |
 | Empty | No report exists in selected scope; **no data**, not a confirmed financial zero |
 
-Detail disclosure shows known report IDs and missing IDs. The no-read fixture hides numerical values and report list. All numbers, times, counts and scope labels are samples, not live seller data or global policies. The source asOf is never replaced by the device time.
+Detail disclosure shows known report IDs and missing IDs. The no-read fixture also disables and redacts the scenario selector, hiding numerical values, scenario counts and report list. All numbers, times, counts and scope labels are samples, not live seller data or global policies. The source asOf is never replaced by the device time.
 
 ## Command workflow — UX-B03…B07
 
@@ -29,8 +29,8 @@ Detail disclosure shows known report IDs and missing IDs. The no-read fixture hi
 7. Read/write/none and online/offline are explicitly **browser-side simulations**. No-read hides snapshot and history, prevents lookup; read-only permits lookup but not submit; offline prevents business send/lookup and never enqueues.
 8. Results are rendered by distinct layers: receipt ACK, business outcome, invoice/accounting/reconciliation, post-command balance. The last two are never inferred from a transport response; ambiguous post-balance remains unknown.
 
-The current request and local history are versioned in **sessionStorage, same tab only**, with bounded schema validation and storage-failure fallback. This is not a durable inbox, real audit, trusted identity/permission or recovered business truth. Clearing/denying storage can lose the fixture; an untrusted client copy cannot be used as server evidence. Statements about physical handover or delivery requiring a case are guidance text only: no case is created.
+The current request and local history are versioned in **sessionStorage, same tab only**, with bounded schema validation. If a stored record exists but is invalid, the Lab **does not overwrite it or allow another command**: identity and history are marked unverifiable until the fixture is deliberately reset. When browser storage is inaccessible, the running page can still demonstrate in-memory transitions but warns that reload recovery is unavailable. Neither case is a durable server recovery guarantee. This is not a durable inbox, real audit, trusted identity/permission or recovered business truth; an untrusted client copy cannot be used as server evidence. Statements about physical handover or delivery requiring a case are guidance text only: no case is created.
 
 ## Verification and limitations
 
-See [UI-03 verification](ui-03-verification.md). Tests cover source semantics, stable request ID, state ordering, loss of ACK, permission/offline, recovery on reload, 1440/320 Dark and compact/Field, plus UI-01/02/PWA regressions. No physical IME/Gboard, 125% Lab acceptance, server authorization, actual source/ledger or PREPROD evidence is asserted. Real source-bound reconciliation and recovery need separately authorized backend/API work.
+See [UI-03 verification](ui-03-verification.md). Tests cover source semantics, no-read selector redaction, stable ARIA disclosure target, stable request ID, state ordering, loss of ACK, permission/offline, valid/corrupt restore and denied storage writes, Light/Dark/System and keyboard focus, 1440/320 Dark and compact/Field, plus UI-01/02/PWA regressions. No physical IME/Gboard, 125% Lab acceptance, server authorization, actual source/ledger or PREPROD evidence is asserted. Real source-bound reconciliation and recovery need separately authorized backend/API work.
