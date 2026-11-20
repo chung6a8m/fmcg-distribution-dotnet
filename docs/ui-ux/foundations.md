@@ -1,10 +1,10 @@
-# Nền tảng thị giác và bố cục — đề xuất v0.1
+# Nền tảng thị giác và bố cục — baseline v0.1 đã được Owner phê duyệt
 
 ## 1. Trạng thái và phạm vi
 
-Tài liệu này đề xuất nền tảng UI dùng chung cho `fmcg-distribution-dotnet`, kế thừa năm bộ prototype Sales A, Kho, Field, Finance và Owner. Các từ “phải” và “không được” dưới đây mô tả hợp đồng thiết kế dự kiến khi áp dụng v0.1; chúng không xác nhận ứng dụng hiện tại đã đáp ứng.
+Tài liệu này mô tả Design Baseline v0.1 được Owner phê duyệt theo [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md); chỉ có hiệu lực `ADOPTED` sau khi PR hồ sơ quyết định merge. Kế thừa năm bộ prototype Sales A, Kho, Field, Finance và Owner. Hợp đồng thiết kế **không** chứng minh ứng dụng hiện tại đã đáp ứng.
 
-Ưu tiên **gọn, có thêm dữ liệu hữu ích trong cùng ngữ cảnh** là yêu cầu đã có của Owner. Font, cỡ chữ, chiều cao dòng, sidebar và các kích thước production trong tài liệu này là đề xuất của designer, chưa phải các quyết định số học đã được Owner phê duyệt.
+Ưu tiên **gọn, có thêm dữ liệu hữu ích trong cùng ngữ cảnh** và các baseline Noto Sans, desktop compact, Field-first, Light/Dark/System, adaptive list/detail đã được Owner chốt. Các mức sàn là giá trị thiết kế, không khóa chiều cao nội dung và vẫn cần kiểm trên runtime/thiết bị thật.
 
 - Nguồn và khác biệt giữa các bản vẽ: [prototype-mapping.md](prototype-mapping.md).
 - Giá trị token dùng cho bước triển khai: [tokens/tokens.json](tokens/tokens.json).
@@ -36,7 +36,7 @@ Palette nền tảng được giữ từ cả năm bộ prototype. Tên vai trò
 | Chữ chính | `#172B4D` | Nội dung, tiêu đề, số liệu cần đọc |
 | Chữ phụ | `#5F6F84` | Nhãn phụ, hướng dẫn, metadata vẫn cần đọc |
 | Viền nhẹ | `#DCE3EC` | Phân cách nhóm và hàng; không là dấu hiệu duy nhất của control |
-| Viền control — mới đề xuất | `#7D899A` | Nhận biết input/control tương tác trên nền sáng |
+| Viền control | `#7D899A` | Nhận biết input/control tương tác trên nền sáng |
 | Hành động chính / tích cực | `#0F766E` | Primary action và trạng thái tích cực có nhãn chữ riêng |
 | Nền tích cực / lựa chọn | `#E7F5F1` | Badge tích cực, dòng đang chọn; bổ sung chỉ dấu lựa chọn |
 | Thông tin / focus | `#315DA8` | Thông tin và focus ring; hai vai trò có token riêng |
@@ -52,13 +52,13 @@ Palette nền tảng được giữ từ cả năm bộ prototype. Tên vai trò
 
 Mỗi trạng thái cần có nhãn chữ. Lỗi tại trường có nội dung lỗi; lựa chọn có chỉ dấu rõ; focus có vòng bao; không chỉ đổi màu nền hoặc màu chữ.
 
-**Light là bảng tham chiếu kế thừa prototype; Dark là bảng bổ sung DESIGNER_PROPOSED trong review PR #78.** `tokens.json` giữ 101 token nền và thêm 29 giá trị Dark cho toàn bộ semantic color. Component dùng vai trò ngữ nghĩa, không dùng primitive trực tiếp. Palette Dark và adapter đã có kiểm riêng trong [verification](verification.md); khả năng đổi theme của ứng dụng vẫn chưa triển khai. Xem [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) trước khi áp dụng.
+**Light kế thừa prototype và Dark semantic palette đã được Owner chốt tại OWN-UX-02/06; Dark mang nhãn `DESIGNER_PROPOSED` tại thời điểm tạo PR #78.** `tokens.json` giữ 101 token nền và thêm 29 giá trị Dark cho toàn bộ semantic color. Component dùng vai trò ngữ nghĩa, không dùng primitive trực tiếp. Palette Dark và adapter đã có kiểm riêng trong [verification](verification.md); khả năng đổi theme của ứng dụng vẫn chưa triển khai. Xem [Tailwind v4 và Light/Dark](tailwind-v4-and-themes.md) trước khi áp dụng.
 
 Nhãn trong notice/badge dùng đúng cặp `status.*.foreground/background`. Không đặt `text.secondary` vào mọi nền màu: trên `status.info.background` của Light, cặp đó chỉ đạt 4,487:1. Không suy contrast từ một theme hoặc từ màu chưa thêm opacity sang trạng thái khác.
 
 ## 4. Typography
 
-Font đề xuất là **Noto Sans**, weight **400/700**, giữ khả năng hiển thị tiếng Việt của bộ prototype. Fallback: `"Noto Sans", "Segoe UI", system-ui, sans-serif`.
+Font được Owner phê duyệt là **Noto Sans**, self-hosted weight **400/700**, phù hợp hiển thị tiếng Việt. Fallback: `"Noto Sans", "Segoe UI", system-ui, sans-serif`. Font chưa được tích hợp vào runtime.
 
 Ứng dụng hiện tại dùng Segoe UI trong [web/src/style.css](../../web/src/style.css). Việc đưa Noto Sans vào runtime, đóng gói font, font loading và kiểm tra lại bố cục là một increment triển khai riêng; tài liệu này không thực hiện migration đó.
 
@@ -84,7 +84,7 @@ Chữ bảng 11,2–12 và hàng 26 của một số bản vẽ là mật độ 
 
 ## 5. Khoảng cách, viền và hình dạng
 
-Spacing scale đề xuất, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48**.
+Spacing scale tham chiếu, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48**.
 
 | Mục đích | Giá trị khởi điểm |
 |---|---|
@@ -95,15 +95,15 @@ Spacing scale đề xuất, đơn vị CSS px: **0 / 2 / 4 / 8 / 12 / 16 / 20 / 
 | Padding ngang trang | 16 ở màn nhỏ; 24 khi có đủ không gian |
 | Tách nhóm lớn | 24 hoặc 32 |
 
-Bo góc đề xuất: **4 / 6 / 8**; **999** chỉ cho dạng pill khi có mục đích rõ. Control ưu tiên 4; card/panel dùng 6 hoặc 8. Trạng thái không được chỉ phân biệt bằng hình dạng góc.
+Bo góc tham chiếu: **4 / 6 / 8**; **999** chỉ cho dạng pill khi có mục đích rõ. Control ưu tiên 4; card/panel dùng 6 hoặc 8. Trạng thái không được chỉ phân biệt bằng hình dạng góc.
 
 Viền cơ sở 1px. Phân cấp nội dung chủ yếu bằng vị trí, khoảng cách, tiêu đề và bề mặt; không thêm nhiều shadow để bù bố cục thiếu rõ ràng. Dialog/popover có thể cần phân tách khỏi nền theo đặc tả component sau này.
 
-Focus ring đề xuất: **2px, offset 2px**, dùng `color.focus.ring` của theme hiện tại (Light `#315DA8`, Dark `#93C5FD`). Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
+Focus ring tham chiếu: **2px, offset 2px**, dùng `color.focus.ring` của theme hiện tại (Light `#315DA8`, Dark `#93C5FD`). Phải kiểm tra trên từng bề mặt, không bị ancestor/scroll container cắt mất và không bị action bar che. Focus vẫn cần tồn tại khi màu nền selected hoặc error đang hiển thị.
 
 ## 6. Mật độ và kích thước thao tác
 
-| Thuộc tính | Desktop compact — mặc định đề xuất | Desktop comfortable | Field / thao tác cảm ứng |
+| Thuộc tính | Desktop compact — mặc định Owner chọn | Desktop comfortable | Field / thao tác cảm ứng |
 |---|---:|---:|---:|
 | Chiều cao control tối thiểu | 32 | 40 | 48 |
 | Chiều cao dòng dữ liệu tối thiểu | 36 | 44 | Theo nội dung; vùng thao tác tối thiểu 48 |
@@ -120,7 +120,7 @@ Icon nhỏ có thể nằm trong target lớn hơn. Các target cạnh nhau ph�
 
 ## 7. Khung trang và responsive
 
-Desktop tham chiếu **1440×900**, sidebar **200**, topbar **52** là đề xuất chuẩn hóa. Sales trước đây dùng 208/64; các bộ desktop sau dùng 188/52. Không trình bày 200 là giá trị đã có trong cả năm prototype.
+Desktop tham chiếu **1440×900**, sidebar khoảng **200**, topbar khoảng **52** là baseline từ OWN-UX-07, được phép điều chỉnh khi layout/nội dung yêu cầu. Sales trước đây dùng 208/64; các bộ desktop sau dùng 188/52. Không trình bày 200 là giá trị đã có trong cả năm prototype.
 
 - Sidebar có thể thu gọn khoảng 64 khi hữu ích; icon vẫn phải có tên truy cập và đường đọc nhãn bằng bàn phím/cảm ứng.
 - Không bắt buộc navigation chỉ có icon; dùng menu mở được nếu nhãn hoặc ngữ cảnh cần thiết.
@@ -129,7 +129,7 @@ Desktop tham chiếu **1440×900**, sidebar **200**, topbar **52** là đề xu�
 - Dải chỉ số xuống dòng theo không gian; không cắt số, đơn vị hoặc trạng thái thiếu.
 - Bảng so sánh có thể cuộn ngang trong vùng bảng, giữ nguồn và tiêu đề cần thiết; trang không được tràn ngang ngoài ý muốn.
 
-Field tham chiếu **430×932**, chiều ngang hỗ trợ tối thiểu đề xuất **320 CSS px**. Chiều cao trang do nội dung quyết định; không đặt chiều cao cố định theo 932 hoặc 900.
+Field tham chiếu **430×932**, chiều ngang hỗ trợ từ **320 CSS px** theo OWN-UX-05. Chiều cao trang do nội dung quyết định; không đặt chiều cao cố định theo 932 hoặc 900.
 
 Header, bottom navigation và action bar phải tính safe area, bàn phím ảo và text zoom. Chỉ dùng vị trí sticky/fixed khi nội dung cuối trang và control đang focus vẫn có thể nhìn thấy, cuộn tới và thao tác.
 

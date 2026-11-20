@@ -1,10 +1,10 @@
 # FMCG UI/UX Standard v0.1
 
-**Trạng thái: PROPOSED_FOR_ADOPTION / DOCS_ONLY.** Ngày lập: 20/11/2026. Baseline repository: `6abafe25d21678579122c11d0c206818fb1cb0fd`.
+**Trạng thái: `OWNER_APPROVED_9_OF_9 / DOCS_ONLY`.** Baseline UI/UX v0.1 `ADOPTED` **sau khi PR quyết định Owner được review, xác nhận CI HEAD cuối và merge**; trước đó `ADOPTION_PENDING_DECISION_PR_MERGE`. Ngày lập 20/11/2026, reference ban đầu PR #78. [Biên bản OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md).
 
 Bộ quy chuẩn chuyển ngôn ngữ thiết kế của năm bộ prototype thành tài liệu có thể dùng khi đặc tả, triển khai và review UI của `fmcg-distribution-dotnet`. Hướng đã được người dùng yêu cầu là **gọn, nhiều dữ liệu hữu ích trên cùng màn hình**, bao phủ Sales A, Kho/điều phối, Hiện trường, Thủ quỹ/kế toán và Chủ NPP/vận hành.
 
-Các con số kích thước, font chuẩn hóa và cách chia breakpoint trong v0.1 là **đề xuất của designer**, được ghi trong [sổ quyết định](decisions.md). Không gán nhãn `OWNER_APPROVED` cho lựa chọn chưa có câu trả lời. Yêu cầu lập quy chuẩn không tự phê duyệt component library, tính năng nghiệp vụ hoặc thực thi roadmap.
+Owner đã chọn phương án 1 cho 9/9 quyết định: teal/navy, Noto Sans self-hosted, Desktop Compact, Field-first, Light/Dark/System, adaptive list/detail và chiến lược library theo ADR. [Sổ quyết định](decisions.md) tách các lựa chọn đã duyệt khỏi thiết bị Field cụ thể, library cụ thể, brand override và các hợp đồng nghiệp vụ còn cần quyết định. **UI-01 chỉ được triển khai sau khi PR hồ sơ quyết định merge, trong PR code độc lập**; UI-02…05 vẫn chưa được cấp quyền.
 
 ## Đọc và áp dụng
 
@@ -19,7 +19,7 @@ Các con số kích thước, font chuẩn hóa và cách chia breakpoint trong 
 | [Nội dung và định dạng](content-and-formatting.md) | Tiếng Việt, số, tiền, đơn vị, thời gian và microcopy |
 | [Quản trị và review](governance-and-review.md) | MUST/SHOULD, ngoại lệ, phiên bản và bằng chứng PR |
 | [Mapping prototype](prototype-mapping.md) | Truy nguồn 52 bản màn hình và các điểm đã chuẩn hóa |
-| [Sổ quyết định](decisions.md) | Phần đã có căn cứ, đề xuất và lựa chọn cần chốt khi triển khai |
+| [Sổ quyết định](decisions.md) / [Owner Decisions](../decisions/owner-uiux-2026-11-20.md) | 9 quyết định đã chốt, các mục còn mở và giới hạn cấp quyền |
 | [Kiểm tra bộ tài liệu](verification.md) | Token/CSS parity, contrast và phạm vi bằng chứng |
 | [Adoption roadmap](adoption-roadmap.md) | Các increment áp dụng độc lập, chưa tự được cấp phép thực thi |
 | [Screen spec template](templates/screen-spec.md) | Đặc tả một màn hình/luồng trước khi code |
@@ -36,7 +36,7 @@ Các con số kích thước, font chuẩn hóa và cách chia breakpoint trong 
 3. Bản UI/UX Standard đã được chấp nhận và screen/component spec của increment.
 4. Prototype và fixture minh họa. Screenshot giúp hiểu bố cục; không là API schema, policy, máy trạng thái hoặc evidence runtime.
 
-Trong bản đề xuất này, **MUST** diễn đạt điều kiện của chuẩn được đề nghị; các yêu cầu nghiệp vụ đã tồn tại vẫn bắt buộc theo nguồn của chúng. **SHOULD** là hướng mặc định có thể có ngoại lệ được ghi rõ. [Governance](governance-and-review.md) quy định cách ghi nhận và chấp nhận phiên bản.
+Trong baseline được Owner duyệt (hiệu lực sau merge PR quyết định), **MUST** là yêu cầu trong phạm vi được áp dụng và **SHOULD** là mặc định có thể có ngoại lệ được ghi rõ. Business/security contracts hiện hành vẫn có thẩm quyền cao hơn. [Governance](governance-and-review.md) quy định versioning và exception.
 
 ## Nguyên tắc thiết kế
 
@@ -49,12 +49,12 @@ Trong bản đề xuất này, **MUST** diễn đạt điều kiện của chu�
 
 ## Phạm vi kỹ thuật hiện tại
 
-Repository đã chốt React + TypeScript + Vite + PWA online-first và Tailwind v4. UI hiện hành trong `web/src/main.tsx` là shell health/PWA; `web/src/style.css` đang dùng Segoe UI 14 px. v0.1 đề xuất font Noto Sans từ prototype, có fallback Segoe UI; việc đưa font/tokens vào runtime thuộc UI-01 riêng. Review PR #78 bổ sung adapter Tailwind v4 và palette Dark tham chiếu: Light kế thừa prototype, Dark là DESIGNER_PROPOSED. Quy tắc Light/Dark/System, nguồn theme trên `html` và ma trận kiểm được ghi trong [hợp đồng theme](tailwind-v4-and-themes.md); chưa có theme switcher trong ứng dụng.
+Repository đã chốt React + TypeScript + Vite + PWA online-first và Tailwind v4. Runtime hiện hành trong `web/src/` vẫn là health/PWA shell, dùng Segoe UI 14px, **chưa import reference tokens/font hoặc triển khai theme**. OWN-UX-03 phê duyệt Noto Sans 400/700 self-hosted; OWN-UX-02/06 phê duyệt Light và 29 Dark semantic overrides, preference Light/Dark/System. [Hợp đồng theme](tailwind-v4-and-themes.md) mô tả CSP-safe first paint, native controls, portal và PWA cho UI-01.
 
-Không có lựa chọn thư viện component, grid, icon hoặc workspace tabs được phê duyệt bởi tài liệu này. Các stack của repository khác không tự áp dụng sang project này.
+OWN-UX-07 chốt Sidebar + Adaptive List/Detail; OWN-UX-08 chốt **ADR theo từng increment** chứ chưa chọn thư viện component/grid/icon/docking cụ thể. OWN-UX-09 **chỉ** cho phép UI-01 foundations/demo controls sau merge hồ sơ quyết định, không cho phép grid phức tạp, API nghiệp vụ hoặc các increment UI-02…05.
 
 ## Giới hạn bằng chứng
 
-Lần bàn giao này gồm tài liệu, token tham chiếu và hình minh họa chính xác. Việc kiểm JSON, contrast palette, liên kết và render không chứng minh ứng dụng đã có các component hay đạt usability/accessibility/E2E. Không nâng trạng thái APP/PREPROD/EV/P0, không sửa `business/` hoặc `business.lock.json`, và không mở offline business writes.
+PR #78 đã bàn giao tài liệu, tokens tham chiếu và bằng chứng render UI-00. Việc phê duyệt Design Baseline không chứng minh ứng dụng đã có component hoặc đạt usability/accessibility/runtime E2E. Không nâng trạng thái APP/PREPROD/EV/P0, không sửa `business/` hoặc `business.lock.json`, và không mở offline business writes.
 
 Ngoại lệ [OWN-APP00B-13-02](../decisions/owner-app00b-13-02-125-scale-exception.md) về 125% tiếp tục có hiệu lực trong phạm vi được ghi. Chuẩn này không đưa lại kiểm tra 125% thành gate bắt buộc hoặc backlog bắt buộc của APP-00B/C.

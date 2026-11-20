@@ -1,6 +1,6 @@
 # Accessibility và responsive
 
-**PROPOSED UI/UX v0.1.** Đây là yêu cầu thiết kế và kế hoạch kiểm chứng, không là tuyên bố ứng dụng đạt WCAG. Các tiêu chí dưới đây phải được kiểm trên component và luồng thật trong phạm vi increment đã được cấp phép.
+**UI/UX v0.1 OWNER_APPROVED (hiệu lực ADOPTED sau merge PR quyết định).** Đây là yêu cầu thiết kế và kế hoạch kiểm chứng, không là tuyên bố ứng dụng đạt WCAG. Các tiêu chí dưới đây phải được kiểm trên component và luồng thật trong phạm vi increment đã được cấp phép.
 
 ## UX-A01 - Phạm vi và ngoại lệ đang có
 
@@ -34,7 +34,7 @@ Tham chiếu: [WCAG 2.4.11 Focus Not Obscured](https://www.w3.org/WAI/WCAG22/Und
 
 ## UX-A04 - Vùng chạm và thiết bị
 
-Project đề xuất **48×48 CSS px** cho thao tác chạm thường dùng của Field; hình icon có thể nhỏ hơn nhưng vùng tương tác đạt kích thước này. Desktop control compact 32 px và mục tiêu icon tối thiểu 32×32 là lựa chọn thiết kế khi dùng chuột/bàn phím; không tự dùng compact desktop cho màn cảm ứng tại kho.
+OWN-UX-05 phê duyệt mục tiêu **48×48 CSS px** cho thao tác chạm thường dùng của Field; hình icon có thể nhỏ hơn nhưng vùng tương tác đạt kích thước này. Desktop control compact 32 px và mục tiêu icon tối thiểu 32×32 là lựa chọn thiết kế khi dùng chuột/bàn phím; không tự dùng compact desktop cho màn cảm ứng tại kho.
 
 WCAG 2.5.8 AA có mức 24×24 CSS px hoặc các ngoại lệ khoảng cách/loại control được mô tả trong tiêu chí. **48 px là mục tiêu sản phẩm của bộ Field**, không gọi đó là ngưỡng WCAG AA. Nguồn: [Target Size Minimum](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html).
 

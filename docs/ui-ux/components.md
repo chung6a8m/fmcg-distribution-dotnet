@@ -1,4 +1,6 @@
-# Hợp đồng thành phần UI — đề xuất v0.1
+# Hợp đồng thành phần UI — v0.1
+
+**OWNER_APPROVED / DOCS_ONLY.** Hợp đồng thuộc baseline được duyệt tại [OWN-UX-01..09](../decisions/owner-uiux-2026-11-20.md); hiệu lực `ADOPTED` sau review, CI HEAD cuối và merge PR #79. Component runtime được triển khai và nghiệm thu theo increment riêng.
 
 ## 1. Phạm vi hợp đồng
 
@@ -87,7 +89,7 @@ Chuyển bảng thành thẻ trên mobile khi mục đích là xử lý từng n
 
 ### Mật độ bảng: hàng đọc, editor và nội dung dài
 
-Các số dưới đây vẫn là **DESIGNER_PROPOSED**, dùng lại token hiện có. Compact phải được đo ở hàng/cell đã render; giá trị token riêng lẻ chưa chứng minh bảng gọn hoặc dễ thao tác.
+Các mức compact/comfortable dưới đây đã được Owner phê duyệt tại **OWN-UX-04**; target Field thuộc **OWN-UX-05**. Recipe là tham chiếu triển khai, chưa phải component runtime đã nghiệm thu. Compact phải được đo ở hàng/cell đã render; giá trị token riêng lẻ chưa chứng minh bảng gọn hoặc dễ thao tác.
 
 | Trạng thái | Compact | Comfortable | Quy tắc |
 |---|---:|---:|---|
