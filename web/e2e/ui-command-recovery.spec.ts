@@ -25,7 +25,11 @@ test('UI03-F01 link, partial 2/3, source detail and no business network writes',
   await expect(source).toContainText('2/3 báo cáo chuyến')
   await expect(source).toContainText('250.000 ₫ · tổng phần đã biết')
   await expect(source).toContainText('20/11/2026 09:25 +07:00')
+  const detail = page.locator('#ui03-source-details')
+  await expect(detail).toBeAttached() // aria-controls must resolve even while collapsed.
+  await expect(detail).toBeHidden()
   await source.getByRole('button', { name: 'Xem nguồn và phần còn thiếu' }).click()
+  await expect(detail).toBeVisible()
   await expect(source).toContainText('SIM-TRIP-01: 0 ₫ (đã biết)')
   await expect(source).toContainText('Chờ nguồn: SIM-TRIP-03')
   await sendFixture(page)
@@ -54,6 +58,13 @@ test('UI03-S01 zero, no data, N unknown, stale asOf and permission redaction', a
   await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('none')
   await expect(source).toContainText('Quyền đọc bị từ chối')
   await expect(source).not.toContainText('19/11/2026 17:15 +07:00')
+  await expect(selector).toBeDisabled()
+  await expect(selector).toHaveText('Không có quyền xem kịch bản nguồn')
+  await expect(selector).not.toContainText('2/3')
+  await expect(selector).not.toContainText('2/2')
+  await page.getByLabel('Quyền/assignment (mô phỏng)').selectOption('read')
+  await expect(selector).toBeEnabled()
+  await expect(source).toContainText('19/11/2026 17:15 +07:00')
 })
 
 test('UI03-C01 preflight invalidated by edit/version/permission/connection', async ({ page }) => {
@@ -180,3 +191,64 @@ for (const width of [1440, 320]) {
     await info.attach('ui03-' + width + '-dark', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
   })
 }
+
+test('UI03-V02 Light/System preference and keyboard focus do not submit implicitly', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.goto(path)
+  const theme = page.getByLabel('Chế độ hiển thị')
+  await theme.selectOption('system')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  await page.emulateMedia({ colorScheme: 'light' })
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await theme.selectOption('light')
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  const input = page.getByRole('textbox', { name: 'Số lượng trong payload mẫu' })
+  await input.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' })).toBeEnabled()
+  await page.keyboard.press('Tab')
+  await expect(page.getByLabel('Phiên bản nguồn cho payload')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' })).toBeFocused()
+})
+
+test('UI03-C06 corrupt persisted UNKNOWN blocks another ID and preserves evidence', async ({ page }) => {
+  await page.goto(path)
+  await sendFixture(page)
+  await page.getByRole('button', { name: 'Mô phỏng mất ACK' }).click()
+  const key = 'fmcg.ui03.synthetic.v1'
+  await expect.poll(() => page.evaluate(k => JSON.parse(sessionStorage.getItem(k) ?? '{}').phase, key))
+    .toBe('unknown')
+  await page.evaluate(k => {
+    const item = JSON.parse(sessionStorage.getItem(k) ?? '{}')
+    item.sent.quantity = '999'
+    sessionStorage.setItem(k, JSON.stringify(item))
+  }, key)
+  await page.reload()
+  await expect(page.getByText('Không thể khôi phục yêu cầu gốc')).toBeVisible()
+  await expect(page.getByTestId('ui03-id')).toHaveText('Không xác định')
+  await expect(page.getByRole('button', { name: 'Kiểm tra điều kiện (demo)' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Tạo nháp demo tiếp theo sau kết quả cuối' }))
+    .toBeDisabled()
+  await expect.poll(() => page.evaluate(k => JSON.parse(sessionStorage.getItem(k) ?? '{}').sent.quantity, key))
+    .toBe('999')
+})
+
+test('UI03-C07 denied sessionStorage write warns and keeps only in-memory state', async ({ page }) => {
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'fmcg.ui03.synthetic.v1') throw new DOMException('session denied', 'SecurityError')
+      return setItem.call(this, key, value)
+    }
+  })
+  await page.goto(path)
+  await expect(page.getByText('Không lưu được session')).toBeVisible()
+  await sendFixture(page)
+  await expect(page.getByTestId('ui03-id')).toHaveText('UI03-LOCAL-0001')
+  await expect(page.getByRole('button', { name: 'Gửi command mẫu' })).toBeDisabled()
+  await expect(page.getByText('Không lưu được session')).toBeVisible()
+})
