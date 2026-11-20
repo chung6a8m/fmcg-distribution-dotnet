@@ -26,6 +26,6 @@ Form validation is on blur/check, with input `aria-invalid`/`aria-describedby`, 
 
 ## Acceptance and limitations
 
-Review against [UI-02 verification matrix](ui-02-verification.md), source tests and Playwright trace/screenshot artifacts. Pass requires final-HEAD PR CI and independent findings resolution; neither code presence nor test source alone is runtime PASS.
+Review against [UI-02 verification matrix](ui-02-verification.md), source tests and Playwright trace/screenshot artifacts. PR #82 completed independent final-source-HEAD review and bounded synthetic 100% browser CI; [post-merge closeout](../closeout/2026-11-20-ui-02.md) records the exact evidence and four resolved findings. This does not replace future physical, source-bound or business acceptance.
 
 Do not claim real data-source cancellation/race ordering, remote permission revocation, high-volume virtualization, screen reader certification, physical Android/iOS/IME/Gboard tests, PREPROD, EV/P0 or E2E business verification. Those require separate authorized increments and evidence.
