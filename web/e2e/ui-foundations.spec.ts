@@ -35,7 +35,7 @@ test('opens from the health shell and keeps native field semantics', async ({ pa
   await expect(reference).not.toBeEditable()
   const disabled = page.getByLabel('Mã nội bộ (không khả dụng)')
   await expect(disabled).toBeDisabled()
-  await expect(disabled).toHaveAccessibleDescription(/không khả dụng/i)
+  await expect(disabled).toHaveAccessibleDescription('Mã này được đặt sẵn trong bản minh họa.')
   const invalid = page.getByLabel('Số lượng mẫu', { exact: true })
   await expect(invalid).toHaveAttribute('aria-invalid', 'true')
   await expect(invalid).toHaveAccessibleDescription(/số nguyên dương/i)

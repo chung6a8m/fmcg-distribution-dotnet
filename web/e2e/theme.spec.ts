@@ -228,7 +228,8 @@ async function colors(node: Locator) {
     }
     const style = getComputedStyle(el)
     return { text: style.color, surface: surface(el), outside: surface(el.parentElement),
-      border: style.borderTopColor, outline: style.outlineColor, outlineWidth: style.outlineWidth,
+      border: style.borderTopColor, borderWidth: parseFloat(style.borderTopWidth), borderStyle: style.borderTopStyle,
+      outline: style.outlineColor, outlineWidth: style.outlineWidth,
       outlineStyle: style.outlineStyle }
   })
 }
@@ -250,6 +251,10 @@ for (const theme of ['light', 'dark'] as const) {
     async function measure(name: string, node: Locator, boundary?: 'border' | 'surface') {
       const c = await colors(node)
       check(name + ' text', c.text, c.surface, 4.5)
+      if (boundary === 'border') {
+        expect(c.borderWidth, name + ' border width').toBeGreaterThan(0)
+        expect(['none', 'hidden'], name + ' border style ' + c.borderStyle).not.toContain(c.borderStyle)
+      }
       if (boundary) check(name + ' control boundary', c[boundary], c.outside, 3)
       return c
     }
@@ -274,8 +279,31 @@ for (const theme of ['light', 'dark'] as const) {
       for (const selector of ['input[readonly]', '#demo-density', 'input[aria-invalid=true]']) {
         await measure(selector, page.locator(selector), 'border')
       }
-      for (const node of await page.locator('.badge, .notice strong, .notice p').all()) {
-        await measure(await node.innerText(), node)
+      const states = page.getByRole('region', { name: 'Trạng thái mẫu' })
+      await expect(states.locator('.badge')).toHaveCount(4)
+      await expect(states.locator('.notice')).toHaveCount(3)
+      for (const [tone, label] of [
+        ['success', 'Thành công'], ['info', 'Thông tin'], ['warning', 'Cảnh báo'], ['danger', 'Lỗi']
+      ]) {
+        const badge = states.locator(`.badge[data-tone="${tone}"]`)
+        await expect(badge).toBeVisible()
+        await expect(badge).toHaveText(label)
+        await measure(label, badge)
+      }
+      for (const [tone, title, body] of [
+        ['info', 'Đang tải', 'Đang đọc danh mục minh họa…'],
+        ['warning', 'Trống', 'Danh sách mẫu chưa có mặt hàng.'],
+        ['danger', 'Có lỗi', 'Không thể hiển thị dữ liệu trong ví dụ này.']
+      ]) {
+        const notice = states.locator(`.notice[data-tone="${tone}"]`)
+        const heading = notice.locator('strong')
+        const message = notice.locator('p')
+        await expect(heading).toBeVisible()
+        await expect(heading).toHaveText(title)
+        await expect(message).toBeVisible()
+        await expect(message).toHaveText(body)
+        await measure(title, heading)
+        await measure(body, message)
       }
       const disabled = await colors(page.locator('input:disabled'))
       check('disabled input (inactive control exception)', disabled.text, disabled.surface, null)

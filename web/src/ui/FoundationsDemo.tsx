@@ -92,7 +92,7 @@ export function FoundationsDemo() {
           <Field label="Tên điểm bán" defaultValue="Cửa hàng bách hóa Nguyễn Đình Chiểu, phường Bàn Cờ, Thành phố Hồ Chí Minh" />
           <div className="field-pair">
             <Field label="Mã tham chiếu (chỉ đọc)" value="UI-01-DEMO" readOnly />
-            <Field label="Mã nội bộ (không khả dụng)" value="NB-001" disabled help="Ví dụ về trường không khả dụng." />
+            <Field label="Mã nội bộ (không khả dụng)" value="NB-001" disabled help="Mã này được đặt sẵn trong bản minh họa." />
           </div>
           <Field label="Số lượng mẫu" value={quantity} inputMode="numeric" error={quantityError}
             onChange={event => setQuantity(event.currentTarget.value)} />
