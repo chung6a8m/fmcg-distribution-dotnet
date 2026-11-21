@@ -1,5 +1,5 @@
 # Internal LAB-D01 collector. Stdout is consumed in memory by docker_preflight.py.
-param([switch]$DataDisk)
+param([switch]$DataDisk, [switch]$VerifySignatures)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -10,6 +10,21 @@ $PSNativeCommandUseErrorActionPreference = $false
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 
 try {
+    . (Join-Path $PSScriptRoot 'DockerWsl.Windows.ps1')
+    Assert-D01WindowsEnvironment
+    $systemDirectory = [Environment]::SystemDirectory
+    $env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';' +
+        (Join-Path $systemDirectory 'WindowsPowerShell\v1.0\Modules')
+    if ($VerifySignatures) {
+        $request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
+        foreach ($path in $request.paths) {
+            if (-not (Test-D01Authenticode -Path $path -Publisher $request.publisher)) {
+                exit 4
+            }
+        }
+        [Console]::WriteLine('VERIFIED')
+        exit 0
+    }
     if ($DataDisk) {
         $path = [Console]::ReadLine()
         $image = Get-DiskImage -ImagePath $path
@@ -32,7 +47,8 @@ try {
             ForEach-Object { [int]$_.LocalPort }
     )
     if ($tcpErrors -or $udpErrors) { exit 3 }
-    $netsh = Join-Path $env:SystemRoot 'System32/netsh.exe'
+    $netsh = Join-Path $systemDirectory 'netsh.exe'
+    if (-not (Test-D01Authenticode -Path $netsh -Publisher 'Microsoft Corporation')) { exit 4 }
     $excluded = [Collections.Generic.List[object]]::new()
     foreach ($family in 'ipv4', 'ipv6') {
         foreach ($transport in 'tcp', 'udp') {

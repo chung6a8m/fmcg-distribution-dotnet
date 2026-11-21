@@ -17,6 +17,7 @@ if __name__ == "__main__":
 # publication primitives without accepting or issuing an E05 admission.
 from tools.app02b_lab.contract import (LabError, canonical_json, digest, guarded_directory,
                                        read_json, require, strict_json)
+from tools.app02b_lab.docker_windows import verified_windows_folders
 from tools.app02b_lab.environment import PRIVATE_NETWORKS, check_location, windows_path
 from tools.app02b_lab.preflight import beneath, existing_local_input, output_path, source_info
 from tools.app02b_lab.schema import validate_document
@@ -95,6 +96,8 @@ def command(args, *, timeout=25, inventory=False, input_data=None, missing=None)
         raise LabError("COLLECTION_ERROR") from None
     if inventory and result.returncode == 3:
         raise LabError("HOST_ACCESS_DENIED")
+    if inventory and result.returncode == 4:
+        raise LabError("UNTRUSTED_NATIVE_EXECUTABLE")
     require(len(result.stdout) <= LIMIT, "COLLECTION_ERROR")
     if result.returncode and missing:
         check_discovery_error(result.stderr, missing)
@@ -132,10 +135,19 @@ def version(value, prefix=""):
     return match[1] if match else None
 
 
-def collect_wsl(host):
-    executable = Path(os.environ["SystemRoot"]) / "System32/wsl.exe"
+def verify_signatures(pwsh, paths, publisher):
+    raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR, "-VerifySignatures"],
+                  input_data=canonical_json({"paths": list(map(str, paths)), "publisher": publisher}),
+                  timeout=100, inventory=True)
+    require(text_result(raw) == "VERIFIED", "COLLECTION_ERROR")
+
+
+def collect_wsl(pwsh, system_directory, host):
+    executable = system_directory / "wsl.exe"
     if not executable.is_file():
         return
+    executable = existing_local_input(str(executable), directory=False)
+    verify_signatures(pwsh, [executable], "Microsoft Corporation")
     raw = text_result(command([executable, "--version"]))
     first_line = next(iter(raw.splitlines()), "")
     # --version lists WSL first, before kernel, WSLg and Windows.
@@ -150,11 +162,11 @@ def collect_wsl(host):
         host["wslMode"] = None
 
 
-def storage(pwsh, host):
+def storage(pwsh, folders, host):
     """Use the Docker Desktop settings and recognized VHD layout on a fixed Windows drive."""
     import shutil
 
-    settings = Path(os.environ["APPDATA"]) / "Docker/settings-store.json"
+    settings = folders["APPDATA"] / "Docker/settings-store.json"
     if not settings.is_file() or settings.stat().st_size > LIMIT:
         return
     configuration = json_result(settings.read_bytes(), dict)
@@ -164,7 +176,7 @@ def storage(pwsh, host):
                  if key.casefold() in ("customwsldistrodir", "datafolder", "diskimagelocation")
                  and value not in (None, "")]
     if not locations:
-        base = Path(os.environ["LOCALAPPDATA"]) / "Docker/wsl"
+        base = folders["LOCALAPPDATA"] / "Docker/wsl"
     elif all(windows_path(value) for value in locations) and len({Path(value) for value in locations}) == 1:
         base = Path(locations[0])
     else:
@@ -186,51 +198,69 @@ def storage(pwsh, host):
         host["diskRef"] = str(path).casefold()
 
 
-def collect_inventory(pwsh, plan, host):
+def collect_inventory(pwsh, plan, host, folders):
+    if docker_overrides():
+        return "DOCKER_ENV_OVERRIDE"
     host["python"] = ".".join(map(str, sys.version_info[:3]))
     host["git"] = version(text_result(command(["git.exe", "--version"])), r"git version ")
     raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR], timeout=100, inventory=True)
     host.update(json_result(raw, dict))
-    collect_wsl(host)
+    collect_wsl(pwsh, folders["SystemDirectory"], host)
     if host.get("wslMode") == 2:
-        storage(pwsh, host)
+        storage(pwsh, folders, host)
     desktop = host.get("desktopPath")
     if not desktop:
         return "DAEMON_UNAVAILABLE"
-    install = existing_local_input(desktop, directory=False).parent
+    desktop = existing_local_input(desktop, directory=False)
+    install = desktop.parent
+    per_user = folders["LOCALAPPDATA"] / "Programs/DockerDesktop"
+    require(desktop.name.casefold() == "docker desktop.exe"
+            and (install == per_user or beneath(install, folders["ProgramFiles"])),
+            "UNTRUSTED_NATIVE_EXECUTABLE")
     executable = install / "resources/bin/docker.exe"
     if not executable.is_file():
         return "UNSUPPORTED_DESKTOP_LAYOUT"
-    if not trusted_plugin_discovery(install):
-        return "UNTRUSTED_PLUGIN_CONFIGURATION"
-    return docker_inventory(existing_local_input(str(executable), directory=False), host, plan)
+    executable = existing_local_input(str(executable), directory=False)
+    try:
+        plugins = docker_plugin_paths(install, folders)
+    except LabError as error:
+        if error.code != "UNTRUSTED_PLUGIN_CONFIGURATION":
+            raise
+        return error.code
+    verify_signatures(pwsh, [desktop, executable, *plugins], "Docker Inc")
+    return docker_inventory(executable, host, plan)
 
 
-def trusted_plugin_discovery(install):
-    """Limit the trusted toolchain to the running installation and OS plugin directory."""
-    docker_config = Path(os.environ["USERPROFILE"]) / ".docker"
+def docker_plugin_paths(install, folders):
+    """Collect only executable candidates from the packaged and OS-known CLI plugin roots."""
+    docker_config = folders["USERPROFILE"] / ".docker"
     trusted = [install / "resources/cli-plugins",
-               Path(os.environ["ProgramFiles"]) / "Docker/cli-plugins",
-               Path(os.environ["ProgramData"]) / "Docker/cli-plugins"]
+               folders["ProgramFiles"] / "Docker/cli-plugins",
+               folders["ProgramData"] / "Docker/cli-plugins"]
     trusted_targets = {check_location(path) for path in trusted if path.exists()}
     config = docker_config / "config.json"
-    directories = [docker_config / "cli-plugins", *trusted]
     if config.is_file():
+        config = check_location(config)
         require(config.stat().st_size <= LIMIT, "COLLECTION_ERROR")
         settings = json_result(config.read_bytes(), dict)
         for key, paths in settings.items():
             if key.casefold() == "clipluginsextradirs":
-                if not isinstance(paths, list) or not all(windows_path(path) for path in paths):
-                    return False
-                directories.extend(Path(path) for path in paths)
-    for path in directories:
-        if not path.exists():
-            continue
-        for plugin in path.iterdir():
-            if (plugin.name.lower().startswith("docker-") and plugin.suffix.lower() == ".exe"
-                    and plugin.resolve().parent not in trusted_targets):
-                return False
-    return True
+                require(isinstance(paths, list) and all(windows_path(path) and Path(path) in trusted
+                                                       for path in paths), "UNTRUSTED_PLUGIN_CONFIGURATION")
+
+    def candidates(path):
+        return [plugin for plugin in path.iterdir()
+                if plugin.name.lower().startswith("docker-") and plugin.suffix.lower() == ".exe"]
+
+    user = docker_config / "cli-plugins"
+    require(not user.exists() or not candidates(check_location(user)), "UNTRUSTED_PLUGIN_CONFIGURATION")
+    plugins = set()
+    for path in trusted_targets:
+        for entry in candidates(path):
+            plugin = entry.resolve(strict=True)
+            require(plugin.parent in trusted_targets and plugin.is_file(), "UNTRUSTED_PLUGIN_CONFIGURATION")
+            plugins.add(check_location(plugin))
+    return sorted(plugins)
 
 
 def objects(value):
@@ -254,9 +284,13 @@ def inspect_list(docker, kind, ids, template):
     return result
 
 
-def docker_inventory(executable, host, plan=None):
+def docker_overrides():
     keys = {key.upper() for key in os.environ}
-    if DOCKER_OVERRIDES & keys or any(key.startswith("COMPOSE_") for key in keys):
+    return bool(DOCKER_OVERRIDES & keys or any(key.startswith("COMPOSE_") for key in keys))
+
+
+def docker_inventory(executable, host, plan=None):
+    if docker_overrides():
         return "DOCKER_ENV_OVERRIDE"
 
     host["context"] = text_result(command([executable, "context", "show"]))
@@ -514,7 +548,7 @@ def evaluate(plan, host, source, plan_hash, issue=None):
         observed["images"].append({"role": role, "sha256": image["reference"].split("@sha256:")[1],
                                    "publisherReceiptSha256": image["publisherReceiptSha256"],
                                    "status": status(verified)})
-    collection_error = issue in ("COLLECTION_ERROR", "HOST_ACCESS_DENIED")
+    collection_error = issue in ("COLLECTION_ERROR", "HOST_ACCESS_DENIED", "UNTRUSTED_NATIVE_EXECUTABLE")
     return {
         "schema": "APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1",
         "evidenceClassification": "WINDOWS_HOST_PREFLIGHT", "authorization": "NOT_EVALUATED",
@@ -603,6 +637,7 @@ def validate_publisher_receipts(config, evidence, plan):
 
 
 def run(config_file, output_directory, pwsh):
+    folders = verified_windows_folders()
     config = existing_local_input(config_file, directory=False)
     path = output_path(output_directory)
     raw = bounded_input(config)
@@ -614,12 +649,12 @@ def run(config_file, output_directory, pwsh):
     initial = source_info()
     host = {}
     try:
-        issue = collect_inventory(pwsh, plan, host)
+        issue = collect_inventory(pwsh, plan, host, folders)
         report = evaluate(plan, host, initial, digest(raw), issue)
     except (LabError, PermissionError) as error:
         issue = "HOST_ACCESS_DENIED" if isinstance(error, PermissionError) else error.code
-        report = evaluate(plan, {}, initial, digest(raw),
-                          "HOST_ACCESS_DENIED" if issue == "HOST_ACCESS_DENIED" else "COLLECTION_ERROR")
+        report = evaluate(plan, {}, initial, digest(raw), issue
+                          if issue in ("HOST_ACCESS_DENIED", "UNTRUSTED_NATIVE_EXECUTABLE") else "COLLECTION_ERROR")
     except (OSError, ValueError, TypeError, AttributeError, KeyError):
         report = evaluate(plan, {}, initial, digest(raw), "COLLECTION_ERROR")
     final = source_info()

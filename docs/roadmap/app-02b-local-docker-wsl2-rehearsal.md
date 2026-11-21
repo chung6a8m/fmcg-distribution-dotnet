@@ -94,6 +94,8 @@ flowchart LR
 
 **Evidence disposition:** `HOST_NOT_RUN / APPLY_BLOCKED`. Source CI exercises synthetic Windows and Linux fixtures via the retained LAB-E05 workflow. The implementation PR carries exact source, review and CI receipts. The laptop operator supplies the protected plan, publisher verification records and actual host receipt. Original physical acceptance remains `NOT_VERIFIED`.
 
+**Native tool provenance:** Use OS-known Windows roots and verify Authenticode for Docker Desktop, CLI plugins and Windows system tools before invoking those probes. Reject conflicting shell roots and user-controlled plugin search paths. The implementation PR retains the source review and Windows regression receipts.
+
 ## 5. LAB-D02 — Guarded Compose plan/apply, networks and storage
 
 **Proposed branch:** `feat/app02b-lab-d02-compose-boundaries`. **Source dependency:** reviewed/merged D01; live prerequisite: D01 host result on the **actual** laptop and separately authorized exact target/plan. Do not attempt to satisfy LAB-I01 Hyper-V readiness.

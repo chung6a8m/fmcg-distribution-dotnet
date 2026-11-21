@@ -60,8 +60,15 @@ Use 64-bit PowerShell 7 and a trusted local toolchain. The
 [toolchain floor file](toolchain.lock.json) records the supported version
 floors for this increment. Start with the desired daemon already running,
 `desktop-linux` selected and Docker/Compose overrides clear in the current
-shell. D01 resolves the CLI from the running Desktop installation and expects
-Docker's packaged plugins or the system-managed plugin directory.
+shell. D01 gets system paths from Windows and rejects conflicting shell
+variables before collection. It accepts a signed Docker Desktop installation
+under Windows Program Files or the standard Local AppData Docker Desktop
+directory. The Desktop, CLI and discovered plugins must have valid Docker Inc
+Authenticode signatures. WSL and netsh must have valid Microsoft signatures
+and come from the Windows system directory. Keep CLI plugins in the Desktop
+package or in the Windows Program Files or ProgramData Docker plugin directory.
+User CLI plugins and extra search directories outside those locations block
+collection. The invoking PowerShell, Python and Git are operator-managed tools.
 
 ```powershell
 pwsh -NoProfile -File .\scripts\lab\Test-DockerWslPrerequisites.ps1 -ConfigFile C:\PrivateLabPlan\docker-host.json -OutputDirectory C:\LabEvidence\Docker\d01-attempt-01
@@ -79,6 +86,7 @@ $LASTEXITCODE
 | `SOURCE`, `HOST_IDENTITY`, `ENGINE_IDENTITY` | The clean exact checkout, intended laptop and pinned daemon. |
 | `DOCKER_ENV_OVERRIDE`, `UNSAFE_CONTEXT`, `LOCAL_CONTEXT` | The invoking shell, selected `desktop-linux` context and local Docker Desktop named pipe. |
 | `UNSUPPORTED_DESKTOP_LAYOUT`, `UNTRUSTED_PLUGIN_CONFIGURATION` | A running Desktop installation with its packaged CLI and supported plugin locations. |
+| `WINDOWS_ROOT_ENV_OVERRIDE`, `UNTRUSTED_NATIVE_EXECUTABLE` | The shell's Windows directory settings and the expected Authenticode signatures of installed tools. |
 | `DAEMON_UNAVAILABLE`, `LINUX_ENGINE`, `WSL2_BACKEND` | Running Docker Desktop Linux engine with the running `docker-desktop` distro in WSL2 mode and a WSL2 engine kernel. |
 | `SQL_X64`, `IMAGE_*` | Native x64 Windows and x86-64 Linux engine, cached Linux/amd64 images, exact publisher digest and external provenance record. |
 | `HOST_MEMORY`, `WSL_MEMORY`, `WINDOWS_BACKING_STORAGE` | Free Windows RAM, daemon-visible WSL2 RAM/CPU, recognized Docker root/driver, attached VHD capacity and free bytes on the backing Windows disk. |
@@ -111,4 +119,6 @@ LAB-E05 admission and B.9 evidence.
 - [Microsoft Windows disk image inventory](https://learn.microsoft.com/en-us/powershell/module/storage/get-diskimage)
 - [Docker context inspection](https://docs.docker.com/reference/cli/docker/context/inspect/)
 - [Microsoft WSL commands](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)
+- [Windows known folders](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)
+- [Microsoft Authenticode signature verification](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature)
 - [Microsoft SQL Server container architecture](https://learn.microsoft.com/en-us/sql/linux/containers/deploy)

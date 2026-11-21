@@ -15,6 +15,8 @@ try {
         [Console]::Error.WriteLine('COLLECTION_FAILED INVALID_ARGUMENTS')
         exit 1
     }
+    . (Join-Path $PSScriptRoot 'DockerWsl.Windows.ps1')
+    Assert-D01WindowsEnvironment
     $python = Get-Command python.exe -CommandType Application -All -ErrorAction Ignore |
         Where-Object { $_.Source -notlike '*\Microsoft\WindowsApps\*' } | Select-Object -First 1
     if (-not $python) {
@@ -27,6 +29,10 @@ try {
     [Console]::Error.WriteLine('COLLECTION_FAILED PREFLIGHT_RUNTIME_FAILED')
     exit 1
 } catch {
+    if ($_.Exception.Message -in 'WINDOWS_ROOT_ENV_OVERRIDE', 'WINDOWS_ROOT_UNAVAILABLE', 'WINDOWS_64_BIT_REQUIRED') {
+        [Console]::Error.WriteLine("COLLECTION_FAILED $($_.Exception.Message)")
+        exit 1
+    }
     [Console]::Error.WriteLine('COLLECTION_FAILED PREFLIGHT_RUNTIME_FAILED')
     exit 1
 }

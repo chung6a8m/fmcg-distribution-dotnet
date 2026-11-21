@@ -232,7 +232,7 @@ class WindowsDockerPreflightTests(unittest.TestCase):
         return sha
 
     def run_preflight(self, issue=None, error=None):
-        def collect(pwsh, plan, host):
+        def collect(pwsh, plan, host, folders):
             if error is not None:
                 raise error
             host.update(self.host)
@@ -313,38 +313,91 @@ class WindowsDockerPreflightTests(unittest.TestCase):
             path.parent.mkdir(parents=True)
             path.write_bytes(b"synthetic")
         settings.write_text(json.dumps({"CustomWslDistroDir": str(moved)}), encoding="utf-8")
-        with patch.dict(os.environ, {"APPDATA": str(self.root), "LOCALAPPDATA": str(self.root)}):
-            with patch.object(preflight, "command", return_value=b'{"attached":false,"capacity":512}') as query:
-                observed = {}
-                preflight.storage("pwsh", observed)
-                self.assertEqual({}, observed)
-                probed = Path(query.call_args.kwargs["input_data"].decode().strip())
-                self.assertTrue(probed.samefile(disk))
-            with patch.object(preflight, "command", return_value=b'{"attached":true,"capacity":512}'):
-                preflight.storage("pwsh", observed)
-                self.assertEqual(str(disk.resolve()).casefold(), observed["diskRef"])
-                self.assertEqual(512, observed["diskCapacity"])
-            with patch.object(preflight, "command", return_value=None):
-                with self.assertRaisesRegex(LabError, "^COLLECTION_ERROR$"):
-                    preflight.storage("pwsh", {})
-            disk.unlink()
-            with patch.object(preflight, "command") as query:
-                preflight.storage("pwsh", {})
-                query.assert_not_called()
+        folders = {"APPDATA": self.root, "LOCALAPPDATA": self.root}
+        with patch.object(preflight, "command", return_value=b'{"attached":false,"capacity":512}') as query:
+            observed = {}
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual({}, observed)
+            probed = Path(query.call_args.kwargs["input_data"].decode().strip())
+            self.assertTrue(probed.samefile(disk))
+        with patch.object(preflight, "command", return_value=b'{"attached":true,"capacity":512}'):
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual(str(disk.resolve()).casefold(), observed["diskRef"])
+            self.assertEqual(512, observed["diskCapacity"])
+        with patch.object(preflight, "command", return_value=None):
+            with self.assertRaisesRegex(LabError, "^COLLECTION_ERROR$"):
+                preflight.storage("pwsh", folders, {})
+        disk.unlink()
+        with patch.object(preflight, "command") as query:
+            preflight.storage("pwsh", folders, {})
+            query.assert_not_called()
 
     def test_plugin_discovery_requires_packaged_or_system_managed_plugin(self):
         install = self.root / "DockerDesktop"
-        system = self.root / "ProgramData/Docker/cli-plugins"
+        folders = {"ProgramFiles": self.root / "ProgramFiles", "ProgramData": self.root / "ProgramData",
+                   "USERPROFILE": self.root / "user"}
+        system = folders["ProgramData"] / "Docker/cli-plugins"
         system.mkdir(parents=True)
-        (system / "docker-compose.exe").touch()
-        user = self.root / "user/.docker/cli-plugins"
+        packaged = system / "docker-compose.exe"
+        packaged.touch()
+        user = folders["USERPROFILE"] / ".docker/cli-plugins"
         user.mkdir(parents=True)
-        with patch.dict(os.environ, {"USERPROFILE": str(self.root / "user"),
-                                     "ProgramFiles": str(self.root / "ProgramFiles"),
-                                     "ProgramData": str(self.root / "ProgramData")}):
-            self.assertTrue(preflight.trusted_plugin_discovery(install))
-            (user / "docker-compose.exe").touch()
-            self.assertFalse(preflight.trusted_plugin_discovery(install))
+        self.assertEqual([packaged.resolve()], preflight.docker_plugin_paths(install, folders))
+        (user / "docker-compose.exe").touch()
+        with self.assertRaisesRegex(LabError, "^UNTRUSTED_PLUGIN_CONFIGURATION$"):
+            preflight.docker_plugin_paths(install, folders)
+        (user / "docker-compose.exe").unlink()
+        extra = self.root / "unexpected"
+        extra.mkdir()
+        (extra / "docker-compose.exe").touch()
+        (user.parent / "config.json").write_text(json.dumps({"cliPluginsExtraDirs": [str(extra)]}))
+        with self.assertRaisesRegex(LabError, "^UNTRUSTED_PLUGIN_CONFIGURATION$"):
+            preflight.docker_plugin_paths(install, folders)
+
+    def test_spoofed_windows_roots_refuse_execution_before_native_collection(self):
+        fake_root = self.root / "spoof"
+        fake_plugins = fake_root / "Docker/cli-plugins"
+        fake_plugins.mkdir(parents=True)
+        (fake_plugins / "docker-compose.exe").write_bytes(b"unexpected synthetic executable")
+        fake_os = fake_root / "System32"
+        fake_os.mkdir()
+        (fake_os / "wsl.exe").write_bytes(b"unexpected synthetic executable")
+        (fake_os / "netsh.exe").write_bytes(b"unexpected synthetic executable")
+        invalid_config = self.root / "invalid.json"
+        invalid_config.write_text("intentionally invalid", encoding="utf-8")
+        for variable in ("ProgramFiles", "ProgramData", "SystemRoot"):
+            with self.subTest(variable=variable), patch.dict(os.environ, {variable: str(fake_root)}):
+                with (patch.object(preflight, "source_info") as source,
+                      patch.object(preflight, "command") as native):
+                    with self.assertRaisesRegex(LabError, "^WINDOWS_ROOT_ENV_OVERRIDE$"):
+                        preflight.run(str(self.config), str(self.output), "pwsh")
+                    source.assert_not_called()
+                    native.assert_not_called()
+                # PowerShell startup can reconstruct ProgramFiles. Spoof it in
+                # the invoking shell after startup to exercise the wrapper guard.
+                env = {**os.environ, "LAB_D01_SPOOF": variable, "LAB_D01_FAKE_ROOT": str(fake_root),
+                       "LAB_D01_CONFIG": str(invalid_config), "LAB_D01_OUTPUT": str(self.output)}
+                result = subprocess.run(
+                    ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                     "[Environment]::SetEnvironmentVariable($env:LAB_D01_SPOOF, $env:LAB_D01_FAKE_ROOT); "
+                     "& ./scripts/lab/Test-DockerWslPrerequisites.ps1 -ConfigFile $env:LAB_D01_CONFIG "
+                     "-OutputDirectory $env:LAB_D01_OUTPUT"],
+                    cwd=ROOT, env=env, capture_output=True, timeout=30,
+                )
+                self.assertEqual(1, result.returncode)
+                self.assertIn(b"WINDOWS_ROOT_ENV_OVERRIDE", result.stderr)
+                self.assertFalse(self.output.exists())
+
+    def test_authenticode_requires_a_valid_signature_from_the_expected_publisher(self):
+        folders = preflight.verified_windows_folders()
+        netsh = folders["SystemDirectory"] / "netsh.exe"
+        preflight.verify_signatures("pwsh", [netsh], "Microsoft Corporation")
+        with self.assertRaisesRegex(LabError, "^UNTRUSTED_NATIVE_EXECUTABLE$"):
+            preflight.verify_signatures("pwsh", [netsh], "Docker Inc")
+        fake_compose = self.root / "docker-compose.exe"
+        fake_compose.write_bytes(netsh.read_bytes() + b"tampered fixture")
+        with self.assertRaisesRegex(LabError, "^UNTRUSTED_NATIVE_EXECUTABLE$"):
+            preflight.verify_signatures("pwsh", [fake_compose], "Microsoft Corporation")
 
 
 if __name__ == "__main__":
