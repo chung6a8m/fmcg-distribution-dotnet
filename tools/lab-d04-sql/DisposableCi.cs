@@ -21,7 +21,8 @@ internal sealed partial class LabSql
         return mode switch
         {
             "bootstrap" => await BootstrapAsync(),
-            "fixture-fence" => await FenceAsync(),
+            "fixture-fence" => await FenceAsync(revoke: true),
+            "fixture-fence-readback" => await FenceAsync(revoke: false),
             _ => throw new RehearsalError("D04_INVALID_MODE")
         };
     }
@@ -160,25 +161,28 @@ internal sealed partial class LabSql
         await seed.ExecuteNonQueryAsync(ct);
     }
 
-    private async Task<object> FenceAsync()
+    private async Task<object> FenceAsync(bool revoke)
     {
         await using var master = await OpenAsync("bootstrap", "master");
         await MatchMarker(master);
         var before = await SnapshotAsync();
         var fenceDb = scope.Databases["fence"];
         await using var api = await OpenAsync("apiA", fenceDb);
-        await AssertFenceAsync(api, 1, null);
-        await AssertFenceAsync(api, 2, 51603);
-        await InRollback(api, "SELECT COUNT_BIG(*) FROM dbo.B5Membership", [229]);
-        await using var revoker = await OpenAsync("revoker", fenceDb);
-        await using (var cmd = Command(revoker, """
-            EXEC dbo.b5_RevokeMember @TenantId=@tenant,@ActorId=@actor,
-                @ExpectedFenceEpoch=1,@EvidenceRef=N'LAB_D04_SYNTHETIC';
-            """))
+        if (revoke)
         {
-            cmd.Parameters.AddWithValue("@tenant", scope.Tenants["A"]);
-            cmd.Parameters.AddWithValue("@actor", Actor);
-            await cmd.ExecuteNonQueryAsync(ct);
+            await AssertFenceAsync(api, 1, null);
+            await AssertFenceAsync(api, 2, 51603);
+            await InRollback(api, "SELECT COUNT_BIG(*) FROM dbo.B5Membership", [229]);
+            await using var revoker = await OpenAsync("revoker", fenceDb);
+            await using (var cmd = Command(revoker, """
+                EXEC dbo.b5_RevokeMember @TenantId=@tenant,@ActorId=@actor,
+                    @ExpectedFenceEpoch=1,@EvidenceRef=N'LAB_D04_SYNTHETIC';
+                """))
+            {
+                cmd.Parameters.AddWithValue("@tenant", scope.Tenants["A"]);
+                cmd.Parameters.AddWithValue("@actor", Actor);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
         }
         await AssertFenceAsync(api, 1, 51603);
         await AssertFenceAsync(api, 2, 51604);

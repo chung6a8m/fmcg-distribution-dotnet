@@ -1,5 +1,6 @@
 """D04 fixed SQL deployment model and protected planning inputs."""
 import argparse
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import re
@@ -19,6 +20,7 @@ from tools.app02b_lab.docker_d02_host import assert_private
 IMAGE = "mcr.microsoft.com/mssql/server@sha256:ee45df93117986941f5e47e1b074897b115c62d6733f2f0b24b1d51259a77723"
 VERSION = "17.0.5065.9"
 POLICY = "APP02B-LAB-DOCKER-SQL-PLAN-V1"
+ENROLLMENT = "APP02B-LAB-DOCKER-SQL-PROBE-ENROLLMENT-V1"
 FILES = ROOT / "deploy/lab/docker-wsl2/sql"
 ROLES = ("apiA", "apiB", "observer")
 
@@ -67,8 +69,16 @@ def require_trust(peer, stage_sha, predecessor):
             and peer.get("vantage") == "OPERATOR_ENROLLED_PRIVATE_PEER"
             and peer.get("auditVantage") == "OPERATOR_PROTECTED_AUDIT_READBACK"
             and peer.get("status") == "ROLE_AUDIT_OBSERVED" and peer.get("sourceHead") == predecessor
-            and peer.get("originalGateStatus") == "NOT_VERIFIED" and peer.get("stageReceiptSha256") == stage_sha,
+            and peer.get("originalGateStatus") == "NOT_VERIFIED" and peer.get("stageReceiptSha256") == stage_sha
+            and d03.d01.nonzero_digest(peer.get("scopeSha256")),
             "D04_D03_TRUST_REQUIRED")
+    try:
+        observed = datetime.strptime(peer["collectedUtc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError, KeyError):
+        raise LabError("D04_D03_TRUST_TIME_INVALID") from None
+    now = d02.utc_now()
+    require(d02.timestamp(observed) == peer["collectedUtc"]
+            and timedelta() <= now - observed <= timedelta(hours=1), "D04_D03_TRUST_STALE")
     expected = {f"{role}_read_{owner}": {"httpStatus": 200 if role == owner else 403, "audit": "OBSERVED"}
                 for role in ("api", "worker", "operator") for owner in ("api", "worker", "operator")}
     require(peer.get("checks") == expected, "D04_D03_ROLE_MATRIX_REQUIRED")

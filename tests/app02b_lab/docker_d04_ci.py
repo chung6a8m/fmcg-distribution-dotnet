@@ -11,7 +11,7 @@ from docker_d03_ci import CiDocker, await_health, certificate, command, must_blo
 from tools.app02b_lab import docker_d03 as d03, docker_d04 as d04
 from tools.app02b_lab.contract import LabError, canonical_json, require
 from tools.app02b_lab.docker_d03_client import Vault
-from tools.app02b_lab.docker_d04_peer import credential_path, load_credentials, sql_run
+from tools.app02b_lab.docker_d04_peer import credential_path, load_credentials, sql_run, sql_tls
 
 PROJECT = f"fmcg-lab-d04-{os.environ.get('GITHUB_RUN_ID', '')}-{os.environ.get('GITHUB_RUN_ATTEMPT', '')}"
 
@@ -28,8 +28,17 @@ def private_address(docker, name, network):
 def wait_sql(docker, name):
     for _ in range(120):
         row, = docker._inspect("container", [name])
-        require(row["State"]["Running"], "D04_CI_SQL_STOPPED")
-        if b"SQL Server is now ready for client connections" in docker.run("logs", name):
+        logs = docker.run("logs", "--tail", "100", name, include_stderr=True)
+        if not row["State"]["Running"]:
+            patterns = (b"permission denied", b"operation not permitted", b"read-only file system",
+                        b"private key", b"certificate", b"bootstrap", b"master.mdf", b"memory",
+                        b"invalid", b"fault", b"failed", b"address", b"administrator password")
+            flags = [word.decode("ascii") for word in patterns if word in logs.lower()]
+            import re
+            errors = sorted(set(re.findall(rb"(?im)(?:Error: |error code: |reason: )([0-9a-fx]{1,12})\b", logs)))
+            raise LabError("D04_CI_SQL_STOPPED", f"exit={row['State']['ExitCode']}, "
+                           + ",".join(flags + [code.decode("ascii") for code in errors]))
+        if b"SQL Server is now ready for client connections" in logs:
             return
         time.sleep(1)
     raise LabError("D04_CI_SQL_NOT_READY")
@@ -107,38 +116,35 @@ def run(folder, report):
             and mounts["/var/opt/mssql-backup"]["Name"] == sql_model["volumes"]["backup"]["name"]
             and not any(item.startswith("MSSQL_SA_PASSWORD=") for item in row["Config"]["Env"]),
             "D04_CI_MOUNT_OR_SECRET_DRIFT")
-    try:
-        sql_run("verify", address, spec, sql_secrets)
-    except LabError as error:
-        # A trust failure must occur before the driver reaches the non-existent database or login.
-        require(error.code in ("D04_SQL_ERROR_0", "D04_SQL_ERROR_-2146893019", "D04_SQL_ERROR_-2146893022"),
-                "D04_CI_EXPECTED_UNTRUSTED_SQL_CERTIFICATE", error.code)
-    else:
-        raise LabError("D04_CI_UNTRUSTED_SQL_ALLOWED")
-    command("sudo", "install", "-m", "0644", str(sql_ca[0]),
-            f"/usr/local/share/ca-certificates/lab-d04-{nonce}.crt")
-    command("sudo", "update-ca-certificates")
-    report["checks"]["strict_tls_untrusted_then_trusted"] = "PASS"
+    leaf_sha = d03.validate_pem(sql_cert.read_bytes(), sql_key.read_bytes(), sql_ca[0].read_bytes())
+    must_block(lambda: sql_tls(address, vault_ca[0].read_bytes(), leaf_sha), "D04_SQL_TLS_CA_OR_NAME_REJECTED")
+    must_block(lambda: sql_tls(address, sql_ca[0].read_bytes(), "f" * 64), "D04_SQL_TLS_LEAF_CHANGED")
+    leaf = sql_tls(address, sql_ca[0].read_bytes(), leaf_sha)
+    report["checks"]["strict_tls_ca_name_and_leaf"] = "PASS"
     report["phase"] = "sql_migrations"
-    report["checks"]["migration_reapply"] = sql_run("bootstrap", address, spec, passwords)
+    report["checks"]["migration_reapply"] = sql_run("bootstrap", address, spec, passwords, leaf)
     report["phase"] = "sql_permission_matrix"
-    before = sql_run("verify", address, spec, sql_secrets)
+    before = sql_run("verify", address, spec, sql_secrets, leaf)
     report["checks"]["permissions"] = before
-    report["checks"]["sql_fence"] = sql_run("fixture-fence", address, spec, passwords)
+    report["checks"]["sql_fence"] = sql_run("fixture-fence", address, spec, passwords, leaf)
     docker.run("restart", sql_name)
     report["phase"] = "sql_persistence"
     wait_sql(docker, sql_name)
     for _ in range(20):
         try:
-            after = sql_run("verify", private_address(docker, sql_name, sql_net), spec, sql_secrets)
+            restarted_address = private_address(docker, sql_name, sql_net)
+            restarted_leaf = sql_tls(restarted_address, sql_ca[0].read_bytes(), leaf_sha)
+            after = sql_run("verify", restarted_address, spec, sql_secrets, restarted_leaf)
             break
         except LabError as error:
-            if error.code not in ("D04_SQL_ERROR_-2", "D04_SQL_ERROR_10054", "D04_SQL_ERROR_0"):
+            if error.code not in ("D04_SQL_ERROR_-2", "D04_SQL_ERROR_10054", "D04_SQL_ERROR_0", "D04_SQL_TLS_UNAVAILABLE"):
                 raise
             time.sleep(1)
     else:
         raise LabError("D04_CI_SQL_RESTART_TIMEOUT")
     require(before == after, "D04_CI_RESTART_FINGERPRINT_DRIFT")
+    report["checks"]["revoked_fence_restart"] = sql_run("fixture-fence-readback", restarted_address,
+                                                      spec, passwords, restarted_leaf)
     report["checks"]["named_volume_restart_readback"] = "PASS"
 
 

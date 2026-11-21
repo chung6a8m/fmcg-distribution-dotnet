@@ -16,7 +16,7 @@ try
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
     }) ?? throw new RehearsalError("D04_INVALID_INPUT");
-    var sql = new LabSql(request, deadline.Token);
+    using var sql = new LabSql(request, deadline.Token);
     var response = args[0] == "verify" ? await sql.VerifyAsync() : await sql.RunDisposableCiAsync(args[0]);
     Console.WriteLine(JsonSerializer.Serialize(response));
     return 0;
@@ -37,7 +37,7 @@ catch (Exception error)
     return 1;
 }
 
-internal sealed record Request(string Endpoint, Scope Spec, Dictionary<string, string> Credentials);
+internal sealed record Request(string Endpoint, Scope Spec, Dictionary<string, string> Credentials, string CertificateDer);
 internal sealed record Scope(string Project, string Nonce, string Instance, Dictionary<string, string> Databases,
     Dictionary<string, Guid> Tenants, Dictionary<string, Guid> Bindings, Dictionary<string, string> Logins);
 internal sealed class RehearsalError(string code) : Exception
@@ -45,7 +45,7 @@ internal sealed class RehearsalError(string code) : Exception
     public string Code { get; } = code;
 }
 
-internal sealed partial class LabSql
+internal sealed partial class LabSql : IDisposable
 {
     private const string Build = "17.0.5065.9";
     private static readonly string[] DbSlots = ["identity", "registry", "fence", "tenantA", "tenantB"];
@@ -53,6 +53,8 @@ internal sealed partial class LabSql
     private readonly Request request;
     private readonly Scope scope;
     private readonly CancellationToken ct;
+    private readonly DirectoryInfo certificateDirectory;
+    private string CertificateFile => Path.Combine(certificateDirectory.FullName, "sql.cer");
 
     public LabSql(Request request, CancellationToken ct)
     {
@@ -78,6 +80,17 @@ internal sealed partial class LabSql
         }
         foreach (var role in Roles)
             Need(scope.Logins[role] == $"labd04_{role.ToLowerInvariant()}_{scope.Nonce}", "D04_SQL_LOGIN_SCOPE");
+        var encoded = Convert.FromBase64String(request.CertificateDer);
+        Need(encoded.Length is > 0 and <= 8192, "D04_SQL_CERTIFICATE_FORMAT");
+        certificateDirectory = Directory.CreateTempSubdirectory("lab-d04-cert-");
+        try { File.WriteAllBytes(CertificateFile, encoded); }
+        catch { Dispose(); throw; }
+    }
+
+    public void Dispose()
+    {
+        File.Delete(CertificateFile);
+        certificateDirectory.Delete();
     }
 
     private static void Need(bool valid, string code)
@@ -100,7 +113,7 @@ internal sealed partial class LabSql
             DataSource = $"tcp:{request.Endpoint},1433",
             InitialCatalog = database,
             Encrypt = SqlConnectionEncryptOption.Strict,
-            HostNameInCertificate = "sql",
+            ServerCertificate = CertificateFile,
             TrustServerCertificate = false,
             Pooling = false,
             ConnectTimeout = 5
@@ -118,7 +131,7 @@ internal sealed partial class LabSql
             using var cmd = Command(connection, """
                 SELECT CASE WHEN CONVERT(sysname, SERVERPROPERTY('MachineName'))=@machine
                     AND CONVERT(nvarchar(64),SERVERPROPERTY('ProductVersion'))=@build
-                    AND CONVERT(nvarchar(128),SERVERPROPERTY('Edition')) LIKE N'Developer Edition%'
+                    AND CONVERT(bigint,SERVERPROPERTY('EditionID'))=-2117995310
                     AND DB_NAME()=@db AND ORIGINAL_LOGIN()=@login
                     AND (@bootstrap=1 OR (IS_SRVROLEMEMBER('sysadmin')=0 AND IS_MEMBER('db_owner')=0
                         AND ISNULL(HAS_PERMS_BY_NAME(NULL,NULL,'CONTROL SERVER'),0)=0
@@ -249,7 +262,10 @@ internal sealed partial class LabSql
             const string insert = "INSERT dbo.LabD04Probe(ProbeId,Marker) VALUES (2,N'LAB_D04_ROLLBACK')";
             await InRollback(api, insert, []);
             await InRollback(api, "CREATE TABLE dbo.LabD04DdlDenied (Value int)", [262, 229]);
+            await InRollback(api, "ALTER TABLE dbo.LabD04Probe ADD D04Denied bit NULL", [229, 4902, 1088]);
             await InRollback(observer, insert, [229]);
+            await InRollback(observer, "UPDATE dbo.LabD04Probe SET Marker=N'DENIED' WHERE ProbeId=1", [229]);
+            await InRollback(observer, "DELETE dbo.LabD04Probe WHERE ProbeId=1", [229]);
             await InRollback(api, $"SELECT COUNT_BIG(*) FROM [{other}].dbo.LabD04Probe", [916, 229]);
         }
         var after = await SnapshotAsync();
@@ -257,7 +273,7 @@ internal sealed partial class LabSql
         return new
         {
             status = "SQL_ROLE_PROBES_OBSERVED", databaseCount = 5, sameInstanceChecks = "OBSERVED",
-            apiOwnReadAndRolledBackInsert = 2, crossTenantDenied = 2, observerInsertDenied = 2, apiDdlDenied = 2,
+            apiOwnReadAndRolledBackInsert = 2, crossTenantDenied = 2, observerInsertUpdateDeleteDenied = 6, apiCreateAlterDenied = 4,
             independentObserverFingerprints = after, beforeAfterEqual = true
         };
     }

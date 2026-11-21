@@ -15,7 +15,8 @@ the model, environment file, command line or report. The container entry
 process reads it locally and supplies it to SQL Server during startup. The
 daemon/laptop still shares custody. SQL Server presents the leaf certificate
 for `sql`, TLS is forced, and SqlClient uses Strict encryption with
-hostname validation against the verifier's enrolled OS trust store.
+a leaf pin for every connection. Before SQL login the peer validates the live
+chain and hostname against the reviewed SQL CA and leaf fingerprint.
 
 ## Read-only Windows planning
 
@@ -23,8 +24,9 @@ Use a clean checkout. Provide independently retained D01/D02 plans and a
 successful D02 staging receipt, the D03 staging plan and receipt plus a
 current D03 Vault peer role/audit observation from the same daemon and
 namespace. The D01 plan must include the pinned SQL publisher receipt.
-The D04 plan checks the actual local context, SQL image, unused labeled
-data volume and bridge, running D03 container identity, TLS files, and
+The D04 plan checks the actual local context, SQL image, detached label-matching
+data volume and bridge, running D03 container identity, a D03 role/audit receipt at most
+one hour old, TLS files, and
 distinct backup namespace. Keep output and inputs outside Git. Restrict
 the private key and bootstrap file and their parent directories to the
 operator, SYSTEM and Administrators. Confirm service UID read access on the
@@ -75,11 +77,15 @@ instance name, derived B.4 tenant names and binding IDs come from the scope.
 Tokens are read without echo and passwords travel to SqlClient in process
 memory via standard input. Keep the plan, D03 stage and peer evidence, D03
 scope and Vault CA as 0600 files under owner-only 0700 directories. The
-redacted result is written once to a new path.
+redacted result is written once to a new path. The independently supplied
+enrollment uses schema `APP02B-LAB-DOCKER-SQL-PROBE-ENROLLMENT-V1`,
+operation `D04_PROBE_ROLLBACK_ONLY`, matching `nonce`, exact
+`planSha256` and UTC `expiresUtc`. Obtain its SHA-256 from the
+operator approval channel.
 
 ~~~powershell
 dotnet build tools/lab-d04-sql/FmcgDms.Lab.D04.Sql.csproj -c Release
-./scripts/lab/Test-DockerLabSql.ps1 -PlanFile /private/docker-sql-plan.json -VaultStageReceipt /private/docker-vault-stage.json -VaultTrustReceipt /private/peer-result.json -VaultScope /private/vault-scope.json -VaultCa /private/vault-ca.pem -OutputFile /private/d04-roles-01.json
+./scripts/lab/Test-DockerLabSql.ps1 -PlanFile /private/docker-sql-plan.json -VaultStageReceipt /private/docker-vault-stage.json -VaultTrustReceipt /private/peer-result.json -VaultScope /private/vault-scope.json -VaultCa /private/vault-ca.pem -SqlCa /private/sql-ca.pem -EnrollmentFile /private/sql-probe-approval.json -EnrollmentSha256 $ApprovedEnrollmentSha256 -OutputFile /private/d04-roles-01.json
 ~~~
 
 The verifier checks the same SQL Server identity, Developer engine build,

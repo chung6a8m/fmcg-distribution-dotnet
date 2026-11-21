@@ -53,13 +53,13 @@ def compose(project, nonce, certificate, key):
     }
 
 
-def authorize(raw, approval_sha, plan_sha, nonce, operation, now):
+def authorize(raw, approval_sha, plan_sha, nonce, operation, now, *, schema=ENROLLMENT):
     require(type(approval_sha) is str and d02.HEX.fullmatch(approval_sha)
             and digest(raw) == approval_sha, "D03_ENROLLMENT_UNAPPROVED")
     approval = strict_json(raw)
     d02.object_fields(approval, "schema operation nonce planSha256 expiresUtc", "D03_INVALID_ENROLLMENT")
     require((approval["schema"], approval["operation"], approval["planSha256"], approval["nonce"])
-            == (ENROLLMENT, operation, plan_sha, nonce), "D03_ENROLLMENT_SCOPE_MISMATCH")
+            == (schema, operation, plan_sha, nonce), "D03_ENROLLMENT_SCOPE_MISMATCH")
     try:
         expiry = datetime.strptime(approval["expiresUtc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):

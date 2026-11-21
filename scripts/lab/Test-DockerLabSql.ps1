@@ -5,6 +5,9 @@ param(
     [Parameter(Mandatory)][string]$VaultTrustReceipt,
     [Parameter(Mandatory)][string]$VaultScope,
     [Parameter(Mandatory)][string]$VaultCa,
+    [Parameter(Mandatory)][string]$SqlCa,
+    [Parameter(Mandatory)][string]$EnrollmentFile,
+    [Parameter(Mandatory)][string]$EnrollmentSha256,
     [Parameter(Mandatory)][string]$OutputFile
 )
 $ErrorActionPreference = 'Stop'
@@ -14,5 +17,5 @@ if (-not $IsLinux -or $PSVersionTable.PSVersion.Major -ne 7) {
     exit 1
 }
 $python = Get-Command python3 -CommandType Application
-& $python.Source -I -S -B (Join-Path $PSScriptRoot '../../tools/app02b_lab/docker_d04_peer.py') --plan $PlanFile --stage $VaultStageReceipt --trust $VaultTrustReceipt --vault-scope $VaultScope --vault-ca $VaultCa --output $OutputFile
+& $python.Source -I -S -B (Join-Path $PSScriptRoot '../../tools/app02b_lab/docker_d04_peer.py') --plan $PlanFile --stage $VaultStageReceipt --trust $VaultTrustReceipt --vault-scope $VaultScope --vault-ca $VaultCa --sql-ca $SqlCa --enrollment $EnrollmentFile --enrollment-sha256 $EnrollmentSha256 --output $OutputFile
 exit $LASTEXITCODE

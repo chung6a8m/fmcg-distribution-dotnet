@@ -16,11 +16,11 @@ PROJECT = f"fmcg-lab-d03-{os.environ.get('GITHUB_RUN_ID', '')}-{os.environ.get('
 NONCE = "d03" + "0" * 28 + "1"
 
 
-def command(*args, input_data=None):
+def command(*args, input_data=None, include_stderr=False):
     result = subprocess.run(args, input=input_data, capture_output=True, timeout=120)
     if result.returncode:
         raise LabError("CI_NATIVE_COMMAND_FAILED", " ".join(args[:3]))
-    return result.stdout
+    return result.stdout + result.stderr if include_stderr else result.stdout
 
 
 class CiDocker:
@@ -34,9 +34,9 @@ class CiDocker:
         require(value.startswith(b"linux ") and bool(value.strip()[6:]), "CI_LOCAL_DOCKER_REQUIRED")
         return value
 
-    def run(self, *args, input_data=None):
+    def run(self, *args, input_data=None, include_stderr=False):
         require(self.identity() == self.engine, "CI_DAEMON_CHANGED")
-        return command("docker", "--host", "unix:///var/run/docker.sock", *args, input_data=input_data)
+        return command("docker", "--host", "unix:///var/run/docker.sock", *args, input_data=input_data, include_stderr=include_stderr)
 
     def _inspect(self, kind, names):
         return json.loads(self.run(kind, "inspect", "--", *names))

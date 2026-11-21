@@ -1,7 +1,10 @@
 """Read D04 role credentials from enrolled Vault and run the bounded SQL verifier."""
 import argparse
-import json
+from base64 import b64encode
 from pathlib import Path
+import re
+import socket
+import ssl
 import subprocess
 import sys
 
@@ -38,15 +41,34 @@ def load_credentials(vault, spec, tokens):
     return credentials
 
 
-def sql_run(mode, endpoint, spec, credentials, *, cli=None):
+def sql_tls(endpoint, ca, leaf_sha):
+    """Verify the actual TDS 8 TLS handshake without sending a SQL credential."""
+    require(d04.d03.d01.nonzero_digest(leaf_sha) and b"PRIVATE KEY" not in ca, "D04_SQL_TRUST_INPUT")
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    tls.minimum_version = ssl.TLSVersion.TLSv1_2
+    tls.hostname_checks_common_name = False
+    tls.load_verify_locations(cadata=ca.decode("ascii"))
+    try:
+        with socket.create_connection((endpoint, 1433), timeout=5) as transport:
+            with tls.wrap_socket(transport, server_hostname="sql") as encrypted:
+                leaf = encrypted.getpeercert(binary_form=True)
+    except ssl.SSLCertVerificationError:
+        raise LabError("D04_SQL_TLS_CA_OR_NAME_REJECTED") from None
+    except OSError:
+        raise LabError("D04_SQL_TLS_UNAVAILABLE") from None
+    require(leaf and digest(leaf) == leaf_sha, "D04_SQL_TLS_LEAF_CHANGED")
+    return leaf
+
+
+def sql_run(mode, endpoint, spec, credentials, leaf, *, cli=None):
     cli = cli or ["dotnet", "run", "--no-build", "-c", "Release", "--project", str(PROJECT), "--"]
     result = subprocess.run([*cli, mode], input=canonical_json({
         "endpoint": endpoint, "spec": spec, "credentials": credentials,
+        "certificateDer": b64encode(leaf).decode("ascii"),
     }), capture_output=True, timeout=250, cwd=ROOT)
     if result.returncode:
         # The C# entry point emits one bounded error code only. Never pass through native text.
         code = result.stderr.strip().decode("ascii", errors="replace")
-        import re
         code = code if re.fullmatch(r"D04_[A-Za-z0-9_]{1,100}", code) else "D04_SQL_TOOL_FAILED"
         raise LabError(code)
     value = strict_json(result.stdout)
@@ -58,10 +80,10 @@ def run(args):
     plan_raw, plan = _file(args.plan)
     stage_raw, stage = _file(args.stage)
     scope_raw, scope = _file(args.vault_scope)
-    _, observation = _file(args.trust)
+    trust_raw, observation = _file(args.trust)
     require(plan.get("schema") == d04.POLICY and plan.get("status") == "PLAN_ONLY"
             and plan.get("sourceHead") == peer.checkout() and plan.get("d03StageSha256") == digest(stage_raw)
-            and plan.get("d03ScopeSha256") == digest(scope_raw) and plan.get("d03PeerSha256") == digest(peer.read_file(args.trust))
+            and plan.get("d03ScopeSha256") == digest(scope_raw) and plan.get("d03PeerSha256") == digest(trust_raw)
             and plan.get("d03LeafDerSha256") == stage.get("leafDerSha256")
             and d04.d03.d01.nonzero_digest(stage.get("leafDerSha256"))
             and scope.get("schema") == "APP02B-LAB-DOCKER-VAULT-PEER-V1"
@@ -75,12 +97,23 @@ def run(args):
     ca = peer.read_file(args.vault_ca)
     require(digest(ca) == scope.get("caSha256") == stage.get("caSha256") and b"PRIVATE KEY" not in ca,
             "D04_VAULT_CA_MISMATCH")
+    sql_ca = peer.read_file(args.sql_ca)
+    require(digest(sql_ca) == plan.get("sqlCaSha256"), "D04_SQL_CA_MISMATCH")
     peer.custody_parent(args.output.parent)
+    permit = peer.read_file(args.enrollment)
+
+    def authorize():
+        d04.d03.authorize(permit, args.enrollment_sha256, digest(plan_raw), spec["nonce"],
+                          "D04_PROBE_ROLLBACK_ONLY", d04.d02.utc_now(), schema=d04.ENROLLMENT)
+
+    authorize()
+    leaf = sql_tls("sql", sql_ca, plan["sqlLeafDerSha256"])
     vault = Vault("https://vault:8200", ca, leaf_sha=stage["leafDerSha256"])
     require(vault.cluster() == scope.get("clusterId"), "D04_VAULT_CLUSTER_CHANGED")
     credentials = load_credentials(vault, spec, {role: peer.secret(f"D04 {role} Vault token") for role in d04.ROLES})
     require(vault.cluster() == scope.get("clusterId"), "D04_VAULT_CLUSTER_CHANGED")
-    value = sql_run("verify", "sql", spec, credentials)
+    authorize()
+    value = sql_run("verify", "sql", spec, credentials, leaf)
     peer.output_file(args.output, canonical_json({
         "schema": "APP02B-LAB-DOCKER-SQL-PEER-RESULT-V1", "planSha256": digest(plan_raw),
         "sourceHead": plan["sourceHead"], "vantage": "OPERATOR_ENROLLED_PRIVATE_PEER",
@@ -98,8 +131,9 @@ def _file(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    for name in ("plan", "stage", "trust", "vault-scope", "vault-ca", "output"):
+    for name in ("plan", "stage", "trust", "vault-scope", "vault-ca", "sql-ca", "enrollment", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
+    parser.add_argument("--enrollment-sha256", required=True)
     try:
         require(sys.platform == "linux" and sys.flags.isolated and sys.flags.no_site
                 and sys.flags.dont_write_bytecode, "D04_ISOLATED_LINUX_PEER_REQUIRED")
