@@ -125,27 +125,32 @@ function Get-LocalDbLogMetadata {
 }
 
 function Get-LocalDbEventMetadata {
-    try {
-        # Only LocalDB providers, at most eight recent Application records.
-        # Never format/render Event.Message or export its property payload.
-        $events = @(Get-WinEvent -FilterHashtable @{
-            LogName = 'Application'; ProviderName = 'SQLLocalDB*'
-            StartTime = [DateTime]::Now.AddMinutes(-10)
-        } -MaxEvents 8 -ErrorAction Stop)
-        return @{
-            status = 'OK'
-            events = @($events | ForEach-Object {
-                @{ id = $_.Id; level = $_.Level; utc = $_.TimeCreated.ToUniversalTime().ToString('o') }
-            })
+    $since = [DateTime]::Now.AddMinutes(-10)
+    $failures = [Collections.Generic.List[string]]::new()
+    # Query the two provider families separately. An unregistered wildcard can
+    # terminate a combined Get-WinEvent query before the other provider is read.
+    # Event 280 is documented under SQL Server Local Database Runtime 12.0.
+    $events = @(foreach ($provider in 'SQLLocalDB*', 'SQL Server Local Database Runtime *') {
+        try {
+            Get-WinEvent -FilterHashtable @{
+                LogName = 'Application'; ProviderName = $provider; StartTime = $since
+            } -MaxEvents 8 -ErrorAction Stop
+        } catch [UnauthorizedAccessException] {
+            $failures.Add('ACCESS_DENIED')
+        } catch {
+            if ($_.FullyQualifiedErrorId.Split(',')[0] -notin 'NoMatchingEventsFound', 'NoMatchingProvidersFound') {
+                $failures.Add('PROBE_FAILED')
+            }
         }
-    } catch [UnauthorizedAccessException] { return @{ status = 'ACCESS_DENIED'; events = @() } }
-    catch {
-        $id = $_.FullyQualifiedErrorId.Split(',')[0]
-        return @{
-            status = if ($id -in 'NoMatchingEventsFound', 'NoMatchingProvidersFound') { 'NO_MATCH' }
-                     else { 'PROBE_FAILED' }
-            events = @()
-        }
+    })
+    return @{
+        status = if ($events.Count -gt 0) {
+            if ($failures.Count -gt 0) { 'PARTIAL' } else { 'OK' }
+        } elseif ($failures.Count -gt 0) { $failures[0] } else { 'NO_MATCH' }
+        # Keep only eight records across both providers. Never access the payload.
+        events = @($events | Sort-Object TimeCreated -Descending | Select-Object -First 8 | ForEach-Object {
+            @{ id = $_.Id; level = $_.Level; utc = $_.TimeCreated.ToUniversalTime().ToString('o') }
+        })
     }
 }
 

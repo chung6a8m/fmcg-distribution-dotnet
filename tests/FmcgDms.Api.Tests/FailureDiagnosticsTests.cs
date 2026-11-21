@@ -177,15 +177,7 @@ public sealed class FailureDiagnosticsTests : IDisposable
     [Fact]
     public async Task LocalDb_collector_reports_missing_command_timeout_and_permission_denial()
     {
-        Directory.CreateDirectory(folder);
-        var source = new DirectoryInfo(AppContext.BaseDirectory);
-        while (!File.Exists(Path.Combine(source.FullName, "FmcgDms.slnx")))
-            source = source.Parent ?? throw new InvalidOperationException("Solution root not found.");
-        string scriptPath = Path.Combine(folder, "scripts", "Collect-LocalDbDiagnostics.ps1");
-        Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)!);
-        File.Copy(Path.Combine(source.FullName, "scripts", "Collect-LocalDbDiagnostics.ps1"), scriptPath);
-        var start = Shell($$"""
-            . '{{scriptPath.Replace("'", "''")}}'
+        var (console, path) = await RunCollectorAsync("""
             $shell = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
             $missing = Invoke-LocalDbProbe 'lab-e02-absent-executable.exe' @()
             $timeout = Invoke-LocalDbProbe $shell @('-NoProfile', '-Command', 'Start-Sleep 30') 300
@@ -199,6 +191,68 @@ public sealed class FailureDiagnosticsTests : IDisposable
             $denied = Invoke-LocalDbProbe 'SqlLocalDB.exe' @('info')
             [Console]::Out.WriteLine("$($missing.status)/$($timeout.status)/$($denied.status)")
             $env:LAB_E02_BOOTSTRAP = 'start,1,AutomaticInstanceCreationFailed,0x80131500|bad-stage,1,collector-private-resource,None'
+            """);
+        Assert.Contains("COMMAND_NOT_FOUND/TIMEOUT/ACCESS_DENIED", console);
+        using JsonDocument artifact = await Read(path);
+        Assert.Equal("PARTIAL", artifact.RootElement.GetProperty("status").GetString());
+        JsonElement bootstrap = Assert.Single(artifact.RootElement.GetProperty("bootstrap").EnumerateArray());
+        Assert.Equal(1, bootstrap.GetProperty("exitCode").GetInt32());
+        Assert.Equal("AutomaticInstanceCreationFailed", bootstrap.GetProperty("error").GetString());
+        Assert.DoesNotContain("collector-private-resource", console);
+        Assert.DoesNotContain("collector-private-resource", artifact.RootElement.GetRawText());
+    }
+
+    [Fact]
+    public async Task LocalDb_collector_retains_metadata_for_versioned_runtime_event_280()
+    {
+        var (console, path) = await RunCollectorAsync("""
+            function Get-WinEvent {
+                param([hashtable]$FilterHashtable, [int]$MaxEvents, $ErrorAction)
+                if ($FilterHashtable.LogName -ne 'Application' -or $MaxEvents -ne 8 -or
+                    $FilterHashtable.StartTime -lt [DateTime]::Now.AddMinutes(-11)) {
+                    throw 'Unexpected event query bounds'
+                }
+                $fixture = @(
+                    [pscustomobject]@{
+                        ProviderName = 'SQL Server Local Database Runtime 12.0'; Id = 280; Level = 2
+                        TimeCreated = [DateTime]::UtcNow; Message = 'event-private-payload'
+                    }
+                    [pscustomobject]@{
+                        ProviderName = 'Unrelated Provider'; Id = 281; Level = 2
+                        TimeCreated = [DateTime]::UtcNow; Message = 'unrelated-private-payload'
+                    }
+                )
+                $matched = @($fixture | Where-Object ProviderName -like $FilterHashtable.ProviderName)
+                if ($matched.Count -eq 0) {
+                    Write-Error -Message 'Fixture has no matching provider' -ErrorId NoMatchingProvidersFound
+                }
+                $matched
+            }
+            """);
+        using JsonDocument artifact = await Read(path);
+        JsonElement application = artifact.RootElement.GetProperty("applicationEvents");
+        Assert.Equal("OK", application.GetProperty("status").GetString());
+        JsonElement entry = Assert.Single(application.GetProperty("events").EnumerateArray());
+        Assert.Equal(280, entry.GetProperty("id").GetInt32());
+        Assert.Equal(2, entry.GetProperty("level").GetInt32());
+        Assert.Equal(TimeSpan.Zero, entry.GetProperty("utc").GetDateTimeOffset().Offset);
+        Assert.Equal(3, entry.EnumerateObject().Count());
+        Assert.DoesNotContain("private-payload", console);
+        Assert.DoesNotContain("private-payload", artifact.RootElement.GetRawText());
+    }
+
+    private async Task<(string Console, string Path)> RunCollectorAsync(string setup)
+    {
+        Directory.CreateDirectory(folder);
+        var source = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(source.FullName, "FmcgDms.slnx")))
+            source = source.Parent ?? throw new InvalidOperationException("Solution root not found.");
+        string scriptPath = Path.Combine(folder, "scripts", "Collect-LocalDbDiagnostics.ps1");
+        Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)!);
+        File.Copy(Path.Combine(source.FullName, "scripts", "Collect-LocalDbDiagnostics.ps1"), scriptPath);
+        var start = Shell($$"""
+            . '{{scriptPath.Replace("'", "''")}}'
+            {{setup}}
             Write-LocalDbDiagnostics
             """);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start fixture.");
@@ -210,15 +264,7 @@ public sealed class FailureDiagnosticsTests : IDisposable
         finally { if (!process.HasExited) process.Kill(entireProcessTree: true); }
         string console = await stdout + await stderr;
         Assert.Equal(0, process.ExitCode);
-        Assert.Contains("COMMAND_NOT_FOUND/TIMEOUT/ACCESS_DENIED", console);
-        string report = Assert.Single(Directory.EnumerateFiles(folder, "localdb-*.json", SearchOption.AllDirectories));
-        using JsonDocument artifact = await Read(report);
-        Assert.Equal("PARTIAL", artifact.RootElement.GetProperty("status").GetString());
-        JsonElement bootstrap = Assert.Single(artifact.RootElement.GetProperty("bootstrap").EnumerateArray());
-        Assert.Equal(1, bootstrap.GetProperty("exitCode").GetInt32());
-        Assert.Equal("AutomaticInstanceCreationFailed", bootstrap.GetProperty("error").GetString());
-        Assert.DoesNotContain("collector-private-resource", console);
-        Assert.DoesNotContain("collector-private-resource", artifact.RootElement.GetRawText());
+        return (console, Assert.Single(Directory.EnumerateFiles(folder, "localdb-*.json", SearchOption.AllDirectories)));
     }
 
     private App01e4ApiProcess Launch(string script)
