@@ -160,9 +160,15 @@ def _validate_container(row, role, service, project, app_network, image_id):
 
 def _validate_network(row, subnet, expected_container_names):
     ipam = row.get("IPAM")
+    # Docker Desktop can report the default IPv4-only address families explicitly.
+    default_address_families = {
+        "com.docker.network.enable_ipv4": "true",
+        "com.docker.network.enable_ipv6": "false",
+    }
     require(row.get("Driver") == "bridge" and row.get("Scope") == "local" and row.get("Internal") is True
-            and not any(row.get(key) for key in ("Attachable", "Ingress", "EnableIPv6", "Options")),
+            and not any(row.get(key) for key in ("Attachable", "Ingress", "EnableIPv6")),
             "D02_NETWORK_DRIFT")
+    require(row.get("Options") in (None, {}, default_address_families), "D02_NETWORK_DRIFT")
     require(isinstance(ipam, dict) and ipam.get("Driver") == "default" and not ipam.get("Options"),
             "D02_NETWORK_DRIFT")
     config = ipam.get("Config")
