@@ -26,7 +26,7 @@ Every increment must add meaningful regression/negative tests for its owned inva
 
 **Host evidence:** #90 records `HOST_PREFLIGHT_OBSERVED / BLOCKED`, exit 2, on initial source `22e70256b99a759bd8c27d296206c0a41960da49`. Required failures/unknowns concern Windows/Hyper-V, reboot, RAM/disk, HNS coverage and Windows Time; subnet overlap remains NOT_TESTED with incomplete HNS. No final-source host PASS is recorded here. Installer/image provenance remains NOT_PINNED until verified. Rerun the [operator procedure](../../../deploy/lab/windows/README.md) on the intended laptop with a clean merged source and a fresh protected output directory; source CI cannot prove that host ready.
 
-**Implemented boundary:** I01 emits the standalone `APP02B-LAB-WINDOWS-PLAN-V1` planning/report pair. It does not issue an E05 environment/admission manifest or create VMs. LAB-I02 owns planned setup; I03–I05 complete the live prerequisites for LOCAL_LAB_READY. Physical PREPROD remains NOT_VERIFIED.
+**Implemented boundary:** I01 consumes an operator-supplied `APP02B-LAB-WINDOWS-PLAN-V1` plan and emits `preflight.json` with schema `APP02B-LAB-WINDOWS-PREFLIGHT-V1`, plus its `preflight.md` rendering. It does not issue an E05 environment/admission manifest or create VMs. LAB-I02 owns planned setup; I03–I05 complete the live prerequisites for LOCAL_LAB_READY. Physical PREPROD remains NOT_VERIFIED.
 
 **Deliverable:** a read-only capability report and validated environment configuration, usable before any administrator action.
 

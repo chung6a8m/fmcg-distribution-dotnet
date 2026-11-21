@@ -282,7 +282,9 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 <a id="lab-e02"></a>
 ## LAB-E02 — Diagnostics cho LocalDB và A11-09
 
-**Status:** `SOURCE_MERGED` qua [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). Final source `0c4a9a91a13b51cdae50208fab48c2bccafd8d60`; merge `ddc227e202a307a7a21951d7545985e036a13459`. [Final-source checks](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88/checks): 20/20 SUCCESS, 10 workflows; [APP-00A](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44848111951) giữ regression và diagnostics source tests. **Source/API dependencies:** không có dependency source mới.
+**Status:** `SOURCE_MERGED` qua [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). Final source `0c4a9a91a13b51cdae50208fab48c2bccafd8d60`; merge `ddc227e202a307a7a21951d7545985e036a13459`. [Final-source checks](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88/checks): latest job conclusions 20/20 SUCCESS, 10 workflows; [APP-00A](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44848111951) giữ regression và diagnostics source tests. **Source/API dependencies:** không có dependency source mới.
+
+**Lịch sử CI trên cùng final source:** APP-02B.4 tenant SQL [attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44848111939/attempts/1) FAIL tại LocalDB startup trước tests; [attempt 2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44848111939/attempts/2) SUCCESS. Lỗi này nằm ngoài APP-00A diagnostics collector; retry xanh không giải quyết root cause của E03 và không thay thế failed attempt.
 
 **Giới hạn evidence:** đã merge instrumentation; actual HTTP 500/root cause và việc thu artifact từ lỗi hosted thật chưa được xác minh bởi receipt này. #75/#68 vẫn OPEN; E03/E04 xử lý riêng theo trace. Source merge không xác nhận physical PREPROD hoặc tự đánh dấu các ca live PASS.
 
@@ -362,7 +364,7 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 
 **Exit:** shared contract ổn định cho mọi collector/driver; chưa cần runtime thật để kiểm chứng validator.
 
-**Contract ownership:** E05 giữ `schemas/lab-environment-v1.json` / `APP02B-LAB-ENVIRONMENT-V1` cho cấu trúc tối thiểu/secret references và yêu cầu protected admission riêng. LAB-I01 đã triển khai schema planning độc lập `APP02B-LAB-WINDOWS-PLAN-V1`, không phải E05 schema extension và không phát hành E05 admission. Operator phải cung cấp protected original host fingerprint và authorization/admission hợp lệ theo [V1 contract](lab-e05-contract.md); report I01 chỉ là input readiness. Schema labels chính xác: `APP02B-LAB-EVIDENCE-V1`, `LOCAL_OPERATOR_LAB`, `SOLO_OWNER_SELF_ATTESTED`. `configurationSha256` hash manifest không chứa secrets, bao gồm danh tính/version của secret references và externally retained authorization record; không công bố hash đoán được của secret values. `hostSha256` đi kèm protected original fingerprint.
+**Contract ownership:** E05 giữ `schemas/lab-environment-v1.json` / `APP02B-LAB-ENVIRONMENT-V1` cho cấu trúc tối thiểu/secret references và yêu cầu protected admission riêng. LAB-I01 nhận plan độc lập `APP02B-LAB-WINDOWS-PLAN-V1` và xuất report `APP02B-LAB-WINDOWS-PREFLIGHT-V1`, không phải E05 schema extension và không phát hành E05 admission. Operator phải cung cấp protected original host fingerprint và authorization/admission hợp lệ theo [V1 contract](lab-e05-contract.md); report I01 chỉ là input readiness. Schema labels chính xác: `APP02B-LAB-EVIDENCE-V1`, `LOCAL_OPERATOR_LAB`, `SOLO_OWNER_SELF_ATTESTED`. `configurationSha256` hash manifest không chứa secrets, bao gồm danh tính/version của secret references và externally retained authorization record; không công bố hash đoán được của secret values. `hostSha256` đi kèm protected original fingerprint.
 
 <a id="lab-e06"></a>
 ## LAB-E06 — Collectors SQL/HTTP/network/Vault

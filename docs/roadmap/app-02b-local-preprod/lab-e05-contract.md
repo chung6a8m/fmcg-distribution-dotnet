@@ -14,8 +14,9 @@ Use a clean checkout and an existing, operator-protected local evidence director
 all Git worktrees. Restrict the evidence directory and input directory to the operator
 and authorized custodians. On Windows use a local drive with restricted NTFS ACLs. Keep
 the authorization record and raw host fingerprint under their designated custody. The
-runner checks pins and recorded admission. Merged LAB-I01 measures platform state through
-the separate APP02B-LAB-WINDOWS-PLAN-V1 planning/report contract; it emits no E05 environment
+runner checks pins and recorded admission. Merged LAB-I01 consumes an operator-supplied
+APP02B-LAB-WINDOWS-PLAN-V1 plan and measures platform state. It emits preflight.json with
+schema APP02B-LAB-WINDOWS-PREFLIGHT-V1 and its preflight.md rendering, but no E05 environment
 or protected admission manifest. Obtain the protected host fingerprint and externally
 authorized E05 inputs separately. An I01 readiness report or operator-supplied file does
 not prove that a live SQL binding was independently measured or execution was approved.
@@ -154,7 +155,7 @@ private evidence.
 
 | Increment | Contract handoff |
 | --- | --- |
-| LAB-I01 | Supply the separate Windows planning/readiness report and toolchain/root observations. It does not issue APP02B-LAB-ENVIRONMENT-V1, protected host-fingerprint bytes or APP02B-LAB-ADMISSION-V1; the operator must obtain those separately under E05's admission contract. |
+| LAB-I01 | Consume the operator's APP02B-LAB-WINDOWS-PLAN-V1 plan; emit the separate APP02B-LAB-WINDOWS-PREFLIGHT-V1 readiness report and Markdown rendering with toolchain/root observations. It does not issue APP02B-LAB-ENVIRONMENT-V1, protected host-fingerprint bytes or APP02B-LAB-ADMISSION-V1; the operator must obtain those separately under E05's admission contract. |
 | LAB-E06 | Use AttemptDraft to implement typed raw-before-descriptor collectors bound to the V1 attempt/case/phase/target. Introduce reviewed interpretation of raw measurements before enabling technical PASS. |
 | LAB-E07 | Populate source-bound CI evidence through a reviewed inventory extension. Current CI directory stays empty. |
 | LAB-S09 | Match the shared C# DTO to the eight run-context fields and deterministic JSON contract. Keep enrollment identities and approvals external. |
