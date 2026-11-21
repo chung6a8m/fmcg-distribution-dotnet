@@ -56,6 +56,40 @@ class DockerD02BoundaryTests(unittest.TestCase):
                              reviewed_volumes={"app02b-docker-lab_sql"})
         docker.run.assert_not_called()
 
+    def test_pinned_app_disappearance_or_replacement_refuses_before_mutation(self):
+        project = "app02b-docker-lab"
+        published = {"name": project + "_app", "subnet": "172.29.40.0/24"}
+        spec = {"project": project, "nonce": NONCE, "networks": [published], "volumes": [], "ports": []}
+        for networks in ([], [{"Name": published["name"], "Id": "2"*64}]):
+            with self.subTest(networks=networks):
+                docker = Mock()
+                docker.state.return_value = {"volumes": [], "networks": networks, "containers": [], "volumeUsers": {}}
+                with self.assertRaisesRegex(LabError, "^D02_RESUME_NETWORK_CHANGED$"):
+                    d02.apply_change(docker, spec, {}, {}, ensure_current=lambda: None,
+                                     resume_app_network_id="1"*64)
+                docker.run.assert_not_called()
+
+    def test_fresh_inventory_checks_pinned_app_before_excluding_it_from_conflicts(self):
+        app, pinned, subnet = "demo_app", "1"*64, "172.29.40.0/24"
+        baseline = {"project": "demo", "hostRef": "h", "engineRef": "e",
+                    "networks": [{"name": app, "subnet": subnet}],
+                    "resumeD02": {"appNetworkId": pinned, "nonce": NONCE}}
+        network = {"id": pinned, "name": app, "subnets": [subnet]}
+        host = {"projects": [], "volumes": [], "containers": [], "networks": [network]}
+        state = {"containers": [], "volumes": [], "networks": [{"Name": app, "Id": pinned}]}
+        with (patch.object(d02.d01, "identity_refs", return_value=("h", "e")),
+              patch.object(d02, "source_info", return_value=("a"*40, "CLEAN")),
+              patch.object(d02.d01, "evaluate", return_value={"checks": {"PORTS": "PASS"}, "issueCodes": []})
+              as evaluate):
+            self.assertEqual("PASS", d02.require_fresh_host(baseline, {"d01PlanSha256": SHA}, host, state))
+            evaluated_plan, inventory, *_ = evaluate.call_args.args
+            self.assertNotIn("resumeD02", evaluated_plan)
+            self.assertEqual([], inventory["networks"])
+            host["networks"] = [{**network, "id": "2"*64}]
+            with self.assertRaisesRegex(LabError, "^D02_RESUME_NETWORK_CHANGED$"):
+                d02.require_fresh_host(baseline, {"d01PlanSha256": SHA}, host, state)
+            evaluate.assert_called_once()
+
     def test_preflight_rejects_ready_report_from_another_source_or_plan(self):
         plan = {"sourceHead": "a"*40, "hostRef": "1"*64, "engineRef": "2"*64}
         report = {"schema": "APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1", "readiness": "READY",

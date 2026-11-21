@@ -53,6 +53,24 @@ def fixture():
     return plan, host
 
 
+def resume_fixture():
+    plan, host = fixture()
+    name = plan["project"] + "_app"
+    subnet = next(row["subnet"] for row in plan["networks"] if row["name"] == name)
+    network_id, nonce = "3" * 64, "4" * 32
+    plan["resumeD02"] = {"appNetworkId": network_id, "nonce": nonce}
+    host["networks"] = [{"id": network_id, "name": name, "subnets": [subnet]}]
+    host["resumeAppNetwork"] = {
+        "Id": network_id, "Name": name, "Driver": "bridge", "Scope": "local", "Internal": True,
+        "EnableIPv6": False, "Options": {"com.docker.network.enable_ipv4": "true",
+                                        "com.docker.network.enable_ipv6": "false"},
+        "IPAM": {"Driver": "default", "Config": [{"Subnet": subnet}]},
+        "Labels": {"io.fmcg-dms.lab-d02.project": plan["project"], "io.fmcg-dms.lab-d02.nonce": nonce},
+        "Containers": {},
+    }
+    return plan, host
+
+
 class DockerPreflightTests(unittest.TestCase):
     def test_ready_report_is_versioned_and_redacted(self):
         plan, host = fixture()
@@ -97,6 +115,56 @@ class DockerPreflightTests(unittest.TestCase):
                 self.assertEqual("BLOCKED", report["readiness"])
                 self.assertNotEqual("PASS", report["checks"][check])
                 preflight.validate_document(report, "docker-host-preflight")
+
+    def test_resumes_only_the_pinned_owned_app_bridge_without_disclosing_identity(self):
+        plan, host = resume_fixture()
+        preflight.validate_plan(plan)
+        report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b" * 64)
+        self.assertEqual("READY", report["readiness"])
+        self.assertEqual("NOT_EVALUATED", report["authorization"])
+        self.assertEqual(1, report["observed"]["networkCount"])
+        preflight.validate_document(report, "docker-host-preflight")
+        serialized = json.dumps(report) + preflight.markdown(report)
+        self.assertNotIn(plan["resumeD02"]["appNetworkId"], serialized)
+        self.assertNotIn(plan["resumeD02"]["nonce"], serialized)
+
+    def test_resume_rejects_missing_replaced_foreign_or_drifted_networks(self):
+        def set_detail(key, value):
+            return lambda host: host["resumeAppNetwork"].update({key: value})
+
+        cases = {
+            "absent": lambda h: h.update(networks=[]),
+            "replacement-id": lambda h: h["networks"][0].update(id="5"*64),
+            "wrong-inspected-id": set_detail("Id", "5"*64),
+            "wrong-project": lambda h: h["resumeAppNetwork"]["Labels"].update(
+                {"io.fmcg-dms.lab-d02.project": "other-project"}),
+            "wrong-nonce": lambda h: h["resumeAppNetwork"]["Labels"].update(
+                {"io.fmcg-dms.lab-d02.nonce": "5"*32}),
+            "wrong-subnet": lambda h: h["resumeAppNetwork"]["IPAM"]["Config"][0].update(
+                Subnet="172.29.80.0/24"),
+            "public": set_detail("Internal", False),
+            "driver": set_detail("Driver", "overlay"),
+            "ipv6": set_detail("EnableIPv6", True),
+            "ipv4-disabled": lambda h: h["resumeAppNetwork"].update(EnableIPv4=False, Options={}),
+            "unexpected-option": set_detail("Options", {"com.docker.network.bridge.enable_icc": "false"}),
+            "endpoint": set_detail("Containers", {"foreign": {"Name": "foreign"}}),
+            "other-overlap": lambda h: h["networks"].append(
+                {"name": "foreign", "subnets": h["networks"][0]["subnets"]}),
+            "duplicate-name": lambda h: h["networks"].append(h["networks"][0].copy()),
+            "windows-route": lambda h: h.update(routes=h["networks"][0]["subnets"]),
+        }
+        for name, alter in cases.items():
+            with self.subTest(name=name):
+                plan, host = resume_fixture()
+                alter(host)
+                report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b"*64)
+                self.assertEqual("FAIL", report["checks"]["NETWORKS"])
+                self.assertEqual("BLOCKED", report["readiness"])
+
+    def test_fresh_plan_rejects_even_an_owned_app_bridge(self):
+        plan, host = resume_fixture()
+        del plan["resumeD02"]
+        self.assertIs(preflight.conflicts(plan, host)["NETWORKS"], False)
 
     def test_source_must_match_clean_plan(self):
         plan, host = fixture()

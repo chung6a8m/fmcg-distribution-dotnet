@@ -59,6 +59,30 @@ platform from this plan on the confirmed local daemon. Staging is an
 operator action outside the preflight entry point. Preflight inspects the
 cache and does not pull images.
 
+### Resume a partially staged D02 APP bridge
+
+A fresh plan omits `resumeD02` and continues to require an unused network
+namespace and subnet. If an earlier authorized D02 Apply left only its APP
+bridge, use a new plan bound to the current source and daemon and add:
+
+~~~json
+"resumeD02": {
+  "appNetworkId": "<full 64-character Docker network ID of the previously staged APP bridge>",
+  "nonce": "<the previous 32-character D02 nonce>"
+}
+~~~
+
+Obtain the full network ID from protected read-only Docker inspection of the
+preserved APP bridge. Keep the prior D02 project, nonce and planned APP subnet.
+D01 reads the pinned bridge twice, first in the network inventory and then
+in the detailed inspection. It exempts only that exact empty internal bridge
+from conflicts after checking its ID, name, owner labels, IPv4 subnet and
+D02 network configuration. Other namespace or subnet conflicts are still
+checked, including Windows routes. A missing or replaced bridge, different
+nonce or subnet, unexpected endpoint or configuration drift remains blocked.
+D01 still reports `authorization=NOT_EVALUATED`; the plan checksum binds
+the new fields without exposing the raw ID or nonce in the report.
+
 ## Run on the intended laptop
 
 Use 64-bit PowerShell 7 and a trusted local toolchain. The
