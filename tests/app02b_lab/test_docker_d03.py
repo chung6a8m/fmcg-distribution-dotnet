@@ -64,6 +64,9 @@ class VaultPlanTests(unittest.TestCase):
                 self.test_case.assertEqual(method, "GET")
                 if status == 403:
                     raise LabError("D03_UNEXPECTED_HTTP_STATUS")
+                if path == "auth/token/lookup-self":
+                    role = "lab-d03-issuer" if options["token"] == "unused" else "lab-d03-api"
+                    return {"data": {"policies": [role], "type": "service"}}
                 return {}
 
         vault = OverprivilegedVault()
@@ -71,4 +74,5 @@ class VaultPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(LabError, "D03_UNEXPECTED_HTTP_STATUS"):
             rotate(vault, "api", "unused", "broad-token",
                    lambda _token: self.fail("stored a replacement"),
-                   lambda: self.fail("authorized issuance"))
+                   lambda: self.fail("authorized issuance"),
+                   lambda: self.fail("attempted rotation audit"))

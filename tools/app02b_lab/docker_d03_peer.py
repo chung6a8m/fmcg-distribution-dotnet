@@ -76,7 +76,10 @@ def secret(label):
 def run(args):
     raw = read_file(args.config)
     config = strict_json(raw)
-    d02.object_fields(config, "schema sourceHead nonce clusterId caSha256 stageReceiptSha256", "D03_PEER_CONFIG")
+    fields = "schema sourceHead nonce clusterId caSha256 stageReceiptSha256"
+    if args.role:
+        fields += " previousTokenSha256 issuerTokenSha256 replacementPath"
+    d02.object_fields(config, fields, "D03_PEER_CONFIG")
     source = checkout()
     require(config["schema"] == "APP02B-LAB-DOCKER-VAULT-PEER-V1" and config["sourceHead"] == source
             and type(config["nonce"]) is str and d02.NONCE.fullmatch(config["nonce"])
@@ -88,14 +91,18 @@ def run(args):
     receipt = strict_json(stage)
     require(type(receipt) is dict and receipt.get("schema") == "APP02B-LAB-DOCKER-VAULT-STAGE-V1"
             and receipt.get("status") == "STAGED" and receipt.get("sourceHead") == source
-            and receipt.get("nonce") == config["nonce"] and receipt.get("caSha256") == config["caSha256"],
+            and receipt.get("nonce") == config["nonce"] and receipt.get("caSha256") == config["caSha256"]
+            and d03.d01.nonzero_digest(receipt.get("leafDerSha256")),
             "D03_PEER_STAGE_MISMATCH")
     ca = read_file(args.ca)
     require(digest(ca) == config["caSha256"] and b"PRIVATE KEY" not in ca, "D03_CA_MISMATCH")
-    vault = Vault("https://vault:8200", ca)
+    vault = Vault("https://vault:8200", ca, leaf_sha=receipt["leafDerSha256"])
 
     def identity():
         require(vault.cluster() == config["clusterId"], "D03_CLUSTER_CHANGED")
+
+    def audit_records():
+        return [strict_json(line) for line in read_file(args.audit).splitlines()]
 
     if args.role:
         operation = "ROTATE_" + args.role.upper()
@@ -109,22 +116,24 @@ def run(args):
             d03.authorize(approval, args.enrollment_sha256, digest(raw), config["nonce"], operation, d02.utc_now())
 
         custody_parent(args.replacement.parent)
-        require(not os.path.lexists(args.replacement), "D03_REPLACEMENT_EXISTS")
+        require(str(safe_path(args.replacement, missing=True)) == config["replacementPath"]
+                and not os.path.lexists(args.replacement), "D03_REPLACEMENT_SCOPE_MISMATCH")
         authorization()
         issuer = secret("Scoped issuer token")
         previous = secret("Current role token")
+        require(digest(issuer.encode("utf-8")) == config["issuerTokenSha256"]
+                and digest(previous.encode("utf-8")) == config["previousTokenSha256"], "D03_TOKEN_SCOPE_MISMATCH")
+        # An exclusive marker prevents reusing the approval while an earlier attempt is unresolved.
+        output_file(args.config.parent / ("rotation-" + digest(approval) + ".started"), b"STARTED\n")
         result = rotate(vault, args.role, issuer, previous,
-                        lambda value: output_file(args.replacement, (value + "\n").encode("ascii")), authorization)
+                        lambda value: output_file(args.replacement, (value + "\n").encode("ascii")),
+                        authorization, audit_records)
         print(result)
         return
 
     identity()
     custody_parent(args.output.parent)
     tokens = {role: secret(f"{role} probe token") for role in ROLE_PATHS}
-
-    def audit_records():
-        return [strict_json(line) for line in read_file(args.audit).splitlines()]
-
     checks = probe_roles(vault, tokens, audit_records)
     identity()
     output_file(args.output, canonical_json({
@@ -139,9 +148,9 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    for name in ("config", "ca", "stage-receipt"):
+    for name in ("config", "ca", "stage-receipt", "audit"):
         parser.add_argument("--" + name, type=Path, required=True)
-    for name in ("audit", "output", "enrollment", "replacement"):
+    for name in ("output", "enrollment", "replacement"):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--role", choices=ROLE_PATHS)
     parser.add_argument("--enrollment-sha256")
@@ -150,9 +159,8 @@ def main():
         require(sys.platform == "linux" and sys.flags.isolated and sys.flags.no_site
                 and sys.flags.dont_write_bytecode, "D03_ISOLATED_LINUX_PEER_REQUIRED")
         rotation = (args.enrollment, args.enrollment_sha256, args.replacement)
-        observation = (args.audit, args.output)
-        require((all(rotation) and not any(observation)) if args.role else
-                (all(observation) and not any(rotation)), "D03_PEER_ARGUMENTS")
+        require((all(rotation) and not args.output) if args.role else
+                (args.output and not any(rotation)), "D03_PEER_ARGUMENTS")
         run(args)
         return 0
     except LabError as error:

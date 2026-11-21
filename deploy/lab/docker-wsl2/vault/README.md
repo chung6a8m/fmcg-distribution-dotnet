@@ -105,19 +105,26 @@ The role test proves only those scoped HTTP/audit observations.
 
 For separately approved rotation, provide a new enrollment with operation
 `ROTATE_API`, `ROTATE_WORKER` or `ROTATE_OPERATOR`. Its `planSha256`
-is the exact private peer scope file hash. Run the peer command with
+is the exact private peer scope file hash. Add the SHA-256 of the exact
+current role token and issuer token bytes (no newline) as
+`previousTokenSha256` and `issuerTokenSha256`, and the absolute
+`replacementPath`. Compute token hashes under protected custody without
+passing a credential on the command line. The stage receipt also pins the
+leaf certificate on every connection. Run the peer command with
 `--role`, `--enrollment`, `--enrollment-sha256` and an unused
-`--replacement` path instead of the audit/output options. The command asks
+`--replacement` path instead of the output option. Supply the audit reader
+for both observations and rotation. The command asks
 for the current role and delegated issuer credentials without echo in an
 interactive terminal, creates a short-lived replacement, checks role
-boundaries, stores it in restricted custody, then revokes the old token and
-checks denial. If interrupted after issuance, inspect audit and credential
+boundaries and audit, stores it in restricted custody, then revokes the old
+token and checks denial and audit. An exclusive attempt marker prevents
+replaying the same enrollment. If interrupted after issuance, inspect audit and credential
 state before retrying. A replacement that was issued but never delivered
 expires within five minutes. Bring the replacement into the operator's
 approved custody flow before it expires.
 
 ~~~bash
-python3 -I -S -B tools/app02b_lab/docker_d03_peer.py --config /private/peer.json --ca /private/ca.pem --stage-receipt /private/docker-vault-stage.json --role api --enrollment /private/rotation.json --enrollment-sha256 "$APPROVED_D03_ROTATION_SHA256" --replacement /private/api-replacement
+python3 -I -S -B tools/app02b_lab/docker_d03_peer.py --config /private/peer.json --ca /private/ca.pem --stage-receipt /private/docker-vault-stage.json --audit /private/audit.jsonl --role api --enrollment /private/rotation.json --enrollment-sha256 "$APPROVED_D03_ROTATION_SHA256" --replacement /private/api-replacement
 ~~~
 
 ## Evidence limits

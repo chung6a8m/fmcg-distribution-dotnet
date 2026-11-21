@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from .contract import LabError, canonical_json, require, strict_json
+from .contract import LabError, canonical_json, digest, require, strict_json
 
 AUDIT_HEADER = "X-Lab-D03-Probe"
 AUDIT_PATH = "lab-file"
@@ -18,7 +18,7 @@ RESPONSE_LIMIT = 1_048_576
 
 
 class Vault:
-    def __init__(self, url, ca_pem, *, connect_address=None):
+    def __init__(self, url, ca_pem, *, connect_address=None, leaf_sha=None):
         try:
             target = urlsplit(url)
             self.host, self.port = target.hostname, target.port
@@ -36,9 +36,10 @@ class Vault:
         else:
             self.context.load_verify_locations(cafile=ca_pem)
         self.connect_address = connect_address
+        self.leaf_sha = leaf_sha
 
     def request(self, method, path, *, token=None, payload=None, probe_id=None, timeout=4):
-        require(method in ("GET", "POST", "PUT") and re.fullmatch(r"[a-z0-9_/-]+", path)
+        require(method in ("GET", "POST", "PUT", "DELETE") and re.fullmatch(r"[a-z0-9_/-]+", path)
                 and "//" not in path and not path.startswith("/"), "D03_UNSAFE_REQUEST")
         headers = {"Accept": "application/json"}
         if token is not None:
@@ -58,6 +59,9 @@ class Vault:
             connection._create_connection = lambda _addr, timeout, source: socket.create_connection(
                 (self.connect_address, self.port), timeout, source)
         try:
+            if self.leaf_sha is not None:
+                connection.connect()
+                require(digest(connection.sock.getpeercert(binary_form=True)) == self.leaf_sha, "D03_TLS_LEAF_CHANGED")
             connection.request(method, "/v1/" + path, body, headers)
             response = connection.getresponse()
             raw = response.read(RESPONSE_LIMIT + 1)
@@ -134,35 +138,62 @@ def probe_roles(vault, tokens, read_audit):
     raise LabError("D03_AUDIT_WITNESS_MISSING")
 
 
-def token_for_role(vault, role, issuer):
+def token_for_role(vault, role, issuer, *, probe_id=None):
     require(role in POLICIES, "D03_INVALID_ROLE")
-    result = vault.expect(200, "POST", "auth/token/create/" + POLICIES[role], token=issuer,
+    result = vault.expect(200, "POST", "auth/token/create/" + POLICIES[role], token=issuer, probe_id=probe_id,
                           payload={"ttl": "5m", "explicit_max_ttl": "5m", "no_default_policy": True,
                                    "policies": [POLICIES[role]]})
     auth = result.get("auth") or {}
     token = auth.get("client_token")
     require(type(token) is str and ARN.fullmatch(token) and auth.get("policies") == [POLICIES[role]]
-            and type(auth.get("lease_duration")) is int and 0 < auth["lease_duration"] <= 300,
+            and auth.get("renewable") is False and auth.get("token_type") == "service"
+            and not auth.get("identity_policies") and type(auth.get("lease_duration")) is int and 0 < auth["lease_duration"] <= 300,
             "D03_ISSUED_ROLE_MISMATCH")
     return token
 
 
-def rotate(vault, role, issuer, previous, store, authorize):
-    """Persist a verified replacement before revoking the old token with its own restricted capability."""
+def verify_role_token(vault, token, policy, probe_id=None):
+    reply = vault.expect(200, "GET", "auth/token/lookup-self", token=token, probe_id=probe_id)
+    record = reply.get("data") or {}
+    require(record.get("policies") == [policy] and not record.get("identity_policies")
+            and record.get("type") == "service", "D03_UNEXPECTED_TOKEN_POLICY")
+
+
+def wait_for_witnesses(read_audit, cases):
+    for _ in range(10):
+        rows = read_audit()
+        if all(audit_witness(rows, probe, path, denied=denied) for probe, path, denied in cases):
+            return
+        time.sleep(0.2)
+    raise LabError("D03_AUDIT_WITNESS_MISSING")
+
+
+def rotate(vault, role, issuer, previous, store, authorize, read_audit):
+    """Persist a verified replacement before revoking the exact approved prior token."""
     require(role in ROLE_PATHS, "D03_INVALID_ROLE")
     path = ROLE_PATHS[role]
+    policy = POLICIES[role]
+    issuer_probe, prior_probe = uuid4().hex, uuid4().hex
+    verify_role_token(vault, issuer, "lab-d03-issuer", issuer_probe)
+    verify_role_token(vault, previous, policy, prior_probe)
     vault.expect(200, "GET", path, token=previous)
     for other, denied in ROLE_PATHS.items():
         if other != role:
             vault.expect(403, "GET", denied, token=previous)
+    wait_for_witnesses(read_audit, [(probe, "auth/token/lookup-self", False)
+                                  for probe in (issuer_probe, prior_probe)])
     authorize()
-    replacement = token_for_role(vault, role, issuer)
+    issuance = uuid4().hex
+    replacement = token_for_role(vault, role, issuer, probe_id=issuance)
     vault.expect(200, "GET", path, token=replacement)
     for other, denied in ROLE_PATHS.items():
         if other != role:
             vault.expect(403, "GET", denied, token=replacement)
+    wait_for_witnesses(read_audit, [(issuance, "auth/token/create/" + policy, False)])
     store(replacement)
     authorize()
-    vault.expect(204, "POST", "auth/token/revoke-self", token=previous)
-    vault.expect(403, "GET", path, token=previous)
+    revoke, denial = uuid4().hex, uuid4().hex
+    vault.expect(204, "POST", "auth/token/revoke-self", token=previous, probe_id=revoke)
+    vault.expect(403, "GET", path, token=previous, probe_id=denial)
+    wait_for_witnesses(read_audit, [(revoke, "auth/token/revoke-self", False), (denial, path, True)])
     return "ROTATED"

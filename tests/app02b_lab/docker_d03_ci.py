@@ -123,6 +123,12 @@ def run(report, folder):
     ca = certificate(folder, "lab-d03-ca")
     wrong_ca = certificate(folder, "lab-d03-wrong-ca")
     cert, key = certificate(folder, "leaf", ca)
+    leaf_sha = d03.validate_pem(cert.read_bytes(), key.read_bytes(), ca[0].read_bytes())
+    must_block(lambda: d03.validate_pem(cert.read_bytes(), key.read_bytes() + ca[1].read_bytes(),
+                                       ca[0].read_bytes()), "D03_INVALID_TLS_INPUT")
+    d03.verify_tls_inputs(cert, key, ca[0].read_bytes())
+    must_block(lambda: d03.verify_tls_inputs(cert, key, wrong_ca[0].read_bytes()), "D03_INVALID_TLS_INPUT")
+    report["checks"]["offline_certificate_chain"] = "PASS"
     model = d03.compose(PROJECT, NONCE, cert, key)
     docker = CiDocker()
     name = model["services"]["vault"]["container_name"]
@@ -140,13 +146,15 @@ def run(report, folder):
     row, = docker._inspect("container", [name])
     ip = row["NetworkSettings"]["Networks"][network]["IPAddress"]
     require(bool(ip), "CI_PRIVATE_ADDRESS")
-    vault = Vault("https://vault:8200", ca[0], connect_address=ip)
+    vault = Vault("https://vault:8200", ca[0], connect_address=ip, leaf_sha=leaf_sha)
 
     await_health(vault, 501)
     must_block(lambda: Vault("https://vault:8200", wrong_ca[0], connect_address=ip).request("GET", "sys/health"),
                "D03_TLS_REJECTED")
     must_block(lambda: Vault("https://bad-name:8200", ca[0], connect_address=ip).request("GET", "sys/health"),
                "D03_TLS_REJECTED")
+    must_block(lambda: Vault("https://vault:8200", ca[0], connect_address=ip, leaf_sha="f" * 64)
+               .request("GET", "sys/health"), "D03_TLS_LEAF_CHANGED")
     report["checks"]["untrusted_ca_and_wrong_hostname"] = "PASS"
 
     report["phase"] = "initialize_and_enroll_roles"
@@ -164,14 +172,15 @@ def run(report, folder):
     report["phase"] = "verify_role_audit"
     report["checks"]["role_matrix"] = probe_roles(vault, tokens, read_audit)
     replacement = []
-    rotate(vault, "api", issuer, tokens["api"], replacement.append, lambda: None)
+    rotate(vault, "api", issuer, tokens["api"], replacement.append, lambda: None, read_audit)
     tokens["api"], = replacement
     report["checks"]["rotation_and_old_token_denial"] = "PASS"
 
     expired = vault.expect(200, "POST", "auth/token/create/lab-d03-worker", token=issuer,
-                           payload={"ttl": "1s", "policies": [POLICIES["worker"]],
+                           payload={"ttl": "3s", "policies": [POLICIES["worker"]],
                                     "no_default_policy": True})["auth"]["client_token"]
-    for _ in range(12):
+    vault.expect(200, "GET", ROLE_PATHS["worker"], token=expired)
+    for _ in range(36):
         status, _ = vault.request("GET", ROLE_PATHS["worker"], token=expired)
         if status == 403:
             break
@@ -180,14 +189,19 @@ def run(report, folder):
     report["checks"]["expired_token_denial"] = "PASS"
 
     report["phase"] = "restart_and_unseal"
-    audit_before = len(read_audit())
+    audit_before = read_audit()
     docker.run("restart", name)
     await_health(vault, 503)
     unseal(vault, keys)
     require(vault.cluster() == cluster, "CI_RAFT_CLUSTER_DRIFT")
-    require(len(read_audit()) >= audit_before, "CI_AUDIT_NOT_PERSISTED")
+    require(read_audit()[:len(audit_before)] == audit_before, "CI_AUDIT_NOT_PERSISTED")
     report["checks"]["raft_restart"] = probe_roles(vault, tokens, read_audit)
-    must_block(lambda: probe_roles(vault, tokens, lambda: []), "D03_AUDIT_WITNESS_MISSING")
+    # Operate only on the disposable single-node fixture. The retained log reader
+    # still sees older records while Vault no longer writes the new probe attempts.
+    vault.expect(204, "DELETE", "sys/audit/" + AUDIT_PATH, token=root)
+    devices = vault.expect(200, "GET", "sys/audit", token=root)
+    require(AUDIT_PATH + "/" not in (devices.get("data") or devices), "CI_AUDIT_STILL_ENABLED")
+    must_block(lambda: probe_roles(vault, tokens, read_audit), "D03_AUDIT_WITNESS_MISSING")
     report["checks"]["missing_audit_fails_closed"] = "PASS"
 
 

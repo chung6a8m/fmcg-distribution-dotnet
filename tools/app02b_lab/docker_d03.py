@@ -109,7 +109,69 @@ def d02_receipts(config, pwsh, source):
     return intent, result, {"d02PlanSha256": digest(plan_raw), "d02ApplySha256": digest(result_raw)}
 
 
-def stage_model(docker, model, image_id, *, ensure_current):
+CERTIFICATE = re.compile(rb"-----BEGIN CERTIFICATE-----[\r\n]+[A-Za-z0-9+/=\r\n]+-----END CERTIFICATE-----")
+LEAF_KEY = re.compile(rb"-----BEGIN ((?:RSA |EC )?PRIVATE KEY)-----[\r\n]+"
+                      rb"[A-Za-z0-9+/=\r\n]+-----END \1-----")
+
+
+def validate_pem(certificate, key, ca):
+    require(LEAF_KEY.fullmatch(key.strip()) and b"PRIVATE KEY" not in certificate + ca,
+            "D03_INVALID_TLS_INPUT")
+    leaf = CERTIFICATE.match(certificate.lstrip())
+    require(leaf is not None, "D03_INVALID_TLS_INPUT")
+    der = ssl.PEM_cert_to_DER_cert(leaf[0].decode("ascii"))
+    require(all(ssl.PEM_cert_to_DER_cert(entry.decode("ascii")) != der for entry in CERTIFICATE.findall(ca)),
+            "D03_TRUST_ANCHOR_AS_LEAF")
+    return digest(der)
+
+
+def verify_tls_inputs(certificate, key, authorities):
+    """Validate key, current chain, server purpose and DNS SAN without a listening socket."""
+    server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server.minimum_version = ssl.TLSVersion.TLSv1_2
+    client = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    client.minimum_version = ssl.TLSVersion.TLSv1_2
+    client.hostname_checks_common_name = False
+    try:
+        server.load_cert_chain(certificate, key, password=lambda: "")
+        client.load_verify_locations(cadata=authorities.decode("ascii"))
+        to_server, from_server = ssl.MemoryBIO(), ssl.MemoryBIO()
+        to_client, from_client = ssl.MemoryBIO(), ssl.MemoryBIO()
+        listener = server.wrap_bio(to_server, from_server, server_side=True)
+        peer = client.wrap_bio(to_client, from_client, server_hostname="vault")
+        pending = [peer, listener]
+        for _ in range(12):
+            for context in pending[:]:
+                try:
+                    context.do_handshake()
+                    pending.remove(context)
+                except ssl.SSLWantReadError:
+                    pass
+            to_server.write(from_client.read())
+            to_client.write(from_server.read())
+            if not pending:
+                return
+    except (ssl.SSLError, UnicodeError):
+        raise LabError("D03_INVALID_TLS_INPUT") from None
+    raise LabError("D03_INVALID_TLS_INPUT")
+
+
+def bind_matches(observed, intended):
+    """Compose may translate Windows drive paths into Desktop's Linux path."""
+    if type(observed) is not str:
+        return False
+    actual, expected = observed.replace("\\", "/"), intended.replace("\\", "/")
+    if os.name != "nt":
+        return actual == expected
+    drive = re.fullmatch(r"([a-zA-Z]):/(.+)", expected)
+    if drive is None:
+        return False
+    translated = drive[1].lower() + "/" + drive[2]
+    return actual.casefold() in {expected.casefold(), ("/host_mnt/" + translated).casefold(),
+                                 ("/run/desktop/mnt/host/" + translated).casefold()}
+
+
+def stage_model(docker, model, image_id, *, ensure_current, reviewed_targets=None):
     """Create only. Do not adopt, overwrite, start, or remove a partial staging."""
     ensure_current()
     docker.run("compose", "--project-directory", str(ROOT), "--env-file", os.devnull,
@@ -140,10 +202,19 @@ def stage_model(docker, model, image_id, *, ensure_current):
                 "D03_STAGE_MOUNT_DRIFT")
         if mount["type"] == "volume":
             require(actual.get("Name") == model["volumes"][mount["source"]]["name"], "D03_STAGE_MOUNT_DRIFT")
+        else:
+            require(bind_matches(actual.get("Source"), mount["source"]), "D03_STAGE_MOUNT_DRIFT")
     audit, = docker._inspect("volume", [model["volumes"]["audit"]["name"]])
     require(audit.get("Driver") == "local" and not audit.get("Options")
             and all((audit.get("Labels") or {}).get(k) == v for k, v in service["labels"].items()),
             "D03_STAGE_AUDIT_DRIFT")
+    if reviewed_targets is not None:
+        network_name = model["networks"]["vault"]["name"]
+        network_id = d01.text_result(docker.run("network", "inspect", "--format", "{{.Id}}", "--", network_name))
+        data, = docker._inspect("volume", [model["volumes"]["data"]["name"]])
+        require(digest(network_id.encode("ascii")) == reviewed_targets["networkRef"]
+                and digest(canonical_json([data["Name"], data["CreatedAt"], data["Driver"], data["Labels"]]))
+                == reviewed_targets["dataVolumeRef"], "D03_STAGE_TARGET_CHANGED")
     return digest(identifier.encode("ascii"))
 
 
@@ -173,15 +244,10 @@ def run(args):
     cert, cert_raw = protected_file(config["certificate"], args.pwsh)
     key, key_raw = protected_file(config["leafKey"], args.pwsh, confidential=True)
     ca, ca_raw = protected_file(config["caCertificate"], args.pwsh)
-    require(len({cert, ca, key}) == 3 and b"PRIVATE KEY" not in cert_raw + ca_raw and b"BEGIN CERTIFICATE" in cert_raw
-            and b"PRIVATE KEY" in key_raw and not beneath(key, evidence)
+    require(len({cert, ca, key}) == 3 and not beneath(key, evidence)
             and not any("$" in str(path) for path in (cert, key, HCL)), "D03_INVALID_TLS_INPUT")
-    try:
-        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        tls.load_cert_chain(cert, key, password=lambda: "")
-        tls.load_verify_locations(cafile=ca)
-    except ssl.SSLError:
-        raise LabError("D03_INVALID_TLS_INPUT") from None
+    leaf_sha = validate_pem(cert_raw, key_raw, ca_raw)
+    verify_tls_inputs(cert, key, ca_raw)
     model = compose(spec["project"], spec["nonce"], cert, key)
     require(len(model["name"]) <= 63, "D03_PROJECT_TOO_LONG")
 
@@ -192,26 +258,37 @@ def run(args):
         budget = baseline["budget"]
         require(d01.image_check({"reference": IMAGE, "role": "VAULT"}, host["images"].get("VAULT"))
                 and d01.minimum(d01.mib(host.get("freeRam")), budget["hostFreeRamMiB"])
-                and d01.minimum(d01.mib(host.get("diskFree")), budget["diskFreeMiB"]),
+                and d01.minimum(d01.mib(host.get("diskFree")), budget["diskFreeMiB"])
+                and d01.minimum(d01.mib(host.get("diskCapacity")), budget["diskFreeMiB"])
+                and d01.minimum(d01.mib(host["engine"].get("MemTotal")), budget["engineRamMiB"])
+                and d01.minimum(host["engine"].get("NCPU"), budget["engineCpu"]),
                 "D03_HOST_BUDGET_OR_IMAGE_BLOCKED")
+        namespace = docker.state(model["name"])
+        require(model["name"] not in host["projects"] and not any(namespace.values()), "D03_NAMESPACE_IN_USE")
         ids = docker.image_ids(intent["images"], intent["sourceHead"])
         require(ids == intent["imageIds"], "D03_D02_IMAGE_CHANGED")
         state = docker.state(spec["project"])
         topology.validate_state(spec, intent["compose"], state, ids, complete=True)
         require(result.get("observed") == d02.scoped_inventory(state), "D03_D02_STATE_CHANGED")
+        bridge, = [row for row in state["networks"] if row["Name"] == model["networks"]["vault"]["name"]]
+        data, = [row for row in state["volumes"] if row["Name"] == model["volumes"]["data"]["name"]]
+        require(type(data.get("CreatedAt")) is str and data["CreatedAt"], "D03_DATA_VOLUME_IDENTITY_MISSING")
+        target_refs = {
+            "networkRef": digest(bridge["Id"].encode("ascii")),
+            "dataVolumeRef": digest(canonical_json([data["Name"], data["CreatedAt"], data["Driver"], data["Labels"]])),
+        }
         image = d01.json_result(docker.run("image", "inspect", "--format",
                     d01.projection(("Id", ".Id"), ("Os", ".Os"), ("Architecture", ".Architecture"),
                                    ("RepoDigests", ".RepoDigests")), "--", IMAGE), dict)
         image_id = image.get("Id")
-        require(image.get("Os") == "linux" and image.get("Architecture") == "amd64"
-                and type(image.get("RepoDigests")) is list and IMAGE in image["RepoDigests"]
+        require(d01.image_check({"reference": IMAGE, "role": "VAULT"}, image)
                 and type(image_id) is str and re.fullmatch(r"sha256:[a-f0-9]{64}", image_id),
                 "D03_VAULT_IMAGE_UNVERIFIED")
         document = {"schema": PLAN, "operation": STAGE, "sourceHead": source, "nonce": spec["nonce"],
-                    "hostRef": intent["hostRef"], "engineRef": intent["engineRef"], **hashes,
+                    "hostRef": intent["hostRef"], "engineRef": intent["engineRef"], **hashes, **target_refs,
                     "configSha256": digest(raw), "certificateSha256": digest(cert_raw), "caSha256": digest(ca_raw),
                     "tlsInputsSha256": digest(canonical_json([digest(cert_raw), digest(key_raw), digest(ca_raw)])),
-                    "hclSha256": digest(HCL.read_bytes()), "imageId": image_id,
+                    "leafDerSha256": leaf_sha, "hclSha256": digest(HCL.read_bytes()), "imageId": image_id,
                     "composeSha256": digest(canonical_json(model)),
                     "project": spec["project"], "image": IMAGE, "exposure": "NONE"}
         return docker, document
@@ -243,9 +320,9 @@ def run(args):
         receipt = {"schema": "APP02B-LAB-DOCKER-VAULT-STAGE-V1", "sourceHead": source,
                    "planSha256": plan_sha, "enrollmentSha256": digest(approval),
                    "collectedUtc": d02.timestamp(d02.utc_now()), "operation": STAGE,
-                   "nonce": spec["nonce"], "caSha256": digest(ca_raw)}
+                   "nonce": spec["nonce"], "caSha256": digest(ca_raw), "leafDerSha256": leaf_sha}
         try:
-            ref = stage_model(docker, model, current["imageId"], ensure_current=check)
+            ref = stage_model(docker, model, current["imageId"], ensure_current=check, reviewed_targets=current)
         except LabError as error:
             d02.publish(out, evidence, "docker-vault-stage.json", {**receipt, "status": "BLOCKED", "issue": error.code})
             raise
