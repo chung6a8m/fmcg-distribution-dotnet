@@ -27,10 +27,10 @@ Mỗi ID `LAB-*` tương ứng **một PR có trách nhiệm, interface và tiê
 |---|---|---|
 | [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) / [PR #74](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/74) | Issue OPEN; #74 OPEN/DRAFT, source `aaa32dba…`; SQL bridges chưa là end-to-end runtime/PITR verification | S01→S02/S04/S06/S07→I08→E08/E10. Source integration có disposition riêng; không cần đóng #53 để viết code kiểm tra chính nó |
 | [#75](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75) / [#68](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/68) | LocalDB bootstrap và A11-09 HTTP500 là hai nhánh điều tra; rerun PASS chưa chứng minh nguyên nhân | E02 diagnostics, E03 và E04 fix riêng theo trace |
-| [#59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/59) / [PR #61](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/61) | CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; source/ephemeral-CI scope; hết hạn `2026-12-19T00:00:00Z` | E01 sửa status hiện tại trong #73; E07/E13 kiểm tra scope/expiry; không coi dependency đã patched |
-| [PR #73](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/73) | OPEN, source `d8564ab5…`; status #59/CI còn cần đồng bộ | E01 owns status reconciliation; roadmap này không tạo physical closeout cạnh tranh |
+| [#59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/59) / [PR #61](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/61) | CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; source/ephemeral-CI scope; hết hạn `2026-12-19T00:00:00Z` | E01 ghi scope hiện tại và giữ lỗi CI lịch sử; E07/E13 kiểm tra scope/expiry; không coi dependency đã patched |
+| [PR #73](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/73) | OPEN / unmerged / conflicting, source `d8564ab5274c84ad347ab26f227b3d01dd1562b6` | Xem [source closeout](../closeout/2026-11-18-app-02b9-source-only.md) tại cùng đường dẫn đã đề xuất trong #73 |
 | [#52](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/52), [#54](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/54), [#55](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/55), [#60](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/60), [#64](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/64), [#65](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/65), [#67](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/67) | Source mitigations/CI và actual environment acceptance là hai mức riêng; còn runtime/role/key/audit/source integration | I03–I05, S02–S08, O01–O02, E06/E08/E09/E11; reuse mitigation đã merge |
-| [#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/56) | OPEN; original 30 physical cases và RUNTIME-01/02 chưa verified | E13 chỉ đề xuất physical closeout khi toàn bộ original contract thật sự đạt |
+| [#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/56) | CLOSED trên GitHub; 30 physical cases `NOT_RUN / NOT_VERIFIED`, RUNTIME-01/02 `NOT_VERIFIED` | E13 chỉ đề xuất physical closeout khi toàn bộ original contract thật sự đạt |
 
 Đối chiếu [risk policy #59](../security/issue59-conditional-risk-policy.json) trước mỗi candidate. Exception `APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY` không tự mở frontend publication hoặc deployment. Lab này ưu tiên backend HTTP/SQL; frontend giữ trong phạm vi CI hiện được duyệt. Quyết định source-only của PR trước không tự áp dụng cho PR #74 hoặc increment mới.
 
@@ -40,7 +40,7 @@ Dependency dưới đây là **source/API prerequisite**. Live run còn cần en
 
 | ID | PR scope | Source/API dependencies | Deliverable chính | State |
 |---|---|---|---|---|
-| [LAB-E01](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e01) | Đồng bộ #73/#59 và phạm vi lab | — | Docs/state, không close physical | PLANNED |
+| [LAB-E01](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e01) | Đồng bộ #73/#59 và phạm vi lab | — | Docs/state, không close physical | SOURCE_REVIEW |
 | [LAB-E02](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e02) | Diagnostics cho LocalDB và A11-09 | — | Artifact lỗi redacted, giữ assertion | PLANNED |
 | [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) | Fix LocalDB bootstrap có root cause | LAB-E02 | Regression deterministic và bounded init | PLANNED |
 | [LAB-E04](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e04) | Fix HTTP 500 sau OS restart | LAB-E02 | A/B × Worker on/off regression | PLANNED |
@@ -125,13 +125,13 @@ Một code PR chỉ gọi SOURCE_READY/SOURCE_MERGED khi: phạm vi đúng incre
 
 Trạng thái register sau này: `PLANNED → IN_PROGRESS → SOURCE_REVIEW → SOURCE_MERGED → LAB_EXECUTED → LAB_REVIEWED`; BLOCKED luôn kèm dependency/artifact/reason. Original physical ledger giữ riêng NOT_RUN/NOT_VERIFIED. Một docs PR hoàn tất không chuyển 32 implementation rows thành done.
 
-## 7. Điều kiện trước khi đóng #56
+## 7. Điều kiện trước khi xác nhận physical acceptance của #56
 
 - E01 đã đồng bộ tài liệu B.9/#73 với #59; mọi scope/expiry hiện tại được kiểm tra lại.
 - #53 có end-to-end current authority, actual restore và Worker/CASE witnesses; #75 có root-cause disposition của cả hai nhánh, không chỉ một green rerun.
 - Frozen source H, fixture, image digests, migrations và effective config khớp evidence/CI/review; mọi source thay đổi phải revalidate.
 - 30 original cases, 5 gates và 2 runtime probes đầy đủ actual witnesses; required CI không missing/skipped; original B9 mutations vẫn reject.
 - Independent observer/Security/DBA và key custody đáp ứng đúng original contract; actual approved retention/restore/outcome/alert evidence đầy đủ.
-- Nếu chỉ có một người: hoàn thành báo cáo local trung thực, để các điều kiện chưa đạt BLOCKED và #56 OPEN. Một alternative solo contract chỉ tồn tại sau explicit versioned Owner disposition riêng; roadmap này không ban hành ngoại lệ đó.
+- Nếu chỉ có một người: hoàn thành báo cáo local trung thực, giữ các điều kiện chưa đạt BLOCKED, kể cả khi GitHub #56 hiển thị CLOSED. Một alternative solo contract chỉ tồn tại sau explicit versioned Owner disposition riêng; roadmap này không ban hành ngoại lệ đó.
 
 Xem [original B.1 case contract](../security/app-02b1-acceptance-evidence.md), [original B.9](app-02b9-independent-preprod-oracle.md) và [Owner decisions](../decisions/owner-app02b-2026-11-17.md). APP-02C/D/E, production/Pilot/Go-Live, real EV-08 và production P0 không được đóng bởi roadmap hoặc local lab này.

@@ -1,6 +1,6 @@
 # APP-02B LAB — Evidence, CI, Drivers and Closeout
 
-**State:** PLAN_ONLY / IMPLEMENTATION_NOT_STARTED. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
+**State:** LAB-E01 `SOURCE_REVIEW` (docs-only); LAB-E02..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
 
 **Goal:** chạy các scenario thật, giữ raw evidence và đối chiếu đủ 30 case + 2 runtime probes, với trạng thái closeout đúng phạm vi.
 **Architecture/stack:** [design](design.md); Python collectors/runner, PowerShell entrypoints, GitHub Actions và original B9 validator.
@@ -19,19 +19,19 @@
 <a id="lab-e01"></a>
 ## LAB-E01 — Đồng bộ #73/#59 và phạm vi lab
 
-**Status:** PLANNED. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** SOURCE_REVIEW (docs-only). **PR boundary:** một PR độc lập từ current main. **Source/API dependencies:** không có.
 
 **Dependencies:** không phụ thuộc runtime mới. **Deliverable:** một PR tài liệu có trạng thái và lineage đúng; hoặc cập nhật đúng PR #73 sau khi chủ sở hữu nhánh cho phép tích hợp, không tạo hai closeout cạnh tranh.
 
-**Modify (existing):** các file của PR #73: `README.md`, `docs/closeout/2026-11-18-app-02b9-source-only.md` (hiện chỉ trên nhánh #73), `docs/roadmap/app-00-app-01.md`, `app-02.md`, `app-02b-preprod-foundation.md`, `app-02b7-backup-pitr-safe-restore.md`, `app-02b8-immutable-audit-operations.md`, `app-02b9-independent-preprod-oracle.md`. Không chép phiên bản nhánh cũ đè main.
+**Modify (existing):** các file của PR #73: `README.md`, `docs/closeout/2026-11-18-app-02b9-source-only.md` (dùng lại đường dẫn được đề xuất trong #73), `docs/roadmap/app-00-app-01.md`, `app-02.md`, `app-02b-preprod-foundation.md`, `app-02b7-backup-pitr-safe-restore.md`, `app-02b8-immutable-audit-operations.md`, `app-02b9-independent-preprod-oracle.md`. Không chép phiên bản nhánh cũ đè main.
 
-**Create (proposed):** `docs/decisions/proposed-app02b-local-lab-scope.md` với trạng thái `PROPOSED / NO_PHYSICAL_ACCEPTANCE_AMENDMENT`. Tách phần thiết kế được roadmap chọn khỏi Owner approval chưa có: approved environment, identities, backup target, retention/key history, operational fault windows. Nếu sau này Owner chọn ngoại lệ solo physical thì tạo decision riêng có phạm vi và ngày, không sửa lịch sử B.1 hoặc thừa kế B.4/#59.
+**Scope proposal:** [proposed-app02b-local-lab-scope.md](../../decisions/proposed-app02b-local-lab-scope.md) với trạng thái `PROPOSED / NO_PHYSICAL_ACCEPTANCE_AMENDMENT`. Tách phần thiết kế được roadmap chọn khỏi Owner approval chưa có: approved environment, identities, backup target, retention/key history, operational fault windows. Nếu sau này Owner chọn ngoại lệ solo physical thì tạo decision riêng có phạm vi và ngày, không sửa lịch sử B.1 hoặc thừa kế B.4/#59.
 
-- [ ] Đọc live #53/#56/#59/#60/#64/#65/#67/#68/#75 và #73/#74; record exact SHAs và updated times.
-- [ ] Đổi trạng thái hiện tại #59 thành CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; giữ ngày hết hạn và scope. Giữ tất cả failures cũ theo run/attempt.
-- [ ] Run `44323688504` hiện success attempt 2 trên `216ce719...`; diễn đạt attempt 1 fail, attempt 2 pass. Không sửa lịch sử thành chưa từng fail.
-- [ ] Thêm #75, giữ #68 root cause unresolved; giữ 30 physical cases NOT_RUN/NOT_VERIFIED và #56 OPEN.
-- [ ] Diff chỉ docs; link-check các relative links vào file tồn tại trên nhánh/main và các URL run. Kiểm tra final PR HEAD/CI riêng; không dùng CI #61 như CI #73.
+- [x] Đối chiếu live #53/#56/#59/#60/#64/#65/#67/#68/#75 và #73/#74. Ghi exact SHAs, trạng thái và updated times trong [B.9 source closeout](../../closeout/2026-11-18-app-02b9-source-only.md).
+- [x] Đổi trạng thái hiện tại #59 thành CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; giữ ngày hết hạn và scope. Giữ tất cả failures cũ theo run/attempt.
+- [x] Run `44323688504` hiện success attempt 2 trên `216ce719...`; diễn đạt attempt 1 fail, attempt 2 pass. Không sửa lịch sử thành chưa từng fail.
+- [x] Ghi #75 và #68 OPEN, root causes unresolved. Giữ 30 physical cases NOT_RUN/NOT_VERIFIED. GitHub #56 thực tế CLOSED; physical acceptance vẫn NO_GO.
+- [ ] Kiểm tra diff docs, relative links và URL run trên final PR HEAD. Ghi final HEAD và CI của PR LAB-E01 trong mục Verification của PR; giữ CI #61 và #73 theo đúng source riêng.
 
 **Exit:** source/docs có thể merge theo gate của PR tài liệu; không ký hoặc đóng physical acceptance. Không cần viết test unit chỉ để kiểm tra một câu văn.
 
