@@ -210,7 +210,8 @@ class WindowsDockerPreflightTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="lab-d01-")
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        # Model canonical Windows known-folder paths even when TEMP uses an alias.
+        self.root = Path(temp.name).resolve(strict=True)
         self.config = self.root / "plan.json"
         self.evidence = self.root / "evidence"
         self.evidence.mkdir()
