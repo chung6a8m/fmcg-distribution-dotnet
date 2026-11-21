@@ -139,3 +139,7 @@ LAB-E05 admission and B.9 evidence.
 - [Windows known folders](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)
 - [Microsoft Authenticode signature verification](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature)
 - [Microsoft SQL Server container architecture](https://learn.microsoft.com/en-us/sql/linux/containers/deploy)
+
+## LAB-D02 source and CI
+
+See the [LAB-D02 operator contract](network-policy.md) for guarded Compose staging.

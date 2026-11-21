@@ -1,0 +1,46 @@
+name: APP-02B LAB-D02 Docker Compose (synthetic CI only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/app02b-lab-d02.yml'
+      - 'deploy/lab/docker-wsl2/**'
+      - 'scripts/lab/New-DockerRehearsal.ps1'
+      - 'scripts/lab/DockerRehearsal.Common.ps1'
+      - 'scripts/lab/Test-DockerRehearsalNetwork.ps1'
+      - 'scripts/lab/DockerWsl*.ps1'
+      - 'tools/app02b_lab/**'
+      - 'tests/app02b_lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d02-compose-synthetic:
+    name: LAB-D02 staged Compose and private bridge checks (synthetic Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source HEAD
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Verify staging and scoped network behavior on the disposable runner
+        shell: bash
+        env:
+          LAB_D02_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$LAB_D02_SOURCE_HEAD"
+          PYTHONPATH="$GITHUB_WORKSPACE" python -B tests/app02b_lab/docker_d02_ci.py
+      - name: Retain synthetic CI evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-d02-synthetic-ci
+          path: ${{ runner.temp }}/lab-d02-ci.json
+          if-no-files-found: error

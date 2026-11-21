@@ -1,0 +1,57 @@
+{
+  "services": {
+    "api": {
+      "image": "",
+      "platform": "linux/amd64",
+      "pull_policy": "never",
+      "entrypoint": ["dotnet", "FmcgDms.Preprod.Api.dll"],
+      "command": [],
+      "working_dir": "/app",
+      "environment": {
+        "DOTNET_ENVIRONMENT": "Preprod",
+        "ASPNETCORE_ENVIRONMENT": "Preprod",
+        "ASPNETCORE_URLS": "http://0.0.0.0:8080",
+        "Runtime__Environment": "Preprod",
+        "Runtime__Role": "api",
+        "Runtime__Mode": "FOUNDATION_ONLY",
+        "Runtime__Admission": "NO_GO",
+        "Identity__Enabled": "false"
+      },
+      "networks": ["app"],
+      "read_only": true,
+      "user": "1654:1654",
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "healthcheck": {"disable": true},
+      "restart": "no"
+    },
+    "worker": {
+      "image": "",
+      "platform": "linux/amd64",
+      "pull_policy": "never",
+      "entrypoint": ["dotnet", "FmcgDms.Preprod.Worker.dll"],
+      "command": [],
+      "working_dir": "/app",
+      "environment": {
+        "DOTNET_ENVIRONMENT": "Preprod",
+        "Runtime__Environment": "Preprod",
+        "Runtime__Role": "worker",
+        "Runtime__Mode": "FOUNDATION_ONLY",
+        "Runtime__Admission": "NO_GO"
+      },
+      "networks": ["app"],
+      "read_only": true,
+      "user": "1654:1654",
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "healthcheck": {"disable": true},
+      "restart": "no"
+    }
+  },
+  "networks": {
+    "app": {
+      "external": true,
+      "name": ""
+    }
+  }
+}
