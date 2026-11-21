@@ -1,0 +1,46 @@
+name: APP-02B LAB-D03 Vault TLS and Raft (synthetic CI only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/app02b-lab-d03.yml'
+      - 'deploy/lab/docker-wsl2/vault/**'
+      - 'deploy/preprod/vault-policy-api.hcl'
+      - 'deploy/preprod/vault-policy-worker.hcl'
+      - 'scripts/lab/*DockerLabVault*.ps1'
+      - 'tools/app02b_lab/**'
+      - 'tests/app02b_lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d03-vault-synthetic:
+    name: LAB-D03 private TLS, Raft, Vault roles and audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out exact source HEAD
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Verify exact source and run isolated Vault
+        shell: bash
+        env:
+          LAB_D03_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$LAB_D03_SOURCE_HEAD"
+          python -B -m unittest discover -s tests/app02b_lab -p 'test_docker_d03.py' -v
+          PYTHONPATH="$GITHUB_WORKSPACE" python -B tests/app02b_lab/docker_d03_ci.py
+      - name: Retain only redacted synthetic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-d03-synthetic-ci
+          path: ${{ runner.temp }}/lab-d03-ci.json
+          if-no-files-found: error

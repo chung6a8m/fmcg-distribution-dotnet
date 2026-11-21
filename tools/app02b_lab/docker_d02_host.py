@@ -6,7 +6,7 @@ import re
 
 from . import docker_preflight as d01
 from .contract import canonical_json, digest, require
-from .docker_d02_topology import IMAGE, PROJECT, PROJECT_LABEL
+from .docker_d02_topology import IMAGE, PROJECT_LABEL
 from .docker_windows import verified_windows_folders
 from .preflight import existing_local_input
 from .environment import check_location
@@ -16,6 +16,7 @@ COMPOSE_LABEL = "com.docker.compose.project"
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
 OBJECT_ID = re.compile(r"[0-9a-f]{64}", re.ASCII)
 NETWORK_ID = re.compile(r"(?:[0-9a-f]{64}|[a-z0-9]{25})", re.ASCII)
+DOCKER_NAMESPACE = re.compile(r"[a-z][a-z0-9_-]{2,62}", re.ASCII)
 VOLUME_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", re.ASCII)
 NAMESPACE_PREFIXES = ("-", "_")
 # The global scan excludes container configuration and environment secrets.
@@ -43,11 +44,12 @@ $env:PSModulePath = Get-D01TrustedModulePath
 $sidType = [Security.Principal.SecurityIdentifier]
 $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($current, 'S-1-5-18', 'S-1-5-32-544')
-$writeMask = [int]([Security.AccessControl.FileSystemRights]::Write -bor
+$rightsMask = [int]([Security.AccessControl.FileSystemRights]::Write -bor
     [Security.AccessControl.FileSystemRights]::Delete -bor
     [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
     [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
     [Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x50000000)
+if ($D03Confidential) { $rightsMask = -1 }
 $paths = @(ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd()))
 if ($paths.Count -eq 0) { exit 1 }
 foreach ($path in $paths) {
@@ -60,17 +62,18 @@ foreach ($path in $paths) {
     foreach ($rule in $rules) {
         if ($rule.AccessControlType -eq 'Allow' -and
             $rule.IdentityReference.Value -notin $trusted -and
-            ([int]$rule.FileSystemRights -band $writeMask)) { exit 1 }
+            ([int]$rule.FileSystemRights -band $rightsMask)) { exit 1 }
     }
 }
 [Console]::WriteLine('PRIVATE')
 """
 
 
-def assert_private(pwsh, paths):
+def assert_private(pwsh, paths, *, confidential=False):
     values = list(dict.fromkeys(map(str, paths)))
     require(bool(values), "UNSAFE_D02_ACL")
-    encoded = base64.b64encode(ACL_CHECK.encode("utf-16-le")).decode("ascii")
+    script = ("$D03Confidential = $true\n" if confidential else "") + ACL_CHECK
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     raw = d01.command([pwsh, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
                       input_data=canonical_json(values))
     require(d01.text_result(raw) == "PRIVATE", "UNSAFE_D02_ACL")
@@ -161,7 +164,7 @@ class Docker:
         return rows
 
     def state(self, project):
-        require(type(project) is str and PROJECT.fullmatch(project), "INVALID_PROJECT_NAMESPACE")
+        require(type(project) is str and DOCKER_NAMESPACE.fullmatch(project), "INVALID_PROJECT_NAMESPACE")
         self.verify()
         ids = {"container": self._names("container", "--all", "--no-trunc"),
                "network": self._names("network", "--no-trunc"),
