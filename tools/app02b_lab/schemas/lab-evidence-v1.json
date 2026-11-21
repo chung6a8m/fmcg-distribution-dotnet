@@ -1,0 +1,571 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fmcgdms:lab-evidence-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "evidenceClass",
+    "humanReview",
+    "originalGateStatus",
+    "runId",
+    "sourceHeadSha",
+    "environmentId",
+    "caseCount",
+    "runtimeProbeCount",
+    "cases",
+    "runtimeProbes"
+  ],
+  "properties": {
+    "schema": {
+      "const": "APP02B-LAB-EVIDENCE-V1"
+    },
+    "evidenceClass": {
+      "const": "LOCAL_OPERATOR_LAB"
+    },
+    "humanReview": {
+      "const": "SOLO_OWNER_SELF_ATTESTED"
+    },
+    "originalGateStatus": {
+      "const": "NOT_VERIFIED"
+    },
+    "runId": {
+      "type": "string",
+      "pattern": "^b-lab-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8,32}$"
+    },
+    "sourceHeadSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "environmentId": {
+      "type": "string",
+      "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+    },
+    "caseCount": {
+      "const": 30
+    },
+    "runtimeProbeCount": {
+      "const": 2
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/result"
+      },
+      "minItems": 30,
+      "maxItems": 30,
+      "uniqueItems": true
+    },
+    "runtimeProbes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/result"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caseId",
+        "expected",
+        "negativeInvariant",
+        "requiredKinds",
+        "technicalResult",
+        "acceptanceStatus",
+        "missingRequirements",
+        "tenantScope",
+        "peerScope",
+        "targetRefs",
+        "actualObservations",
+        "diff",
+        "positiveRefs",
+        "negativeRefs",
+        "peerBefore",
+        "peerAfter",
+        "faultId",
+        "observedUtc",
+        "attemptId"
+      ],
+      "properties": {
+        "caseId": {
+          "type": "string",
+          "pattern": "^(B0[1-5]-0[1-6]|RUNTIME-0[12])$"
+        },
+        "expected": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+        },
+        "negativeInvariant": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+        },
+        "requiredKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "technicalResult": {
+          "enum": [
+            "NOT_RUN",
+            "BLOCKED",
+            "FAIL",
+            "PASS"
+          ]
+        },
+        "acceptanceStatus": {
+          "const": "NOT_VERIFIED"
+        },
+        "missingRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "tenantScope": {
+          "enum": [
+            "UNASSIGNED",
+            "A",
+            "B",
+            "A_AND_B",
+            "RUNTIME"
+          ]
+        },
+        "peerScope": {
+          "enum": [
+            "UNASSIGNED",
+            "A",
+            "B",
+            "A_AND_B",
+            "NONE"
+          ]
+        },
+        "targetRefs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ref-[a-f0-9]{16,64}$"
+          },
+          "minItems": 0,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "actualObservations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "diff": {
+          "anyOf": [
+            {
+              "enum": [
+                "MATCH",
+                "MISMATCH"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "positiveRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "negativeRefs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactRef"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "peerBefore": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peerAfter": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "faultId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observedUtc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attemptId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^attempt-[a-f0-9]{32}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "technicalResult": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actualObservations": {
+            "minItems": 1
+          },
+          "positiveRefs": {
+            "minItems": 1
+          },
+          "negativeRefs": {
+            "minItems": 1
+          },
+          "missingRequirements": {
+            "maxItems": 0
+          },
+          "diff": {
+            "const": "MATCH"
+          },
+          "faultId": {
+            "type": "string",
+            "pattern": "^ref-[a-f0-9]{16,64}$"
+          },
+          "observedUtc": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+            "format": "date-time"
+          },
+          "attemptId": {
+            "type": "string",
+            "pattern": "^attempt-[a-f0-9]{32}$"
+          }
+        }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "sha256"
+      ],
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_./-]{1,512}$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "evidenceClass",
+        "humanReview",
+        "originalGateStatus",
+        "runId",
+        "sourceHeadSha",
+        "environmentId",
+        "configurationSha256",
+        "attemptId",
+        "startedUtc",
+        "selection",
+        "results"
+      ],
+      "properties": {
+        "schema": {
+          "const": "APP02B-LAB-EVIDENCE-V1"
+        },
+        "evidenceClass": {
+          "const": "LOCAL_OPERATOR_LAB"
+        },
+        "humanReview": {
+          "const": "SOLO_OWNER_SELF_ATTESTED"
+        },
+        "originalGateStatus": {
+          "const": "NOT_VERIFIED"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^b-lab-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8,32}$"
+        },
+        "sourceHeadSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "configurationSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^attempt-[a-f0-9]{32}$"
+        },
+        "startedUtc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "selection": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(B0[1-5]-0[1-6]|RUNTIME-0[12])$"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/result"
+          },
+          "minItems": 32,
+          "maxItems": 32,
+          "uniqueItems": true
+        }
+      }
+    },
+    "witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "evidenceClass",
+        "humanReview",
+        "originalGateStatus",
+        "runId",
+        "attemptId",
+        "caseId",
+        "sourceHeadSha",
+        "environmentId",
+        "configurationSha256",
+        "kind",
+        "phase",
+        "observedUtc",
+        "observedSymbol",
+        "faultId",
+        "observerPrincipalRef",
+        "targetIdentity",
+        "vantagePoint",
+        "rawArtifact"
+      ],
+      "properties": {
+        "schema": {
+          "const": "APP02B-LAB-EVIDENCE-V1"
+        },
+        "evidenceClass": {
+          "const": "LOCAL_OPERATOR_LAB"
+        },
+        "humanReview": {
+          "const": "SOLO_OWNER_SELF_ATTESTED"
+        },
+        "originalGateStatus": {
+          "const": "NOT_VERIFIED"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^b-lab-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8,32}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^attempt-[a-f0-9]{32}$"
+        },
+        "caseId": {
+          "type": "string",
+          "pattern": "^(B0[1-5]-0[1-6]|RUNTIME-0[12])$"
+        },
+        "sourceHeadSha": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "configurationSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+        },
+        "phase": {
+          "enum": [
+            "POSITIVE",
+            "NEGATIVE"
+          ]
+        },
+        "observedUtc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        },
+        "observedSymbol": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+        },
+        "faultId": {
+          "type": "string",
+          "pattern": "^ref-[a-f0-9]{16,64}$"
+        },
+        "observerPrincipalRef": {
+          "type": "string",
+          "pattern": "^ref-[a-f0-9]{16,64}$"
+        },
+        "targetIdentity": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ref-[a-f0-9]{16,64}$"
+          },
+          "minItems": 0,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "vantagePoint": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,95}$"
+        },
+        "rawArtifact": {
+          "$ref": "#/$defs/artifactRef"
+        }
+      }
+    },
+    "journal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptId",
+        "attemptSha256",
+        "previousSha256",
+        "sequence"
+      ],
+      "properties": {
+        "attemptId": {
+          "type": "string",
+          "pattern": "^attempt-[a-f0-9]{32}$"
+        },
+        "attemptSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "previousSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": [
+        "runId",
+        "baselineSha256",
+        "attemptCount",
+        "journalHeadSha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string",
+          "pattern": "^b-lab-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8,32}$"
+        },
+        "baselineSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "attemptCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "journalHeadSha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

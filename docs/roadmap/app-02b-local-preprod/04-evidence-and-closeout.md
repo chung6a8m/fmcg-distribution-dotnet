@@ -89,7 +89,7 @@
 <a id="lab-e05"></a>
 ## LAB-E05 — Run context, catalog và schema
 
-**Status:** PLANNED. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** SOURCE_REVIEW. [V1 contract and usage](lab-e05-contract.md). **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
 
 **Create:** `tools/app02b_lab/context.py`, `catalog.py`, `schema.py`, `run.py`, `schemas/lab-evidence-v1.json`, `schemas/lab-run-context-v1.json`, `tests/app02b_lab/test_context.py`, `test_catalog.py`, `test_schema.py`; wrapper `scripts/lab/Invoke-LabAcceptance.ps1`.
 
