@@ -1,0 +1,326 @@
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+import subprocess
+
+from tools.app02b_lab import docker_preflight as preflight
+from tools.app02b_lab.contract import LabError
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SHA = "a" * 40
+
+
+def fixture():
+    plan = json.loads((ROOT / "deploy/lab/docker-wsl2/host-plan.example.json").read_text())
+    plan["sourceHead"] = SHA
+    for image in plan["images"]:
+        image["reference"] = image["reference"].split("@")[0] + "@sha256:" + "1" * 64
+        image["publisherReceiptSha256"] = "2" * 64
+    host = {
+        "machine": "private host identity", "architecture": "X64", "build": 26100,
+        "freeRam": 8 * 2**30, "totalRam": 16 * 2**30, "diskFree": 120 * 2**30,
+        "diskRef": "private data disk identity", "diskCapacity": 500 * 2**30,
+        "dns": 2, "ports": [], "excluded": [], "routes": [],
+        "pwsh": "7.5.0", "desktop": "4.50.0", "git": "2.49.0", "python": "3.14.1",
+    }
+    engine = {
+        "ID": "private daemon identity", "OSType": "linux", "Architecture": "x86_64",
+        "OperatingSystem": "Docker Desktop", "KernelVersion": "6.6.87.2-microsoft-standard-WSL2",
+        "MemTotal": 8 * 2**30, "NCPU": 4, "Driver": "overlayfs",
+        "DockerRootDir": "/var/lib/docker", "ServerVersion": "29.1.0",
+    }
+    host["wsl"] = "2.6.1.0"
+    host["wslMode"] = 2
+    host["dockerCli"] = "29.1.0"
+    host["compose"] = "2.40.3"
+    host["clockSkewSeconds"] = 2
+    host["context"] = preflight.CONTEXT
+    host["endpoint"] = preflight.ENDPOINT
+    host["engine"] = engine
+    host["containers"] = []
+    host["projects"] = []
+    host["networks"] = []
+    host["volumes"] = []
+    host["images"] = {
+        image["role"]: {"Os": "linux", "Architecture": "amd64", "RepoDigests": [image["reference"]]}
+        for image in plan["images"]
+    }
+    plan["hostRef"], plan["engineRef"] = preflight.identity_refs(host)
+    return plan, host
+
+
+class DockerPreflightTests(unittest.TestCase):
+    def test_ready_report_is_versioned_and_redacted(self):
+        plan, host = fixture()
+        preflight.validate_plan(plan)
+        report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b" * 64)
+        self.assertEqual("READY", report["readiness"], report)
+        preflight.validate_document(report, "docker-host-preflight")
+        rendered = json.dumps(report) + preflight.markdown(report)
+        for value in ("private host identity", "private daemon identity", "private data disk",
+                      preflight.ENDPOINT, plan["evidenceRoot"], plan["networks"][0]["subnet"]):
+            self.assertNotIn(value, rendered)
+
+    def test_each_required_negative_blocks(self):
+        cases = (
+            ("DOCKER_DAEMON", lambda h: h.update(engine=None)),
+            ("WSL2_BACKEND", lambda h: h.update(wslMode=1)),
+            ("LINUX_ENGINE", lambda h: h["engine"].update(OSType="windows")),
+            ("LOCAL_CONTEXT", lambda h: h.update(endpoint="tcp://192.0.2.5:2375")),
+            ("LOCAL_CONTEXT", lambda h: h.update(context="unexpected")),
+            ("SQL_X64", lambda h: h.update(architecture="Arm64")),
+            ("SQL_X64", lambda h: h["engine"].update(Architecture="aarch64")),
+            ("HOST_MEMORY", lambda h: h.update(freeRam=1)),
+            ("WSL_MEMORY", lambda h: h["engine"].pop("MemTotal")),
+            ("DATA_STORAGE", lambda h: h.update(diskFree=None)),
+            ("DATA_STORAGE", lambda h: h.update(diskRef=None)),
+            ("DATA_STORAGE", lambda h: h.update(diskCapacity=1)),
+            ("DATA_STORAGE", lambda h: h["engine"].update(DockerRootDir="/unknown")),
+            ("PORTS", lambda h: h.update(ports=[18443])),
+            ("PORTS", lambda h: h.update(excluded=[[18400, 18500]])),
+            ("NETWORKS", lambda h: h.update(routes=["172.29.40.0/23"])),
+            ("PROJECT", lambda h: h.update(containers=[{"project": "app02b-docker-lab", "ports": [], "binds": 0}])),
+            ("VOLUMES", lambda h: h.update(volumes=["app02b-docker-lab_sql"])),
+            ("IMAGE_SQL", lambda h: h["images"].pop("SQL")),
+            ("IMAGE_SQL", lambda h: h["images"]["SQL"].update(RepoDigests=[])),
+            ("ENGINE_IDENTITY", lambda h: h["engine"].update(ID="different")),
+        )
+        for check, change in cases:
+            with self.subTest(check=check):
+                plan, host = fixture()
+                change(host)
+                report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b" * 64)
+                self.assertEqual("BLOCKED", report["readiness"])
+                self.assertNotEqual("PASS", report["checks"][check])
+                preflight.validate_document(report, "docker-host-preflight")
+
+    def test_source_must_match_clean_plan(self):
+        plan, host = fixture()
+        for source in ((SHA, "DIRTY"), ("c" * 40, "CLEAN"), (None, "UNKNOWN")):
+            report = preflight.evaluate(plan, host, source, "b" * 64)
+            self.assertEqual("BLOCKED", report["readiness"])
+            self.assertNotEqual("PASS", report["checks"]["SOURCE"])
+
+    def test_plan_rejects_unpinned_unknown_images_and_secret_fields(self):
+        for change in (
+            lambda p: p.update(password="credential"),
+            lambda p: p["images"][0].update(reference="mcr.microsoft.com/mssql/server:latest"),
+            lambda p: p["images"][0].update(reference="foreign.example/mssql/server@sha256:" + "b" * 64),
+            lambda p: p["networks"][0].update(subnet="192.0.2.0/24"),
+            lambda p: p["ports"].append(18443),
+        ):
+            plan, _ = fixture()
+            change(plan)
+            with self.assertRaises(LabError):
+                preflight.validate_plan(plan)
+
+    def test_doctor_refuses_target_overrides_before_invoking_docker(self):
+        for name in ("DOCKER_HOST", "DOCKER_CONTEXT", "Docker_Config", "DOCKER_DEFAULT_PLATFORM", "COMPOSE_ENV_FILES"):
+            with self.subTest(name=name), patch.dict(os.environ, {name: "private"}):
+                with patch.object(preflight, "command") as command:
+                    self.assertEqual("DOCKER_ENV_OVERRIDE", preflight.docker_inventory(Path("docker"), {}))
+                    command.assert_not_called()
+
+    def test_remote_endpoint_is_never_contacted(self):
+        with patch.object(preflight, "command", side_effect=[
+            b"desktop-linux\n", b'"tcp://192.0.2.5:2375"\n',
+        ]) as command:
+            host = {}
+            self.assertEqual("UNSAFE_CONTEXT", preflight.docker_inventory(Path("docker"), host))
+            self.assertEqual(2, command.call_count)
+
+    def test_malformed_json_is_collection_error(self):
+        for data in (b"{bad", b'{"a":1,"a":2}', b"[]"):
+            with self.assertRaises(LabError):
+                preflight.json_result(data, dict)
+
+    def test_classifies_missing_daemon_and_permissions_at_native_boundary(self):
+        cases = (
+            ("daemon", b"The system cannot find the file specified", None),
+            ("daemon", b"Access is denied: private pipe", "HOST_ACCESS_DENIED"),
+            ("image", b"Error response from daemon: No such image: private reference", None),
+            ("image", b"unexpected engine API response", "COLLECTION_ERROR"),
+        )
+        for discovery, stderr, failure in cases:
+            result = subprocess.CompletedProcess([], 1, b"", stderr)
+            with self.subTest(discovery=discovery, failure=failure), patch.object(
+                    preflight.subprocess, "run", return_value=result):
+                if failure:
+                    with self.assertRaisesRegex(LabError, "^" + failure + "$"):
+                        preflight.command(["docker"], missing=discovery)
+                else:
+                    self.assertIsNone(preflight.command(["docker"], missing=discovery))
+
+    def test_inventory_with_swarm_id_and_configured_port_range(self):
+        network_id = "zzj6nj4cr3y5387js5rjo4hf8"
+        container_id = "a" * 64
+        rows = iter([
+            b"", b"", container_id.encode(),
+            b'{"Name":"/foreign","Project":"","Bindings":{"8080/tcp":[{"HostPort":"18440-18450"}]},'
+            b'"LivePorts":null,"Mounts":[]}',
+            network_id.encode(),
+            b'{"Name":"foreign","Subnets":[{"Subnet":"172.30.20.0/24"},{"Subnet":"fc00::/64"}]}',
+        ])
+        plan, host = fixture()
+        preflight.collect_objects(lambda *args: next(rows), host)
+        self.assertEqual([(18440, 18450)], host["containers"][0]["ports"])
+        self.assertEqual(["172.30.20.0/24"], host["networks"][0]["subnets"])
+        self.assertFalse(preflight.conflicts(plan, host)["PORTS"])
+
+    def test_git_evidence_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            (path / ".git").mkdir()
+            with self.assertRaisesRegex(LabError, "GIT_LOCATION_FORBIDDEN"):
+                preflight.check_location(path / "new-evidence", missing=True)
+
+    def test_daemon_queries_are_pinned_to_local_pipe_and_read_only(self):
+        plan, host = fixture()
+        calls = [
+            b"desktop-linux", json.dumps(preflight.ENDPOINT).encode(),
+            json.dumps(host["engine"]).encode(), b"Docker version 29.1.0", b"v2.40.3",
+            b"", b"", b"", b"",
+            *[json.dumps(host["images"][image["role"]]).encode() for image in plan["images"]],
+            json.dumps(host["engine"]["ID"]).encode(), b"desktop-linux", json.dumps(preflight.ENDPOINT).encode(),
+        ]
+        with patch.object(preflight, "command", side_effect=calls) as run:
+            self.assertIsNone(preflight.docker_inventory(Path("docker"), host, plan))
+            server_calls = [call.args[0][3:] for call in run.call_args_list if call.args[0][1] == "--host"]
+            self.assertTrue(all(call.args[0][2] == preflight.ENDPOINT for call in run.call_args_list
+                                if call.args[0][1] == "--host"))
+            self.assertEqual(["info", "compose", "compose", "volume", "container", "network",
+                              "image", "image", "image", "image", "info"],
+                             [args[0] for args in server_calls])
+            self.assertTrue(all(args[1] == "inspect" for args in server_calls if args[0] == "image"))
+
+
+@unittest.skipUnless(os.name == "nt", "Windows publication and reparse point checks")
+class WindowsDockerPreflightTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="lab-d01-")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.config = self.root / "plan.json"
+        self.evidence = self.root / "evidence"
+        self.evidence.mkdir()
+        self.output = self.evidence / "attempt"
+        self.plan, self.host = fixture()
+        self.plan["evidenceRoot"] = str(self.evidence)
+        self.receipts = self.root / "receipts"
+        self.receipts.mkdir()
+        for image in self.plan["images"]:
+            image["publisherReceiptSha256"] = self.write_receipt(image["reference"])
+        self.config.write_text(json.dumps(self.plan), encoding="utf-8")
+
+    def write_receipt(self, reference):
+        receipt = preflight.canonical_json({"schema": "APP02B-LAB-DOCKER-PUBLISHER-RECEIPT-V1",
+                                            "reference": reference, "platform": "linux/amd64",
+                                            "proofSha256": "3" * 64})
+        sha = preflight.digest(receipt)
+        (self.receipts / f"{sha}.json").write_bytes(receipt)
+        return sha
+
+    def run_preflight(self, issue=None, error=None):
+        def collect(pwsh, plan, host):
+            if error is not None:
+                raise error
+            host.update(self.host)
+            return issue
+
+        with (patch.object(preflight, "source_info", return_value=(SHA, "CLEAN")),
+              patch.object(preflight, "collect_inventory", side_effect=collect)):
+            return preflight.run(str(self.config), str(self.output), "pwsh")
+
+    def test_publishes_three_files_atomically_and_refuses_overwrite(self):
+        self.assertEqual(0, self.run_preflight())
+        journal = self.output / "SHA256SUMS"
+        hashes = journal.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(2, len(hashes))
+        for line in hashes:
+            sha, name = line.split("  ")
+            self.assertEqual(sha, preflight.digest((self.output / name).read_bytes()))
+        with self.assertRaisesRegex(LabError, "OUTPUT_ALREADY_EXISTS"):
+            self.run_preflight()
+        self.assertEqual(hashes, journal.read_text(encoding="utf-8").splitlines())
+
+    def test_missing_privileges_preserves_redacted_collection_error_receipt(self):
+        self.assertEqual(1, self.run_preflight(error=PermissionError("private path")))
+        report = (self.output / "docker-preflight.json").read_text(encoding="utf-8")
+        self.assertNotIn("private path", report)
+        self.assertEqual(["HOST_ACCESS_DENIED"], json.loads(report)["issueCodes"])
+
+    def test_refuses_missing_mismatched_and_unrelated_publisher_receipts(self):
+        image = self.plan["images"][0]
+        receipt = self.receipts / (image["publisherReceiptSha256"] + ".json")
+        receipt.unlink()
+        with self.assertRaisesRegex(LabError, "PATH_MISSING"):
+            self.run_preflight()
+        receipt.write_bytes(b"tampered")
+        with self.assertRaisesRegex(LabError, "PUBLISHER_RECEIPT_DIGEST_MISMATCH"):
+            self.run_preflight()
+        image["publisherReceiptSha256"] = self.write_receipt("unrelated")
+        self.config.write_text(json.dumps(self.plan), encoding="utf-8")
+        with self.assertRaisesRegex(LabError, "INVALID_PUBLISHER_RECEIPT"):
+            self.run_preflight()
+        self.assertFalse(self.output.exists())
+
+    def test_blocked_measurements_use_exit_two(self):
+        self.host["engine"] = None
+        self.assertEqual(2, self.run_preflight(issue="DAEMON_UNAVAILABLE"))
+
+    def test_wrapper_rejects_malformed_plan_without_publishing(self):
+        self.config.write_bytes(b'{"secret":"private path"')
+        result = subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-File",
+                                 ROOT / "scripts/lab/Test-DockerWslPrerequisites.ps1",
+                                 "-ConfigFile", self.config, "-OutputDirectory", self.output],
+                                capture_output=True, timeout=30)
+        self.assertEqual(1, result.returncode, result.stderr)
+        self.assertIn(b"INVALID_JSON", result.stderr)
+        self.assertNotIn(b"private path", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_output_under_junction_is_refused(self):
+        junction = self.root / "junction"
+        with patch.dict(os.environ, {"LAB_D01_TARGET": str(self.evidence), "LAB_D01_LINK": str(junction)}):
+            subprocess.run(["pwsh", "-NoProfile", "-NonInteractive", "-Command",
+                            "New-Item -ItemType Junction -Path $env:LAB_D01_LINK -Target $env:LAB_D01_TARGET"],
+                           capture_output=True, check=True, timeout=30)
+        self.addCleanup(junction.rmdir)
+        self.output = junction / "attempt"
+        with self.assertRaisesRegex(LabError, "LINK_OR_REPARSE_POINT"):
+            self.run_preflight()
+        self.assertFalse((self.evidence / "attempt").exists())
+
+    def test_storage_uses_configured_attached_vhd_without_stale_default_fallback(self):
+        config_dir = self.root / "Docker"
+        config_dir.mkdir()
+        settings = config_dir / "settings-store.json"
+        moved = self.root / "moved"
+        stale = config_dir / "wsl/disk/docker_data.vhdx"
+        disk = moved / "disk/docker_data.vhdx"
+        for path in (stale, disk):
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"synthetic")
+        settings.write_text(json.dumps({"CustomWslDistroDir": str(moved)}), encoding="utf-8")
+        with patch.dict(os.environ, {"APPDATA": str(self.root), "LOCALAPPDATA": str(self.root)}):
+            with patch.object(preflight, "command", return_value=b'{"attached":false,"capacity":512}') as query:
+                observed = {}
+                preflight.storage("pwsh", observed)
+                self.assertEqual({}, observed)
+                self.assertEqual(str(disk), query.call_args.kwargs["input_data"].decode().strip())
+            with patch.object(preflight, "command", return_value=b'{"attached":true,"capacity":512}'):
+                preflight.storage("pwsh", observed)
+                self.assertEqual(str(disk).casefold(), observed["diskRef"])
+                self.assertEqual(512, observed["diskCapacity"])
+            disk.unlink()
+            with patch.object(preflight, "command") as query:
+                preflight.storage("pwsh", {})
+                query.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

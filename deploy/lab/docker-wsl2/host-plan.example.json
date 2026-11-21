@@ -1,0 +1,57 @@
+{
+  "schema": "APP02B-LAB-DOCKER-HOST-PLAN-V1",
+  "sourceHead": "0000000000000000000000000000000000000000",
+  "evidenceRoot": "C:\\LabEvidence\\Docker",
+  "hostRef": "0000000000000000000000000000000000000000000000000000000000000000",
+  "engineRef": "0000000000000000000000000000000000000000000000000000000000000000",
+  "project": "app02b-docker-lab",
+  "volumes": [
+    "app02b-docker-lab_sql",
+    "app02b-docker-lab_vault"
+  ],
+  "networks": [
+    {
+      "name": "app02b-docker-lab_app",
+      "subnet": "172.29.40.0/24"
+    },
+    {
+      "name": "app02b-docker-lab_data",
+      "subnet": "172.29.41.0/24"
+    },
+    {
+      "name": "app02b-docker-lab_vault",
+      "subnet": "172.29.42.0/24"
+    }
+  ],
+  "ports": [
+    18443
+  ],
+  "budget": {
+    "hostFreeRamMiB": 4096,
+    "engineRamMiB": 6144,
+    "diskFreeMiB": 32768,
+    "engineCpu": 2
+  },
+  "images": [
+    {
+      "role": "SQL",
+      "reference": "mcr.microsoft.com/mssql/server@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "publisherReceiptSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "APP",
+      "reference": "mcr.microsoft.com/dotnet/aspnet@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "publisherReceiptSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "VAULT",
+      "reference": "hashicorp/vault@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "publisherReceiptSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "role": "PROXY",
+      "reference": "caddy@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "publisherReceiptSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

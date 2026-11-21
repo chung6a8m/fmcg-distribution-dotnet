@@ -1,0 +1,12 @@
+{
+  "schema": "APP02B-LAB-DOCKER-HOST-TOOLCHAIN-V1",
+  "windowsBuild": 26100,
+  "python": "3.14",
+  "git": "2.40",
+  "pwsh": "7.4",
+  "wsl": "2.1.5",
+  "desktop": "4.30",
+  "dockerCli": "25.0",
+  "engine": "25.0",
+  "compose": "2.0"
+}

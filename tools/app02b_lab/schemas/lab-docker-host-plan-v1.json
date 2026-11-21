@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "sourceHead", "evidenceRoot", "hostRef", "engineRef", "project", "volumes", "networks", "ports", "budget", "images"],
+  "properties": {
+    "schema": {"const": "APP02B-LAB-DOCKER-HOST-PLAN-V1"},
+    "sourceHead": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "evidenceRoot": {"type": "string", "pattern": "^[A-Za-z]:\\\\[^\\r\\n]{1,240}$"},
+    "hostRef": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "engineRef": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "project": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,62}$"},
+    "volumes": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,62}$"},
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "networks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "subnet"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,62}$"},
+          "subnet": {"type": "string", "pattern": "^[0-9.]{7,15}/[0-9]{1,2}$"}
+        }
+      },
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true
+    },
+    "ports": {
+      "type": "array",
+      "items": {"type": "integer", "minimum": 1024},
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hostFreeRamMiB", "engineRamMiB", "diskFreeMiB", "engineCpu"],
+      "properties": {
+        "hostFreeRamMiB": {"type": "integer", "minimum": 1024},
+        "engineRamMiB": {"type": "integer", "minimum": 4096},
+        "diskFreeMiB": {"type": "integer", "minimum": 8192},
+        "engineCpu": {"type": "integer", "minimum": 2}
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "reference", "publisherReceiptSha256"],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["APP", "SQL", "VAULT", "PROXY"]
+          },
+          "reference": {"type": "string", "pattern": "^[a-z0-9./_-]+@sha256:[a-f0-9]{64}$"},
+          "publisherReceiptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      },
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true
+    }
+  }
+}
