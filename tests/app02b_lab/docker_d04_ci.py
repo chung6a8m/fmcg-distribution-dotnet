@@ -135,12 +135,14 @@ def run(folder, report):
     address = private_address(docker, sql_name, sql_net)
     row, = docker._inspect("container", [sql_name])
     mounts = {mount["Destination"]: mount for mount in row["Mounts"]}
-    require(row["HostConfig"]["CapDrop"] == ["ALL"]
-            and row["HostConfig"]["CapAdd"] == ["NET_BIND_SERVICE"]
-            and mounts["/var/opt/mssql"]["Name"] == sql_model["volumes"]["data"]["name"]
-            and mounts["/var/opt/mssql-backup"]["Name"] == sql_model["volumes"]["backup"]["name"]
-            and not any(item.startswith("MSSQL_SA_PASSWORD=") for item in row["Config"]["Env"]),
-            "D04_CI_MOUNT_OR_SECRET_DRIFT")
+    capabilities = {item.removeprefix("CAP_") for item in row["HostConfig"]["CapAdd"] or []}
+    require(row["HostConfig"]["CapDrop"] == ["ALL"] and capabilities == {"NET_BIND_SERVICE"},
+            "D04_CI_CAPABILITY_DRIFT")
+    require(mounts["/var/opt/mssql"]["Name"] == sql_model["volumes"]["data"]["name"]
+            and mounts["/var/opt/mssql-backup"]["Name"] == sql_model["volumes"]["backup"]["name"],
+            "D04_CI_SQL_VOLUME_DRIFT")
+    require(not any(item.startswith("MSSQL_SA_PASSWORD=") and item.partition("=")[2]
+                    for item in row["Config"]["Env"]), "D04_CI_SQL_SECRET_IN_DOCKER_CONFIG")
     leaf_sha = d03.validate_pem(sql_cert.read_bytes(), sql_key.read_bytes(), sql_ca[0].read_bytes())
     must_block(lambda: sql_tls(address, vault_ca[0].read_bytes(), leaf_sha), "D04_SQL_TLS_CA_OR_NAME_REJECTED")
     must_block(lambda: sql_tls(address, sql_ca[0].read_bytes(), "f" * 64), "D04_SQL_TLS_LEAF_CHANGED")
