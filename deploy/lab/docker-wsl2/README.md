@@ -109,7 +109,7 @@ and a single read/write ext4 mount at `/mnt/docker-desktop-disk`. It checks a
 unique guest SCSI LUN, matching Windows and guest block capacity and the
 latest successful HCS change for the same slot. That change must be an Add
 for the exact configured VHDX on controller 0. Missing, stale or ambiguous
-evidence leaves the backing storage `UNKNOWN`. The redacted report records
+attachment evidence leaves the backing storage `UNKNOWN`. Native collector errors can return `COLLECTION_FAILED`. The redacted report records
 `WINDOWS_STORAGE` or `HCS_WSL` when the attachment is measured.
 
 D01 checks recognized layouts under the configured paths and requires
