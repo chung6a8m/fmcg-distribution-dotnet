@@ -12,7 +12,7 @@
 
 **Non-goals:** do not establish independent VMs, physical PREPROD, off-host disaster recovery, production-grade security isolation or original B.1/B.9 human approval. Do not open APP-02C/D/E runtime, real money posting, production/Pilot/Go-Live or grant real business command authority. Docker containers on one daemon/WSL2 host share a kernel/privilege/storage/failure domain. `DOCKER_REHEARSAL_READY` is a proposed **new engineering-only milestone**, not `LOCAL_LAB_READY` or `PREPROD_FOUNDATION_VERIFIED`.
 
-Preserve `business/`, `business.lock.json`, `tools/app02b9/expected-v1.json`, the B.9 validator, current source/synthetic guards, RUNTIME denial semantics, PR #93 source/CI history, and the original five gates G-B01..05 with 30 cases plus RUNTIME-01/02. A GitHub issue's closed state cannot substitute for physical acceptance. Record #53/#68/#75 and #59 disposition according to their current live status, rather than assuming fixes.
+Preserve `business/`, `business.lock.json`, `tools/app02b9/expected-v1.json`, the B.9 validator, current source/synthetic guards, RUNTIME denial semantics, PR #93 source/CI history, and the original five gates G-B01..05 with 30 cases plus RUNTIME-01/02. A GitHub issue's closed state cannot substitute for physical acceptance. Record #53 as GitHub CLOSED (PR #74 still OPEN/DRAFT and physical B53 NOT_VERIFIED), #68/#75 as OPEN and #59 by its scoped policy; never infer fixes from issue status.
 
 **Separate evidence axes (never collapse):**
 
@@ -124,7 +124,7 @@ flowchart LR
 
 ## 7. LAB-D04 — Real SQL container, A/B databases and privilege probes
 
-**Proposed branch:** `feat/app02b-lab-d04-sql-tenants`. **Dependencies:** D02/D03 sources and live protected trust/credentials; reuse reviewed B3 Identity, B4 Tenant Registry, B5 revocation fence and I05 lifecycle scope where available. Current #53 source/operational gating remains an independent prerequisite for any B53 operation; no cherry-pick or silent grant.
+**Proposed branch:** `feat/app02b-lab-d04-sql-tenants`. **Dependencies:** D02/D03 sources and live protected trust/credentials; reuse reviewed B3 Identity, B4 Tenant Registry, B5 revocation fence and I05 lifecycle scope where available. Issue #53 is CLOSED on GitHub but PR #74 remains OPEN/DRAFT; current B53 source/integration and physical revocation/PITR authorization remain independent prerequisites for any B53 operation. No cherry-pick or silent grant.
 
 **Owned paths (proposed):** `deploy/lab/docker-wsl2/sql/`, `scripts/lab/Install-DockerLabSql.ps1`, `scripts/lab/Test-DockerLabSql.ps1`, a bounded redacted SQL privilege probe and focused tests. Use existing migration/tenant tooling and `Microsoft.Data.SqlClient` where appropriate; do not create a competing tenant lifecycle engine.
 

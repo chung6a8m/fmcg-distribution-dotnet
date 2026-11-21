@@ -81,7 +81,7 @@ For D02/D03/D04, record actual vantage (`WINDOWS_HOST`, `DOCKER_PRIVATE_PEER`, `
 - All findings resolved or explicitly documented with decision and scope; source-only vs live evidence labeled truthfully. Run `git diff --check`, verify links and actual retained CI on final source HEAD.
 - Update the increment's **existing** D-track roadmap row/section, PR problem/change/verification/evidence/remaining-gates and dependency SHA. Before GitHub merge: `SOURCE_REVIEW`. Only after merge confirmation: `SOURCE_MERGED`. Don't create recursive merge-acknowledgement PRs.
 - If no laptop access or missing approval: finish only independently reviewable source work, mark `HOST_NOT_RUN` / `APPLY_BLOCKED` and provide a specific operator handoff; do not fabricate host measurements.
-- Do **not** auto-merge, close #53/#56/#75, set `LOCAL_LAB_READY`, claim production/B.9 acceptance, or implement D02–D04 in the D01 PR.
+- Do **not** auto-merge, treat GitHub-closed #53/#56 as physical gate PASS, close still-open #75, set `LOCAL_LAB_READY`, claim production/B.9 acceptance, or implement D02–D04 in the D01 PR.
 
 ## 7. Handoff checklist to the Owner
 
