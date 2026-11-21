@@ -76,10 +76,10 @@ class DockerPreflightTests(unittest.TestCase):
             ("SQL_X64", lambda h: h["engine"].update(Architecture="aarch64")),
             ("HOST_MEMORY", lambda h: h.update(freeRam=1)),
             ("WSL_MEMORY", lambda h: h["engine"].pop("MemTotal")),
-            ("DATA_STORAGE", lambda h: h.update(diskFree=None)),
-            ("DATA_STORAGE", lambda h: h.update(diskRef=None)),
-            ("DATA_STORAGE", lambda h: h.update(diskCapacity=1)),
-            ("DATA_STORAGE", lambda h: h["engine"].update(DockerRootDir="/unknown")),
+            ("WINDOWS_BACKING_STORAGE", lambda h: h.update(diskFree=None)),
+            ("WINDOWS_BACKING_STORAGE", lambda h: h.update(diskRef=None)),
+            ("WINDOWS_BACKING_STORAGE", lambda h: h.update(diskCapacity=1)),
+            ("WINDOWS_BACKING_STORAGE", lambda h: h["engine"].update(DockerRootDir="/unknown")),
             ("PORTS", lambda h: h.update(ports=[18443])),
             ("PORTS", lambda h: h.update(excluded=[[18400, 18500]])),
             ("NETWORKS", lambda h: h.update(routes=["172.29.40.0/23"])),
@@ -132,6 +132,13 @@ class DockerPreflightTests(unittest.TestCase):
             host = {}
             self.assertEqual("UNSAFE_CONTEXT", preflight.docker_inventory(Path("docker"), host))
             self.assertEqual(2, command.call_count)
+
+    def test_formatted_info_surfaces_api_errors_even_with_successful_exit(self):
+        responses = [b"desktop-linux", json.dumps(preflight.ENDPOINT).encode(),
+                     b'{"ServerErrors":["unexpected daemon API failure"]}']
+        with patch.object(preflight, "command", side_effect=responses):
+            with self.assertRaisesRegex(LabError, "^COLLECTION_ERROR$"):
+                preflight.docker_inventory(Path("docker"), {})
 
     def test_malformed_json_is_collection_error(self):
         for data in (b"{bad", b'{"a":1,"a":2}', b"[]"):
@@ -316,10 +323,27 @@ class WindowsDockerPreflightTests(unittest.TestCase):
                 preflight.storage("pwsh", observed)
                 self.assertEqual(str(disk).casefold(), observed["diskRef"])
                 self.assertEqual(512, observed["diskCapacity"])
+            with patch.object(preflight, "command", return_value=None):
+                with self.assertRaisesRegex(LabError, "^COLLECTION_ERROR$"):
+                    preflight.storage("pwsh", {})
             disk.unlink()
             with patch.object(preflight, "command") as query:
                 preflight.storage("pwsh", {})
                 query.assert_not_called()
+
+    def test_plugin_discovery_requires_packaged_or_system_managed_plugin(self):
+        install = self.root / "DockerDesktop"
+        system = self.root / "ProgramData/Docker/cli-plugins"
+        system.mkdir(parents=True)
+        (system / "docker-compose.exe").touch()
+        user = self.root / "user/.docker/cli-plugins"
+        user.mkdir(parents=True)
+        with patch.dict(os.environ, {"USERPROFILE": str(self.root / "user"),
+                                     "ProgramFiles": str(self.root / "ProgramFiles"),
+                                     "ProgramData": str(self.root / "ProgramData")}):
+            self.assertTrue(preflight.trusted_plugin_discovery(install))
+            (user / "docker-compose.exe").touch()
+            self.assertFalse(preflight.trusted_plugin_discovery(install))
 
 
 if __name__ == "__main__":

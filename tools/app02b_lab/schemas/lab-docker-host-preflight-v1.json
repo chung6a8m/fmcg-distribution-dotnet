@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "evidenceClassification", "authorization", "publisherProvenance", "collectedUtc", "sourceHead", "sourceState", "planSha256", "hostRef", "engineRef", "readiness", "issueCodes", "checks", "observed"],
+  "required": ["schema", "evidenceClassification", "authorization", "publisherProvenance", "engineFilesystemHeadroom", "collectedUtc", "sourceHead", "sourceState", "planSha256", "hostRef", "engineRef", "readiness", "issueCodes", "checks", "observed"],
   "properties": {
     "schema": {"const": "APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1"},
     "evidenceClassification": {"const": "WINDOWS_HOST_PREFLIGHT"},
     "authorization": {"const": "NOT_EVALUATED"},
     "publisherProvenance": {"const": "OPERATOR_RECEIPT_DIGEST_BOUND"},
+    "engineFilesystemHeadroom": {"const": "NOT_MEASURED"},
     "collectedUtc": {"type": "string", "format": "date-time"},
     "sourceHead": {
       "anyOf": [
@@ -49,7 +50,7 @@
     "checks": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["SOURCE", "WINDOWS", "POWERSHELL", "PYTHON", "GIT", "HOST_IDENTITY", "HOST_MEMORY", "HOST_DNS", "HOST_CLOCK", "WSL_VERSION", "WSL2_BACKEND", "DOCKER_DESKTOP", "DOCKER_CLI", "LOCAL_CONTEXT", "DOCKER_DAEMON", "ENGINE_IDENTITY", "LINUX_ENGINE", "SQL_X64", "WSL_MEMORY", "DATA_STORAGE", "COMPOSE", "PROJECT", "NETWORKS", "PORTS", "VOLUMES", "IMAGE_APP", "IMAGE_SQL", "IMAGE_VAULT", "IMAGE_PROXY"],
+      "required": ["SOURCE", "WINDOWS", "POWERSHELL", "PYTHON", "GIT", "HOST_IDENTITY", "HOST_MEMORY", "HOST_DNS", "HOST_CLOCK", "WSL_VERSION", "WSL2_BACKEND", "DOCKER_DESKTOP", "DOCKER_CLI", "LOCAL_CONTEXT", "DOCKER_DAEMON", "ENGINE_IDENTITY", "LINUX_ENGINE", "SQL_X64", "WSL_MEMORY", "WINDOWS_BACKING_STORAGE", "COMPOSE", "PROJECT", "NETWORKS", "PORTS", "VOLUMES", "IMAGE_APP", "IMAGE_SQL", "IMAGE_VAULT", "IMAGE_PROXY"],
       "properties": {
         "SOURCE": {
           "type": "string",
@@ -127,7 +128,7 @@
           "type": "string",
           "enum": ["PASS", "FAIL", "UNKNOWN"]
         },
-        "DATA_STORAGE": {
+        "WINDOWS_BACKING_STORAGE": {
           "type": "string",
           "enum": ["PASS", "FAIL", "UNKNOWN"]
         },
@@ -399,7 +400,7 @@
               "LINUX_ENGINE": {"const": "PASS"},
               "SQL_X64": {"const": "PASS"},
               "WSL_MEMORY": {"const": "PASS"},
-              "DATA_STORAGE": {"const": "PASS"},
+              "WINDOWS_BACKING_STORAGE": {"const": "PASS"},
               "COMPOSE": {"const": "PASS"},
               "PROJECT": {"const": "PASS"},
               "NETWORKS": {"const": "PASS"},

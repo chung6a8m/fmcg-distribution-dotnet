@@ -46,7 +46,7 @@ def projection(*fields):
 
 ENGINE_FORMAT = projection(*((field, "." + field) for field in (
     "ID", "OSType", "Architecture", "OperatingSystem", "KernelVersion", "MemTotal",
-    "NCPU", "Driver", "DockerRootDir", "ServerVersion", "SystemTime",
+    "NCPU", "Driver", "DockerRootDir", "ServerVersion", "SystemTime", "ServerErrors",
 )))
 CONTAINER_FORMAT = projection(
     ("Name", ".Name"), ("Project", '(index .Config.Labels "com.docker.compose.project")'),
@@ -97,15 +97,19 @@ def command(args, *, timeout=25, inventory=False, input_data=None, missing=None)
         raise LabError("HOST_ACCESS_DENIED")
     require(len(result.stdout) <= LIMIT, "COLLECTION_ERROR")
     if result.returncode and missing:
-        error = result.stderr.lower()
-        if any(marker in error for marker in (b"access is denied", b"permission denied", b"0x80070005")):
-            raise LabError("HOST_ACCESS_DENIED")
-        expected = {
-            "daemon": (b"the system cannot find the file specified", b"cannot connect to the docker daemon"),
-            "image": (b"no such image:", b"no such object:"),
-        }
-        require(any(marker in error for marker in expected[missing]), "COLLECTION_ERROR")
+        check_discovery_error(result.stderr, missing)
     return result.stdout if result.returncode == 0 else None
+
+
+def check_discovery_error(stderr, missing):
+    error = stderr.lower()
+    if any(marker in error for marker in (b"access is denied", b"permission denied", b"0x80070005")):
+        raise LabError("HOST_ACCESS_DENIED")
+    expected = {
+        "daemon": (b"the system cannot find the file specified", b"cannot connect to the docker daemon"),
+        "image": (b"no such image:", b"no such object:"),
+    }
+    require(any(marker in error for marker in expected[missing]), "COLLECTION_ERROR")
 
 
 def json_result(raw, expected):
@@ -173,9 +177,9 @@ def storage(pwsh, host):
     path = existing_local_input(str(present[0]), directory=False)
     raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR, "-DataDisk"],
                   input_data=(str(path) + "\n").encode("utf-8"), inventory=True)
-    if raw is None:
-        return
     observed = json_result(raw, dict)
+    require(type(observed.get("attached")) is bool and numeric(observed.get("capacity")) is not None,
+            "COLLECTION_ERROR")
     if observed.get("attached") is True and numeric(observed.get("capacity")):
         host["diskCapacity"] = observed["capacity"]
         host["diskFree"] = shutil.disk_usage(path.parent).free
@@ -205,10 +209,11 @@ def collect_inventory(pwsh, plan, host):
 def trusted_plugin_discovery(install):
     """Limit the trusted toolchain to the running installation and OS plugin directory."""
     docker_config = Path(os.environ["USERPROFILE"]) / ".docker"
-    package_plugins = (install / "resources/cli-plugins").resolve()
-    system_plugins = (Path(os.environ["ProgramFiles"]) / "Docker/cli-plugins").resolve()
+    trusted = [install / "resources/cli-plugins",
+               Path(os.environ["ProgramFiles"]) / "Docker/cli-plugins",
+               Path(os.environ["ProgramData"]) / "Docker/cli-plugins"]
     config = docker_config / "config.json"
-    directories = [docker_config / "cli-plugins"]
+    directories = [docker_config / "cli-plugins", *trusted]
     if config.is_file():
         require(config.stat().st_size <= LIMIT, "COLLECTION_ERROR")
         settings = json_result(config.read_bytes(), dict)
@@ -218,12 +223,11 @@ def trusted_plugin_discovery(install):
                     return False
                 directories.extend(Path(path) for path in paths)
     for path in directories:
-        canonical = path.resolve()
-        if not path.exists() or canonical in (package_plugins, system_plugins):
+        if not path.exists():
             continue
         for plugin in path.iterdir():
             if (plugin.name.lower().startswith("docker-") and plugin.suffix.lower() == ".exe"
-                    and plugin.resolve().parent != package_plugins):
+                    and plugin.resolve().parent not in trusted):
                 return False
     return True
 
@@ -272,6 +276,11 @@ def docker_inventory(executable, host, plan=None):
     if raw is None:
         return "DAEMON_UNAVAILABLE"
     host["engine"] = json_result(raw, dict)
+    errors = host["engine"].pop("ServerErrors", None)
+    if errors:
+        check_discovery_error("\n".join(errors).encode(), "daemon")
+        host.pop("engine")
+        return "DAEMON_UNAVAILABLE"
     host["dockerCli"] = version(text_result(command([executable, "--version"])), r"Docker version ")
     host["compose"] = version(text_result(docker("compose", "version", "--short")))
     host["clockSkewSeconds"] = clock_skew(host["engine"].get("SystemTime"))
@@ -490,7 +499,7 @@ def evaluate(plan, host, source, plan_hash, issue=None):
         "WSL_MEMORY": (observed["engineRamMiB"] >= budget["engineRamMiB"]
                        and observed["engineCpu"] >= budget["engineCpu"])
         if observed["engineRamMiB"] is not None and observed["engineCpu"] is not None else None,
-        "DATA_STORAGE": min(observed["diskFreeMiB"], observed["vhdCapacityMiB"]) >= budget["diskFreeMiB"]
+        "WINDOWS_BACKING_STORAGE": min(observed["diskFreeMiB"], observed["vhdCapacityMiB"]) >= budget["diskFreeMiB"]
         if (observed["storageRef"] and driver and engine.get("DockerRootDir") == "/var/lib/docker"
             and observed["diskFreeMiB"] is not None and observed["vhdCapacityMiB"] is not None) else None,
         "COMPOSE": supported("compose"),
@@ -509,6 +518,7 @@ def evaluate(plan, host, source, plan_hash, issue=None):
         "schema": "APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1",
         "evidenceClassification": "WINDOWS_HOST_PREFLIGHT", "authorization": "NOT_EVALUATED",
         "publisherProvenance": "OPERATOR_RECEIPT_DIGEST_BOUND",
+        "engineFilesystemHeadroom": "NOT_MEASURED",
         "collectedUtc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sourceHead": source[0], "sourceState": source[1], "planSha256": plan_hash,
         "hostRef": host_ref, "engineRef": engine_ref, "observed": observed,
@@ -529,7 +539,8 @@ def markdown(report):
              "| Required check | Status |", "| --- | --- |"]
     lines.extend(f"| {name} | {result} |" for name, result in report["checks"].items())
     lines.extend(["", "Issue codes " + (", ".join(report["issueCodes"]) or "none"),
-                  "", "Shared Windows/WSL2 host. Authorization NOT_EVALUATED. Original gates NOT_VERIFIED.", ""])
+                  "", "Docker Linux filesystem headroom NOT_MEASURED.",
+                  "Shared Windows/WSL2 host. Authorization NOT_EVALUATED. Original gates NOT_VERIFIED.", ""])
     return "\n".join(lines)
 
 

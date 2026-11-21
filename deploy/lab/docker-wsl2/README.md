@@ -81,7 +81,7 @@ $LASTEXITCODE
 | `UNSUPPORTED_DESKTOP_LAYOUT`, `UNTRUSTED_PLUGIN_CONFIGURATION` | A running Desktop installation with its packaged CLI and supported plugin locations. |
 | `DAEMON_UNAVAILABLE`, `LINUX_ENGINE`, `WSL2_BACKEND` | Running Docker Desktop Linux engine with the running `docker-desktop` distro in WSL2 mode and a WSL2 engine kernel. |
 | `SQL_X64`, `IMAGE_*` | Native x64 Windows and x86-64 Linux engine, cached Linux/amd64 images, exact publisher digest and external provenance record. |
-| `HOST_MEMORY`, `WSL_MEMORY`, `DATA_STORAGE` | Free Windows RAM, daemon-visible WSL2 RAM/CPU, recognized Docker root/driver, attached VHD capacity and free bytes on the backing Windows disk. |
+| `HOST_MEMORY`, `WSL_MEMORY`, `WINDOWS_BACKING_STORAGE` | Free Windows RAM, daemon-visible WSL2 RAM/CPU, recognized Docker root/driver, attached VHD capacity and free bytes on the backing Windows disk. |
 | `HOST_DNS`, `HOST_CLOCK` | Windows DNS answers for MCR and Docker Hub, and Windows-to-daemon UTC agreement within 30 seconds. |
 | `PROJECT`, `NETWORKS`, `PORTS`, `VOLUMES` | Distinct names and subnets across Windows IPv4 routes and Docker networks, unused ports including Windows excluded ranges and existing Docker bindings, and a fresh volume namespace. |
 | `HOST_ACCESS_DENIED`, `COLLECTION_ERROR` | Read access to Windows inventory, disk metadata and Docker read APIs. Inspect diagnostics locally under operator custody. |

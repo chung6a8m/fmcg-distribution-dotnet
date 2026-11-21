@@ -72,6 +72,9 @@ try {
     exit 0
 } catch [System.UnauthorizedAccessException] {
     exit 3
+} catch [Microsoft.Management.Infrastructure.CimException] {
+    if ($_.Exception.StatusCode.ToString() -eq 'AccessDenied') { exit 3 }
+    exit 1
 } catch {
     exit 1
 }
