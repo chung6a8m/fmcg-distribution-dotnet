@@ -115,6 +115,37 @@ class DockerD02TopologyTests(unittest.TestCase):
             validate_state(self.spec, self.doc, state, IMAGE_IDS, complete=True)
         validate_state(self.spec, self.doc, inspected_state(self.spec, self.doc), IMAGE_IDS, complete=True)
 
+    def test_accepts_docker_desktop_address_family_defaults_after_partial_stage(self):
+        state = inspected_state(self.spec, self.doc)
+        state["containers"] = []
+        state["networks"] = state["networks"][:1]
+        state["volumes"] = []
+        state["volumeUsers"] = {}
+        state["networks"][0]["Options"] = {
+            "com.docker.network.enable_ipv4": "true",
+            "com.docker.network.enable_ipv6": "false",
+        }
+        validate_state(self.spec, self.doc, state, IMAGE_IDS)
+
+    def test_rejects_other_network_options(self):
+        ipv4 = "com.docker.network.enable_ipv4"
+        ipv6 = "com.docker.network.enable_ipv6"
+        defaults = {ipv4: "true", ipv6: "false"}
+        cases = (
+            {**defaults, "com.docker.network.bridge.enable_icc": "false"},
+            {**defaults, ipv4: "false"},
+            {**defaults, ipv6: "true"},
+            {ipv4: "true"},
+            {ipv6: "false"},
+            {ipv4: True, ipv6: False},
+            [],
+        )
+        for options in cases:
+            with self.subTest(options=options), self.assertRaisesRegex(LabError, "D02_NETWORK_DRIFT"):
+                state = inspected_state(self.spec, self.doc)
+                state["networks"][0]["Options"] = options
+                validate_state(self.spec, self.doc, state, IMAGE_IDS)
+
     def test_rejects_volume_consumers_wrong_labels_and_case_variants(self):
         clean = inspected_state(self.spec, self.doc)
         cases = []
