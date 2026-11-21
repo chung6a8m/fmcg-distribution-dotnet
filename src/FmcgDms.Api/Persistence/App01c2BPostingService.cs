@@ -14,7 +14,7 @@ namespace FmcgDms.Api.Persistence;
 /// entitlement transaction. No offline writes, real cash API, legal invoice,
 /// tax/revenue accounting, A partial delivery or production authorization.
 /// </summary>
-public sealed class App01c2BPostingService(TenantConnections connections)
+public sealed partial class App01c2BPostingService(TenantConnections connections)
 {
     private const decimal MaximumQuantity = 999999999999999.999m;
     private const decimal MaximumAmount = 999999999999999.9999m;
@@ -119,7 +119,8 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                 StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Invalid actor identity.");
 
-        byte[] hash = CommandPayloadHash.Compute(Kind, tenant, actor, request.SourceNumber,
+        var fields = new List<(string Key, string Value)>
+        {
             ("TripId", request.TripId.ToString("N")),
             ("CustomerId", request.CustomerId.ToString("N")),
             ("ShipToSnapshotId", request.ShipToSnapshotId.ToString("N")),
@@ -128,7 +129,13 @@ public sealed class App01c2BPostingService(TenantConnections connections)
             ("BaseQuantity", CommandPayloadHash.Decimal(request.BaseQuantity)),
             ("UnitPrice", CommandPayloadHash.Decimal(request.UnitPrice)),
             ("ReceivedCashAmount", CommandPayloadHash.Decimal(request.ReceivedCashAmount)),
-            ("VerificationEvidenceRef", request.VerificationEvidenceRef ?? ""));
+            ("VerificationEvidenceRef", request.VerificationEvidenceRef ?? "")
+        };
+        if (request.PendingBankEvidenceRef is not null)
+            fields.Add(("PendingBankEvidenceRef", request.PendingBankEvidenceRef));
+        if (request.CustomerCreditReservationId is Guid reservationId)
+            fields.Add(("CustomerCreditReservationId", reservationId.ToString("N")));
+        byte[] hash = CommandPayloadHash.Compute(Kind, tenant, actor, request.SourceNumber, fields.ToArray());
 
         await using SqlConnection db = await connections.OpenSyntheticScratchAsync(principal, ct);
         await using SqlTransaction tx =
@@ -181,17 +188,22 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                 || request.ShipToSnapshotId == Guid.Empty || request.TripManifestLineId == Guid.Empty
                 || request.SkuId == Guid.Empty)
                 result = BusinessCommandOutcome.Rejected("INVALID_REFERENCE");
-            else if (!ValidKey(request.VerificationEvidenceRef, 128))
+            else if (request.PendingBankEvidenceRef is not null
+                && (!ValidKey(request.PendingBankEvidenceRef, 128)
+                    || request.ReceivedCashAmount != 0 || !string.IsNullOrEmpty(request.VerificationEvidenceRef)
+                    || request.CustomerCreditReservationId is not null))
+                result = BusinessCommandOutcome.Rejected("BANK_PENDING_INPUT_INVALID");
+            else if (request.PendingBankEvidenceRef is null && !ValidKey(request.VerificationEvidenceRef, 128))
                 result = BusinessCommandOutcome.Rejected("CASH_EVIDENCE_INVALID");
             else if (!ValidQuantity(request.BaseQuantity) || !ValidMoney(request.UnitPrice)
-                || !ValidMoney(request.ReceivedCashAmount))
+                || (request.PendingBankEvidenceRef is null && !ValidMoney(request.ReceivedCashAmount)))
                 result = BusinessCommandOutcome.Rejected("AMOUNT_OR_QUANTITY_INVALID");
             else
             {
                 decimal payable;
                 try { payable = checked(request.BaseQuantity * request.UnitPrice); }
                 catch (OverflowException) { payable = -1m; }
-                if (!ValidMoney(payable) || request.ReceivedCashAmount > payable)
+                if (!ValidMoney(payable))
                     result = BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID");
                 else
                 {
@@ -390,32 +402,10 @@ public sealed class App01c2BPostingService(TenantConnections connections)
         if (cost < 0 || cost > MaximumAmount)
             return BusinessCommandOutcome.Rejected("VEHICLE_COST_INVALID");
 
-        var witness = await db.QuerySingleOrDefaultAsync<VerifiedCash>(Sql("""
-            SELECT TripId,CustomerId,ShipToSnapshotId,VerifiedAmount,
-                PaymentMethod,VerificationStatus,VerifiedBy,VerifiedAtUtc
-            FROM dbo.VerifiedCashEvidence WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND EvidenceRef=@Evidence
-            """, p, tx, ct));
-        if (witness is null || witness.TripId != request.TripId
-            || witness.CustomerId != request.CustomerId
-            || witness.ShipToSnapshotId != request.ShipToSnapshotId
-            || witness.VerifiedAmount != request.ReceivedCashAmount
-            || witness.PaymentMethod != "CASH" || witness.VerificationStatus != "VERIFIED"
-            || witness.VerifiedAtUtc is null
-            || witness.VerifiedAtUtc.Value > DateTime.UtcNow
-            || string.IsNullOrWhiteSpace(witness.VerifiedBy)
-            || string.Equals(witness.VerifiedBy?.Trim(), actor, StringComparison.OrdinalIgnoreCase))
-            return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_NOT_VERIFIED");
-        bool evidenceUsed = await db.ExecuteScalarAsync<bool>(Sql("""
-            SELECT CAST(CASE WHEN EXISTS (
-                SELECT 1 FROM dbo.CashReceipt WITH (UPDLOCK,HOLDLOCK)
-                WHERE TenantId=@Tenant AND VerificationEvidenceRef=@Evidence
-            ) THEN 1 ELSE 0 END AS bit)
-            """, p, tx, ct));
-        if (evidenceUsed)
-            return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_ALREADY_USED");
-
-        decimal creditDue = payable - request.ReceivedCashAmount;
+        var (payment, rejection) = await ResolvePaymentAsync(db, tx, tenant, actor, request, payable, ct);
+        if (payment is null)
+            return BusinessCommandOutcome.Rejected(rejection!);
+        decimal creditDue = payable - payment.TotalApplied;
         var grants = (await db.QueryAsync<CreditGrant>(Sql("""
             SELECT g.Id,g.GrantedAmount,g.ConsumedAmount,g.ReleasedAmount,g.Status,
                 (SELECT COALESCE(SUM(c.ConsumedAmount),0)
@@ -513,35 +503,39 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
                 Date = trip.BusinessDate }, tx, ct));
 
-        // FK requires exact trusted witness, amount, status and Trip/customer.
-        await db.ExecuteAsync(Sql("""
-            INSERT dbo.CashReceipt(Id,TenantId,SaleDeliveryId,TripId,CustomerId,
-                BusinessSourceLineId,VerificationEvidenceRef,ReceivedAmount,
-                AppliedAmount,VerifiedAtUtc)
-            VALUES(@Receipt,@Tenant,@Delivery,@Trip,@Customer,@SourceLine,
-                @Evidence,@Cash,0,@VerifiedAt);
-            INSERT dbo.ReceiptAllocation(Id,TenantId,CashReceiptId,
-                ReceivableOpenItemId,CustomerId,AppliedAmount)
-            VALUES(@Allocation,@Tenant,@Receipt,@Item,@Customer,@Cash);
-            """, new { Receipt = receiptId, Allocation = Guid.NewGuid(),
-                Tenant = tenant, Delivery = deliveryId, Trip = request.TripId,
-                Customer = request.CustomerId, SourceLine = sourceLine,
-                Evidence = request.VerificationEvidenceRef,
-                Cash = request.ReceivedCashAmount, VerifiedAt = witness.VerifiedAtUtc,
-                Item = itemId }, tx, ct));
-        if (await db.ExecuteAsync(Sql("""
-            UPDATE dbo.CashReceipt SET AppliedAmount=AppliedAmount+@Cash
-            WHERE TenantId=@Tenant AND Id=@Receipt
-                AND ReceivedAmount-AppliedAmount>=@Cash;
-            """, new { Tenant = tenant, Receipt = receiptId,
-                Cash = request.ReceivedCashAmount }, tx, ct)) != 1
-            || await db.ExecuteAsync(Sql("""
-                UPDATE dbo.ReceivableOpenItem SET AppliedAmount=AppliedAmount+@Cash
-                WHERE TenantId=@Tenant AND Id=@Item
-                    AND OriginalAmount-AppliedAmount>=@Cash;
-                """, new { Tenant = tenant, Item = itemId,
-                    Cash = request.ReceivedCashAmount }, tx, ct)) != 1)
-            throw new InvalidOperationException("Receipt/AR allocation counter changed.");
+        if (payment.CashReceived > 0)
+        {
+            await db.ExecuteAsync(Sql("""
+                INSERT dbo.CashReceipt(Id,TenantId,SaleDeliveryId,TripId,CustomerId,
+                    BusinessSourceLineId,VerificationEvidenceRef,ReceivedAmount,AppliedAmount,VerifiedAtUtc)
+                VALUES(@Receipt,@Tenant,@Delivery,@Trip,@Customer,@SourceLine,
+                    @Evidence,@CashReceived,0,@VerifiedAt);
+                INSERT dbo.ReceiptAllocation(Id,TenantId,CashReceiptId,
+                    ReceivableOpenItemId,CustomerId,AppliedAmount)
+                VALUES(NEWID(),@Tenant,@Receipt,@Item,@Customer,@CashApplied);
+                """, new { Receipt = receiptId, Tenant = tenant, Delivery = deliveryId, Trip = request.TripId,
+                    Customer = request.CustomerId, SourceLine = sourceLine, Item = itemId,
+                    Evidence = request.VerificationEvidenceRef, payment.CashReceived, payment.CashApplied,
+                    VerifiedAt = payment.CashVerifiedAt }, tx, ct));
+            if (await db.ExecuteAsync(Sql("""
+                UPDATE dbo.CashReceipt SET AppliedAmount=AppliedAmount+@Cash
+                WHERE TenantId=@Tenant AND Id=@Receipt AND ReceivedAmount-AppliedAmount>=@Cash;
+                """, new { Tenant = tenant, Receipt = receiptId, Cash = payment.CashApplied }, tx, ct)) != 1)
+                throw new InvalidOperationException("Receipt allocation counter changed.");
+        }
+        if (payment.TotalApplied > 0 && await db.ExecuteAsync(Sql("""
+                UPDATE dbo.ReceivableOpenItem SET AppliedAmount=AppliedAmount+@Applied
+                WHERE TenantId=@Tenant AND Id=@Item AND OutstandingAmount>=@Applied;
+                """, new { Tenant = tenant, Item = itemId, Applied = payment.TotalApplied }, tx, ct)) != 1)
+            throw new InvalidOperationException("AR allocation counter changed.");
+
+        if (payment.IsExtended)
+            await db.ExecuteAsync(Sql("""
+                INSERT dbo.BLocalSalePayment(TenantId,SaleDeliveryId,PendingBankEvidenceRef,
+                    CreditReservationId,CreditApplied,CreditIssued)
+                VALUES(@Tenant,@Delivery,@Bank,@Reservation,@CreditApplied,@CreditIssued);
+                """, new { Tenant = tenant, Delivery = deliveryId, Bank = request.PendingBankEvidenceRef,
+                    Reservation = request.CustomerCreditReservationId, payment.CreditApplied, payment.CreditIssued }, tx, ct));
 
         foreach (var use in uses)
         {
@@ -562,30 +556,30 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                     ShipTo = request.ShipToSnapshotId, use.Amount }, tx, ct));
         }
 
-        // The posting has seven source-linked legs (six if fully cash-paid):
-        // physical quantity/cost, COGS, gross AR, allocated AR, verified
-        // custody cash, consumed B right and consumed grant credit (negative).
-        var effects = new[]
+        var effects = new List<PostingEffect>
         {
-            new PostingEffect("PHYSICAL-OUT", "PHYSICAL_STOCK", -request.BaseQuantity, -cost,
-                (Guid?)null, (Guid?)request.SkuId, (Guid?)trip.VehicleLocationId),
-            new PostingEffect("COGS", "COGS", 0m, cost,
-                (Guid?)null, (Guid?)request.SkuId, (Guid?)null),
-            new PostingEffect("AR-GROSS", "AR", 0m, payable,
-                (Guid?)request.CustomerId, (Guid?)null, (Guid?)null),
-            new PostingEffect("AR-CASH-ALLOC", "AR", 0m, -request.ReceivedCashAmount,
-                (Guid?)request.CustomerId, (Guid?)null, (Guid?)null),
-            new PostingEffect("CASH-CUSTODY", "CUSTODY", 0m, request.ReceivedCashAmount,
-                (Guid?)request.CustomerId, (Guid?)null, (Guid?)null),
-            new PostingEffect("RIGHT-B-USED", "RIGHT_B_CONSUMED", -request.BaseQuantity, 0m,
-                (Guid?)null, (Guid?)request.SkuId, (Guid?)null)
+            new("PHYSICAL-OUT", "PHYSICAL_STOCK", -request.BaseQuantity, -cost,
+                null, request.SkuId, trip.VehicleLocationId),
+            new("COGS", "COGS", 0m, cost, null, request.SkuId, null),
+            new("AR-GROSS", "AR", 0m, payable, request.CustomerId, null, null),
+            new("RIGHT-B-USED", "RIGHT_B_CONSUMED", -request.BaseQuantity, 0m, null, request.SkuId, null)
         };
+        if (payment.CashReceived > 0)
+        {
+            effects.Add(new("AR-CASH-ALLOC", "AR", 0m, -payment.CashApplied, request.CustomerId, null, null));
+            effects.Add(new("CASH-CUSTODY", "CUSTODY", 0m, payment.CashReceived, request.CustomerId, null, null));
+        }
+        if (payment.CreditApplied > 0)
+        {
+            effects.Add(new("AR-CREDIT-ALLOC", "AR", 0m, -payment.CreditApplied, request.CustomerId, null, null));
+            effects.Add(new("CUSTOMER-CREDIT-USED", "CUSTOMER_CREDIT", 0m, -payment.CreditApplied, request.CustomerId, null, null));
+        }
+        if (payment.CreditIssued > 0)
+            effects.Add(new("CUSTOMER-CREDIT-ISSUED", "CUSTOMER_CREDIT", 0m, payment.CreditIssued, request.CustomerId, null, null));
+        if (creditDue > 0)
+            effects.Add(new("CREDIT-B-USED", "RIGHT_CREDIT_B_CONSUMED", 0m, -creditDue, request.CustomerId, null, null));
         foreach (var effect in effects)
             await AddEffectAsync(db, tx, tenant, sourceLine, effect, ct);
-        if (creditDue > 0)
-            await AddEffectAsync(db, tx, tenant, sourceLine,
-                new PostingEffect("CREDIT-B-USED", "RIGHT_CREDIT_B_CONSUMED", 0m, -creditDue,
-                    request.CustomerId, null, null), ct);
 
         // Compare physical/AR/cash/grant source aggregates with their mutable
         // counters *before* committing. A later APP-01C.4 oracle is independent.
@@ -596,7 +590,7 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                 (SELECT COALESCE(SUM(AppliedAmount),0) FROM dbo.ReceiptAllocation
                     WHERE TenantId=@Tenant AND CashReceiptId=@Receipt
                         AND ReceivableOpenItemId=@Item) AS Allocated,
-                (SELECT AppliedAmount FROM dbo.CashReceipt
+                (SELECT COALESCE(SUM(AppliedAmount),0) FROM dbo.CashReceipt
                     WHERE TenantId=@Tenant AND Id=@Receipt) AS ReceiptApplied,
                 (SELECT AppliedAmount FROM dbo.ReceivableOpenItem
                     WHERE TenantId=@Tenant AND Id=@Item) AS ArApplied,
@@ -606,10 +600,10 @@ public sealed class App01c2BPostingService(TenantConnections connections)
                     WHERE TenantId=@Tenant AND BusinessSourceLineId=@SourceLine) AS EffectCount
             """, new { Tenant = tenant, Delivery = deliveryId, Receipt = receiptId,
                 Item = itemId, SourceLine = sourceLine }, tx, ct));
-        if (posted.Issues != 1 || posted.Allocated != request.ReceivedCashAmount
-            || posted.ReceiptApplied != request.ReceivedCashAmount
-            || posted.ArApplied != request.ReceivedCashAmount
-            || posted.CreditUsed != creditDue || posted.EffectCount != (creditDue > 0 ? 7 : 6))
+        if (posted.Issues != 1 || posted.Allocated != payment.CashApplied
+            || posted.ReceiptApplied != payment.CashApplied
+            || posted.ArApplied != payment.TotalApplied
+            || posted.CreditUsed != creditDue || posted.EffectCount != effects.Count)
             throw new InvalidOperationException("B source-ledger posting is incomplete.");
 
         return BusinessCommandOutcome.Applied("B_SALE_DELIVERY_POSTED", sourceId);
