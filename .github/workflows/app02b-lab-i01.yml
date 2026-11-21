@@ -1,0 +1,62 @@
+name: APP-02B LAB-I01 preflight (source only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/app02b-lab-i01.yml'
+      - 'deploy/lab/windows/**'
+      - 'scripts/lab/Lab.Common.psm1'
+      - 'scripts/lab/Test-LabPrerequisites.ps1'
+      - 'tools/app02b_lab/**'
+      - 'tests/app02b_lab/**'
+      - 'global.json'
+      - 'web/package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight-source:
+    name: LAB-I01 source tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    env:
+      SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Verify exact HEAD and deterministic planning tests
+        shell: pwsh
+        run: |
+          if ((git rev-parse --verify HEAD).Trim() -ne $env:SOURCE_HEAD) {
+            throw 'Exact source HEAD mismatch'
+          }
+          git diff --check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -m unittest discover -s tests/app02b_lab -p 'test_environment.py' -v
+          exit $LASTEXITCODE
+      - name: Exercise PowerShell and Windows publication with disposable fixtures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tests/app02b_lab/Test-WindowsPreflight.ps1
+          $env:PYTHONPATH = (Get-Location).Path
+          python tests/app02b_lab/windows_preflight_integration.py -v
+          exit $LASTEXITCODE
+      - name: Record evidence scope
+        shell: pwsh
+        run: |
+          Write-Output 'EvidenceClass=GITHUB_HOSTED_SYNTHETIC_SOURCE_ONLY'
+          Write-Output 'WindowsOwnerHost=NOT_TESTED_BY_CI'
+          Write-Output 'PhysicalPREPROD=NOT_VERIFIED'

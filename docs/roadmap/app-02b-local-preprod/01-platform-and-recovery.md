@@ -22,7 +22,7 @@ Every increment must add meaningful regression/negative tests for its owned inva
 <a id="lab-i01"></a>
 ## LAB-I01 — Preflight Windows và toolchain
 
-**Status:** PLANNED. **PR boundary:** one independently reviewed PR. **Source/API dependencies:** LAB-E05. Live setup/approval requirements are additional and do not convert source merge into acceptance.
+**Status:** SOURCE_REVIEW. **PR boundary:** one independently reviewed PR. **Source/API dependencies:** LAB-E05. Live setup/approval requirements are additional and do not convert source merge into acceptance.
 
 **Deliverable:** a read-only capability report and validated environment configuration, usable before any administrator action.
 
@@ -35,7 +35,7 @@ Every increment must add meaningful regression/negative tests for its owned inva
 - [ ] Emit precise installation prerequisites and a proposed resource budget. RAM 32/64 GB are planning profiles, not claims that the current machine passed a performance gate.
 - [ ] Freeze installers/image identities with release version, download origin, SHA-256 and signer/digest verification procedure. A checksum supplied by the same untrusted replacement file is insufficient.
 
-**Verification:** `python -m unittest discover -s tests/app02b_lab -p test_environment.py`; fixtures cover subnet overlap, identical A/B targets, unsupported CPU, missing tools, wrong SDK, invalid evidence path and secret-bearing configuration. Run the PowerShell inventory on an actual Windows host and retain redacted output. CI cannot attest to that host. **Dependencies:** roadmap/evidence contracts only.
+**Verification:** `python -m unittest discover -s tests/app02b_lab -p test_environment.py`; fixtures cover subnet overlap, identical A/B targets, unsupported CPU, missing tools, wrong SDK, invalid evidence path and secret-bearing configuration. Run the PowerShell inventory on an actual Windows host and retain redacted output. CI cannot attest to that host. **Dependencies:** merged LAB-E05 source and the existing roadmap/evidence contracts. See the [Windows operator guide](../../../deploy/lab/windows/README.md) for the LAB-I01 plan schema and evidence limits.
 
 <a id="lab-i02"></a>
 ## LAB-I02 — VM Hyper-V và network
