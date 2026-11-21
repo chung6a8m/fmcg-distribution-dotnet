@@ -54,6 +54,11 @@ actual `reference` and put the hash of the retained publisher proof in
 }
 ```
 
+Separately authorized image cache staging may use the exact OCI digests and
+platform from this plan on the confirmed local daemon. Staging is an
+operator action outside the preflight entry point. Preflight inspects the
+cache and does not pull images.
+
 ## Run on the intended laptop
 
 Use 64-bit PowerShell 7 and a trusted local toolchain. The
@@ -98,11 +103,19 @@ $LASTEXITCODE
 
 The Windows disk check supports the current Docker-managed `docker_data.vhdx`
 layout and the conventional `/var/lib/docker` root with overlay storage. The
-Windows Storage provider must confirm the VHD is attached. D01 checks the
-recognized layouts under the configured paths and requires exactly one VHD
-candidate. It uses the default location only when no path is configured. A
-missing, ambiguous or unconfirmed attachment reports `UNKNOWN`, as do
-unrecognized layouts such as older `docker-desktop-data` storage. D01 measures the Windows volume and the virtual disk's capacity.
+recognized VHD must have a Windows Storage attachment or a live HCS/WSL
+correlation. The fallback uses signed Windows tools, a stable running WSL VM
+and a single read/write ext4 mount at `/mnt/docker-desktop-disk`. It checks a
+unique guest SCSI LUN, matching Windows and guest block capacity and the
+latest successful HCS change for the same slot. That change must be an Add
+for the exact configured VHDX on controller 0. Missing, stale or ambiguous
+evidence leaves the backing storage `UNKNOWN`. The redacted report records
+`WINDOWS_STORAGE` or `HCS_WSL` when the attachment is measured.
+
+D01 checks recognized layouts under the configured paths and requires
+exactly one VHD candidate. It uses the default location only when no path
+is configured. Unrecognized layouts such as older `docker-desktop-data`
+storage report `UNKNOWN`. D01 measures the Windows volume and the virtual disk's capacity.
 Linux filesystem free space and quotas need separate scoped measurement before
 using the rehearsal storage. Port and route observations are snapshots.
 The tool performs DNS lookups and local read probes. Its operation set covers

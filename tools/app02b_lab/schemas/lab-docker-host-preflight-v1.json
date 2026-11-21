@@ -269,6 +269,7 @@
             {"type": "null"}
           ]
         },
+        "storageAttachmentMethod": {"enum": ["WINDOWS_STORAGE", "HCS_WSL"]},
         "storageRef": {
           "anyOf": [
             {"type": "string", "pattern": "^[a-f0-9]{64}$"},

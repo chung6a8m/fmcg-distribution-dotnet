@@ -168,6 +168,27 @@ def collect_wsl(pwsh, system_directory, host):
         host["wslMode"] = None
 
 
+def verified_wsl_attachment(proof, capacity):
+    if not isinstance(proof, dict) or proof.get("stableVm") is not True:
+        return False
+    lun = numeric(proof.get("guestLun"))
+    changes = proof.get("changes")
+    if lun is None or numeric(proof.get("guestCapacity")) != capacity or not isinstance(changes, list):
+        return False
+    latest = None
+    for change in changes:
+        if not isinstance(change, dict) or numeric(change.get("lun")) is None:
+            return False
+        if change["lun"] == lun:
+            # The guest LUN only identifies a slot for a single supported
+            # controller. Any same-LUN record on another controller is ambiguous.
+            if numeric(change.get("controller")) != 0:
+                return False
+            if latest is None:
+                latest = change
+    return bool(latest and latest.get("request") == "Add" and latest.get("matchesVhd") is True)
+
+
 def storage(pwsh, folders, host):
     """Use the Docker Desktop settings and recognized VHD layout on a fixed Windows drive."""
     import shutil
@@ -208,10 +229,19 @@ def storage(pwsh, folders, host):
     observed = json_result(raw, dict)
     require(type(observed.get("attached")) is bool and numeric(observed.get("capacity")) is not None,
             "COLLECTION_ERROR")
-    if observed.get("attached") is True and numeric(observed.get("capacity")):
-        host["diskCapacity"] = observed["capacity"]
-        host["diskFree"] = shutil.disk_usage(path.parent).free
-        host["diskRef"] = str(path).casefold()
+    capacity = observed["capacity"]
+    if not capacity:
+        return
+    if observed["attached"]:
+        method = "WINDOWS_STORAGE"
+    elif verified_wsl_attachment(observed.get("wslAttachment"), capacity):
+        method = "HCS_WSL"
+    else:
+        return
+    host["diskCapacity"] = capacity
+    host["diskFree"] = shutil.disk_usage(path.parent).free
+    host["diskRef"] = str(path).casefold()
+    host["diskAttachmentMethod"] = method
 
 
 def collect_inventory(pwsh, plan, host, folders):
@@ -222,8 +252,6 @@ def collect_inventory(pwsh, plan, host, folders):
     raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR], timeout=100, inventory=True)
     host.update(json_result(raw, dict))
     collect_wsl(pwsh, folders["SystemDirectory"], host)
-    if host.get("wslMode") == 2:
-        storage(pwsh, folders, host)
     desktop_paths = host.get("desktopPaths")
     require(type(desktop_paths) is list, "COLLECTION_ERROR")
     if not desktop_paths:
@@ -258,7 +286,10 @@ def collect_inventory(pwsh, plan, host, folders):
         desktop_files.append(frontend)
     host["desktop"] = verify_signatures(pwsh, [*desktop_files, executable, *plugins], "Docker Inc",
                                          read_desktop_version=True)
-    return docker_inventory(executable, host, plan)
+    issue = docker_inventory(executable, host, plan)
+    if issue is None and local_context(host) and linux_desktop(host.get("engine") or {}) and wsl_backend(host):
+        storage(pwsh, folders, host)
+    return issue
 
 
 def docker_plugin_paths(install, folders):
@@ -529,6 +560,8 @@ def evaluate(plan, host, source, plan_hash, issue=None):
         "diskFreeMiB": mib(host.get("diskFree")),
         "vhdCapacityMiB": mib(host.get("diskCapacity")),
     }
+    if host.get("diskAttachmentMethod"):
+        observed["storageAttachmentMethod"] = host["diskAttachmentMethod"]
     for key in ("containers", "projects", "networks", "volumes"):
         inventory = host.get(key)
         observed[key.removesuffix("s") + "Count"] = len(inventory) if inventory is not None else None
@@ -603,8 +636,10 @@ def markdown(report):
              f"- Engine reference `{report['engineRef']}`", "",
              "| Required check | Status |", "| --- | --- |"]
     lines.extend(f"| {name} | {result} |" for name, result in report["checks"].items())
-    lines.extend(["", "Issue codes " + (", ".join(report["issueCodes"]) or "none"),
-                  "", "Docker Linux filesystem headroom NOT_MEASURED.",
+    lines.extend(["", "Issue codes " + (", ".join(report["issueCodes"]) or "none")])
+    if method := report["observed"].get("storageAttachmentMethod"):
+        lines.append(f"Windows backing storage attachment {method}.")
+    lines.extend(["", "Docker Linux filesystem headroom NOT_MEASURED.",
                   "Shared Windows/WSL2 host. Authorization NOT_EVALUATED. Original gates NOT_VERIFIED.", ""])
     return "\n".join(lines)
 

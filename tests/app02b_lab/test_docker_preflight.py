@@ -387,6 +387,42 @@ class WindowsDockerPreflightTests(unittest.TestCase):
             self.assertEqual({}, observed)
             query.assert_not_called()
 
+    def test_detached_windows_view_requires_matching_live_wsl_vhd_evidence(self):
+        settings = self.root / "Docker/settings-store.json"
+        settings.parent.mkdir()
+        settings.write_text("{}", encoding="utf-8")
+        disk = self.root / "Docker/wsl/disk/docker_data.vhdx"
+        disk.parent.mkdir(parents=True)
+        disk.touch()
+        folders = {"APPDATA": self.root, "LOCALAPPDATA": self.root}
+        add = {"controller": 0, "lun": 3, "request": "Add", "matchesVhd": True}
+        proof = {"stableVm": True, "guestLun": 3, "guestCapacity": 512, "changes": [add]}
+        cases = {
+            "exact live VM and LUN": (proof, "HCS_WSL"),
+            "VM replaced": (dict(proof, stableVm=False), None),
+            "unrelated guest LUN": (dict(proof, guestLun=4), None),
+            "capacity mismatch": (dict(proof, guestCapacity=513), None),
+            "different VHD": (dict(proof, changes=[dict(add, matchesVhd=False)]), None),
+            "later removal": (dict(proof, changes=[dict(add, request="Remove"), add]), None),
+            "later replacement": (dict(proof, changes=[dict(add, matchesVhd=False), add]), None),
+            "ambiguous controller": (dict(proof, changes=[add, dict(add, controller=1)]), None),
+        }
+        for case, (attachment, method) in cases.items():
+            with self.subTest(case=case):
+                response = {"attached": False, "capacity": 512, "wslAttachment": attachment}
+                with patch.object(preflight, "command", return_value=json.dumps(response).encode()):
+                    observed = {}
+                    preflight.storage("pwsh", folders, observed)
+                self.assertEqual(method, observed.get("diskAttachmentMethod"))
+                self.assertEqual(512 if method else None, observed.get("diskCapacity"))
+                if method:
+                    plan, host = fixture()
+                    host.update(observed)
+                    report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b" * 64)
+                    preflight.validate_document(report, "docker-host-preflight")
+                    self.assertEqual("HCS_WSL", report["observed"]["storageAttachmentMethod"])
+                    self.assertIn("HCS_WSL", preflight.markdown(report))
+
     def test_storage_uses_configured_attached_vhd_without_stale_default_fallback(self):
         config_dir = self.root / "Docker"
         config_dir.mkdir()
