@@ -132,7 +132,8 @@ python3 -I -S -B tools/app02b_lab/docker_d03_peer.py --config /private/peer.json
 GitHub-hosted CI uses real TLS, Vault, Raft and file audit with temporary CA
 and in-memory synthetic bootstrap credentials. The runner reaches the
 private bridge IP with verified DNS SNI and reads the log via Docker exec.
-It also exercises restart/re-unseal, CA and hostname rejection, role
+It also exercises restart/re-unseal and replacement against retained Raft/audit
+volumes, CA and hostname rejection, role
 boundaries, expiry, rotation and missing audit readback. The archive contains
 only redacted check results. It establishes no Windows-host, edge,
 off-host custody, physical or business admission status. Live restart and

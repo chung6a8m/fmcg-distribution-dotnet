@@ -6,7 +6,7 @@ import re
 
 from . import docker_preflight as d01
 from .contract import canonical_json, digest, require
-from .docker_d02_topology import IMAGE, PROJECT, PROJECT_LABEL
+from .docker_d02_topology import IMAGE, PROJECT_LABEL
 from .docker_windows import verified_windows_folders
 from .preflight import existing_local_input
 from .environment import check_location
@@ -16,6 +16,7 @@ COMPOSE_LABEL = "com.docker.compose.project"
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}", re.ASCII)
 OBJECT_ID = re.compile(r"[0-9a-f]{64}", re.ASCII)
 NETWORK_ID = re.compile(r"(?:[0-9a-f]{64}|[a-z0-9]{25})", re.ASCII)
+DOCKER_NAMESPACE = re.compile(r"[a-z][a-z0-9_-]{2,62}", re.ASCII)
 VOLUME_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}", re.ASCII)
 NAMESPACE_PREFIXES = ("-", "_")
 # The global scan excludes container configuration and environment secrets.
@@ -163,7 +164,7 @@ class Docker:
         return rows
 
     def state(self, project):
-        require(type(project) is str and PROJECT.fullmatch(project), "INVALID_PROJECT_NAMESPACE")
+        require(type(project) is str and DOCKER_NAMESPACE.fullmatch(project), "INVALID_PROJECT_NAMESPACE")
         self.verify()
         ids = {"container": self._names("container", "--all", "--no-trunc"),
                "network": self._names("network", "--no-trunc"),

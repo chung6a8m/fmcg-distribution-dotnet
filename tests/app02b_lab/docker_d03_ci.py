@@ -196,11 +196,31 @@ def run(report, folder):
     require(vault.cluster() == cluster, "CI_RAFT_CLUSTER_DRIFT")
     require(read_audit()[:len(audit_before)] == audit_before, "CI_AUDIT_NOT_PERSISTED")
     report["checks"]["raft_restart"] = probe_roles(vault, tokens, read_audit)
+    report["phase"] = "replace_disposable_container"
+    original, = docker._inspect("container", [name])
+    require(type(original["Id"]) is str and original["Id"] == row["Id"]
+            and all(original["Config"]["Labels"].get(key) == value
+                    for key, value in model["services"]["vault"]["labels"].items()), "CI_FOREIGN_VAULT")
+    docker.run("stop", "--", original["Id"])
+    docker.run("rm", "--", original["Id"])
+    d03.stage_model(docker, model, image["Id"], ensure_current=lambda: None)
+    docker.run("start", name)
+    replaced, = docker._inspect("container", [name])
+    require(replaced["Id"] != original["Id"], "CI_VAULT_WAS_NOT_REPLACED")
+    ip = replaced["NetworkSettings"]["Networks"][network]["IPAddress"]
+    require(bool(ip), "CI_PRIVATE_ADDRESS")
+    vault = Vault("https://vault:8200", ca[0], connect_address=ip, leaf_sha=leaf_sha)
+    await_health(vault, 503)
+    unseal(vault, keys)
+    require(vault.cluster() == cluster and read_audit()[:len(audit_before)] == audit_before,
+            "CI_RAFT_OR_AUDIT_REPLACEMENT_DRIFT")
+    report["checks"]["raft_and_audit_container_replacement"] = probe_roles(vault, tokens, read_audit)
     # Operate only on the disposable single-node fixture. The retained log reader
     # still sees older records while Vault no longer writes the new probe attempts.
     vault.expect(204, "DELETE", "sys/audit/" + AUDIT_PATH, token=root)
     devices = vault.expect(200, "GET", "sys/audit", token=root)
-    require(AUDIT_PATH + "/" not in (devices.get("data") or devices), "CI_AUDIT_STILL_ENABLED")
+    require(not {AUDIT_PATH, AUDIT_PATH + "/"}.intersection(devices.get("data") or devices),
+            "CI_AUDIT_STILL_ENABLED")
     must_block(lambda: probe_roles(vault, tokens, read_audit), "D03_AUDIT_WITNESS_MISSING")
     report["checks"]["missing_audit_fails_closed"] = "PASS"
 

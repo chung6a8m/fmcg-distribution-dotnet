@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from tools.app02b_lab.contract import LabError, canonical_json, digest
 from tools.app02b_lab import docker_d03 as d03
@@ -76,3 +77,7 @@ class VaultPlanTests(unittest.TestCase):
                    lambda _token: self.fail("stored a replacement"),
                    lambda: self.fail("authorized issuance"),
                    lambda: self.fail("attempted rotation audit"))
+    def test_windows_bind_normalizes_only_drive_and_prefix(self):
+        with patch.object(d03.os, "name", "nt"):
+            self.assertTrue(d03.bind_matches("/run/desktop/mnt/host/c/Private/Leaf.key", "C:/Private/Leaf.key"))
+            self.assertFalse(d03.bind_matches("/run/desktop/mnt/host/c/private/Leaf.key", "C:/Private/Leaf.key"))

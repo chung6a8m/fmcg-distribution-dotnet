@@ -166,9 +166,9 @@ def bind_matches(observed, intended):
     drive = re.fullmatch(r"([a-zA-Z]):/(.+)", expected)
     if drive is None:
         return False
-    translated = drive[1].lower() + "/" + drive[2]
-    return actual.casefold() in {expected.casefold(), ("/host_mnt/" + translated).casefold(),
-                                 ("/run/desktop/mnt/host/" + translated).casefold()}
+    aliases = (drive[1] + ":/", "/host_mnt/" + drive[1] + "/", "/run/desktop/mnt/host/" + drive[1] + "/")
+    return any(actual[:len(prefix)].casefold() == prefix.casefold() and actual[len(prefix):] == drive[2]
+               for prefix in aliases)
 
 
 def stage_model(docker, model, image_id, *, ensure_current, reviewed_targets=None):
@@ -186,8 +186,20 @@ def stage_model(docker, model, image_id, *, ensure_current, reviewed_targets=Non
     mounts = {item.get("Destination"): item for item in row.get("Mounts") or []}
     host = row.get("HostConfig") or {}
     details = row.get("Config") or {}
+    settings = row.get("NetworkSettings") or {}
+    attached = settings.get("Networks")
+    network_name = model["networks"]["vault"]["name"]
+    require(type(attached) is dict and set(attached) <= {network_name}
+            and not any((settings.get("Ports") or {}).values()), "D03_STAGE_NETWORK_DRIFT")
+    endpoint = attached.get(network_name) or {}
+    aliases = endpoint.get("Aliases")
+    if aliases is not None:
+        require(type(aliases) is list and "vault" in aliases
+                and set(aliases) <= {"vault", service["container_name"]}, "D03_STAGE_NETWORK_DRIFT")
     require(row.get("Image") == image_id and (row.get("State") or {}).get("Status") == "created"
-            and not host.get("Privileged") and not host.get("PortBindings")
+            and host.get("Privileged") is False and host.get("PublishAllPorts") is False
+            and not host.get("PortBindings") and not host.get("CapAdd")
+            and (host.get("RestartPolicy") or {}).get("Name") in ("", "no")
             and host.get("ReadonlyRootfs") is True and host.get("CapDrop") == ["ALL"]
             and set(host.get("SecurityOpt") or []) == {"no-new-privileges:true"}
             and details.get("User") == service["user"] and details.get("Entrypoint") == service["entrypoint"]
@@ -209,10 +221,10 @@ def stage_model(docker, model, image_id, *, ensure_current, reviewed_targets=Non
             and all((audit.get("Labels") or {}).get(k) == v for k, v in service["labels"].items()),
             "D03_STAGE_AUDIT_DRIFT")
     if reviewed_targets is not None:
-        network_name = model["networks"]["vault"]["name"]
         network_id = d01.text_result(docker.run("network", "inspect", "--format", "{{.Id}}", "--", network_name))
         data, = docker._inspect("volume", [model["volumes"]["data"]["name"]])
-        require(digest(network_id.encode("ascii")) == reviewed_targets["networkRef"]
+        require(endpoint.get("NetworkID") in (None, "", network_id)
+                and digest(network_id.encode("ascii")) == reviewed_targets["networkRef"]
                 and digest(canonical_json([data["Name"], data["CreatedAt"], data["Driver"], data["Labels"]]))
                 == reviewed_targets["dataVolumeRef"], "D03_STAGE_TARGET_CHANGED")
     return digest(identifier.encode("ascii"))
