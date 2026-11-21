@@ -16,6 +16,14 @@
 - #59 đã CLOSED bằng risk acceptance, không phải patched package. Scope `APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY`; expiry `2026-12-19T00:00:00Z`; không cho phép frontend publication/physical deployment qua exception này.
 - Original B.9 yêu cầu observer khác implementer; Security/DBA khác nhau và khác implementer/observer; bốn public-key pins khác nhau cho fixture/observer/security/dba. Một người giữ bốn khóa không tạo ra independent human review.
 
+<a id="preprod-pr91-merge"></a>
+## Ghi nhận sau merge PR #91
+
+- **Merge vào `main`** ngày 21/11/2026 lúc 14:01 ICT, SHA `a9d5be047c8218766ebe9af3be43ed34e32c1950`. [PR #91](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/91) · [Merge commit](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/a9d5be047c8218766ebe9af3be43ed34e32c1950).
+- **CI** đạt **20/20 checks** trên HEAD của PR `d305118ed0d3956d6ead4cbc7da75a86378226c1` trước khi merge. [Kết quả CI](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/91/checks).
+- **Gói ZIP LocalDB** `PREPROD-bo-bang-chung-AC09-AC21-checkout-sach.zip`, SHA-256 `34E84654948398E7ABA04D237FFB9CA87F7CE003326A266CCCF8AABDBABADAFF`. [Hồ sơ lượt chạy và đường dẫn ZIP](#preprod-ac09-ac21-clean-checkout).
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
 <a id="preprod-pr90-merge"></a>
 ## Ghi nhận sau merge PR #90
 
