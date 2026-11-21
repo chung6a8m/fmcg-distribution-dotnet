@@ -11,6 +11,8 @@ class SqlPlanTests(unittest.TestCase):
         model = d04.compose(scope, Path("leaf.pem"), Path("leaf.key"), Path("private-secret"))
         service = model["services"]["sql"]
         self.assertNotIn("ports", service)
+        self.assertEqual(service["cap_drop"], ["ALL"])
+        self.assertEqual(service["cap_add"], ["NET_BIND_SERVICE"])
         self.assertEqual(list(model["networks"]), ["data"])
         self.assertEqual(model["volumes"]["data"]["name"], "lab-sql_sql")
         self.assertNotEqual(model["volumes"]["backup"]["name"], model["volumes"]["data"]["name"])

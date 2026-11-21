@@ -7,7 +7,8 @@ development and testing. The operator retains the image publisher proof and
 reviewed license receipt before any separate live approval.
 
 The SQL service has no published port and attaches only to the D02 DATA
-bridge. It uses the unused D02 SQL data volume and a distinct backup target.
+bridge. The non-root SQL process keeps only the `NET_BIND_SERVICE` capability
+in its bounding set for the publisher binary. It uses the enrolled D02 SQL data volume and a distinct backup target.
 The backup volume is storage layout only. The scripts perform no backup,
 restore, drop, cleanup, whole-volume rewind or business admission. The
 bootstrap file is mounted from protected custody. Its value never appears in

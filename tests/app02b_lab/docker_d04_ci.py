@@ -112,7 +112,9 @@ def run(folder, report):
     address = private_address(docker, sql_name, sql_net)
     row, = docker._inspect("container", [sql_name])
     mounts = {mount["Destination"]: mount for mount in row["Mounts"]}
-    require(mounts["/var/opt/mssql"]["Name"] == sql_model["volumes"]["data"]["name"]
+    require(row["HostConfig"]["CapDrop"] == ["ALL"]
+            and row["HostConfig"]["CapAdd"] == ["NET_BIND_SERVICE"]
+            and mounts["/var/opt/mssql"]["Name"] == sql_model["volumes"]["data"]["name"]
             and mounts["/var/opt/mssql-backup"]["Name"] == sql_model["volumes"]["backup"]["name"]
             and not any(item.startswith("MSSQL_SA_PASSWORD=") for item in row["Config"]["Env"]),
             "D04_CI_MOUNT_OR_SECRET_DRIFT")
