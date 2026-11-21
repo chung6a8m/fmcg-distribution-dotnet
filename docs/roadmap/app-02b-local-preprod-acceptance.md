@@ -6,7 +6,7 @@
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
 **Global constraints:** giữ immutable business baseline, original synthetic/LocalDB/foundation guards, exact-source evidence và original B.1/B.9. Đây là roadmap triển khai, chưa phải Owner approval cho môi trường cụ thể hoặc sửa hợp đồng human review.
 
-**Parallel Docker/WSL2 rehearsal proposal (not part of this 32-row register):** [LAB-D00–D04 roadmap](app-02b-local-docker-wsl2-rehearsal.md) and [proposed ADR](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) address a Windows laptop with Docker/WSL2 but without the full Hyper-V APP/DATA/VAULT topology. D00 is documentation review; D01–D04 are proposed, not yet authorized for implementation or host Apply. This addition does **not** reclassify LAB-I01 BLOCKED as PASS, change LAB-I02 VM source requirements, increase the 4/32 SOURCE_MERGED count, or satisfy M1 `LOCAL_LAB_READY`/original B.1/B.9 physical acceptance. Docker rehearsal evidence remains separate and nonphysical.
+**Parallel Docker/WSL2 rehearsal:** The [LAB-D00–D04 roadmap](app-02b-local-docker-wsl2-rehearsal.md) and [proposed ADR](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) cover a Windows laptop with Docker/WSL2. D00 is the proposal, and the directly authorized D01 source is `SOURCE_REVIEW / HOST_NOT_RUN`. D02–D04 and any host Apply require separate authorization. The 32-row Hyper-V register, LAB-I01/I02 gates, M1 `LOCAL_LAB_READY` and original B.1/B.9 physical acceptance use their own evidence.
 
 ## 1. Cách dùng roadmap
 

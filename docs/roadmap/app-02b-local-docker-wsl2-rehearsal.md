@@ -1,6 +1,6 @@
 # APP-02B LAB-D00–D04 — Windows Docker Desktop / WSL2 rehearsal roadmap
 
-**Status (2026-11-21):** `ROADMAP_PROPOSED / DOCS_ONLY / NO_LIVE_EXECUTION`. The Owner requested this roadmap for a Windows laptop with Docker/WSL2 and insufficient capacity for separate Hyper-V APP/DATA/VAULT VMs. This is an **additive proposal**, not an amendment to the existing [32-increment Windows VM roadmap](app-02b-local-preprod-acceptance.md), a new physical acceptance decision, or an authorization to execute D01–D04.
+**Status (2026-11-21):** D00 architecture `ROADMAP_PROPOSED`, D01 `SOURCE_REVIEW / HOST_NOT_RUN`. The Owner requested this roadmap for a Windows laptop with Docker/WSL2 and insufficient capacity for separate Hyper-V APP/DATA/VAULT VMs. The [32-increment Windows VM roadmap](app-02b-local-preprod-acceptance.md) and its separate physical acceptance gates remain in force. D02–D04 require separate Owner authorization.
 
 **Decision/ADR:** [Docker/WSL2 proposal](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) · **Codex handoff:** [LAB-D handoff](app-02b-local-docker-wsl2/codex-handoff.md) · **Existing architecture:** [APP-02B local lab design](app-02b-local-preprod/design.md) · **VM platform contract:** [LAB-I01/I02](app-02b-local-preprod/01-platform-and-recovery.md) · **Physical oracle:** [B.9](app-02b9-independent-preprod-oracle.md).
 
@@ -48,7 +48,7 @@ These five proposed rows are **separate from the existing 32-row LAB-E/I/S/O reg
 | ID | Proposed PR scope and dependency | Deliverable / exit gate | Current state |
 |---|---|---|---|
 | **LAB-D00** | Docs-only architecture proposal, contract boundaries and this roadmap; no source dependency beyond PR #93 baseline | Reviewed ADR + D01–D04 specs + Codex handoff, exact links and acceptance labels | `DOCS_REVIEW / PROPOSED` |
-| **LAB-D01** | Read-only Docker/WSL2 host preflight, after D00 Owner adoption | Versioned redacted report, capability + provenance inventory, safe operator disposition | `PLANNED / NOT_AUTHORIZED` |
+| **LAB-D01** | Read-only Docker/WSL2 host preflight after D00 proposal merge and direct D01 Owner instruction | Versioned redacted report, capability + provenance inventory, safe operator disposition | `SOURCE_REVIEW / HOST_NOT_RUN` |
 | **LAB-D02** | Guarded Compose plan/apply, networks, storage, negative probes; source dependency D01 | Scoped project plan/ownership, idempotent infra-only Apply, no business admission | `PLANNED / NOT_AUTHORIZED` |
 | **LAB-D03** | Trusted TLS, durable Vault Raft, role credential lifecycle; D02 source and enrolled live sandbox | Real Vault 403/audit, persistence, fail-closed trust & token rotation | `PLANNED / NOT_AUTHORIZED` |
 | **LAB-D04** | Supported SQL instance + A/B tenant identities and permission probes; D02/D03 source, B3–B5 and current authority prerequisites | Same-instance DB layout, migrations/readback, denial witnesses and local reconciliation | `PLANNED / NOT_AUTHORIZED` |
@@ -80,17 +80,21 @@ flowchart LR
 
 ## 4. LAB-D01 — Docker/WSL2 preflight and image provenance
 
-**Proposed branch:** `feat/app02b-lab-d01-docker-preflight`. **Inputs:** operator-controlled nonsecret configuration outside Git; fixed source SHA and locally selected Docker context; proposed schema `APP02B-LAB-DOCKER-HOST-PLAN-V1`. Reuse common evidence/source lineage code only through an explicitly versioned adapter; do not rename LAB-I01 schemas.
+**Source review:** `feat/app02b-lab-d01-docker-preflight` starts from D00 merge `be961ba7f71eead5360fe8cc31c22a0a6e989818` via [PR #94](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/94). The Owner's direct LAB-D01 implementation instruction of 2026-11-21 authorizes this source increment. The checked-out source SHA and plan SHA-256 are recorded in each valid attempt.
 
-**Owned paths/interfaces (proposed):**
+**Implemented interfaces:**
 - `scripts/lab/Test-DockerWslPrerequisites.ps1 -ConfigFile <path> -OutputDirectory <new-protected-directory>` — **read-only**; exit 0 only when required conditions measured PASS, exit 1 input/collection failure, exit 2 required condition BLOCKED/UNKNOWN.
-- `tools/app02b_lab/docker_preflight.py` plus `tools/app02b_lab/schemas/lab-docker-host-*-v1.json` (names become fixed in D01 after consumer review).
-- `deploy/lab/docker-wsl2/host-plan.example.json`, `toolchain.lock.json`/operator guide, `tests/app02b_lab/test_docker_preflight.py`.
-- Outputs `docker-preflight.json` and `docker-preflight.md` with proposed schema `APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1` and SHA-256 under operator-protected outside-repo storage.
+- `tools/app02b_lab/docker_preflight.py` plus `tools/app02b_lab/schemas/lab-docker-host-*-v1.json`. D01 uses the independent `APP02B-LAB-DOCKER-HOST-PLAN-V1` and `APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1` contracts and shared strict parsing and Windows path safeguards.
+- [Operator guide](../../deploy/lab/docker-wsl2/README.md), example plan, toolchain floors, and `tests/app02b_lab/test_docker_preflight.py`.
+- Outputs `docker-preflight.json`, `docker-preflight.md` and `SHA256SUMS` under operator-protected outside-repo storage.
 
 **Required observations:** exact Windows build/architecture; WSL version and distro mode; running Docker Desktop/Engine, selected `docker context`, daemon endpoint/host identity (not a remote/unexpected engine), Linux container OS/arch, Compose/plugin versions, storage backend and Docker root; resource ceilings/free RAM/disk/WSL2 allocation; existing Compose projects, container networks, volumes, binds and host/loopback port collisions; local DNS/clock; image registry/digest/signature or trusted publisher provenance; CLI availability and redaction.
 
 **Negative tests:** absent daemon, Windows-container backend, WSL1, remote context, ARM/emulation SQL, missing memory/storage, unknown data root, preoccupied ports, unsupported image pin, polluted `DOCKER_HOST`, secret-leaking input, symlink/reparse and Git evidence path. A synthetic CI runner is not the user's laptop. **Exit:** one exact-source redacted report with no required UNKNOWN; host restrictions remain explicit even if Docker works. No Docker pulls, `compose up`, installs, settings changes or VM mutations at D01.
+
+**Evidence disposition:** `HOST_NOT_RUN / APPLY_BLOCKED`. Source CI exercises synthetic Windows and Linux fixtures via the retained LAB-E05 workflow. The implementation PR carries exact source, review and CI receipts. The laptop operator supplies the protected plan, publisher verification records and actual host receipt. Original physical acceptance remains `NOT_VERIFIED`.
+
+**Native tool provenance:** Use OS-known Windows roots and verify Authenticode for Docker Desktop, CLI plugins and Windows system tools before invoking those probes. Reject conflicting shell roots and user-controlled plugin search paths. The implementation PR retains the source review and Windows regression receipts.
 
 ## 5. LAB-D02 — Guarded Compose plan/apply, networks and storage
 
@@ -174,4 +178,4 @@ For **every** D increment:
 | Cross-tenant/rollback permission drift | D04 same-instance current authority, independent SQL readback; #53 remains a separate prerequisite |
 | Physical evidence mislabelled as approved | D00 decision boundary, all D PRs and original B.9 unchanged |
 
-**Next executable step:** Owner reviews/adopts D00 scope, then Codex implements **LAB-D01 alone** with read-only host inventory and tests on a dedicated PR. Do not jump to D02 `-Apply` because Docker Desktop happens to be installed.
+**Next executable step:** review the dedicated LAB-D01 source PR and collect the read-only host receipt on the intended laptop with the protected operator plan. D02 implementation and Apply retain their separate authorization gates.

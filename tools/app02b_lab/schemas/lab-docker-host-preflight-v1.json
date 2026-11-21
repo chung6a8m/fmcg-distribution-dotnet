@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "evidenceClassification", "authorization", "publisherProvenance", "engineFilesystemHeadroom", "collectedUtc", "sourceHead", "sourceState", "planSha256", "hostRef", "engineRef", "readiness", "issueCodes", "checks", "observed"],
+  "properties": {
+    "schema": {"const": "APP02B-LAB-DOCKER-HOST-PREFLIGHT-V1"},
+    "evidenceClassification": {"const": "WINDOWS_HOST_PREFLIGHT"},
+    "authorization": {"const": "NOT_EVALUATED"},
+    "publisherProvenance": {"const": "OPERATOR_RECEIPT_DIGEST_BOUND"},
+    "engineFilesystemHeadroom": {"const": "NOT_MEASURED"},
+    "collectedUtc": {"type": "string", "format": "date-time"},
+    "sourceHead": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        {"type": "null"}
+      ]
+    },
+    "sourceState": {
+      "type": "string",
+      "enum": ["CLEAN", "DIRTY", "UNKNOWN", "CHANGED_DURING_COLLECTION"]
+    },
+    "planSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "hostRef": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "engineRef": {
+      "anyOf": [
+        {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "readiness": {
+      "type": "string",
+      "enum": ["READY", "BLOCKED", "COLLECTION_FAILED"]
+    },
+    "issueCodes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["DOCKER_ENV_OVERRIDE", "UNSAFE_CONTEXT", "DAEMON_UNAVAILABLE", "UNSUPPORTED_DESKTOP_LAYOUT", "UNTRUSTED_PLUGIN_CONFIGURATION", "UNTRUSTED_NATIVE_EXECUTABLE", "COLLECTION_ERROR", "HOST_ACCESS_DENIED"]
+      },
+      "minItems": 0,
+      "maxItems": 5,
+      "uniqueItems": true
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["SOURCE", "WINDOWS", "POWERSHELL", "PYTHON", "GIT", "HOST_IDENTITY", "HOST_MEMORY", "HOST_DNS", "HOST_CLOCK", "WSL_VERSION", "WSL2_BACKEND", "DOCKER_DESKTOP", "DOCKER_CLI", "LOCAL_CONTEXT", "DOCKER_DAEMON", "ENGINE_IDENTITY", "LINUX_ENGINE", "SQL_X64", "WSL_MEMORY", "WINDOWS_BACKING_STORAGE", "COMPOSE", "PROJECT", "NETWORKS", "PORTS", "VOLUMES", "IMAGE_APP", "IMAGE_SQL", "IMAGE_VAULT", "IMAGE_PROXY"],
+      "properties": {
+        "SOURCE": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "WINDOWS": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "POWERSHELL": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "PYTHON": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "GIT": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "HOST_IDENTITY": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "HOST_MEMORY": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "HOST_DNS": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "HOST_CLOCK": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "WSL_VERSION": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "WSL2_BACKEND": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "DOCKER_DESKTOP": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "DOCKER_CLI": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "LOCAL_CONTEXT": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "DOCKER_DAEMON": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "ENGINE_IDENTITY": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "LINUX_ENGINE": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "SQL_X64": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "WSL_MEMORY": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "WINDOWS_BACKING_STORAGE": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "COMPOSE": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "PROJECT": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "NETWORKS": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "PORTS": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "VOLUMES": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "IMAGE_APP": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "IMAGE_SQL": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "IMAGE_VAULT": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        },
+        "IMAGE_PROXY": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "UNKNOWN"]
+        }
+      }
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windowsBuild", "hostArchitecture", "engineArchitecture", "wslMode", "versions", "storageDriver", "storageRef", "hostFreeRamMiB", "hostTotalRamMiB", "engineRamMiB", "engineCpu", "diskFreeMiB", "vhdCapacityMiB", "containerCount", "projectCount", "networkCount", "volumeCount", "bindCount", "publishedPortCount", "images"],
+      "properties": {
+        "windowsBuild": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "hostArchitecture": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["X64", "ARM64", "X86", "ARM"]
+            },
+            {"type": "null"}
+          ]
+        },
+        "engineArchitecture": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["X64", "ARM64", "X86", "ARM"]
+            },
+            {"type": "null"}
+          ]
+        },
+        "wslMode": {
+          "anyOf": [
+            {"type": "integer", "minimum": 1},
+            {"type": "null"}
+          ]
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["python", "git", "pwsh", "wsl", "desktop", "dockerCli", "engine", "compose"],
+          "properties": {
+            "python": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "git": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "pwsh": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "wsl": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "desktop": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "dockerCli": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "engine": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            },
+            "compose": {
+              "anyOf": [
+                {"type": "string", "pattern": "^[0-9]{1,6}(\\.[0-9]{1,6}){1,3}$"},
+                {"type": "null"}
+              ]
+            }
+          }
+        },
+        "storageDriver": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": ["overlay2", "overlayfs"]
+            },
+            {"type": "null"}
+          ]
+        },
+        "storageRef": {
+          "anyOf": [
+            {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            {"type": "null"}
+          ]
+        },
+        "hostFreeRamMiB": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "hostTotalRamMiB": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "engineRamMiB": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "engineCpu": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "diskFreeMiB": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "vhdCapacityMiB": {"anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+        "containerCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "projectCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "networkCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "volumeCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "bindCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "publishedPortCount": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "sha256", "publisherReceiptSha256", "status"],
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": ["APP", "SQL", "VAULT", "PROXY"]
+              },
+              "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "publisherReceiptSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "status": {
+                "type": "string",
+                "enum": ["PASS", "FAIL", "UNKNOWN"]
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 4,
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "readiness": {"const": "READY"}
+        }
+      },
+      "then": {
+        "properties": {
+          "sourceState": {"const": "CLEAN"},
+          "issueCodes": {"maxItems": 0},
+          "checks": {
+            "properties": {
+              "SOURCE": {"const": "PASS"},
+              "WINDOWS": {"const": "PASS"},
+              "POWERSHELL": {"const": "PASS"},
+              "PYTHON": {"const": "PASS"},
+              "GIT": {"const": "PASS"},
+              "HOST_IDENTITY": {"const": "PASS"},
+              "HOST_MEMORY": {"const": "PASS"},
+              "HOST_DNS": {"const": "PASS"},
+              "HOST_CLOCK": {"const": "PASS"},
+              "WSL_VERSION": {"const": "PASS"},
+              "WSL2_BACKEND": {"const": "PASS"},
+              "DOCKER_DESKTOP": {"const": "PASS"},
+              "DOCKER_CLI": {"const": "PASS"},
+              "LOCAL_CONTEXT": {"const": "PASS"},
+              "DOCKER_DAEMON": {"const": "PASS"},
+              "ENGINE_IDENTITY": {"const": "PASS"},
+              "LINUX_ENGINE": {"const": "PASS"},
+              "SQL_X64": {"const": "PASS"},
+              "WSL_MEMORY": {"const": "PASS"},
+              "WINDOWS_BACKING_STORAGE": {"const": "PASS"},
+              "COMPOSE": {"const": "PASS"},
+              "PROJECT": {"const": "PASS"},
+              "NETWORKS": {"const": "PASS"},
+              "PORTS": {"const": "PASS"},
+              "VOLUMES": {"const": "PASS"},
+              "IMAGE_APP": {"const": "PASS"},
+              "IMAGE_SQL": {"const": "PASS"},
+              "IMAGE_VAULT": {"const": "PASS"},
+              "IMAGE_PROXY": {"const": "PASS"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}
