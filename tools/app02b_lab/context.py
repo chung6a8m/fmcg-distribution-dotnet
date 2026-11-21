@@ -62,7 +62,7 @@ def validate_run_id(run_id: str) -> None:
 def git(*arguments: str) -> bytes:
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     try:
-        return subprocess.run(["git", "-C", str(REPO), *arguments], check=True,
+        return subprocess.run(["git", "--no-replace-objects", "-C", str(REPO), *arguments], check=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               env=env, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):

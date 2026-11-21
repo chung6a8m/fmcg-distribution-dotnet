@@ -39,7 +39,11 @@ class LabValidationReport:
 
 @lru_cache
 def _document(name: str) -> dict:
-    return read_json(_SCHEMAS / f"lab-{name}-v1.json")
+    path = _SCHEMAS / f"lab-{name}-v1.json"
+    read_pinned_data = getattr(__loader__, "read_pinned_data", None)
+    if read_pinned_data is not None:
+        return strict_json(read_pinned_data(path))
+    return read_json(path)
 
 
 def _check(value, rule: dict, definitions: dict, location: str) -> None:

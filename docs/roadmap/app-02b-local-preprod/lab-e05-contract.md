@@ -48,7 +48,7 @@ $run = 'b-lab-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '-
 $config = 'C:\Protected Lab Inputs\public-config.json'
 $evidence = 'C:\Protected Lab Evidence'
 
-python tools/app02b_lab/run.py --config $config --selection case:B01-01 --run-id $run --evidence-root $evidence
+python -I -S -B tools/app02b_lab/run.py --config $config --selection case:B01-01 --run-id $run --evidence-root $evidence
 .\scripts\lab\Invoke-LabAcceptance.ps1 -Config $config -RunId $run -EvidenceRoot $evidence -Selection gate:G-B05 -Resume
 .\scripts\lab\Invoke-LabAcceptance.ps1 -RunId $run -EvidenceRoot $evidence -Validate
 ```
@@ -57,7 +57,14 @@ Selections are case:<original case ID>, gate:G-B01 through gate:G-B05, all (30 c
 and both probes) or runtime:RUNTIME-01 / runtime:RUNTIME-02. Prepare refuses an existing
 run ID. Resume appends an attempt. Validate is read-only, including for an archived bundle
 outside the checkout. It checks the retained source identity without requiring an archive
-to match today's HEAD. Resume always verifies the current checkout.
+to match today's HEAD. Resume always verifies the current checkout. The supported launcher
+uses Python isolation, pins the invocation HEAD, and compiles lab modules from that commit's Git blobs. Repo
+bytecode caches, extension modules shadowing those files, and other repo import candidates
+are excluded. The interpreter and its standard library are trusted operator toolchain
+inputs. Use the isolated command or PowerShell wrapper for source-bound invocation.
+The plain script invocation relaunches itself with isolation for compatibility, after standard
+Python startup has already taken place. Library consumers must arrange equivalent provenance
+for their own entry point and drivers.
 
 | Exit | Meaning |
 | --- | --- |
@@ -86,12 +93,27 @@ environment.json, protected originals, enrollment references, and the immutable 
 and report.md. Coverage includes 30 original cases and two separate runtime rows. A
 prepared baseline is visible before the runner reserves its first attempt. The runner
 retains numbered hashes/ journal entries independently of attempts/ directories. Each
-entry binds its attempt bytes and the preceding entry hash. Write-once publication, checksums,
-relative artifact inventories and journal validation preserve attempt history. A crash after
-attempt reservation leaves the immutable baseline and prior attempts available. Validation
-reports an integrity failure if the reservation lacks the expected attempt. Preserve that
-run for investigation and create a new run ID to continue. A crash during initial staging
-can leave a preparation reservation outside the canonical run path.
+entry binds its attempt bytes and the preceding entry hash. A sealed FAIL remains visible
+in coverage and produces exit 1 when selected, even if a later attempt is NOT_RUN or
+BLOCKED. V1 has no disposition that can clear an earlier failure.
+
+The writer exposes append_attempt(root, inputs, selected, *, checkpoint=None, capture=None).
+An authorized consumer may pass a capture callback. The callback receives an AttemptDraft
+with the frozen context, attempt ID, UTC, selection and default result rows. It publishes
+raw bytes and then witness descriptors through write_artifact(case_id, category, name, data).
+The method returns a path and SHA-256 reference scoped to the final attempt. The callback
+returns a mapping from selected case IDs to complete observed rows. Capture is synchronous.
+The writer checks the full staged result and all referenced artifacts before publishing the
+journal and moving the sealed attempt into history. The production CLI supplies no callback.
+
+An interruption during capture preserves the private staging directory and its capture.json
+identity record under the evidence root. Committed coverage and history remain intact.
+The sealed-bundle validator reads only committed attempts. Operators retain interrupted
+captures separately for investigation. If the journal was published before
+the final directory rename, the missing attempt is an integrity failure, with the complete
+staged capture retained when available. Preserve the interrupted run for investigation and
+use a new run ID if publication was incomplete. A process killed during capture or initial
+preparation may leave an exclusive reservation beside the canonical run directory.
 
 Keep valid checkpoints from independently retained storage outside the evidence tree.
 The checkpoint consists of runId, baselineSha256, attemptCount and journalHeadSha256.
@@ -129,7 +151,7 @@ private evidence.
 | Increment | Contract handoff |
 | --- | --- |
 | LAB-I01 | Provide measured host bytes, externally authorized redacted environment and protected admission. Check toolchain and local root prerequisites. |
-| LAB-E06 | Implement typed collectors and bind raw-before-descriptor evidence to the V1 attempt/case/phase/target. Introduce reviewed interpretation of raw measurements before enabling technical PASS. |
+| LAB-E06 | Use AttemptDraft to implement typed raw-before-descriptor collectors bound to the V1 attempt/case/phase/target. Introduce reviewed interpretation of raw measurements before enabling technical PASS. |
 | LAB-E07 | Populate source-bound CI evidence through a reviewed inventory extension. Current CI directory stays empty. |
 | LAB-S09 | Match the shared C# DTO to the eight run-context fields and deterministic JSON contract. Keep enrollment identities and approvals external. |
 | LAB-I08 | Verify approved lineage receipts and Registry transitions before admitting a changed target. |

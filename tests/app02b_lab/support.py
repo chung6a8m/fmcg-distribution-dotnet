@@ -84,8 +84,8 @@ class DisposableLab(unittest.TestCase):
         prepare_run(self.root, inputs)
         return inputs
 
-    def append(self, selection="case:B01-01"):
-        return append_attempt(self.bundle, self.inputs(), selection_ids(selection))
+    def append(self, selection="case:B01-01", **options):
+        return append_attempt(self.bundle, self.inputs(), selection_ids(selection), **options)
 
     def install_cli(self):
         for relative in ("tools/app02b_lab", "scripts/lab"):

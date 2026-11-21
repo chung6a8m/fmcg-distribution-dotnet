@@ -1,5 +1,8 @@
 """Publish and validate the prepared coverage index and append-only attempts."""
 
+from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 import re
 import tempfile
@@ -12,7 +15,7 @@ from .context import (
 )
 from .contract import (
     LabError, canonical_json, child, digest, guarded_directory, publish, read_bytes,
-    require, safe_path, strict_json, sync_directory,
+    relative_parts, require, safe_path, strict_json, sync_directory,
 )
 from .schema import LabValidationReport, ValidationIssue, validate_document
 
@@ -356,8 +359,10 @@ def validate_bundle(root: Path, *, checkpoint: dict | None = None) -> LabValidat
         for attempt, head in _history(root, context, catalog, manifest):
             attempts.append(attempt)
             for row in attempt["results"]:
-                if row["caseId"] in attempt["selection"]:
-                    coverage[row["caseId"]] = row["technicalResult"]
+                key = row["caseId"]
+                if key in attempt["selection"] and coverage[key] != "FAIL":
+                    # V1 has no disposition that can clear a sealed failure.
+                    coverage[key] = row["technicalResult"]
         current = _checkpoint(context, baseline_sha, len(attempts), head, checkpoint)
     except LabError as error:
         return LabValidationReport(context, coverage, tuple(attempts),
@@ -377,16 +382,59 @@ def _checkpoint(context, baseline_sha, count, head, expected):
     return current
 
 
+@dataclass(frozen=True)
+class AttemptDraft:
+    """A private capture view. Only a validated, sealed attempt enters history."""
+
+    context: LabRunContext
+    attempt_id: str
+    started_utc: str
+    selection: tuple[str, ...]
+    results: dict[str, dict]
+    _directory: Path
+
+    def write_artifact(self, case_id: str, category: str, name: str, data: bytes) -> dict:
+        require(case_id in self.selection and category in ("raw", "witnesses"),
+                "INVALID_CAPTURE_ARTIFACT_SCOPE")
+        require(len(relative_parts(name)) == 1 and isinstance(data, bytes),
+                "INVALID_CAPTURE_ARTIFACT")
+        relative = f"cases/{case_id}/{category}/{name}"
+        prefix = f"attempts/{self.attempt_id}/cases/{case_id}"
+        if category == "witnesses":
+            witness = strict_json(data)
+            validate_document(witness, "evidence", "witness")
+            raw = witness["rawArtifact"]
+            require(name.endswith(".json") and raw["relativePath"].startswith(prefix + "/raw/"),
+                    "RAW_PATH_OUTSIDE_CASE")
+            require(bool(_check_hash(self._directory.parent.parent, raw).strip()),
+                    "EMPTY_RAW_ARTIFACT")
+        for folder in ("cases", f"cases/{case_id}", f"cases/{case_id}/{category}"):
+            child(self._directory, folder, missing=True).mkdir(mode=0o700, exist_ok=True)
+        publish(child(self._directory, relative, missing=True), data)
+        return {"relativePath": f"attempts/{self.attempt_id}/{relative}", "sha256": digest(data)}
+
+
 def append_attempt(root: Path, inputs: RunInputs, selected: tuple[str, ...],
-                   *, checkpoint: dict | None = None) -> dict:
+                   *, checkpoint: dict | None = None,
+                   capture: Callable[[AttemptDraft], dict[str, dict]] | None = None) -> dict:
     root = safe_path(root)
     evidence_root = approved_root(root.parent)
+    validate_run_id(root.name)
     with guarded_directory(root):
-        return _append_attempt(root, evidence_root, inputs, selected, checkpoint)
+        reservation = safe_path(evidence_root / (".reserve-attempt-" + root.name), missing=True)
+        try:
+            reservation.mkdir(mode=0o700)
+        except FileExistsError:
+            raise LabError("ATTEMPT_CAPTURE_ALREADY_RESERVED") from None
+        try:
+            return _append_attempt(root, evidence_root, inputs, selected, checkpoint, capture)
+        finally:
+            reservation.rmdir()
 
 
 def _append_attempt(root: Path, evidence_root: Path, inputs: RunInputs,
-                    selected: tuple[str, ...], checkpoint: dict | None) -> dict:
+                    selected: tuple[str, ...], checkpoint: dict | None,
+                    capture: Callable[[AttemptDraft], dict[str, dict]] | None) -> dict:
     validate_source(inputs.context.sourceHeadSha)
     context, catalog, manifest, baseline_sha = _read_baseline(root)
     require(_inputs_match(context, inputs), "RESUME_PROVENANCE_MISMATCH")
@@ -415,20 +463,45 @@ def _append_attempt(root: Path, evidence_root: Path, inputs: RunInputs,
         "results": [_row(definition, attempt_id, definition.caseId in selected)
                     for definition in catalog.values()],
     }
+    # Keep interrupted captures under the admitted root, outside sealed history.
+    staging = Path(tempfile.mkdtemp(prefix=f".lab-capture-{context.runId}-", dir=evidence_root))
+    (staging / "attempts").mkdir(mode=0o700)
+    draft_directory = staging / "attempts" / attempt_id
+    draft_directory.mkdir(mode=0o700)
+    draft_header = staging / "capture.json"
+    if capture is not None:
+        header = {key: value for key, value in attempt.items() if key != "results"}
+        publish(draft_header, canonical_json(header | {"publicationState": "CAPTURING"}))
+        results = {row["caseId"]: row for row in attempt["results"]}
+        draft = AttemptDraft(context, attempt_id, started, selected, deepcopy(results),
+                             draft_directory)
+        observed = capture(draft)
+        require(isinstance(observed, dict) and observed.keys() <= set(selected),
+                "CAPTURE_RESULT_SELECTION_INVALID")
+        require(all(isinstance(row, dict) and row.get("caseId") == case_id
+                    for case_id, row in observed.items()), "CAPTURE_RESULT_CASE_MISMATCH")
+        attempt["results"] = list((results | observed).values())
+
     data = canonical_json(attempt)
     entry = {"sequence": sequence, "attemptId": attempt_id,
              "attemptSha256": digest(data), "previousSha256": previous}
+    publish(draft_directory / "attempt.json", data)
+    _validate_attempt(staging, context, catalog, manifest, entry)
     validate_source(context.sourceHeadSha)
+    # Publish the journal before the sealed directory becomes visible. A crash
+    # here is detectable and leaves the complete capture under its staging path.
     with guarded_directory(directory.parent):
+        require(not directory.exists(), "ATTEMPT_ID_ALREADY_EXISTS")
         journal = child(root, f"hashes/{sequence:08d}.json", missing=True)
         try:
             publish(journal, canonical_json(entry))
         except FileExistsError:
             raise LabError("ATTEMPT_SEQUENCE_ALREADY_RESERVED") from None
-        # Reserving first makes an interrupted write visible, preserving the
-        # prepared coverage and every previously sealed attempt.
-        directory = child(root, f"attempts/{attempt_id}", missing=True)
-        directory.mkdir(mode=0o700)
+        draft_directory.rename(directory)
         sync_directory(directory.parent)
-        publish(directory / "attempt.json", data)
+        sync_directory(draft_directory.parent)
+    draft_directory.parent.rmdir()
+    if capture is not None:
+        draft_header.unlink()
+    staging.rmdir()
     return attempt

@@ -32,7 +32,7 @@ if (-not $python) {
 }
 
 $entryPoint = Join-Path $PSScriptRoot '../../tools/app02b_lab/run.py'
-$labArguments = @('-B', $entryPoint, "--run-id=$RunId", "--evidence-root=$EvidenceRoot", "--selection=$Selection")
+$labArguments = @('-I', '-S', '-B', $entryPoint, "--run-id=$RunId", "--evidence-root=$EvidenceRoot", "--selection=$Selection")
 if ($Validate) {
     $labArguments += '--validate'
 } else {

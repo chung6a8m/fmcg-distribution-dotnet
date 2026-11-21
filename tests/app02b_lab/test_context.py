@@ -49,6 +49,17 @@ class ContextTests(DisposableLab):
         with self.assertRaisesRegex(LabError, "CHECKOUT_HAS_HIDDEN_TRACKED_FILES"):
             self.inputs()
 
+    def test_git_replace_cannot_hide_dirty_checkout(self):
+        tracked = self.checkout / "synthetic.txt"
+        tracked.write_text("replacement source", encoding="utf-8")
+        self.git("add", tracked.name)
+        alternate = self.git("commit-tree", self.git("write-tree").strip(),
+                             "-m", "Synthetic replacement").strip()
+        self.git("replace", self.source, alternate)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        with self.assertRaisesRegex(LabError, "DIRTY_CHECKOUT"):
+            self.inputs()
+
     def test_invalid_or_missing_host_fingerprint_and_environment(self):
         original = self.host.read_bytes()
         self.host.write_bytes(b"")

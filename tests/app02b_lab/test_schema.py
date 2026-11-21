@@ -1,4 +1,6 @@
 import importlib
+import os
+import py_compile
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,7 +12,7 @@ from uuid import UUID
 
 from support import DisposableLab, RUN_ID, get, put
 from tools.app02b_lab.bundle import LABELS
-from tools.app02b_lab.contract import LabError, digest, guarded_directory, publish
+from tools.app02b_lab.contract import LabError, canonical_json, digest, guarded_directory, publish
 from tools.app02b_lab.run import exit_code
 from tools.app02b_lab.schema import strict_json, validate_lab_bundle
 
@@ -88,21 +90,48 @@ class BundleTests(DisposableLab):
         self.assertEqual(self.check().attempts, (first, second))
         self.assertEqual((self.bundle / "run.json").read_bytes(), original)
 
-    def test_crash_during_attempt_preserves_prepared_coverage_and_prior_attempt(self):
+    def test_interrupted_capture_retains_raw_and_prior_attempts(self):
         self.prepare()
         first = self.append()
 
-        def interrupt(path, data):
-            if path.name == "attempt.json":
-                raise OSError("simulated process failure before publication")
-            publish(path, data)
+        def interrupt(draft):
+            draft.write_artifact("B01-01", "raw", "partial.txt", b"SYNTHETIC partial capture")
+            raise OSError("simulated capture interruption")
 
-        with patch.object(bundle_module, "publish", side_effect=interrupt), self.assertRaises(OSError):
+        with self.assertRaises(OSError):
+            self.append(capture=interrupt)
+        report = self.check()
+        self.assertEqual(len(report.coverage), 32)
+        self.assertEqual(report.attempts, (first,))
+        self.assertFalse((self.bundle / "hashes" / "00000002.json").exists())
+        partials = list(self.root.glob(".lab-capture-*/attempts/*/cases/B01-01/raw/partial.txt"))
+        self.assertEqual([path.read_bytes() for path in partials], [b"SYNTHETIC partial capture"])
+        header = get(partials[0].parents[5] / "capture.json")
+        self.assertEqual(header["attemptId"], partials[0].parents[3].name)
+        self.assertEqual(header["sourceHeadSha"], self.source)
+        self.assertEqual(header["selection"], ["B01-01"])
+        self.assertEqual(header["publicationState"], "CAPTURING")
+
+    def test_crash_during_attempt_seal_preserves_coverage_and_prior_attempt(self):
+        self.prepare()
+        first = self.append()
+
+        rename = Path.rename
+
+        def interrupt(source, target):
+            if source.name.startswith("attempt-"):
+                raise OSError("simulated publication interruption")
+            return rename(source, target)
+
+        with patch.object(Path, "rename", autospec=True, side_effect=interrupt), self.assertRaises(OSError):
             self.append()
         report = self.check("PATH_MISSING")
         self.assertEqual(len(report.coverage), 32)
         self.assertEqual(report.attempts, (first,))
-        self.assertTrue((self.bundle / "hashes" / "00000002.json").is_file())
+        entry = get(self.bundle / "hashes" / "00000002.json")
+        staged = list(self.root.glob(f".lab-capture-*/attempts/{entry['attemptId']}/attempt.json"))
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(digest(staged[0].read_bytes()), entry["attemptSha256"])
 
     def test_checksum_and_unindexed_entries_detect_modification(self):
         self.prepare()
@@ -156,18 +185,53 @@ class BundleTests(DisposableLab):
         resealed = validate_lab_bundle(self.bundle, checkpoint=checkpoint)
         self.assertEqual(resealed.issues[0].code, "EXTERNAL_CHECKPOINT_MISMATCH")
 
-    def test_failed_attempt_remains_in_history_after_retry(self):
+    def test_observed_attempt_is_captured_before_seal(self):
         self.prepare()
-        first = self.append()
-        row = first["results"][0]
-        row.update(technicalResult="FAIL", tenantScope="A", peerScope="B", faultId="ref-" + "f" * 16,
-                   targetRefs=[self.manifest["targets"]["A"]["targetRef"]],
-                   observedUtc=first["startedUtc"])
-        self.reseal_attempt(first)
+        target = self.manifest["targets"]["A"]["targetRef"]
+
+        def capture(draft):
+            row = dict(draft.results["B01-01"])
+            fault = "ref-" + "f" * 16
+            raw = draft.write_artifact("B01-01", "raw", "reading.txt", b"SYNTHETIC observation")
+            witness = {
+                **LABELS, "runId": draft.context.runId, "attemptId": draft.attempt_id,
+                "caseId": row["caseId"], "sourceHeadSha": draft.context.sourceHeadSha,
+                "environmentId": draft.context.environmentId,
+                "configurationSha256": draft.context.configurationSha256,
+                "kind": "HTTP", "phase": "POSITIVE", "observedUtc": draft.started_utc,
+                "observedSymbol": "SYNTHETIC_MISMATCH", "faultId": fault,
+                "observerPrincipalRef": "ref-" + "b" * 16, "targetIdentity": [target],
+                "vantagePoint": "WINDOWS_HOST", "rawArtifact": raw,
+            }
+            descriptor = draft.write_artifact(
+                "B01-01", "witnesses", "reading.json", canonical_json(witness))
+            row.update(technicalResult="FAIL", tenantScope="A", peerScope="B",
+                       faultId=fault, targetRefs=[target], observedUtc=draft.started_utc,
+                       positiveRefs=[descriptor], actualObservations=["SYNTHETIC_MISMATCH"],
+                       diff="MISMATCH", missingRequirements=[])
+            return {"B01-01": row}
+
+        first = self.append(capture=capture)
+        first_bytes = (self.bundle / "attempts" / first["attemptId"] / "attempt.json").read_bytes()
         second = self.append()
-        history = self.check().attempts
-        self.assertEqual(history, (first, second))
-        self.assertEqual(history[0]["results"][0]["technicalResult"], "FAIL")
+        report = self.check()
+        self.assertEqual(report.coverage["B01-01"], "FAIL")
+        self.assertEqual(report.attempts, (first, second))
+        self.assertEqual(exit_code([report.coverage["B01-01"]]), 1)
+        self.assertEqual((self.bundle / "attempts" / first["attemptId"] / "attempt.json").read_bytes(),
+                         first_bytes)
+
+    def test_capture_with_unindexed_raw_is_rejected_before_seal(self):
+        self.prepare()
+
+        def capture(draft):
+            draft.write_artifact("B01-01", "raw", "unindexed.txt", b"SYNTHETIC unindexed")
+            return {}
+
+        with self.assertRaisesRegex(LabError, "ATTEMPT_ARTIFACT_INVENTORY"):
+            self.append(capture=capture)
+        self.assertEqual(self.check().attempts, ())
+        self.assertFalse((self.bundle / "hashes" / "00000001.json").exists())
 
     def test_schema_rejects_illegal_fields_values_and_physical_promotion(self):
         self.prepare()
@@ -316,6 +380,44 @@ class CliTests(DisposableLab):
             "--evidence-root", str(self.root), *flags,
         ], cwd=self.checkout, capture_output=True)
 
+    def test_cli_ignores_timestamp_valid_bytecode_from_clean_checkout(self):
+        self.install_cli()
+        module = self.checkout / "tools/app02b_lab/bundle.py"
+        original = module.read_bytes()
+        identity = module.stat()
+        stale = original.replace(b'"INVALID_SELECTION"', b'"STALE_CACHE_PROBE"')
+        self.assertEqual(len(stale), len(original))
+        self.assertNotEqual(stale, original)
+        module.write_bytes(stale)
+        os.utime(module, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+        py_compile.compile(str(module), doraise=True)
+        module.write_bytes(original)
+        os.utime(module, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        outcome = self.cli("case:unknown")
+        self.assertEqual(outcome.returncode, 1, outcome.stdout + outcome.stderr)
+        self.assertEqual(strict_json(outcome.stdout)["issues"][0]["code"], "INVALID_SELECTION")
+
+    def test_cli_refuses_dirty_checkout_without_importing_dirty_module(self):
+        self.install_cli()
+        module = self.checkout / "tools/app02b_lab/bundle.py"
+        module.write_bytes(module.read_bytes() + b'\nraise RuntimeError("UNCOMMITTED_PROBE")\n')
+        outcome = self.cli("case:B01-01")
+        self.assertEqual(outcome.returncode, 1, outcome.stdout + outcome.stderr)
+        self.assertNotIn(b"UNCOMMITTED_PROBE", outcome.stderr)
+        self.assertEqual(strict_json(outcome.stdout)["issues"][0]["code"], "DIRTY_CHECKOUT")
+        self.assertFalse(self.bundle.exists())
+
+    def test_cli_validates_archive_with_schema_from_pinned_commit(self):
+        self.install_cli()
+        self.prepare()
+        self.append()
+        schema = self.checkout / "tools/app02b_lab/schemas/lab-evidence-v1.json"
+        schema.write_bytes(b"{}")
+        outcome = self.cli("case:B01-01", "--validate")
+        self.assertEqual(outcome.returncode, 2, outcome.stdout + outcome.stderr)
+        self.assertEqual(strict_json(outcome.stdout)["validation"], "VALID")
+
     def test_cli_controls_selection_and_preserves_history(self):
         self.install_cli()
         attempts = []
@@ -334,6 +436,28 @@ class CliTests(DisposableLab):
         self.assertEqual(readonly.returncode, 2)
         self.assertEqual(strict_json(readonly.stdout)["attemptIds"], attempts)
         self.assertEqual(self.cli().returncode, 1)
+
+    def test_cli_retry_keeps_prior_failure_in_output_and_exit_code(self):
+        self.install_cli()
+        self.prepare()
+        target = self.manifest["targets"]["A"]["targetRef"]
+
+        def capture(draft):
+            row = draft.results["B01-01"] | {
+                "technicalResult": "FAIL", "tenantScope": "A", "peerScope": "B",
+                "faultId": "ref-" + "f" * 16, "targetRefs": [target],
+                "observedUtc": draft.started_utc,
+            }
+            return {"B01-01": row}
+
+        failed = self.append(capture=capture)
+        result = self.cli("case:B01-01", "--resume")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        body = strict_json(result.stdout)
+        self.assertEqual(body["validation"], "VALID")
+        self.assertEqual(body["selectedResults"], {"B01-01": "FAIL"})
+        self.assertEqual(len(body["attemptIds"]), 2)
+        self.assertEqual(body["attemptIds"][0], failed["attemptId"])
 
     def test_invalid_arguments_and_secret_fields_are_not_echoed(self):
         self.install_cli()

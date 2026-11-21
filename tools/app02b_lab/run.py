@@ -1,12 +1,82 @@
 """Prepare, resume or validate a local lab bundle without executing a scenario."""
 
-import argparse
-from pathlib import Path
 import sys
 
-if __package__ in (None, ""):
-    sys.dont_write_bytecode = True
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+_SOURCE_HEAD = None
+
+if __name__ == "__main__":
+    import os
+
+    if not (sys.flags.isolated and sys.flags.no_site and sys.flags.dont_write_bytecode):
+        # Keep the compatibility launcher on the interpreter's standard
+        # library path. The child bypasses site initialization and PYTHONPATH.
+        stdlib = os.path.dirname(os.__file__)
+        sys.path[:] = [stdlib, os.path.join(stdlib, "lib-dynload"),
+                       os.path.join(sys.base_exec_prefix, "DLLs")]
+        import subprocess
+
+        raise SystemExit(subprocess.call([sys.executable, "-I", "-S", "-B", *sys.argv]))
+
+    from importlib.machinery import ModuleSpec, SourceFileLoader
+    from importlib.util import spec_from_file_location
+    from pathlib import Path
+    import subprocess
+
+    _REPO = Path(__file__).resolve().parents[2]
+    _GIT_ENV = {key: value for key, value in os.environ.items()
+                if not key.upper().startswith("GIT_")}
+
+    def _git_source(*args):
+        try:
+            return subprocess.check_output(
+                ["git", "--no-replace-objects", "-C", str(_REPO), *args],
+                stderr=subprocess.DEVNULL, env=_GIT_ENV, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            print('{"validation":"FAIL","originalGateStatus":"NOT_VERIFIED",'
+                  '"issues":[{"code":"GIT_SOURCE_BOOTSTRAP_FAILED","location":""}]}')
+            raise SystemExit(1) from None
+
+    _SOURCE_HEAD = _git_source("rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+
+    class _LabSourceLoader(SourceFileLoader):
+        def read_pinned_data(self, filename):
+            relative = Path(filename).relative_to(_REPO).as_posix()
+            return _git_source("cat-file", "blob", f"{_SOURCE_HEAD}:{relative}")
+
+        def get_code(self, fullname):
+            filename = self.get_filename(fullname)
+            return self.source_to_code(self.read_pinned_data(filename), filename)
+
+    class _LabSourceFinder:
+        package = "tools.app02b_lab"
+        modules = {"bundle", "catalog", "context", "contract", "schema"}
+        directory = Path(__file__).resolve().parent
+
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "tools":
+                return ModuleSpec(fullname, loader=None, is_package=True)
+            if fullname == self.package:
+                source = self.directory / "__init__.py"
+                return spec_from_file_location(
+                    fullname, source, loader=_LabSourceLoader(fullname, str(source)),
+                    submodule_search_locations=[],
+                )
+            if fullname.startswith(self.package + "."):
+                module = fullname.removeprefix(self.package + ".")
+                if module in self.modules:
+                    source = self.directory / (module + ".py")
+                    return spec_from_file_location(
+                        fullname, source, loader=_LabSourceLoader(fullname, str(source)),
+                    )
+                raise ModuleNotFoundError(fullname)
+            return None
+
+    sys.meta_path.insert(0, _LabSourceFinder())
+
+import argparse
+from pathlib import Path
 
 from tools.app02b_lab.bundle import append_attempt, prepare_run, selection_ids
 from tools.app02b_lab.context import (
@@ -65,7 +135,7 @@ def main(argv=None) -> int:
                 require(not root.exists(), "RUN_ALREADY_EXISTS")
             else:
                 require(root.is_dir(), "RUN_TO_RESUME_MISSING")
-            inputs = collect_inputs(args.config, evidence, checkout_sha(), args.run_id)
+            inputs = collect_inputs(args.config, evidence, _SOURCE_HEAD or checkout_sha(), args.run_id)
             if not args.resume:
                 prepare_run(evidence, inputs)
             append_attempt(root, inputs, selected, checkpoint=checkpoint)
