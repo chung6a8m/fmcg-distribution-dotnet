@@ -1,2 +1,5 @@
 # The oracle fixture is a byte-pinned contract on every platform.
 tools/app02b9/expected-v1.json -text
+
+# SQL Server's shell launcher runs inside the Linux container.
+deploy/lab/docker-wsl2/sql/start.sh text eol=lf

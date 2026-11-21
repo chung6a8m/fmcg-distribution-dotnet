@@ -42,15 +42,15 @@ class CiDocker:
         return json.loads(self.run(kind, "inspect", "--", *names))
 
 
-def certificate(folder, name, authority=None):
+def certificate(folder, name, authority=None, *, hostname="vault"):
     key, crt = folder / f"{name}.key", folder / f"{name}.pem"
     if authority is None:
         command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-noenc", "-days", "1",
                 "-subj", f"/CN={name}", "-keyout", str(key), "-out", str(crt))
     else:
         csr, ext = folder / f"{name}.csr", folder / f"{name}.ext"
-        ext.write_text("subjectAltName=DNS:vault\nextendedKeyUsage=serverAuth\n", encoding="ascii")
-        command("openssl", "req", "-newkey", "rsa:2048", "-noenc", "-subj", "/CN=vault",
+        ext.write_text(f"subjectAltName=DNS:{hostname}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
+        command("openssl", "req", "-newkey", "rsa:2048", "-noenc", "-subj", f"/CN={hostname}",
                 "-keyout", str(key), "-out", str(csr))
         command("openssl", "x509", "-req", "-in", str(csr), "-CA", str(authority[0]),
                 "-CAkey", str(authority[1]), "-CAcreateserial", "-days", "1",

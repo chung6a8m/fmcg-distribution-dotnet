@@ -125,7 +125,7 @@ def validate_pem(certificate, key, ca):
     return digest(der)
 
 
-def verify_tls_inputs(certificate, key, authorities):
+def verify_tls_inputs(certificate, key, authorities, *, hostname="vault"):
     """Validate key, current chain, server purpose and DNS SAN without a listening socket."""
     server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -138,7 +138,7 @@ def verify_tls_inputs(certificate, key, authorities):
         to_server, from_server = ssl.MemoryBIO(), ssl.MemoryBIO()
         to_client, from_client = ssl.MemoryBIO(), ssl.MemoryBIO()
         listener = server.wrap_bio(to_server, from_server, server_side=True)
-        peer = client.wrap_bio(to_client, from_client, server_hostname="vault")
+        peer = client.wrap_bio(to_client, from_client, server_hostname=hostname)
         pending = [peer, listener]
         for _ in range(12):
             for context in pending[:]:

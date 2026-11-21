@@ -1,0 +1,52 @@
+name: APP-02B LAB-D04 SQL rights (synthetic CI only)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/app02b-lab-d04.yml'
+      - 'deploy/lab/docker-wsl2/**'
+      - 'scripts/lab/*DockerLabSql.ps1'
+      - 'tools/lab-d04-sql/**'
+      - 'tools/app02b_lab/**'
+      - 'tests/app02b_lab/**'
+      - 'src/FmcgDms.Preprod.Identity/Migrations/**'
+      - 'src/FmcgDms.Preprod.Tenancy/**'
+      - 'src/FmcgDms.Preprod.Authorization/Migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  d04-sql-synthetic:
+    name: LAB-D04 private SQL TLS, Vault credentials and tenant rights
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+      - name: Build and verify isolated Vault and SQL Server
+        shell: bash
+        env:
+          LAB_D04_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$LAB_D04_SOURCE_HEAD"
+          test "$(dotnet --version)" = "10.0.404"
+          python -B -m unittest discover -s tests/app02b_lab -p 'test_docker_d04.py' -v
+          dotnet build tools/lab-d04-sql/FmcgDms.Lab.D04.Sql.csproj -c Release
+          PYTHONPATH="$GITHUB_WORKSPACE" python -B tests/app02b_lab/docker_d04_ci.py
+      - name: Retain redacted SQL witness
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lab-d04-synthetic-ci
+          path: ${{ runner.temp }}/lab-d04-ci.json
+          if-no-files-found: error
