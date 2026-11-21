@@ -6,7 +6,7 @@
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
 **Global constraints:** giữ immutable business baseline, original synthetic/LocalDB/foundation guards, exact-source evidence và original B.1/B.9. Đây là roadmap triển khai, chưa phải Owner approval cho môi trường cụ thể hoặc sửa hợp đồng human review.
 
-**Parallel Docker/WSL2 rehearsal:** The [LAB-D00–D04 roadmap](app-02b-local-docker-wsl2-rehearsal.md) and [proposed ADR](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) cover a Windows laptop with Docker/WSL2. D00 is the proposal, and the directly authorized D01 source is `SOURCE_REVIEW / HOST_NOT_RUN`. D02–D04 and any host Apply require separate authorization. The 32-row Hyper-V register, LAB-I01/I02 gates, M1 `LOCAL_LAB_READY` and original B.1/B.9 physical acceptance use their own evidence.
+**Parallel Docker/WSL2 rehearsal:** The [LAB-D00–D04 roadmap](app-02b-local-docker-wsl2-rehearsal.md) and [proposed ADR](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) cover a Windows laptop with Docker/WSL2. D00 is the proposal. The D01 baseline is `SOURCE_MERGED` via [PR #95](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/95). The D01 follow-up is `SOURCE_REVIEW` with `HOST_READY` from laptop attempt 09 on source `260530120d0c0fa7195d52d608d8010fde8e020a`. D02–D04 and any host Apply require separate authorization. The 32-row Hyper-V register, LAB-I01/I02 gates, M1 `LOCAL_LAB_READY` and original B.1/B.9 physical acceptance use their own evidence.
 
 ## 1. Cách dùng roadmap
 

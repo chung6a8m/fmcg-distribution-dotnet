@@ -210,7 +210,8 @@ class WindowsDockerPreflightTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="lab-d01-")
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        # Model canonical Windows known-folder paths even when TEMP uses an alias.
+        self.root = Path(temp.name).resolve(strict=True)
         self.config = self.root / "plan.json"
         self.evidence = self.root / "evidence"
         self.evidence.mkdir()
@@ -301,6 +302,127 @@ class WindowsDockerPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(LabError, "LINK_OR_REPARSE_POINT"):
             self.run_preflight()
         self.assertFalse((self.evidence / "attempt").exists())
+
+    def test_desktop_frontend_and_launcher_use_the_same_signed_package(self):
+        folders = {"ProgramFiles": self.root / "ProgramFiles", "ProgramData": self.root / "ProgramData",
+                   "LOCALAPPDATA": self.root / "local", "USERPROFILE": self.root / "user",
+                   "SystemDirectory": self.root / "system"}
+        install = folders["ProgramFiles"] / "Docker/Docker"
+        desktop = install / "Docker Desktop.exe"
+        frontend = install / "frontend/Docker Desktop.exe"
+        cli = install / "resources/bin/docker.exe"
+        for path in (desktop, frontend, cli):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        inventory = {"desktopPaths": [str(frontend), str(desktop)]}
+        with (patch.object(preflight, "command", side_effect=[b"git version 2.50.0", json.dumps(inventory).encode()]),
+              patch.object(preflight, "collect_wsl"),
+              patch.object(preflight, "verify_signatures", return_value="4.98.0") as signatures,
+              patch.object(preflight, "docker_inventory", return_value=None) as docker):
+            host = {}
+            plan, _ = fixture()
+            self.assertIsNone(preflight.collect_inventory("pwsh", plan, host, folders))
+            self.assertEqual("4.98.0", host["desktop"])
+            signatures.assert_called_once_with("pwsh", [desktop, frontend, cli], "Docker Inc",
+                                               read_desktop_version=True)
+            docker.assert_called_once_with(cli, host, plan)
+
+    def test_desktop_refuses_a_second_install_before_executing_cli(self):
+        folders = {"ProgramFiles": self.root / "ProgramFiles", "ProgramData": self.root / "ProgramData",
+                   "LOCALAPPDATA": self.root / "local", "USERPROFILE": self.root / "user",
+                   "SystemDirectory": self.root / "system"}
+        installs = [folders["ProgramFiles"] / "Docker/Docker", folders["LOCALAPPDATA"] / "Programs/DockerDesktop"]
+        desktops = []
+        for install in installs:
+            cli = install / "resources/bin/docker.exe"
+            cli.parent.mkdir(parents=True)
+            cli.touch()
+            desktop = install / "Docker Desktop.exe"
+            desktop.touch()
+            desktops.append(str(desktop))
+        inventory = {"desktopPaths": desktops}
+        with (patch.object(preflight, "command", side_effect=[b"git version 2.50.0", json.dumps(inventory).encode()]),
+              patch.object(preflight, "collect_wsl"),
+              patch.object(preflight, "docker_inventory") as docker):
+            self.assertEqual("UNSUPPORTED_DESKTOP_LAYOUT", preflight.collect_inventory("pwsh", {}, {}, folders))
+            docker.assert_not_called()
+
+    def test_storage_resolves_one_configured_candidate_with_stale_setting(self):
+        config = self.root / "Docker/settings-store.json"
+        config.parent.mkdir()
+        candidate = self.root / "active/disk/docker_data.vhdx"
+        other = self.root / "other/disk/docker_data.vhdx"
+        candidate.parent.mkdir(parents=True)
+        candidate.touch()
+        config.write_text(json.dumps({"CustomWslDistroDir": str(candidate.parents[1]),
+                                      "DataFolder": str(other.parents[1])}), encoding="utf-8")
+        folders = {"APPDATA": self.root, "LOCALAPPDATA": self.root}
+        with patch.object(preflight, "command", return_value=b'{"attached":false,"capacity":512}') as query:
+            observed = {}
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual({}, observed)
+            query.assert_called_once()
+            probed = Path(query.call_args.kwargs["input_data"].decode().strip())
+            self.assertTrue(probed.samefile(candidate))
+        with patch.object(preflight, "command", return_value=b'{"attached":true,"capacity":512}'):
+            observed = {}
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual(512, observed["diskCapacity"])
+        other.parent.mkdir(parents=True)
+        other.touch()
+        with patch.object(preflight, "command") as query:
+            observed = {}
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual({}, observed)
+            query.assert_not_called()
+
+    def test_storage_leaves_unknown_when_a_configured_volume_is_unavailable(self):
+        config = self.root / "Docker/settings-store.json"
+        config.parent.mkdir()
+        config.write_text(json.dumps({"CustomWslDistroDir": str(self.root / "offhost")}), encoding="utf-8")
+        folders = {"APPDATA": self.root, "LOCALAPPDATA": self.root}
+        with (patch.object(preflight, "require_fixed_volume", side_effect=LabError("NONLOCAL_VOLUME")),
+              patch.object(preflight, "command") as query):
+            observed = {}
+            preflight.storage("pwsh", folders, observed)
+            self.assertEqual({}, observed)
+            query.assert_not_called()
+
+    def test_detached_windows_view_requires_matching_live_wsl_vhd_evidence(self):
+        settings = self.root / "Docker/settings-store.json"
+        settings.parent.mkdir()
+        settings.write_text("{}", encoding="utf-8")
+        disk = self.root / "Docker/wsl/disk/docker_data.vhdx"
+        disk.parent.mkdir(parents=True)
+        disk.touch()
+        folders = {"APPDATA": self.root, "LOCALAPPDATA": self.root}
+        add = {"controller": 0, "lun": 3, "request": "Add", "matchesVhd": True}
+        proof = {"stableVm": True, "guestLun": 3, "guestCapacity": 512, "changes": [add]}
+        cases = {
+            "exact live VM and LUN": (proof, "HCS_WSL"),
+            "VM replaced": (dict(proof, stableVm=False), None),
+            "unrelated guest LUN": (dict(proof, guestLun=4), None),
+            "capacity mismatch": (dict(proof, guestCapacity=513), None),
+            "different VHD": (dict(proof, changes=[dict(add, matchesVhd=False)]), None),
+            "later removal": (dict(proof, changes=[dict(add, request="Remove"), add]), None),
+            "later replacement": (dict(proof, changes=[dict(add, matchesVhd=False), add]), None),
+            "ambiguous controller": (dict(proof, changes=[add, dict(add, controller=1)]), None),
+        }
+        for case, (attachment, method) in cases.items():
+            with self.subTest(case=case):
+                response = {"attached": False, "capacity": 512, "wslAttachment": attachment}
+                with patch.object(preflight, "command", return_value=json.dumps(response).encode()):
+                    observed = {}
+                    preflight.storage("pwsh", folders, observed)
+                self.assertEqual(method, observed.get("diskAttachmentMethod"))
+                self.assertEqual(512 if method else None, observed.get("diskCapacity"))
+                if method:
+                    plan, host = fixture()
+                    host.update(observed)
+                    report = preflight.evaluate(plan, host, (SHA, "CLEAN"), "b" * 64)
+                    preflight.validate_document(report, "docker-host-preflight")
+                    self.assertEqual("HCS_WSL", report["observed"]["storageAttachmentMethod"])
+                    self.assertIn("HCS_WSL", preflight.markdown(report))
 
     def test_storage_uses_configured_attached_vhd_without_stale_default_fallback(self):
         config_dir = self.root / "Docker"
