@@ -25,8 +25,10 @@ FIND_NETWORK = d01.projection(("Id", ".Id"), ("Name", ".Name"), ("Labels", ".Lab
 FIND_VOLUME = d01.projection(("Name", ".Name"), ("Labels", ".Labels"))
 IMAGE_FORMAT = d01.projection(
     ("Id", ".Id"), ("Os", ".Os"), ("Architecture", ".Architecture"), ("RepoDigests", ".RepoDigests"),
-    ("User", ".Config.User"), ("Entrypoint", ".Config.Entrypoint"), ("Cmd", ".Config.Cmd"),
-    ("Volumes", ".Config.Volumes"), ("Labels", ".Config.Labels"),
+    ("User", ".Config.User"), ("Entrypoint", ".Config.Entrypoint"),
+    # Docker can omit empty config keys; index renders a missing key as null.
+    ("Cmd", '(index .Config "Cmd")'), ("Volumes", '(index .Config "Volumes")'),
+    ("Labels", ".Config.Labels"),
 )
 ENTRYPOINTS = {
     "api": ["dotnet", "FmcgDms.Preprod.Api.dll"],

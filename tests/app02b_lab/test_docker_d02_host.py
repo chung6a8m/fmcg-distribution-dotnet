@@ -128,6 +128,7 @@ class DockerHostTests(unittest.TestCase):
         for bad in (
             image("api", Entrypoint=["sh"]),
             image("api", User="root"),
+            image("api", Cmd=["sh"]),
             image("api", Volumes={"/data": {}}),
             image("api", Labels={"org.opencontainers.image.revision": "stale"}),
             dict(image("api"), RepoDigests=[IMAGES["worker"]]),
@@ -141,6 +142,30 @@ class DockerHostTests(unittest.TestCase):
             with self.assertRaisesRegex(LabError, "^UNPINNED_D02_IMAGE$"):
                 docker.image_ids(dict(IMAGES, api="example.test/lab-api:latest"), SOURCE)
             run.assert_not_called()
+
+    def test_image_inspect_handles_omitted_cmd_and_volumes(self):
+        docker = docker_stub()
+
+        def inspect(args, **kwargs):
+            self.assertEqual(list(args[:6]), [
+                CLI, "--host", d01.ENDPOINT, "image", "inspect", "--format",
+            ])
+            template, separator, ref = args[6:]
+            self.assertEqual(separator, "--")
+            # Docker's combined JSON projection fails when it dereferences an
+            # omitted config key. An indexed lookup yields JSON null instead.
+            if ".Config.Cmd" in template or ".Config.Volumes" in template:
+                return None
+            self.assertIn('{{json (index .Config "Cmd")}}', template)
+            self.assertIn('{{json (index .Config "Volumes")}}', template)
+            role = next(role for role in IMAGES if IMAGES[role] == ref)
+            return reply(image(role, Cmd=None, Volumes=None))
+
+        with patch.object(docker, "verify"), patch.object(target.d01, "command", side_effect=inspect):
+            self.assertEqual(docker.image_ids(IMAGES, SOURCE), {
+                "api": "sha256:" + "1" * 64,
+                "worker": "sha256:" + "2" * 64,
+            })
 
     @unittest.skipUnless(os.name == "nt", "Windows ACL security descriptors")
     def test_acl_refuses_writes_by_everyone_on_private_artifact(self):
