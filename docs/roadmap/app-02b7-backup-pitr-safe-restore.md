@@ -1,6 +1,6 @@
 # APP-02B.7 — Backup / PITR / Safe Restore
 
-**State: SOURCE_IN_PR / GITHUB_HOSTED_CI_PENDING / PHYSICAL_PREPROD_NOT_VERIFIED / G-B03 NOT_RUN.** Owner approved design [OWN-APP02B-08/10](../decisions/owner-app02b-2026-11-17.md), not runtime activation or a code-only exception to unrelated failing gates. This increment is an independently reviewable PREPROD-only operator package; no production business use, Pilot, APP-02C/D/E, tenant routing, API or Worker dispatch. B.1 acceptance [B03-01..06](../security/app-02b1-acceptance-evidence.md), threats TM-06/TM-11/TM-12/TM-13/TM-14 and open restore-safe revocation [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) are normative.
+**State: MERGED / B7_GITHUB_HOSTED_LOCALDB_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED / G-B03 NOT_RUN.** Owner approved design [OWN-APP02B-08/10](../decisions/owner-app02b-2026-11-17.md), not runtime activation or a code-only exception to unrelated failing gates. This increment is an independently reviewable PREPROD-only operator package; no production business use, Pilot, APP-02C/D/E, tenant routing, API or Worker dispatch. B.1 acceptance [B03-01..06](../security/app-02b1-acceptance-evidence.md), threats TM-06/TM-11/TM-12/TM-13/TM-14 and open restore-safe revocation [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) are normative.
 
 ## Architecture and authority
 

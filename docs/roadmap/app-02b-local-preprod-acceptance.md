@@ -1,6 +1,6 @@
 # APP-02B — Roadmap Windows Local PREPROD Acceptance
 
-**Trạng thái:** ROADMAP_PROPOSED / DOCS_ONLY. **32 implementation increments đều PLANNED.**
+**Trạng thái:** ROADMAP_PROPOSED / DOCS_ONLY. **LAB-E01 SOURCE_REVIEW (docs-only); 31 increments còn lại PLANNED.**
 **Baseline:** `main` [`16d96c71a7967c216ebfa599693807a2b54e7435`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/16d96c71a7967c216ebfa599693807a2b54e7435), đối chiếu 19/11/2026.
 **Goal:** solo developer dùng Windows laptop để triển khai lab có kiểm soát, chạy scenario thật và thu evidence có thể đối chiếu; chuẩn bị các điều kiện còn thiếu cho original APP-02B physical acceptance.
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
@@ -23,9 +23,9 @@ Mỗi ID `LAB-*` tương ứng **một PR có trách nhiệm, interface và tiê
 
 ## 2. Baseline đã xác minh và hệ quả triển khai
 
-| Record | Snapshot 19/11/2026 | Roadmap xử lý |
+| Record | Snapshot 21/11/2026 | Roadmap xử lý |
 |---|---|---|
-| [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) / [PR #74](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/74) | Issue OPEN; #74 OPEN/DRAFT, source `aaa32dba…`; SQL bridges chưa là end-to-end runtime/PITR verification | S01→S02/S04/S06/S07→I08→E08/E10. Source integration có disposition riêng; không cần đóng #53 để viết code kiểm tra chính nó |
+| [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) / [PR #74](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/74) | Issue OPEN; #74 OPEN/DRAFT, source `aaa32dbaff987494190e628592588317a46e3ce0`; SQL bridges chưa là end-to-end runtime/PITR verification | S01→S02/S04/S06/S07→I08→E08/E10. Source integration có disposition riêng; không cần đóng #53 để viết code kiểm tra chính nó |
 | [#75](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75) / [#68](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/68) | LocalDB bootstrap và A11-09 HTTP500 là hai nhánh điều tra; rerun PASS chưa chứng minh nguyên nhân | E02 diagnostics, E03 và E04 fix riêng theo trace |
 | [#59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/59) / [PR #61](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/61) | CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; source/ephemeral-CI scope; hết hạn `2026-12-19T00:00:00Z` | E01 ghi scope hiện tại và giữ lỗi CI lịch sử; E07/E13 kiểm tra scope/expiry; không coi dependency đã patched |
 | [PR #73](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/73) | OPEN / unmerged / conflicting, source `d8564ab5274c84ad347ab26f227b3d01dd1562b6` | Xem [source closeout](../closeout/2026-11-18-app-02b9-source-only.md) tại cùng đường dẫn đã đề xuất trong #73 |

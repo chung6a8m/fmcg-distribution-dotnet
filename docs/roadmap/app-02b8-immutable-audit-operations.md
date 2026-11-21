@@ -1,6 +1,6 @@
 # APP-02B.8 — Immutable Audit & Operations
 
-**State: SOURCE_IN_PR / DEDICATED_CI_PENDING / PHYSICAL_PREPROD_NOT_VERIFIED / G-B04 NOT_RUN.** B.8 is authorized by [OWN-APP02B-09/10](../decisions/owner-app02b-2026-11-17.md) for PREPROD only, but no production, Pilot, automatic business posting or B.9 physical approval. [B.1 frozen cases B04-01..06](../security/app-02b1-acceptance-evidence.md) and [TM-14/TM-15](../security/app-02b1-threat-model.md) remain mandatory.
+**State: MERGED / B8_GITHUB_HOSTED_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED / G-B04 NOT_RUN.** B.8 is authorized by [OWN-APP02B-09/10](../decisions/owner-app02b-2026-11-17.md) for PREPROD only, but no production, Pilot, automatic business posting or B.9 physical approval. [B.1 frozen cases B04-01..06](../security/app-02b1-acceptance-evidence.md) and [TM-14/TM-15](../security/app-02b1-threat-model.md) remain mandatory.
 
 ## Source architecture
 
