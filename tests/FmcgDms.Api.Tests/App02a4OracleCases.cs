@@ -326,7 +326,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 beforePid = before.Pid;
                 using var cashier = before.Client(tenant, CashierActor, "cashier");
-                c = Assert.IsType<Guid>((await IntakeA3(cashier, s.C)).ReceiptId);
+                c = Assert.IsType<Guid>((await A4RestartIntake(s, before, cashier, s.C,
+                    "pre-restart-C")).ReceiptId);
                 await A4Capture(s, "os-pending");
             }
             await using (var after = await App01e4ApiProcess.StartAsync(
@@ -335,7 +336,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 Assert.NotEqual(beforePid, after.Pid);
                 using var sales = after.Client(tenant, SalesActor, "sales");
-                await IntakeA3(sales, s.P);
+                await A4RestartIntake(s, after, sales, s.P, "post-restart-P", beforePid);
                 bool recovered = false;
                 DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
                 while (DateTimeOffset.UtcNow < until)
