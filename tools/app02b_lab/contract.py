@@ -153,9 +153,9 @@ def guarded_directory(path: Path):
         handles = []
         try:
             for part in chain:
-                # Share read/write; OPEN_EXISTING; BACKUP_SEMANTICS and
-                # OPEN_REPARSE_POINT so a replaced leaf is never followed.
-                handle = open_directory(str(part), 0, 3, None, 3, 0x02200000, None)
+                # FILE_LIST_DIRECTORY makes share mode enforceable. Share
+                # read/write, open existing and do not follow a reparse leaf.
+                handle = open_directory(str(part), 0x0001, 3, None, 3, 0x02200000, None)
                 require(handle not in (None, invalid_handle), "DIRECTORY_GUARD_FAILED")
                 handles.append(handle)
                 safe_path(part)

@@ -3,13 +3,14 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 from uuid import UUID
 
 from support import DisposableLab, RUN_ID, get, put
 from tools.app02b_lab.bundle import LABELS
-from tools.app02b_lab.contract import LabError, digest, publish
+from tools.app02b_lab.contract import LabError, digest, guarded_directory, publish
 from tools.app02b_lab.run import exit_code
 from tools.app02b_lab.schema import strict_json, validate_lab_bundle
 
@@ -30,6 +31,25 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(exit_code(["PASS", "NOT_RUN"]), 2)
         self.assertEqual(exit_code(["BLOCKED"]), 2)
         self.assertEqual(exit_code([]), 2)
+
+
+class PathGuardTests(unittest.TestCase):
+    def test_guard_rejects_directory_replacement_or_untrusted_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            guard = parent / "directory"
+            guard.mkdir(mode=0o700)
+            moved = parent / "moved"
+            if sys.platform == "win32":
+                with guarded_directory(guard), self.assertRaises(PermissionError):
+                    guard.rename(moved)
+                guard.rename(moved)
+                self.assertTrue(moved.is_dir())
+            else:
+                parent.chmod(0o777)
+                with self.assertRaisesRegex(LabError, "UNTRUSTED_DIRECTORY_PERMISSIONS"):
+                    with guarded_directory(guard):
+                        self.fail("Guard admitted an untrusted hierarchy")
 
 
 class BundleTests(DisposableLab):
