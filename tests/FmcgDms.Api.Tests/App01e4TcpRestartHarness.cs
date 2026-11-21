@@ -13,14 +13,47 @@ namespace FmcgDms.Api.Tests;
 internal sealed class App01e4ApiProcess : IAsyncDisposable
 {
     private readonly Process process;
-    public int Pid => process.Id;
+    private readonly bool workerEnabled;
+    private readonly string evidenceBase;
+    private readonly DateTimeOffset startedUtc;
+    private readonly object lifecycle = new();
+    private readonly CancellationTokenSource drainCancellation = new();
+    private readonly BoundedProcessOutput stdout = new();
+    private readonly BoundedProcessOutput stderr = new();
+    private readonly Task drains;
+    private Task? disposal;
+    private bool disposed;
+    private int? exitCode;
+    private DateTimeOffset? stoppedUtc;
+
+    public int Pid { get; }
     public int Port { get; }
     public Uri BaseAddress => new($"http://127.0.0.1:{Port}/");
 
-    private App01e4ApiProcess(Process process, int port)
+    private App01e4ApiProcess(Process process, int port, bool workerEnabled, string evidenceBase)
     {
         this.process = process;
+        this.workerEnabled = workerEnabled;
+        this.evidenceBase = evidenceBase;
         Port = port;
+        Pid = process.Id;
+        startedUtc = process.StartTime.ToUniversalTime();
+        drains = Task.WhenAll(stdout.DrainAsync(process.StandardOutput, drainCancellation.Token),
+            stderr.DrainAsync(process.StandardError, drainCancellation.Token));
+    }
+
+    internal static App01e4ApiProcess Launch(ProcessStartInfo start, int port, bool workerEnabled,
+        string evidenceBase)
+    {
+        Process process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not launch APP-01E.4 Kestrel process.");
+        try { return new App01e4ApiProcess(process, port, workerEnabled, evidenceBase); }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            finally { process.Dispose(); }
+            throw;
+        }
     }
 
     public static async Task<App01e4ApiProcess> StartAsync(
@@ -68,13 +101,11 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         start.Environment["TenantDatabases__tenant-a"] = fixture.TenantAConnectionString;
         start.Environment["TenantDatabases__tenant-b"] = fixture.TenantBConnectionString;
         start.Environment["DOTNET_NOLOGO"] = "1";
+        start.Environment["Logging__Console__FormatterOptions__IncludeScopes"] = "true";
+        start.Environment["Logging__Console__FormatterOptions__UseUtcTimestamp"] = "true";
+        start.Environment["Logging__Console__FormatterOptions__TimestampFormat"] = "O ";
 
-        Process process = Process.Start(start)
-            ?? throw new InvalidOperationException("Could not launch APP-01E.4 Kestrel process.");
-        // Drain pipes; a blocked stdout/stderr pipe must not hang the API.
-        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-        Task<string> stderr = process.StandardError.ReadToEndAsync();
-        var host = new App01e4ApiProcess(process, port);
+        var host = Launch(start, port, app02WorkerEnabled, AppContext.BaseDirectory);
         try
         {
             using var probe = new HttpClient(new SocketsHttpHandler { UseProxy = false })
@@ -85,9 +116,9 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
             ready.CancelAfter(TimeSpan.FromSeconds(20));
             while (!ready.Token.IsCancellationRequested)
             {
-                if (process.HasExited)
+                if (host.process.HasExited)
                     throw new InvalidOperationException(
-                        $"APP-01E.4 child exited before readiness: {process.ExitCode}");
+                        $"APP-01E.4 child exited before readiness: {host.process.ExitCode}");
                 try
                 {
                     using var response = await probe.GetAsync("health/live", ready.Token);
@@ -101,15 +132,19 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            await host.DisposeAsync();
-            // Preserve bounded Kestrel startup diagnostics when readiness fails:
-            // a connection refusal is not enough to diagnose the actual host bind.
-            string output = stdout.IsCompletedSuccessfully ? stdout.Result : "(stdout unavailable)";
-            string error = stderr.IsCompletedSuccessfully ? stderr.Result : "(stderr unavailable)";
-            static string Tail(string value) => value.Length > 1200 ? value[^1200..] : value;
+            string detail;
+            try
+            {
+                string artifact = await host.CaptureFailureAsync("kestrel-readiness",
+                    "readiness", CancellationToken.None);
+                detail = $"LAB-E02/{Path.GetFileName(artifact)}";
+            }
+            catch (Exception capture) { detail = $"capture failed ({capture.GetType().Name})"; }
+
+            try { await host.DisposeAsync(); }
+            catch (Exception cleanup) { detail += $", cleanup failed ({cleanup.GetType().Name})"; }
             throw new InvalidOperationException(
-                $"APP-01E.4 Kestrel readiness failed on port {port}; " +
-                $"stdout={Tail(output)}; stderr={Tail(error)}", ex);
+                $"APP-01E.4 Kestrel readiness failed on port {port}. Diagnostics: {detail}", ex);
         }
     }
 
@@ -120,16 +155,100 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
                 BaseAddress = BaseAddress, Timeout = TimeSpan.FromSeconds(30)
             }, tenant, actor, [role]);
 
-    public async ValueTask DisposeAsync()
+    public Task<string> CaptureFailureAsync(string failureId, string stage, CancellationToken ct) =>
+        CaptureAsync(failureId, stage, null, null, null, ct);
+
+    internal Task<string> CaptureHttpFailureAsync(string failureId, string stage,
+        HttpRequestMessage request, HttpResponseMessage response, FailureContext context,
+        CancellationToken ct) =>
+        CaptureAsync(failureId, stage, request, response, context, ct);
+
+    private async Task<string> CaptureAsync(string failureId, string stage,
+        HttpRequestMessage? request, HttpResponseMessage? response, FailureContext? context,
+        CancellationToken ct)
     {
-        if (!process.HasExited)
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        CancellationToken token = deadline.Token;
+        token.ThrowIfCancellationRequested();
+
+        // The HTTP status or process exit can be observed before the asynchronous
+        // console logger and pipe readers have delivered the corresponding lines.
+        // Give them one bounded window on failure, with no wait on successful intake.
+        if (response is not null || stage == "readiness")
         {
-            process.Kill(entireProcessTree: true);
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await process.WaitForExitAsync(deadline.Token); }
-            catch (OperationCanceledException) { throw new TimeoutException("Child did not stop."); }
+            await Task.WhenAny(drains, Task.Delay(TimeSpan.FromMilliseconds(250), token));
+            token.ThrowIfCancellationRequested();
         }
-        process.Dispose();
+
+        object state;
+        lock (lifecycle)
+        {
+            ObserveExit();
+            state = new { pid = Pid, port = Port, workerEnabled, startedUtc, stoppedUtc,
+                exited = exitCode.HasValue, exitCode };
+        }
+        var output = stdout.Snapshot();
+        var error = stderr.Snapshot();
+        return await FailureDiagnostics.WriteAsync(evidenceBase, failureId, new
+        {
+            capturedUtc = DateTimeOffset.UtcNow,
+            stage = FailureDiagnostics.Label(stage),
+            process = state,
+            context,
+            stdout = FailureDiagnostics.RedactedStream(output),
+            stderr = FailureDiagnostics.RedactedStream(error),
+            http = request is null || response is null ? null :
+                await FailureDiagnostics.RedactedHttpAsync(request, response, token)
+        }, token);
+    }
+
+    private void ObserveExit()
+    {
+        // Called under lifecycle while the Process handle is still available.
+        if (!disposed && !exitCode.HasValue && process.HasExited)
+        {
+            exitCode = process.ExitCode;
+            stoppedUtc = process.ExitTime.ToUniversalTime();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        lock (lifecycle) return new ValueTask(disposal ??= StopAsync());
+    }
+
+    private async Task StopAsync()
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) when (process.HasExited) { }
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                try { await process.WaitForExitAsync(deadline.Token); }
+                catch (OperationCanceledException) { throw new TimeoutException("Child did not stop."); }
+            }
+        }
+        finally
+        {
+            try { await drains.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (TimeoutException) { drainCancellation.Cancel(); }
+            finally
+            {
+                lock (lifecycle)
+                {
+                    try { ObserveExit(); }
+                    finally
+                    {
+                        process.Dispose();
+                        disposed = true;
+                        drainCancellation.Dispose();
+                    }
+                }
+            }
+        }
     }
 }
 

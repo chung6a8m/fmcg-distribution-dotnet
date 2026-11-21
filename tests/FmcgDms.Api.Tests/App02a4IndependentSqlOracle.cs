@@ -37,6 +37,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         public string Schema { get; init; } = "APP02A4_SQL_ORACLE_V1";
         public string Status { get; set; } = "FAIL";
         public string? Failure { get; set; }
+        public string? FailureDiagnostic { get; set; }
+        public string? FailureDiagnosticError { get; set; }
         public string Group { get; init; } = "";
         public string TenantId { get; init; } = "";
         public string Database { get; set; } = "";
@@ -439,6 +441,15 @@ public sealed partial class App01e2CrossCommandRaceTests
                         "\nPeer physical SQL mutated during isolated oracle group";
                     failure ??= new InvalidOperationException(report.Failure);
                 }
+            }
+            catch (Exception ex)
+            {
+                report.Status = "FAIL";
+                report.Failure = (report.Failure ?? "") + $"\nPeer SQL verification failed ({ex.GetType().Name})";
+                failure ??= ex;
+            }
+            try
+            {
                 string folder = Path.Combine(AppContext.BaseDirectory,
                     "TestResults", "APP-02A4");
                 Directory.CreateDirectory(folder);
@@ -462,6 +473,18 @@ public sealed partial class App01e2CrossCommandRaceTests
         var result = await IntakeA3(s.Cashier, c ?? s.C);
         return Assert.IsType<Guid>(result.ReceiptId);
     }
+
+    private static Task<App02IntakeResult> A4RestartIntake(A4Session s, App01e4ApiProcess host,
+        HttpClient client, App02EventInput input, string stage, int? previousPid = null) =>
+        IntakeA3(client, input, async (request, response) =>
+        {
+            var context = new FailureContext(FailureDiagnostics.Label(s.Report.TestRunId),
+                FailureDiagnostics.Sha(s.Report.SourceHeadSha) ?? "INVALID",
+                FailureDiagnostics.Sha(s.Report.WorkflowSha) ?? "INVALID", s.Tenant, s.Report.Group, previousPid);
+            string path = await host.CaptureHttpFailureAsync($"{s.Report.Group}-{s.Tenant}", stage,
+                request, response, context, CancellationToken.None);
+            s.Report.FailureDiagnostic = $"LAB-E02/{Path.GetFileName(path)}";
+        }, error => s.Report.FailureDiagnosticError = error);
 
     private static async Task A4IntakeP(A4Session s,
         App02EventInput? p = null)

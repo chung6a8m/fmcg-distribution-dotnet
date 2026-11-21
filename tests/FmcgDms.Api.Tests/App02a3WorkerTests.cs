@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using Dapper;
@@ -69,15 +70,35 @@ public sealed partial class App01e2CrossCommandRaceTests
             p.ProducerId, p.EventId, count, DateTimeOffset.UtcNow);
 
     private static async Task<App02IntakeResult> IntakeA3(
-        HttpClient client, App02EventInput input)
+        HttpClient client, App02EventInput input,
+        Func<HttpRequestMessage, HttpResponseMessage, Task>? capture = null,
+        Action<string>? recordCaptureError = null)
     {
-        using HttpResponseMessage response =
-            await client.PostAsJsonAsync(A3 + "intake", input, TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        using var request = new HttpRequestMessage(HttpMethod.Post, A3 + "intake")
+        {
+            Content = JsonContent.Create(input)
+        };
+        if (capture is not null)
+            request.Headers.TryAddWithoutValidation("traceparent",
+                $"00-{ActivityTraceId.CreateRandom()}-{ActivitySpanId.CreateRandom()}-00");
+        using HttpResponseMessage response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+        await RequireAcceptedA3Async(request, response, capture, recordCaptureError);
         App02IntakeResult? result =
             await response.Content.ReadFromJsonAsync<App02IntakeResult>(TestContext.Current.CancellationToken);
         Assert.Equal("RECEIVED_COMMITTED", result?.Ack);
         return Assert.IsType<App02IntakeResult>(result);
+    }
+
+    internal static async Task RequireAcceptedA3Async(HttpRequestMessage request,
+        HttpResponseMessage response, Func<HttpRequestMessage, HttpResponseMessage, Task>? capture,
+        Action<string>? recordCaptureError)
+    {
+        if (response.StatusCode != HttpStatusCode.Accepted && capture is not null)
+        {
+            try { await capture(request, response); }
+            catch (Exception ex) { recordCaptureError?.Invoke(ex.GetType().Name); }
+        }
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
 
     [Theory]

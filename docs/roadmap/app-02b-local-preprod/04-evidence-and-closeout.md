@@ -1,6 +1,6 @@
 # APP-02B LAB — Evidence, CI, Drivers and Closeout
 
-**State:** LAB-E01 `SOURCE_REVIEW` (docs-only); LAB-E02..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
+**State:** LAB-E01 `SOURCE_MERGED (DOCS_ONLY)`, LAB-E02 `SOURCE_REVIEW`, LAB-E03..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
 
 **Goal:** chạy các scenario thật, giữ raw evidence và đối chiếu đủ 30 case + 2 runtime probes, với trạng thái closeout đúng phạm vi.
 **Architecture/stack:** [design](design.md); Python collectors/runner, PowerShell entrypoints, GitHub Actions và original B9 validator.
@@ -19,7 +19,7 @@
 <a id="lab-e01"></a>
 ## LAB-E01 — Đồng bộ #73/#59 và phạm vi lab
 
-**Status:** SOURCE_REVIEW (docs-only). **PR boundary:** một PR độc lập từ current main. **Source/API dependencies:** không có.
+**Status:** `SOURCE_MERGED (DOCS_ONLY)` qua [PR #87](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/87), final source [9bd8099](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/9bd8099f0ce6b0cb953cbdea7e30e6566a319709), merge [f736d61](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/f736d618fd4d86a3324c19117ff7b5b3ec415bc9). `LAB_EXECUTED` và physical PREPROD vẫn `NOT_VERIFIED`. **Source/API dependencies:** không có.
 
 **Dependencies:** không phụ thuộc runtime mới. **Deliverable:** một PR tài liệu có trạng thái và lineage đúng; hoặc cập nhật đúng PR #73 sau khi chủ sở hữu nhánh cho phép tích hợp, không tạo hai closeout cạnh tranh.
 
@@ -31,14 +31,14 @@
 - [x] Đổi trạng thái hiện tại #59 thành CLOSED / `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`; giữ ngày hết hạn và scope. Giữ tất cả failures cũ theo run/attempt.
 - [x] Run `44323688504` hiện success attempt 2 trên `216ce719...`; diễn đạt attempt 1 fail, attempt 2 pass. Không sửa lịch sử thành chưa từng fail.
 - [x] Ghi #75 và #68 OPEN, root causes unresolved. Giữ 30 physical cases NOT_RUN/NOT_VERIFIED. GitHub #56 thực tế CLOSED; physical acceptance vẫn NO_GO.
-- [ ] Kiểm tra diff docs, relative links và URL run trên final PR HEAD. Ghi final HEAD và CI của PR LAB-E01 trong mục Verification của PR; giữ CI #61 và #73 theo đúng source riêng.
+- [x] Diff docs, 325 relative links và 27 URL evidence đã được kiểm tra trên final HEAD theo mục Verification của PR #87. [CI final HEAD](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/87/checks) đạt 11/11 workflow và 21/21 job. Evidence của #61 và #73 giữ theo source riêng.
 
-**Exit:** source/docs có thể merge theo gate của PR tài liệu; không ký hoặc đóng physical acceptance. Không cần viết test unit chỉ để kiểm tra một câu văn.
+**Exit:** đã hoàn tất gate merge tài liệu. Trạng thái physical acceptance vẫn `NOT_VERIFIED`.
 
 <a id="lab-e02"></a>
 ## LAB-E02 — Diagnostics cho LocalDB và A11-09
 
-**Status:** PLANNED. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** SOURCE_REVIEW trong [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). PR ghi final HEAD, CI và giới hạn evidence. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
 
 **Modify (existing):** `tests/FmcgDms.Api.Tests/App01e4TcpRestartHarness.cs`, `App02a3WorkerTests.cs`, `App02a4OracleCases.cs`, `App02a4IndependentSqlOracle.cs`, `.github/workflows/app00a.yml`. **Create:** `tests/FmcgDms.Api.Tests/FailureDiagnosticsTests.cs`, `scripts/Collect-LocalDbDiagnostics.ps1`.
 

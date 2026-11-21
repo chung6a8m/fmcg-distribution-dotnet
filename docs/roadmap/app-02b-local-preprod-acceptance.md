@@ -1,6 +1,6 @@
 # APP-02B — Roadmap Windows Local PREPROD Acceptance
 
-**Trạng thái:** ROADMAP_PROPOSED / DOCS_ONLY. **LAB-E01 SOURCE_REVIEW (docs-only); 31 increments còn lại PLANNED.**
+**Trạng thái:** ROADMAP_PROPOSED. **LAB-E01 SOURCE_MERGED (DOCS_ONLY) [#87](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/87), LAB-E02 SOURCE_REVIEW, 30 increments còn lại PLANNED.**
 **Baseline:** `main` [`16d96c71a7967c216ebfa599693807a2b54e7435`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/16d96c71a7967c216ebfa599693807a2b54e7435), đối chiếu 19/11/2026.
 **Goal:** solo developer dùng Windows laptop để triển khai lab có kiểm soát, chạy scenario thật và thu evidence có thể đối chiếu; chuẩn bị các điều kiện còn thiếu cho original APP-02B physical acceptance.
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
@@ -36,12 +36,12 @@ Mỗi ID `LAB-*` tương ứng **một PR có trách nhiệm, interface và tiê
 
 ## 3. Increment register — một dòng, một PR
 
-Dependency dưới đây là **source/API prerequisite**. Live run còn cần enrolled environment, credentials, fixtures và fault scope. Implementation có thể được review trước live run nhưng phải ghi rõ SOURCE_MERGED khác LAB_EXECUTED. Mọi dòng hiện PLANNED.
+Dependency dưới đây là **source/API prerequisite**. Live run còn cần enrolled environment, credentials, fixtures và fault scope. Trạng thái từng increment nằm ở cột State.
 
 | ID | PR scope | Source/API dependencies | Deliverable chính | State |
 |---|---|---|---|---|
-| [LAB-E01](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e01) | Đồng bộ #73/#59 và phạm vi lab | — | Docs/state, không close physical | SOURCE_REVIEW |
-| [LAB-E02](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e02) | Diagnostics cho LocalDB và A11-09 | — | Artifact lỗi redacted, giữ assertion | PLANNED |
+| [LAB-E01](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e01) | Đồng bộ #73/#59 và phạm vi lab | — | Docs/state, không close physical | SOURCE_MERGED (DOCS_ONLY) [#87](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/87) · final source [9bd8099](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/9bd8099f0ce6b0cb953cbdea7e30e6566a319709) |
+| [LAB-E02](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e02) | Diagnostics cho LocalDB và A11-09 | — | Artifact lỗi redacted, giữ assertion | SOURCE_REVIEW [#88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88) · instrumentation [7abca25](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/7abca25) · final HEAD và evidence trong PR |
 | [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) | Fix LocalDB bootstrap có root cause | LAB-E02 | Regression deterministic và bounded init | PLANNED |
 | [LAB-E04](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e04) | Fix HTTP 500 sau OS restart | LAB-E02 | A/B × Worker on/off regression | PLANNED |
 | [LAB-E05](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e05) | Run context, catalog và schema | — | 30+2 rows, append-only attempts | PLANNED |
