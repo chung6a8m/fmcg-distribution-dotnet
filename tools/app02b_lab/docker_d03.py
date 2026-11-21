@@ -53,13 +53,13 @@ def compose(project, nonce, certificate, key):
     }
 
 
-def authorize(raw, approval_sha, plan_sha, nonce, operation, now):
+def authorize(raw, approval_sha, plan_sha, nonce, operation, now, *, schema=ENROLLMENT):
     require(type(approval_sha) is str and d02.HEX.fullmatch(approval_sha)
             and digest(raw) == approval_sha, "D03_ENROLLMENT_UNAPPROVED")
     approval = strict_json(raw)
     d02.object_fields(approval, "schema operation nonce planSha256 expiresUtc", "D03_INVALID_ENROLLMENT")
     require((approval["schema"], approval["operation"], approval["planSha256"], approval["nonce"])
-            == (ENROLLMENT, operation, plan_sha, nonce), "D03_ENROLLMENT_SCOPE_MISMATCH")
+            == (schema, operation, plan_sha, nonce), "D03_ENROLLMENT_SCOPE_MISMATCH")
     try:
         expiry = datetime.strptime(approval["expiresUtc"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (ValueError, TypeError):
@@ -125,7 +125,7 @@ def validate_pem(certificate, key, ca):
     return digest(der)
 
 
-def verify_tls_inputs(certificate, key, authorities):
+def verify_tls_inputs(certificate, key, authorities, *, hostname="vault"):
     """Validate key, current chain, server purpose and DNS SAN without a listening socket."""
     server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -138,7 +138,7 @@ def verify_tls_inputs(certificate, key, authorities):
         to_server, from_server = ssl.MemoryBIO(), ssl.MemoryBIO()
         to_client, from_client = ssl.MemoryBIO(), ssl.MemoryBIO()
         listener = server.wrap_bio(to_server, from_server, server_side=True)
-        peer = client.wrap_bio(to_client, from_client, server_hostname="vault")
+        peer = client.wrap_bio(to_client, from_client, server_hostname=hostname)
         pending = [peer, listener]
         for _ in range(12):
             for context in pending[:]:

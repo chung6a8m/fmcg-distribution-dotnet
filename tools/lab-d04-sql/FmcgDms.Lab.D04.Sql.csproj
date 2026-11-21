@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" />
+    <ProjectReference Include="../../src/FmcgDms.Preprod.Tenancy/FmcgDms.Preprod.Tenancy.csproj" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Identity/Migrations/20261117_001_identity_control_plane.sql" LogicalName="identity.sql" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Tenancy/Migrations/20261118_001_registry_control_plane.sql" LogicalName="registry.sql" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Tenancy/Migrations/20261118_001_tenant_marker.sql" LogicalName="tenant.sql" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Authorization/Migrations/20261118_001_independent_fence.sql" LogicalName="fence.sql" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Authorization/Migrations/20261118_002_identity_guard.sql" LogicalName="identity-guard.sql" />
+    <EmbeddedResource Include="../../src/FmcgDms.Preprod.Authorization/Migrations/20261118_003_registry_guard.sql" LogicalName="registry-guard.sql" />
+  </ItemGroup>
+</Project>

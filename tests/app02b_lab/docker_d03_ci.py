@@ -16,11 +16,11 @@ PROJECT = f"fmcg-lab-d03-{os.environ.get('GITHUB_RUN_ID', '')}-{os.environ.get('
 NONCE = "d03" + "0" * 28 + "1"
 
 
-def command(*args, input_data=None):
+def command(*args, input_data=None, include_stderr=False):
     result = subprocess.run(args, input=input_data, capture_output=True, timeout=120)
     if result.returncode:
         raise LabError("CI_NATIVE_COMMAND_FAILED", " ".join(args[:3]))
-    return result.stdout
+    return result.stdout + result.stderr if include_stderr else result.stdout
 
 
 class CiDocker:
@@ -34,23 +34,23 @@ class CiDocker:
         require(value.startswith(b"linux ") and bool(value.strip()[6:]), "CI_LOCAL_DOCKER_REQUIRED")
         return value
 
-    def run(self, *args, input_data=None):
+    def run(self, *args, input_data=None, include_stderr=False):
         require(self.identity() == self.engine, "CI_DAEMON_CHANGED")
-        return command("docker", "--host", "unix:///var/run/docker.sock", *args, input_data=input_data)
+        return command("docker", "--host", "unix:///var/run/docker.sock", *args, input_data=input_data, include_stderr=include_stderr)
 
     def _inspect(self, kind, names):
         return json.loads(self.run(kind, "inspect", "--", *names))
 
 
-def certificate(folder, name, authority=None):
+def certificate(folder, name, authority=None, *, hostname="vault"):
     key, crt = folder / f"{name}.key", folder / f"{name}.pem"
     if authority is None:
         command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-noenc", "-days", "1",
                 "-subj", f"/CN={name}", "-keyout", str(key), "-out", str(crt))
     else:
         csr, ext = folder / f"{name}.csr", folder / f"{name}.ext"
-        ext.write_text("subjectAltName=DNS:vault\nextendedKeyUsage=serverAuth\n", encoding="ascii")
-        command("openssl", "req", "-newkey", "rsa:2048", "-noenc", "-subj", "/CN=vault",
+        ext.write_text(f"subjectAltName=DNS:{hostname}\nextendedKeyUsage=serverAuth\n", encoding="ascii")
+        command("openssl", "req", "-newkey", "rsa:2048", "-noenc", "-subj", f"/CN={hostname}",
                 "-keyout", str(key), "-out", str(csr))
         command("openssl", "x509", "-req", "-in", str(csr), "-CA", str(authority[0]),
                 "-CAkey", str(authority[1]), "-CAcreateserial", "-days", "1",
