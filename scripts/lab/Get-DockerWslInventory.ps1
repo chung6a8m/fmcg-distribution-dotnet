@@ -10,11 +10,10 @@ $PSNativeCommandUseErrorActionPreference = $false
 [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 
 try {
-    . (Join-Path $PSScriptRoot 'DockerWsl.Windows.ps1')
+    . ([IO.Path]::Combine($PSScriptRoot, 'DockerWsl.Windows.ps1'))
     Assert-D01WindowsEnvironment
+    $env:PSModulePath = Get-D01TrustedModulePath
     $systemDirectory = [Environment]::SystemDirectory
-    $env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';' +
-        (Join-Path $systemDirectory 'WindowsPowerShell\v1.0\Modules')
     if ($VerifySignatures) {
         $request = ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd())
         foreach ($path in $request.paths) {

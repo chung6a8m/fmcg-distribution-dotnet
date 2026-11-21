@@ -1,4 +1,9 @@
 # LAB-D01-only Windows bootstrap and Authenticode checks.
+function Get-D01TrustedModulePath {
+    return [IO.Path]::Combine($PSHOME, 'Modules') + ';' +
+        [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules')
+}
+
 function Assert-D01WindowsEnvironment {
     if (-not [Environment]::Is64BitProcess) { throw 'WINDOWS_64_BIT_REQUIRED' }
     $windows = [Environment]::GetFolderPath('Windows')
