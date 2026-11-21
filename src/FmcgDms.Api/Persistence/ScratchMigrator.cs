@@ -8,7 +8,8 @@ namespace FmcgDms.Api.Persistence;
 /// <summary>Only migrate owned, synthetic LocalDB scratch databases in APP-00A.</summary>
 public static class ScratchMigrator
 {
-    public static void Migrate(string connectionString, string tenantId, string expectedNonce)
+    public static void Migrate(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -37,7 +38,7 @@ public static class ScratchMigrator
             throw new InvalidOperationException("DB is already bound to a different tenant.");
 
         using var provider = new ServiceCollection()
-            .AddLogging(x => x.AddConsole())
+            .AddLogging(x => x.SetMinimumLevel(minimumLogLevel).AddConsole())
             .AddFluentMigratorCore()
             .ConfigureRunner(rb => rb.AddSqlServer().WithGlobalConnectionString(connectionString)
                 .ScanIn(typeof(AppSchema).Assembly).For.Migrations())
