@@ -63,7 +63,9 @@ floors for this increment. Start with the desired daemon already running,
 shell. D01 gets system paths from Windows and rejects conflicting shell
 variables before collection. It accepts a signed Docker Desktop installation
 under Windows Program Files or the standard Local AppData Docker Desktop
-directory. The Desktop, CLI and discovered plugins must have valid Docker Inc
+directory. D01 uses the Desktop launcher with its packaged CLI and accepts the
+same installation's signed `frontend` process alongside it. The Desktop
+executables, CLI and discovered plugins must have valid Docker Inc
 Authenticode signatures. WSL and netsh must have valid Microsoft signatures
 and come from the Windows system directory. Keep CLI plugins in the Desktop
 package or in the Windows Program Files or ProgramData Docker plugin directory.
@@ -96,9 +98,11 @@ $LASTEXITCODE
 
 The Windows disk check supports the current Docker-managed `docker_data.vhdx`
 layout and the conventional `/var/lib/docker` root with overlay storage. The
-Windows Storage provider must confirm the configured VHD is attached.
-Unrecognized layouts, including older `docker-desktop-data` storage, report
-`UNKNOWN`. D01 measures the Windows volume and the virtual disk's capacity.
+Windows Storage provider must confirm the VHD is attached. D01 checks the
+recognized layouts under the configured paths and requires exactly one VHD
+candidate. It uses the default location only when no path is configured. A
+missing, ambiguous or unconfirmed attachment reports `UNKNOWN`, as do
+unrecognized layouts such as older `docker-desktop-data` storage. D01 measures the Windows volume and the virtual disk's capacity.
 Linux filesystem free space and quotas need separate scoped measurement before
 using the rehearsal storage. Port and route observations are snapshots.
 The tool performs DNS lookups and local read probes. Its operation set covers

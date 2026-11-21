@@ -18,7 +18,7 @@ if __name__ == "__main__":
 from tools.app02b_lab.contract import (LabError, canonical_json, digest, guarded_directory,
                                        read_json, require, strict_json)
 from tools.app02b_lab.docker_windows import verified_windows_folders
-from tools.app02b_lab.environment import PRIVATE_NETWORKS, check_location, windows_path
+from tools.app02b_lab.environment import PRIVATE_NETWORKS, check_location, require_fixed_volume, windows_path
 from tools.app02b_lab.preflight import beneath, existing_local_input, output_path, source_info
 from tools.app02b_lab.schema import validate_document
 from tools.app02b_lab.windows_output import (close_handle, create_report, create_stage,
@@ -135,10 +135,16 @@ def version(value, prefix=""):
     return match[1] if match else None
 
 
-def verify_signatures(pwsh, paths, publisher):
+def verify_signatures(pwsh, paths, publisher, *, read_desktop_version=False):
+    request = {"paths": list(map(str, paths)), "publisher": publisher}
+    if read_desktop_version:
+        request["readDesktopVersion"] = True
     raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR, "-VerifySignatures"],
-                  input_data=canonical_json({"paths": list(map(str, paths)), "publisher": publisher}),
-                  timeout=100, inventory=True)
+                  input_data=canonical_json(request), timeout=100, inventory=True)
+    if read_desktop_version:
+        desktop_version = json_result(raw, dict).get("desktopVersion")
+        require(desktop_version is None or type(desktop_version) is str, "COLLECTION_ERROR")
+        return version(desktop_version)
     require(text_result(raw) == "VERIFIED", "COLLECTION_ERROR")
 
 
@@ -170,23 +176,33 @@ def storage(pwsh, folders, host):
     if not settings.is_file() or settings.stat().st_size > LIMIT:
         return
     configuration = json_result(settings.read_bytes(), dict)
-    # CustomWslDistroDir selects the relocated WSL2 data disk. DataFolder is
-    # also used by Desktop settings; conflicting values leave the disk unknown.
     locations = [value for key, value in configuration.items()
                  if key.casefold() in ("customwsldistrodir", "datafolder", "diskimagelocation")
                  and value not in (None, "")]
-    if not locations:
-        base = folders["LOCALAPPDATA"] / "Docker/wsl"
-    elif all(windows_path(value) for value in locations) and len({Path(value) for value in locations}) == 1:
-        base = Path(locations[0])
-    else:
+    if locations and not all(windows_path(value) for value in locations):
         return
-    candidates = [base / name for name in ("docker_data.vhdx", "disk/docker_data.vhdx",
-                                            "DockerDesktopWSL/disk/docker_data.vhdx")]
-    present = [path for path in candidates if path.exists()]
+    bases = map(Path, locations) if locations else [folders["LOCALAPPDATA"] / "Docker/wsl"]
+    layouts = ("docker_data.vhdx", "disk/docker_data.vhdx", "DockerDesktopWSL/disk/docker_data.vhdx")
+    present = {}
+    for base in bases:
+        try:
+            require_fixed_volume(base)
+        except LabError as error:
+            if error.code in ("NONLOCAL_VOLUME", "UNSUPPORTED_FILESYSTEM"):
+                return
+            raise
+        for layout in layouts:
+            try:
+                path = check_location(base / layout, missing=True)
+            except LabError as error:
+                if error.code != "PATH_MISSING":
+                    raise
+                continue
+            if path.is_file():
+                present[str(path)] = path
     if len(present) != 1:
         return
-    path = existing_local_input(str(present[0]), directory=False)
+    path = next(iter(present.values()))
     raw = command([pwsh, "-NoProfile", "-NonInteractive", "-File", WINDOWS_COLLECTOR, "-DataDisk"],
                   input_data=(str(path) + "\n").encode("utf-8"), inventory=True)
     observed = json_result(raw, dict)
@@ -208,26 +224,40 @@ def collect_inventory(pwsh, plan, host, folders):
     collect_wsl(pwsh, folders["SystemDirectory"], host)
     if host.get("wslMode") == 2:
         storage(pwsh, folders, host)
-    desktop = host.get("desktopPath")
-    if not desktop:
+    desktop_paths = host.get("desktopPaths")
+    require(type(desktop_paths) is list, "COLLECTION_ERROR")
+    if not desktop_paths:
         return "DAEMON_UNAVAILABLE"
-    desktop = existing_local_input(desktop, directory=False)
-    install = desktop.parent
+    processes = {}
     per_user = folders["LOCALAPPDATA"] / "Programs/DockerDesktop"
-    require(desktop.name.casefold() == "docker desktop.exe"
-            and (install == per_user or beneath(install, folders["ProgramFiles"])),
-            "UNTRUSTED_NATIVE_EXECUTABLE")
-    executable = install / "resources/bin/docker.exe"
-    if not executable.is_file():
+    for value in desktop_paths:
+        path = existing_local_input(value, directory=False)
+        require(path.name.casefold() == "docker desktop.exe"
+                and (path.parent == per_user or beneath(path, per_user) or beneath(path, folders["ProgramFiles"])),
+                "UNTRUSTED_NATIVE_EXECUTABLE")
+        processes[str(path)] = path
+    launchers = [path for path in processes.values() if (path.parent / "resources/bin/docker.exe").is_file()]
+    if len(launchers) != 1:
         return "UNSUPPORTED_DESKTOP_LAYOUT"
-    executable = existing_local_input(str(executable), directory=False)
+    desktop = launchers[0]
+    install = desktop.parent
+    if not (str(install) == str(per_user) or beneath(install, folders["ProgramFiles"])):
+        return "UNSUPPORTED_DESKTOP_LAYOUT"
+    frontend = install / "frontend" / desktop.name
+    if processes.keys() - {str(desktop), str(frontend)}:
+        return "UNSUPPORTED_DESKTOP_LAYOUT"
+    executable = existing_local_input(str(install / "resources/bin/docker.exe"), directory=False)
     try:
         plugins = docker_plugin_paths(install, folders)
     except LabError as error:
         if error.code != "UNTRUSTED_PLUGIN_CONFIGURATION":
             raise
         return error.code
-    verify_signatures(pwsh, [desktop, executable, *plugins], "Docker Inc")
+    desktop_files = [desktop]
+    if str(frontend) in processes:
+        desktop_files.append(frontend)
+    host["desktop"] = verify_signatures(pwsh, [*desktop_files, executable, *plugins], "Docker Inc",
+                                         read_desktop_version=True)
     return docker_inventory(executable, host, plan)
 
 

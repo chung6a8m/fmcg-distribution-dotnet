@@ -21,7 +21,12 @@ try {
                 exit 4
             }
         }
-        [Console]::WriteLine('VERIFIED')
+        if ($request.readDesktopVersion -eq $true) {
+            $file = Get-Item -LiteralPath $request.paths[0]
+            @{ desktopVersion = $file.VersionInfo.ProductVersion } | ConvertTo-Json -Compress
+        } else {
+            [Console]::WriteLine('VERIFIED')
+        }
         exit 0
     }
     if ($DataDisk) {
@@ -35,10 +40,6 @@ try {
     $machine = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name MachineGuid).MachineGuid
     $desktop = @(Get-Process -Name 'Docker Desktop' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Path } | Where-Object { $_ } | Select-Object -Unique)
-    $desktopVersion = if ($desktop.Count -eq 1) {
-        $file = Get-Item -LiteralPath $desktop[0]
-        if ($file.VersionInfo.ProductVersion -match '^\d+\.\d+(?:\.\d+){0,2}') { $Matches[0] }
-    }
     $ports = @(
         Get-NetTCPConnection -ErrorAction SilentlyContinue -ErrorVariable tcpErrors |
             ForEach-Object { [int]$_.LocalPort }
@@ -81,8 +82,7 @@ try {
         routes = $routes
         dns = $dns.Count
         pwsh = $PSVersionTable.PSVersion.ToString()
-        desktop = $desktopVersion
-        desktopPath = if ($desktop.Count -eq 1) { $desktop[0] }
+        desktopPaths = $desktop
     } | ConvertTo-Json -Compress -Depth 6
     exit 0
 } catch [System.UnauthorizedAccessException] {
