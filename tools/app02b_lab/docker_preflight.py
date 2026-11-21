@@ -212,6 +212,7 @@ def trusted_plugin_discovery(install):
     trusted = [install / "resources/cli-plugins",
                Path(os.environ["ProgramFiles"]) / "Docker/cli-plugins",
                Path(os.environ["ProgramData"]) / "Docker/cli-plugins"]
+    trusted_targets = {check_location(path) for path in trusted if path.exists()}
     config = docker_config / "config.json"
     directories = [docker_config / "cli-plugins", *trusted]
     if config.is_file():
@@ -227,7 +228,7 @@ def trusted_plugin_discovery(install):
             continue
         for plugin in path.iterdir():
             if (plugin.name.lower().startswith("docker-") and plugin.suffix.lower() == ".exe"
-                    and plugin.resolve().parent not in trusted):
+                    and plugin.resolve().parent not in trusted_targets):
                 return False
     return True
 

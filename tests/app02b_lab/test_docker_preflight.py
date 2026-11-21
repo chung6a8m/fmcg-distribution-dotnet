@@ -318,10 +318,11 @@ class WindowsDockerPreflightTests(unittest.TestCase):
                 observed = {}
                 preflight.storage("pwsh", observed)
                 self.assertEqual({}, observed)
-                self.assertEqual(str(disk), query.call_args.kwargs["input_data"].decode().strip())
+                probed = Path(query.call_args.kwargs["input_data"].decode().strip())
+                self.assertTrue(probed.samefile(disk))
             with patch.object(preflight, "command", return_value=b'{"attached":true,"capacity":512}'):
                 preflight.storage("pwsh", observed)
-                self.assertEqual(str(disk).casefold(), observed["diskRef"])
+                self.assertEqual(str(disk.resolve()).casefold(), observed["diskRef"])
                 self.assertEqual(512, observed["diskCapacity"])
             with patch.object(preflight, "command", return_value=None):
                 with self.assertRaisesRegex(LabError, "^COLLECTION_ERROR$"):
