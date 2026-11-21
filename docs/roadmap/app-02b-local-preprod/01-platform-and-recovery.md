@@ -1,6 +1,6 @@
 # APP-02B LAB — Platform and Recovery Increments
 
-**State:** PLAN_ONLY / IMPLEMENTATION_NOT_STARTED. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
+**State (2026-11-21):** LAB-I01 `SOURCE_MERGED` through [PR #90](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/90); LAB-I02–I08 `PLANNED`. Planning baseline remains `16d96c71a7967c216ebfa599693807a2b54e7435` (2026-11-19). Latest recorded owner-host preflight is `HOST_PREFLIGHT_OBSERVED / BLOCKED`; `LOCAL_LAB_READY` and physical PREPROD remain unverified.
 
 **Goal:** Prepare a guarded Windows-hosted lab and execute recoverable, measurable SQL fault drills.
 
@@ -15,25 +15,32 @@ Every increment must add meaningful regression/negative tests for its owned inva
 - The base application stack stays `deploy/preprod/compose.yaml`; SQL and Vault remain outside that stack. Preserve FOUNDATION_ONLY/NO_GO until the separately reviewed runtime-admission increment exists. Existing synthetic API/LocalDB credentials cannot become admitted PREPROD credentials.
 - All tools accept the shared `LabRunContext`: `runId`, `environmentId`, `sourceHeadSha`, `fixtureSha256`, `configurationSha256`, `startedUtc`, `hostSha256` and `mode`. Raw collectors append context to every artifact. A new source/config/fixture hash starts a new run; a retry does not overwrite a failed artifact.
 - I04/I05 consume E05's validated serialized JSON context before S09 introduces the shared C# DTO; they do not define a competing DTO or depend on the later S04 host. S09 updates those consumers to the shared type.
-- **New configuration** `deploy/lab/windows/environment.example.json` describes names, addresses, approved target identifiers, resource limits, TLS trust references, image/version locks, Vault secret references and evidence directories. It contains no credentials, private keys, root/unseal material or invented approval flags. Real environment enrollment/approval records are held outside Git and verified separately; signing a local config does not establish independent custody.
+- **LAB-I01 planning configuration** `deploy/lab/windows/environment.example.json` describes a proposed Windows topology with VM/network/resource allocations, opaque tenant/trust references, software version proposals and protected root paths. It is an `APP02B-LAB-WINDOWS-PLAN-V1` input, **not** an approved LAB-E05 `APP02B-LAB-ENVIRONMENT-V1` or admission manifest. It contains no credentials, private keys, root/unseal material or invented approval flags. Real environment enrollment/approval records are held outside Git and verified separately; signing a local plan does not establish independent custody.
 - SQL Server Developer 2022 with an approved CU is a **proposed baseline**, not an existing frozen project decision. Freeze the exact package/image digest and license mode before installation. SDK `10.0.404` and Node `>=26.13.1 <27` follow the existing source baseline. Linux images, Docker, Vault and certificates need authenticated version/checksum records; avoid mutable `latest` inputs.
 - Existing physical obligations remain unchanged: RUNTIME-01/02, 30 B.1 cases, distinct reviewers, off-host recoverable copies, RPO ≤900 s and RTO ≤14400 s. Local evidence uses a separate lab schema/class. No PR may make the B9 physical validator accept solo/local evidence as physical independence.
 
 <a id="lab-i01"></a>
 ## LAB-I01 — Preflight Windows và toolchain
 
-**Status:** SOURCE_REVIEW. **PR boundary:** one independently reviewed PR. **Source/API dependencies:** LAB-E05. Live setup/approval requirements are additional and do not convert source merge into acceptance.
+**Status:** `SOURCE_MERGED` through [PR #90](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/90). Final source `3fa9dc9e8f78986e3afe75ee50d26cd8f425f606`; merge `f4f941eed616af4083ed64d25951be5bab4ac78c`. [Final-source checks](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/90/checks): 24/24 SUCCESS across 12 PR workflows, including [I01 source tests](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44875763898). **Source/API dependencies:** merged LAB-E05 / #89.
 
-**Deliverable:** a read-only capability report and validated environment configuration, usable before any administrator action.
+**Host evidence:** #90 records `HOST_PREFLIGHT_OBSERVED / BLOCKED`, exit 2, on initial source `22e70256b99a759bd8c27d296206c0a41960da49`. Required failures/unknowns concern Windows/Hyper-V, reboot, RAM/disk, HNS coverage and Windows Time; subnet overlap remains NOT_TESTED with incomplete HNS. No final-source host PASS is recorded here. Installer/image provenance remains NOT_PINNED until verified. Rerun the [operator procedure](../../../deploy/lab/windows/README.md) on the intended laptop with a clean merged source and a fresh protected output directory; source CI cannot prove that host ready.
+
+**Implemented boundary:** I01 consumes an operator-supplied `APP02B-LAB-WINDOWS-PLAN-V1` plan and emits `preflight.json` with schema `APP02B-LAB-WINDOWS-PREFLIGHT-V1`, plus its `preflight.md` rendering. It does not issue an E05 environment/admission manifest or create VMs. LAB-I02 owns planned setup; I03–I05 complete the live prerequisites for LOCAL_LAB_READY. Physical PREPROD remains NOT_VERIFIED.
+
+**Implemented deliverable:** a read-only capability report and validated proposed Windows topology plan, usable before any administrator action. LAB-I01 does **not** validate or issue the protected LAB-E05 environment/admission manifest.
 
 **Files:** new `scripts/lab/Test-LabPrerequisites.ps1`, `scripts/lab/Lab.Common.psm1`, `deploy/lab/windows/environment.example.json`, `deploy/lab/windows/toolchain.lock.json`, `tools/app02b_lab/environment.py`, `tests/app02b_lab/test_environment.py`; read existing `global.json`, `web/package.json`, `AGENTS.md`.
 
 **Interfaces:** `Test-LabPrerequisites.ps1 -EnvironmentFile <path> -OutputDirectory <path>` returns exit 0 for a complete inventory and machine-readable readiness; exit 2 when requirements are missing, exit 1 on collection error. It never installs features, changes firewall policy or creates VMs. `environment.py: validate_environment(document: dict) -> list[str]` rejects malformed or inconsistent targets. The report distinguishes `READY_FOR_LAB_SETUP` from authorization to execute setup.
 
-- [ ] Capture Windows edition/build, x64/ARM, virtualization/SLAT, Hyper-V availability, RAM/disk, hostname, current VM/NAT/WSL/Docker subnets, relevant tools and their versions, .NET SDK, Node, Git, SSH, Python/OpenSSL, SQL tools and clock state. Inspect facts without dumping all environment variables or credential stores.
-- [ ] Validate absolute evidence directories outside Git, absence of path traversal, distinct APP/DATA/VAULT identities, nonoverlapping network ranges and distinct tenant A/B identifiers. Do not assume Windows Home provides the Hyper-V role or ARM can run a supported SQL Linux image.
-- [ ] Emit precise installation prerequisites and a proposed resource budget. RAM 32/64 GB are planning profiles, not claims that the current machine passed a performance gate.
-- [ ] Freeze installers/image identities with release version, download origin, SHA-256 and signer/digest verification procedure. A checksum supplied by the same untrusted replacement file is insufficient.
+
+**Original specification criteria (reference):** the source receipt above and the operator report record what has actually been verified. The criteria below retain the planned requirements; they are not a claim of successful host execution.
+
+- Capture Windows edition/build, x64/ARM, virtualization/SLAT, Hyper-V availability, RAM/disk, hostname, current VM/NAT/WSL/Docker subnets, relevant tools and their versions, .NET SDK, Node, Git, SSH, Python/OpenSSL, SQL tools and clock state. Inspect facts without dumping all environment variables or credential stores.
+- Validate absolute evidence directories outside Git, absence of path traversal, distinct APP/DATA/VAULT identities, nonoverlapping network ranges and distinct tenant A/B identifiers. Do not assume Windows Home provides the Hyper-V role or ARM can run a supported SQL Linux image.
+- Emit precise installation prerequisites and a proposed resource budget. RAM 32/64 GB are planning profiles, not claims that the current machine passed a performance gate.
+- Freeze installers/image identities with release version, download origin, SHA-256 and signer/digest verification procedure. A checksum supplied by the same untrusted replacement file is insufficient.
 
 **Verification:** `python -m unittest discover -s tests/app02b_lab -p test_environment.py`; fixtures cover subnet overlap, identical A/B targets, unsupported CPU, missing tools, wrong SDK, invalid evidence path and secret-bearing configuration. Run the PowerShell inventory on an actual Windows host and retain redacted output. CI cannot attest to that host. **Dependencies:** merged LAB-E05 source and the existing roadmap/evidence contracts. See the [Windows operator guide](../../../deploy/lab/windows/README.md) for the LAB-I01 plan schema and evidence limits.
 

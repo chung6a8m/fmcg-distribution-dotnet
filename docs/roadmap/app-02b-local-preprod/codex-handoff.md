@@ -179,6 +179,17 @@ Paths are examples, not authority. Enforce root boundary, no symlink escape, can
 4. A later docs-only commit D may refer to H's historical results. It must not say D was deployed or accepted. No recursive “commit the current SHA, changing that SHA again” loop; original B05-06 remains intact.
 5. E13 produces the truthful local report and physical handoff index. Original oracle uses externally approved roots outside repo/bundle; local keys/class cannot be promoted into physical custody.
 
+### 5.1 Increment closeout
+
+Use one existing spec/closeout section per increment as the canonical record. Apply this convention to future updates; retain the original #91/#92 receipts and all failed attempts as history.
+
+- Update the increment's roadmap row and its canonical section in the implementation PR: scope, dependency PRs, observed verification, remaining live requirements and current source state. Before merge, use SOURCE_REVIEW; set SOURCE_MERGED only after GitHub confirms the merge.
+- Record the exact final source H, CI run/attempt/artifact references, reviewer disposition and later merge commit M in the originating PR metadata. Cite the source/merge receipts when the next substantive documentation update touches that increment. A post-merge documentation correction may have its own PR when it fixes a real gap; a PR whose only purpose is acknowledging the previous docs PR's merge is unnecessary.
+- A documentation commit D may reference verified H and M. It cannot be its own pre-known final SHA and cannot inherit H's runtime acceptance. Keep B05-06 source/review correlation and revalidation intact; never add a tree-equivalence waiver to the physical oracle.
+- Keep source merge, CI scope, actual operator-host/lab observations and original physical acceptance in separate fields. LOCAL_OPERATOR_LAB / SOLO_OWNER_SELF_ATTESTED does not establish independent human review, off-host custody or PREPROD_FOUNDATION_VERIFIED. Preserve FAIL, BLOCKED, NOT_RUN and NOT_VERIFIED with their evidence/reasons.
+- When an older documentation PR is superseded, compare its diff with the merged canonical record, retain useful exact-source reviews/artifact hashes and failed CI history, then close it without merge under the authorized scope. Record the successor PR and observed closure; preserve its historical source rather than copying stale states over main. PR #73 is the [recorded example](../../closeout/2026-11-18-app-02b9-source-only.md#pr-73-predecessor-disposition).
+- Each handoff names the next real dependency or evidence gap. Current sequence: rerun I01 on the intended laptop and resolve reported FAIL/UNKNOWN; implement guarded I02; then I03–I05 for LOCAL_LAB_READY. E03/E04 investigate #75 independently. An unavailable host/approval stays a named live prerequisite while independent source work proceeds.
+
 ## 6. Review checklist
 
 - Does the PR consume a real implemented dependency, or reference an interface which is still only prose?
