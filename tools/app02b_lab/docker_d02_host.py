@@ -43,11 +43,12 @@ $env:PSModulePath = Get-D01TrustedModulePath
 $sidType = [Security.Principal.SecurityIdentifier]
 $current = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $trusted = @($current, 'S-1-5-18', 'S-1-5-32-544')
-$writeMask = [int]([Security.AccessControl.FileSystemRights]::Write -bor
+$rightsMask = [int]([Security.AccessControl.FileSystemRights]::Write -bor
     [Security.AccessControl.FileSystemRights]::Delete -bor
     [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
     [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
     [Security.AccessControl.FileSystemRights]::TakeOwnership -bor 0x50000000)
+if ($D03Confidential) { $rightsMask = -1 }
 $paths = @(ConvertFrom-Json -InputObject ([Console]::In.ReadToEnd()))
 if ($paths.Count -eq 0) { exit 1 }
 foreach ($path in $paths) {
@@ -60,17 +61,18 @@ foreach ($path in $paths) {
     foreach ($rule in $rules) {
         if ($rule.AccessControlType -eq 'Allow' -and
             $rule.IdentityReference.Value -notin $trusted -and
-            ([int]$rule.FileSystemRights -band $writeMask)) { exit 1 }
+            ([int]$rule.FileSystemRights -band $rightsMask)) { exit 1 }
     }
 }
 [Console]::WriteLine('PRIVATE')
 """
 
 
-def assert_private(pwsh, paths):
+def assert_private(pwsh, paths, *, confidential=False):
     values = list(dict.fromkeys(map(str, paths)))
     require(bool(values), "UNSAFE_D02_ACL")
-    encoded = base64.b64encode(ACL_CHECK.encode("utf-16-le")).decode("ascii")
+    script = ("$D03Confidential = $true\n" if confidential else "") + ACL_CHECK
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     raw = d01.command([pwsh, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
                       input_data=canonical_json(values))
     require(d01.text_result(raw) == "PRIVATE", "UNSAFE_D02_ACL")
