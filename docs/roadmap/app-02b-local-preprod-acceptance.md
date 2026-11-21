@@ -6,6 +6,8 @@
 **Architecture/tech stack:** Windows operator + Linux APP/DATA/VAULT VMs, Docker Compose, SQL Server, Vault, .NET 10, PowerShell/Python; [thiết kế và hợp đồng](app-02b-local-preprod/design.md).
 **Global constraints:** giữ immutable business baseline, original synthetic/LocalDB/foundation guards, exact-source evidence và original B.1/B.9. Đây là roadmap triển khai, chưa phải Owner approval cho môi trường cụ thể hoặc sửa hợp đồng human review.
 
+**Parallel Docker/WSL2 rehearsal proposal (not part of this 32-row register):** [LAB-D00–D04 roadmap](app-02b-local-docker-wsl2-rehearsal.md) and [proposed ADR](../decisions/proposed-app02b-docker-wsl2-rehearsal-2026-11-21.md) address a Windows laptop with Docker/WSL2 but without the full Hyper-V APP/DATA/VAULT topology. D00 is documentation review; D01–D04 are proposed, not yet authorized for implementation or host Apply. This addition does **not** reclassify LAB-I01 BLOCKED as PASS, change LAB-I02 VM source requirements, increase the 4/32 SOURCE_MERGED count, or satisfy M1 `LOCAL_LAB_READY`/original B.1/B.9 physical acceptance. Docker rehearsal evidence remains separate and nonphysical.
+
 ## 1. Cách dùng roadmap
 
 Mỗi ID `LAB-*` tương ứng **một PR có trách nhiệm, interface và tiêu chí hoàn tất riêng**. “PR độc lập” nghĩa là review/merge được theo dependency đã ghi; không có nghĩa mọi PR có thể chạy trước mọi PR khác. Không gộp platform, auth, restore và oracle vào một PR lớn. Không dùng nhánh chưa merge làm dependency ngầm.
