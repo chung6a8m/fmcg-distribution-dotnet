@@ -145,6 +145,7 @@ class DockerPreflightTests(unittest.TestCase):
             "public": set_detail("Internal", False),
             "driver": set_detail("Driver", "overlay"),
             "ipv6": set_detail("EnableIPv6", True),
+            "ipv4-disabled": lambda h: h["resumeAppNetwork"].update(EnableIPv4=False, Options={}),
             "unexpected-option": set_detail("Options", {"com.docker.network.bridge.enable_icc": "false"}),
             "endpoint": set_detail("Containers", {"foreign": {"Name": "foreign"}}),
             "other-overlap": lambda h: h["networks"].append(

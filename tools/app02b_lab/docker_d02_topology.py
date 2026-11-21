@@ -166,6 +166,7 @@ def _validate_network(row, subnet, expected_container_names):
         "com.docker.network.enable_ipv6": "false",
     }
     require(row.get("Driver") == "bridge" and row.get("Scope") == "local" and row.get("Internal") is True
+            and row.get("EnableIPv4", True) is True
             and not any(row.get(key) for key in ("Attachable", "Ingress", "EnableIPv6")),
             "D02_NETWORK_DRIFT")
     require(row.get("Options") in (None, {}, default_address_families), "D02_NETWORK_DRIFT")
