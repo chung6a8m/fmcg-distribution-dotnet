@@ -34,6 +34,9 @@ def wait_sql(docker, name):
                         b"private key", b"certificate", b"bootstrap", b"master.mdf", b"memory",
                         b"invalid", b"fault", b"failed", b"address", b"administrator password")
             flags = [word.decode("ascii") for word in patterns if word in logs.lower()]
+            paths = (b"/var/opt/mssql/.system", b"/var/opt/mssql/data", b"/var/opt/mssql/log",
+                     b"/var/opt/mssql/mssql.conf", b"/run/lab-sql/leaf.key", b"/run/lab-sql/bootstrap")
+            flags.extend(path.decode("ascii") for path in paths if path in logs.lower())
             import re
             errors = sorted(set(re.findall(rb"(?im)(?:Error: |error code: |reason: )([0-9a-fx]{1,12})\b", logs)))
             raise LabError("D04_CI_SQL_STOPPED", f"exit={row['State']['ExitCode']}, "
@@ -99,9 +102,29 @@ def run(folder, report):
         docker.run("network", "create", "--internal", "--label", f"lab-d04-ci={nonce}", name)
     for name in (sql_model["volumes"]["data"]["name"], vault_model["volumes"]["data"]["name"]):
         docker.run("volume", "create", "--label", f"lab-d04-ci={nonce}", name)
-    for model, role in ((sql_model, "sql"), (vault_model, "vault")):
+    def compose_run(model, *action):
         docker.run("compose", "--project-directory", str(d04.ROOT), "--env-file", "/dev/null", "-p", model["name"],
-                   "-f", "-", "up", "--no-build", "--pull", "never", "-d", role, input_data=canonical_json(model))
+                   "-f", "-", *action, input_data=canonical_json(model))
+
+    report["phase"] = "initialize_disposable_volume_permissions"
+    compose_run(sql_model, "up", "--no-start", "--no-build", "--pull", "never", "sql")
+    data_name = sql_model["volumes"]["data"]["name"]
+    backup_name = sql_model["volumes"]["backup"]["name"]
+    data, = docker._inspect("volume", [data_name])
+    backup, = docker._inspect("volume", [backup_name])
+    require(data["Labels"].get("lab-d04-ci") == nonce
+            and backup["Labels"].get("io.fmcg-dms.lab-d04.nonce") == nonce
+            and all(row["Driver"] == "local" and not row["Options"] for row in (data, backup)),
+            "D04_CI_VOLUME_OWNERSHIP")
+    docker.run("run", "--rm", "--network", "none", "--pull", "never", "--user", "0:0", "--cap-drop", "ALL",
+               "--cap-add", "CHOWN", "--security-opt", "no-new-privileges:true",
+               "--mount", f"type=volume,source={data_name},target=/d04-data,volume-nocopy",
+               "--mount", f"type=volume,source={backup_name},target=/d04-backup,volume-nocopy",
+               "--entrypoint", "/bin/sh", d04.IMAGE, "-ec",
+               "chown 0:0 /d04-data /d04-backup; chmod 0770 /d04-data /d04-backup; "
+               "chown 10001:0 /d04-data /d04-backup")
+    docker.run("start", sql_name)
+    compose_run(vault_model, "up", "--no-build", "--pull", "never", "-d", "vault")
     report["phase"] = "bootstrap_vault"
     vault = Vault("https://vault:8200", vault_ca[0], connect_address=private_address(docker, vault_name, vault_net))
     await_health(vault, 501)

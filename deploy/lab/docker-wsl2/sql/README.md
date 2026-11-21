@@ -30,7 +30,8 @@ data volume and bridge, running D03 container identity, a D03 role/audit receipt
 one hour old, TLS files, and
 distinct backup namespace. Keep output and inputs outside Git. Restrict
 the private key and bootstrap file and their parent directories to the
-operator, SYSTEM and Administrators. Confirm service UID read access on the
+operator, SYSTEM and Administrators. Confirm service UID read access to the TLS and bootstrap files, and UID 10001/GID 0
+write access to the newly enrolled data and backup volumes on the
 eventual separately authorized target and keep the CA signing key off the host.
 
 ~~~json
