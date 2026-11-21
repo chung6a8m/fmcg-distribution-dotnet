@@ -37,7 +37,7 @@ class Vault:
             self.context.load_verify_locations(cafile=ca_pem)
         self.connect_address = connect_address
 
-    def request(self, method, path, *, token=None, payload=None, probe_id=None):
+    def request(self, method, path, *, token=None, payload=None, probe_id=None, timeout=4):
         require(method in ("GET", "POST", "PUT") and re.fullmatch(r"[a-z0-9_/-]+", path)
                 and "//" not in path and not path.startswith("/"), "D03_UNSAFE_REQUEST")
         headers = {"Accept": "application/json"}
@@ -51,7 +51,7 @@ class Vault:
         if payload is not None:
             body = canonical_json(payload)
             headers["Content-Type"] = "application/json"
-        connection = HTTPSConnection(self.host, self.port, context=self.context, timeout=4)
+        connection = HTTPSConnection(self.host, self.port, context=self.context, timeout=timeout)
         if self.connect_address is not None:
             # Connect to the disposable CI bridge IP while retaining DNS SNI and verification.
             import socket
@@ -67,14 +67,14 @@ class Vault:
             return response.status, value
         except ssl.SSLCertVerificationError:
             raise LabError("D03_TLS_REJECTED") from None
-        except (OSError, HTTPException):
-            raise LabError("D03_VAULT_UNREACHABLE") from None
+        except (OSError, HTTPException) as error:
+            raise LabError("D03_VAULT_UNREACHABLE", f"{method} {path} {type(error).__name__}") from None
         finally:
             connection.close()
 
     def expect(self, status, method, path, **options):
         observed, value = self.request(method, path, **options)
-        require(observed == status, "D03_UNEXPECTED_HTTP_STATUS")
+        require(observed == status, "D03_UNEXPECTED_HTTP_STATUS", f"{method} {path}: {observed}, expected {status}")
         return value
 
     def cluster(self):

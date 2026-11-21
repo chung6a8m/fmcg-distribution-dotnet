@@ -74,7 +74,8 @@ def await_health(vault, expected):
 
 
 def bootstrap(vault):
-    init = vault.expect(200, "POST", "sys/init", payload={"secret_shares": 3, "secret_threshold": 2})
+    init = vault.expect(200, "POST", "sys/init", timeout=30,
+                        payload={"secret_shares": 3, "secret_threshold": 2})
     keys, root = init["keys_base64"], init["root_token"]
     unseal(vault, keys)
     vault.expect(204, "PUT", "sys/config/auditing/request-headers/" + AUDIT_HEADER.lower(),
@@ -104,8 +105,9 @@ def bootstrap(vault):
 
 def unseal(vault, keys):
     for key in keys[:2]:
-        status = vault.expect(200, "POST", "sys/unseal", payload={"key": key})
+        status = vault.expect(200, "POST", "sys/unseal", timeout=30, payload={"key": key})
     require(status.get("sealed") is False, "CI_VAULT_UNSEAL")
+    await_health(vault, 200)
 
 
 def must_block(fn, expected):
@@ -147,6 +149,7 @@ def run(report, folder):
                "D03_TLS_REJECTED")
     report["checks"]["untrusted_ca_and_wrong_hostname"] = "PASS"
 
+    report["phase"] = "initialize_and_enroll_roles"
     keys, root, issuer = bootstrap(vault)
     cluster = vault.cluster()
     tokens = {role: token_for_role(vault, role, issuer) for role in ROLE_PATHS}
@@ -158,6 +161,7 @@ def run(report, folder):
         require(len(raw) < 8_000_000, "CI_AUDIT_LIMIT")
         return [json.loads(line) for line in raw.splitlines()]
 
+    report["phase"] = "verify_role_audit"
     report["checks"]["role_matrix"] = probe_roles(vault, tokens, read_audit)
     replacement = []
     rotate(vault, "api", issuer, tokens["api"], replacement.append, lambda: None)
@@ -175,6 +179,7 @@ def run(report, folder):
     require(status == 403, "CI_EXPIRED_TOKEN_NOT_DENIED")
     report["checks"]["expired_token_denial"] = "PASS"
 
+    report["phase"] = "restart_and_unseal"
     audit_before = len(read_audit())
     docker.run("restart", name)
     await_health(vault, 503)

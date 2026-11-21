@@ -1,13 +1,11 @@
 """Regression checks for the reviewed Vault plan and credentials."""
 from datetime import datetime, timezone
-import json
 from pathlib import Path
-import tempfile
 import unittest
 
 from tools.app02b_lab.contract import LabError, canonical_json, digest
 from tools.app02b_lab import docker_d03 as d03
-from tools.app02b_lab.docker_d03_client import audit_witness, Vault
+from tools.app02b_lab.docker_d03_client import audit_witness, rotate, Vault
 
 
 class VaultPlanTests(unittest.TestCase):
@@ -52,3 +50,25 @@ class VaultPlanTests(unittest.TestCase):
             Vault("http://private-vault:8200", Path("unused-ca.pem"))
         with self.assertRaisesRegex(LabError, "D03_UNSAFE_ENDPOINT"):
             Vault("https://user@private-vault:8200", Path("unused-ca.pem"))
+
+    def test_stage_does_not_call_docker_when_authorization_is_refused(self):
+        def refuse():
+            raise LabError("D03_ENROLLMENT_UNAPPROVED")
+
+        with self.assertRaisesRegex(LabError, "D03_ENROLLMENT_UNAPPROVED"):
+            d03.stage_model(None, {}, "", ensure_current=refuse)
+
+    def test_rotation_does_not_act_on_a_token_that_can_read_another_role(self):
+        class OverprivilegedVault:
+            def expect(self, status, method, path, **options):
+                self.test_case.assertEqual(method, "GET")
+                if status == 403:
+                    raise LabError("D03_UNEXPECTED_HTTP_STATUS")
+                return {}
+
+        vault = OverprivilegedVault()
+        vault.test_case = self
+        with self.assertRaisesRegex(LabError, "D03_UNEXPECTED_HTTP_STATUS"):
+            rotate(vault, "api", "unused", "broad-token",
+                   lambda _token: self.fail("stored a replacement"),
+                   lambda: self.fail("authorized issuance"))
