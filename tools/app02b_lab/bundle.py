@@ -419,15 +419,16 @@ def _append_attempt(root: Path, evidence_root: Path, inputs: RunInputs,
     entry = {"sequence": sequence, "attemptId": attempt_id,
              "attemptSha256": digest(data), "previousSha256": previous}
     validate_source(context.sourceHeadSha)
-    journal = child(root, f"hashes/{sequence:08d}.json", missing=True)
-    try:
-        publish(journal, canonical_json(entry))
-    except FileExistsError:
-        raise LabError("ATTEMPT_SEQUENCE_ALREADY_RESERVED") from None
-    # Reserving first makes an interrupted write visible, preserving the
-    # prepared coverage and every previously sealed attempt.
-    directory = child(root, f"attempts/{attempt_id}", missing=True)
-    directory.mkdir(mode=0o700)
-    sync_directory(directory.parent)
-    publish(directory / "attempt.json", data)
+    with guarded_directory(directory.parent):
+        journal = child(root, f"hashes/{sequence:08d}.json", missing=True)
+        try:
+            publish(journal, canonical_json(entry))
+        except FileExistsError:
+            raise LabError("ATTEMPT_SEQUENCE_ALREADY_RESERVED") from None
+        # Reserving first makes an interrupted write visible, preserving the
+        # prepared coverage and every previously sealed attempt.
+        directory = child(root, f"attempts/{attempt_id}", missing=True)
+        directory.mkdir(mode=0o700)
+        sync_directory(directory.parent)
+        publish(directory / "attempt.json", data)
     return attempt
