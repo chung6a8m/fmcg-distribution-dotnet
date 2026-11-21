@@ -1,6 +1,6 @@
 # APP-02B LAB — Evidence, CI, Drivers and Closeout
 
-**State:** LAB-E01 `SOURCE_MERGED (DOCS_ONLY)`, LAB-E02 `SOURCE_REVIEW`, LAB-E03..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
+**State (2026-11-21):** LAB-E01 `SOURCE_MERGED (DOCS_ONLY)` via #87; LAB-E02 `SOURCE_MERGED` via #88; LAB-E05 `SOURCE_MERGED` via #89. LAB-E03–E04 and LAB-E06–E13 remain `PLANNED`. Planning baseline `16d96c71a7967c216ebfa599693807a2b54e7435` (2026-11-19); source/CI receipts below do not establish authorized lab execution or physical PREPROD.
 
 **Goal:** chạy các scenario thật, giữ raw evidence và đối chiếu đủ 30 case + 2 runtime probes, với trạng thái closeout đúng phạm vi.
 **Architecture/stack:** [design](design.md); Python collectors/runner, PowerShell entrypoints, GitHub Actions và original B9 validator.
@@ -15,6 +15,8 @@
 - #75 chứa hai lỗi khác nhau: LocalDB bootstrap và HTTP 500 sau restart. #68 là một record trước đó của triệu chứng A11-09. Rerun xanh không xác lập root cause.
 - #59 đã CLOSED bằng risk acceptance, không phải patched package. Scope `APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY`; expiry `2026-12-19T00:00:00Z`; không cho phép frontend publication/physical deployment qua exception này.
 - Original B.9 yêu cầu observer khác implementer; Security/DBA khác nhau và khác implementer/observer; bốn public-key pins khác nhau cho fixture/observer/security/dba. Một người giữ bốn khóa không tạo ra independent human review.
+
+**Record ownership:** each increment uses its existing spec/closeout section and PR as the canonical source/evidence record; follow the [increment closeout convention](codex-handoff.md#51-increment-closeout). The PR #91/#92 acknowledgements already committed here are historical documentation receipts, not new runtime evidence. Later updates require a substantive source, evidence, status or gate correction; the next milestone remains the I01 host rerun and guarded I02 setup in the [master roadmap](../app-02b-local-preprod-acceptance.md#4-thứ-tự-triển-khai-thực-dụng-cho-solo-dev).
 
 <a id="preprod-pr91-merge"></a>
 ## Ghi nhận sau merge PR #91
@@ -263,7 +265,7 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 
 **Status:** `SOURCE_MERGED (DOCS_ONLY)` qua [PR #87](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/87), final source [9bd8099](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/9bd8099f0ce6b0cb953cbdea7e30e6566a319709), merge [f736d61](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/f736d618fd4d86a3324c19117ff7b5b3ec415bc9). `LAB_EXECUTED` và physical PREPROD vẫn `NOT_VERIFIED`. **Source/API dependencies:** không có.
 
-**Dependencies:** không phụ thuộc runtime mới. **Deliverable:** một PR tài liệu có trạng thái và lineage đúng; hoặc cập nhật đúng PR #73 sau khi chủ sở hữu nhánh cho phép tích hợp, không tạo hai closeout cạnh tranh.
+**Dependencies:** không phụ thuộc runtime mới. **Deliverable completed:** #87 đã đưa bản reconciliation vào cùng đường dẫn B.9. [PR #73](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/73) đã đóng không merge dưới dạng `SUPERSEDED`; [disposition và evidence lịch sử](../../closeout/2026-11-18-app-02b9-source-only.md#pr-73-predecessor-disposition) giữ source, review, failed CI và artifact riêng của #73. Không dùng nhánh tiền nhiệm làm dependency.
 
 **Modify (existing):** các file của PR #73: `README.md`, `docs/closeout/2026-11-18-app-02b9-source-only.md` (dùng lại đường dẫn được đề xuất trong #73), `docs/roadmap/app-00-app-01.md`, `app-02.md`, `app-02b-preprod-foundation.md`, `app-02b7-backup-pitr-safe-restore.md`, `app-02b8-immutable-audit-operations.md`, `app-02b9-independent-preprod-oracle.md`. Không chép phiên bản nhánh cũ đè main.
 
@@ -280,17 +282,22 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 <a id="lab-e02"></a>
 ## LAB-E02 — Diagnostics cho LocalDB và A11-09
 
-**Status:** SOURCE_REVIEW trong [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). PR ghi final HEAD, CI và giới hạn evidence. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** `SOURCE_MERGED` qua [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). Final source `0c4a9a91a13b51cdae50208fab48c2bccafd8d60`; merge `ddc227e202a307a7a21951d7545985e036a13459`. [Final-source checks](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88/checks): 20/20 SUCCESS, 10 workflows; [APP-00A](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44848111951) giữ regression và diagnostics source tests. **Source/API dependencies:** không có dependency source mới.
+
+**Giới hạn evidence:** đã merge instrumentation; actual HTTP 500/root cause và việc thu artifact từ lỗi hosted thật chưa được xác minh bởi receipt này. #75/#68 vẫn OPEN; E03/E04 xử lý riêng theo trace. Source merge không xác nhận physical PREPROD hoặc tự đánh dấu các ca live PASS.
 
 **Modify (existing):** `tests/FmcgDms.Api.Tests/App01e4TcpRestartHarness.cs`, `App02a3WorkerTests.cs`, `App02a4OracleCases.cs`, `App02a4IndependentSqlOracle.cs`, `.github/workflows/app00a.yml`. **Create:** `tests/FmcgDms.Api.Tests/FailureDiagnosticsTests.cs`, `scripts/Collect-LocalDbDiagnostics.ps1`.
 
 **Interfaces:** bổ sung `App01e4ApiProcess.CaptureFailureAsync(string failureId, string stage, CancellationToken ct)` trả về đường dẫn artifact đã redacted; giữ nguyên `StartAsync(...)`, `Client(...)`, PID và disposal semantics. Nhận context hiện có của A4 report (`TestRunId`, `SourceHeadSha`, `WorkflowSha`, tenant, group); process context thêm PID/start/stop UTC. `IntakeA3` vẫn bắt buộc HTTP 202 và `RECEIVED_COMMITTED`.
 
-- [ ] Test `Failure_diagnostics_redacts_bearer_cookie_connection_secret_and_preserves_correlation`: seed sentinel secrets trong stdout/stderr/headers/body; không còn sentinel trong artifact; còn exception type/SQL error number/TraceId/PID/UTC cần chẩn đoán.
-- [ ] Thay ReadToEnd-only process capture bằng bounded ring buffer được drain liên tục, có snapshot khi process còn sống. Lưu cả hai kênh mà không block child, giới hạn kích thước và record truncated=true khi cắt.
-- [ ] Khi intake khác 202: chụp method/path không query secret, status, correlation, process stage và redacted server exception; sau đó FAIL assertion cũ. Không thay status, không retry business request.
-- [ ] Khi startup LocalDB lỗi: thu `sqllocaldb info`, instance log metadata, executable versions, service/process/error state trong bounded timeout; không in connection secrets; giữ lỗi gốc và upload artifact bằng `if: always()`.
-- [ ] Run `dotnet test --solution FmcgDms.slnx -c Release --minimum-expected-tests 296 -- --report-trx`; CI giữ mọi audit/browser/PWA stage. Thêm tests làm tăng count thì ghi baseline mới, không giảm floor.
+
+**Tiêu chí spec gốc (tham chiếu):** giữ các yêu cầu dưới đây; source/CI được chứng minh bằng receipt trên, còn fault thật và nguyên nhân phải có evidence riêng. Danh sách này không phải một lượt nghiệm thu live.
+
+- Test `Failure_diagnostics_redacts_bearer_cookie_connection_secret_and_preserves_correlation`: seed sentinel secrets trong stdout/stderr/headers/body; không còn sentinel trong artifact; còn exception type/SQL error number/TraceId/PID/UTC cần chẩn đoán.
+- Thay ReadToEnd-only process capture bằng bounded ring buffer được drain liên tục, có snapshot khi process còn sống. Lưu cả hai kênh mà không block child, giới hạn kích thước và record truncated=true khi cắt.
+- Khi intake khác 202: chụp method/path không query secret, status, correlation, process stage và redacted server exception; sau đó FAIL assertion cũ. Không thay status, không retry business request.
+- Khi startup LocalDB lỗi: thu `sqllocaldb info`, instance log metadata, executable versions, service/process/error state trong bounded timeout; không in connection secrets; giữ lỗi gốc và upload artifact bằng `if: always()`.
+- Run `dotnet test --solution FmcgDms.slnx -c Release --minimum-expected-tests 296 -- --report-trx`; CI giữ mọi audit/browser/PWA stage. Thêm tests làm tăng count thì ghi baseline mới, không giảm floor.
 
 **Exit:** lỗi được quan sát có nguồn gốc; issue #75/#68 vẫn OPEN. Diagnostics PR có thể được review độc lập với việc sửa root cause.
 
@@ -331,7 +338,9 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 <a id="lab-e05"></a>
 ## LAB-E05 — Run context, catalog và schema
 
-**Status:** SOURCE_REVIEW. [V1 contract and usage](lab-e05-contract.md). **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** `SOURCE_MERGED` qua [PR #89](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/89). Final source `f822a82ad0b31f8bd8d1004e05ffcb73e306a142`; merge `2c3cd2a4b805746a79b4222939877a1980acdd1a`. [E05 Windows/Ubuntu CI](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44854482443) và [B.9 dispatch trên cùng source](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44854487839) SUCCESS; B.9 kiểm chứng synthetic validator và expected physical NO_GO. [V1 contract and usage](lab-e05-contract.md) là hướng dẫn cho implementation đã merge. **Source/API dependencies:** không có dependency source mới.
+
+**Giới hạn evidence:** contract/runner source đã merge; authorized lab measurements `NOT_RUN`, collectors/drivers chưa được triển khai ở increment này. Original gates vẫn `NOT_VERIFIED`; 30 case và 2 runtime rows không trở thành PASS vì unit/CI tests thành công.
 
 **Create:** `tools/app02b_lab/context.py`, `catalog.py`, `schema.py`, `run.py`, `schemas/lab-evidence-v1.json`, `schemas/lab-run-context-v1.json`, `tests/app02b_lab/test_context.py`, `test_catalog.py`, `test_schema.py`; wrapper `scripts/lab/Invoke-LabAcceptance.ps1`.
 
@@ -341,16 +350,19 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 
 **Lab schema:** `schema=APP02B-LAB-EVIDENCE-V1`, `evidenceClass=LOCAL_OPERATOR_LAB`, `humanReview=SOLO_OWNER_SELF_ATTESTED`; `originalGateStatus=NOT_VERIFIED`; `cases` phải đủ 30 IDs. Mỗi case có `technicalResult` PASS/FAIL/BLOCKED/NOT_RUN, `acceptanceStatus=NOT_VERIFIED`, expected symbol từ frozen fixture, actual observations, missingRequirements, positiveRefs/negativeRefs, tenant scope và peer-before/after. B05-02 giữ BLOCKED khi thiếu reviewer thật. Technical PASS không đại diện mọi original acceptance condition; mô tả rõ assertions nào đã đo và independence nào thiếu.
 
-- [ ] Test catalog thiếu/thừa/trùng ID, fixture đổi byte, dirty checkout, invalid source, duplicate JSON property, NaN, path traversal/symlink escape, empty witness => reject.
-- [ ] Freeze byte-identical original expected fixture cùng hash trước first mutation; run.json ghi trạng thái PREPARED, original commitment và config digest. Không cho sửa fixture giữa run.
-- [ ] Tạo 30 dòng NOT_RUN trước execution. Runner crash/abort vẫn để lại complete coverage index; không chỉ in các case đã chạy.
-- [ ] CLI mới: `python tools/app02b_lab/run.py --config <public-config> --selection case:B01-01 --run-id <id> --evidence-root <outside-repo>`; hỗ trợ `gate:G-B01` và `all`; unknown selection fail. Exit 0 chỉ = mọi technical requirement đã chọn hoàn tất, exit 2 = BLOCKED/NOT_RUN, exit 1 = FAIL; report luôn original gates NOT_VERIFIED.
-- [ ] Resume chỉ dùng cùng source/config/fixture/environment và admitted DB lineage. Một I08 restore transition đã khai báo được giữ trong run với immutable old→new receipt; không sửa baseline identity. Target drift/lineage không được duyệt phải tạo run mới hoặc BLOCKED. Attempt folder mới, append history; không overwrite failed attempts hoặc tự chọn attempt xanh mà giấu lịch sử.
-- [ ] Unit command: `python -m unittest discover -s tests/app02b_lab -p 'test_*.py' -v`.
+
+**Tiêu chí spec gốc (tham chiếu):** các yêu cầu sau giữ nguyên để đối chiếu contract. Receipt trên chứng minh source/CI; interpretation của measurement và live restore/driver admission vẫn thuộc increment sở hữu.
+
+- Test catalog thiếu/thừa/trùng ID, fixture đổi byte, dirty checkout, invalid source, duplicate JSON property, NaN, path traversal/symlink escape, empty witness => reject.
+- Freeze byte-identical original expected fixture cùng hash trước first mutation; run.json ghi trạng thái PREPARED, original commitment và config digest. Không cho sửa fixture giữa run.
+- Tạo 30 dòng NOT_RUN trước execution. Runner crash/abort vẫn để lại complete coverage index; không chỉ in các case đã chạy.
+- CLI mới: `python tools/app02b_lab/run.py --config <public-config> --selection case:B01-01 --run-id <id> --evidence-root <outside-repo>`; hỗ trợ `gate:G-B01` và `all`; unknown selection fail. Exit 0 chỉ = mọi technical requirement đã chọn hoàn tất, exit 2 = BLOCKED/NOT_RUN, exit 1 = FAIL; report luôn original gates NOT_VERIFIED.
+- Resume chỉ dùng cùng source/config/fixture/environment và admitted DB lineage. Một I08 restore transition đã khai báo được giữ trong run với immutable old→new receipt; không sửa baseline identity. Target drift/lineage không được duyệt phải tạo run mới hoặc BLOCKED. Attempt folder mới, append history; không overwrite failed attempts hoặc tự chọn attempt xanh mà giấu lịch sử.
+- Unit command: `python -m unittest discover -s tests/app02b_lab -p 'test_*.py' -v`.
 
 **Exit:** shared contract ổn định cho mọi collector/driver; chưa cần runtime thật để kiểm chứng validator.
 
-**Contract ownership:** thêm `schemas/lab-environment-v1.json` cho cấu trúc tối thiểu/secret references; LAB-I01 bổ sung platform validation qua extension schema versioned, không đổi tên run fields tùy ý. Schema labels chính xác: `APP02B-LAB-EVIDENCE-V1`, `LOCAL_OPERATOR_LAB`, `SOLO_OWNER_SELF_ATTESTED`. `configurationSha256` hash manifest không chứa secrets, bao gồm danh tính/version của secret references và externally retained authorization record; không công bố hash đoán được của secret values. `hostSha256` đi kèm protected original fingerprint.
+**Contract ownership:** E05 giữ `schemas/lab-environment-v1.json` / `APP02B-LAB-ENVIRONMENT-V1` cho cấu trúc tối thiểu/secret references và yêu cầu protected admission riêng. LAB-I01 đã triển khai schema planning độc lập `APP02B-LAB-WINDOWS-PLAN-V1`, không phải E05 schema extension và không phát hành E05 admission. Operator phải cung cấp protected original host fingerprint và authorization/admission hợp lệ theo [V1 contract](lab-e05-contract.md); report I01 chỉ là input readiness. Schema labels chính xác: `APP02B-LAB-EVIDENCE-V1`, `LOCAL_OPERATOR_LAB`, `SOLO_OWNER_SELF_ATTESTED`. `configurationSha256` hash manifest không chứa secrets, bao gồm danh tính/version của secret references và externally retained authorization record; không công bố hash đoán được của secret values. `hostSha256` đi kèm protected original fingerprint.
 
 <a id="lab-e06"></a>
 ## LAB-E06 — Collectors SQL/HTTP/network/Vault

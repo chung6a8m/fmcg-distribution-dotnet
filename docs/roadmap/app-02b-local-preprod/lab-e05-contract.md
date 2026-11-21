@@ -1,10 +1,12 @@
 # LAB-E05 local evidence contract
 
-**Status** | **Scope**
+**Evidence tier** | **Current disposition**
 --- | ---
-SOURCE_REVIEW | Python/JSON contract, portable runner and disposable source tests
-LAB_EXECUTED | No authorized lab measurements recorded here
-Original gates | NOT_VERIFIED
+Source | SOURCE_MERGED via [PR #89](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/89): Python/JSON contract, portable runner and disposable source tests
+Authorized lab execution | NOT_RUN — no authorized lab measurements recorded here
+Original physical gates | NOT_VERIFIED
+
+Final source `f822a82ad0b31f8bd8d1004e05ffcb73e306a142`; merge `2c3cd2a4b805746a79b4222939877a1980acdd1a`. [E05 source CI](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44854482443) and the [same-source B.9 synthetic validator dispatch](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44854487839) succeeded. These receipts do not establish live evidence or original physical acceptance.
 
 ## Operator inputs
 
@@ -12,9 +14,11 @@ Use a clean checkout and an existing, operator-protected local evidence director
 all Git worktrees. Restrict the evidence directory and input directory to the operator
 and authorized custodians. On Windows use a local drive with restricted NTFS ACLs. Keep
 the authorization record and raw host fingerprint under their designated custody. The
-runner checks pins and recorded admission. LAB-I01 owns measuring platform state and
-collecting the approved inputs. A file supplied by the operator does not prove that
-a live host or SQL binding has been independently measured or that execution was approved.
+runner checks pins and recorded admission. Merged LAB-I01 measures platform state through
+the separate APP02B-LAB-WINDOWS-PLAN-V1 planning/report contract; it emits no E05 environment
+or protected admission manifest. Obtain the protected host fingerprint and externally
+authorized E05 inputs separately. An I01 readiness report or operator-supplied file does
+not prove that a live SQL binding was independently measured or execution was approved.
 
 Keep these three inputs together outside the repository and evidence root.
 
@@ -150,7 +154,7 @@ private evidence.
 
 | Increment | Contract handoff |
 | --- | --- |
-| LAB-I01 | Provide measured host bytes, externally authorized redacted environment and protected admission. Check toolchain and local root prerequisites. |
+| LAB-I01 | Supply the separate Windows planning/readiness report and toolchain/root observations. It does not issue APP02B-LAB-ENVIRONMENT-V1, protected host-fingerprint bytes or APP02B-LAB-ADMISSION-V1; the operator must obtain those separately under E05's admission contract. |
 | LAB-E06 | Use AttemptDraft to implement typed raw-before-descriptor collectors bound to the V1 attempt/case/phase/target. Introduce reviewed interpretation of raw measurements before enabling technical PASS. |
 | LAB-E07 | Populate source-bound CI evidence through a reviewed inventory extension. Current CI directory stays empty. |
 | LAB-S09 | Match the shared C# DTO to the eight run-context fields and deterministic JSON contract. Keep enrollment identities and approvals external. |
