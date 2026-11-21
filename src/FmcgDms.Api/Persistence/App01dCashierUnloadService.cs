@@ -14,7 +14,7 @@ namespace FmcgDms.Api.Persistence;
 /// cross-kind idempotency and the shared APP01C:TRIP lock serialize T3..T6.
 /// No production cash handling, legal document, or accounting integration.
 /// </summary>
-public sealed class App01dCashierUnloadService(TenantConnections connections)
+public sealed partial class App01dCashierUnloadService(TenantConnections connections)
 {
     private const decimal MaximumAmount = 999999999999999.9999m;
     private const decimal MaximumQuantity = 999999999999999.999m;

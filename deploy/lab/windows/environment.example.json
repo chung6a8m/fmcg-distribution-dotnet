@@ -1,0 +1,63 @@
+{
+  "schema": "APP02B-LAB-WINDOWS-PLAN-V1",
+  "environmentId": "lab-example",
+  "operatorHostRef": "ref-1000000000000001",
+  "profileGiB": 32,
+  "hostReserveGiB": 8,
+  "vms": {
+    "APP": {
+      "id": "lab-app",
+      "ramGiB": 4,
+      "vhdxGiB": 40
+    },
+    "DATA": {
+      "id": "lab-data",
+      "ramGiB": 8,
+      "vhdxGiB": 80
+    },
+    "VAULT": {
+      "id": "lab-vault",
+      "ramGiB": 2,
+      "vhdxGiB": 20
+    }
+  },
+  "networks": {
+    "APP": {
+      "cidr": "172.28.200.0/24",
+      "gateway": "172.28.200.1"
+    },
+    "DATA": {
+      "cidr": "172.28.201.0/24",
+      "gateway": "172.28.201.1"
+    },
+    "VAULT": {
+      "cidr": "172.28.202.0/24",
+      "gateway": "172.28.202.1"
+    },
+    "MANAGEMENT": {
+      "cidr": "172.28.203.0/24",
+      "gateway": "172.28.203.1"
+    }
+  },
+  "storageRoot": "C:\\Lab\\VM Storage",
+  "evidenceRoot": "C:\\Lab\\Evidence",
+  "backupGiB": 90,
+  "evidenceGiB": 20,
+  "configurationPaths": {
+    "guestConfig": "C:\\Lab\\Config\\guest-plan.json"
+  },
+  "software": {
+    "linuxGuest": "NOT_PINNED",
+    "sqlServer": "NOT_PINNED",
+    "vault": "NOT_PINNED",
+    "appRuntime": "NOT_PINNED"
+  },
+  "tls": {
+    "caRef": "ref-1000000000000002"
+  },
+  "tenantRefs": {
+    "A": "ref-2000000000000001",
+    "B": "ref-2000000000000002"
+  },
+  "toolchainLock": "deploy/lab/windows/toolchain.lock.json"
+}

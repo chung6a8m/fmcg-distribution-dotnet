@@ -132,6 +132,11 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     // separately seeded cashier count witness.
     var closeoutCommands = app.MapGroup("/api/synthetic/app01d/commands")
         .RequireAuthorization();
+    closeoutCommands.MapPost("/allocate-cash-receipt", async (
+        AllocateCashReceiptCommand input, ClaimsPrincipal user,
+        App01dCashierUnloadService service, CancellationToken ct) =>
+        ToCommandHttp(await service.AllocateCashReceiptAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
     closeoutCommands.MapPost("/offer-cash-handover", async (
         OfferCashHandoverCommand input, ClaimsPrincipal user,
         App01dCashierUnloadService service, CancellationToken ct) =>

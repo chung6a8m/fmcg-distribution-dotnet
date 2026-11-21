@@ -46,7 +46,9 @@ public sealed record PostBSaleDeliveryReceiptCommand(
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
     Guid TripManifestLineId, Guid SkuId, decimal BaseQuantity,
     decimal UnitPrice, decimal ReceivedCashAmount,
-    string VerificationEvidenceRef) : IApp01aCommand;
+    string VerificationEvidenceRef,
+    string? PendingBankEvidenceRef = null,
+    Guid? CustomerCreditReservationId = null) : IApp01aCommand;
 
 /// <summary>
 /// One A delivery against a loaded, exact reserved source/order line.
@@ -58,6 +60,12 @@ public sealed record PostAPartialDeliveryCommand(
     Guid TripId, Guid CustomerId, Guid ShipToSnapshotId,
     Guid AOrderId, Guid AOrderLineId, Guid TripManifestLineId, Guid SkuId,
     decimal BaseQuantity) : IApp01aCommand;
+
+/// <summary>Apply part of a confirmed receipt to an open receivable on the same trip.</summary>
+public sealed record AllocateCashReceiptCommand(
+    string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid CashReceiptId, Guid ReceivableOpenItemId,
+    decimal Amount) : IApp01aCommand;
 
 /// <summary>APP-01D: a cash OFFER has no ledger impact.</summary>
 public sealed record OfferCashHandoverCommand(

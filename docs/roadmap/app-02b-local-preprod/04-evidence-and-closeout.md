@@ -16,6 +16,232 @@
 - #59 đã CLOSED bằng risk acceptance, không phải patched package. Scope `APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY`; expiry `2026-12-19T00:00:00Z`; không cho phép frontend publication/physical deployment qua exception này.
 - Original B.9 yêu cầu observer khác implementer; Security/DBA khác nhau và khác implementer/observer; bốn public-key pins khác nhau cho fixture/observer/security/dba. Một người giữ bốn khóa không tạo ra independent human review.
 
+<a id="preprod-ac09-ac21-clean-checkout"></a>
+## Tái lập AC-09 và AC-21 từ source đã chốt
+
+Ngày 21/11/2026, lượt `ac09-ac21-repro-20261121-062524Z-9d1eb42b` chạy từ commit `f1ee1c8ff71ff77ad3b41db9209a70796a31c6e8` trong checkout riêng ở detached HEAD. Git xác nhận checkout sạch trước và sau khi chạy. Môi trường Windows SQL Server LocalDB 15.0.4382.1, .NET SDK 10.0.404, `SYNTHETIC_NONPRODUCTION`.
+
+| Phạm vi | `tenant-a` | `tenant-b` |
+|---|---|---|
+| AC-09 `CASH_60` và `CASH_100` | **10/10 mỗi ca** | **10/10 mỗi ca** |
+| AC-09 `CASH_60_CREDIT_20`, `BANK_PENDING`, `CASH_OVERPAY_120` | **15/15 mỗi ca** | **15/15 mỗi ca** |
+| AC-09 tranh cùng hạn mức | **18/18** | **18/18** |
+| AC-21 qua APP-01 | **5/5 mốc, 25/25 chỉ số**, gửi lại **4/4** | **5/5 mốc, 25/25 chỉ số**, gửi lại **4/4** |
+
+Các chỉ số SQL khớp gói trước ở cả hai tenant. Ca tranh hạn mức vẫn có một lệnh ghi sổ và một lệnh bị từ chối. Gửi lại các lệnh được kiểm tra giữ nguyên dấu vân tay SQL, và tenant đối chứng giữ nguyên dữ liệu trong từng lượt. AC-09 dùng fixture cho chứng cứ chuyển khoản chờ và giữ tín dụng. AC-21 dùng fixture cho mốc khoản thu đã xác nhận, sau đó chạy bốn lệnh qua HTTP. Kiểm thử Release đạt **12/12 AC-09 và 2/2 AC-21**.
+
+- **Gói PREPROD cập nhật** [PREPROD-bo-bang-chung-AC09-AC21-checkout-sach.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-ac21-repro-20261121-062524Z-9d1eb42b/PREPROD-bo-bang-chung-AC09-AC21-checkout-sach.zip). SHA-256 `34E84654948398E7ABA04D237FFB9CA87F7CE003326A266CCCF8AABDBABADAFF`. Gồm sáu gói thành phần, trong đó có các lượt AC-03 và khôi phục đã lưu trước đây.
+- **Gói chi tiết lượt tái lập** [PREPROD-AC09-AC21-clean-checkout.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-ac21-repro-20261121-062524Z-9d1eb42b/PREPROD-AC09-AC21-clean-checkout.zip). SHA-256 `A7B4D98EE67BB8D3063EA7F200C52166437613773D2681DB8D3698C3B704D056`. Gồm JSON hai tenant, TRX, thông tin checkout và đối chiếu với gói trước.
+- **Mốc so sánh** [Bộ bằng chứng PREPROD cập nhật AC-09](#preprod-updated-ac09-bundle), SHA-256 `CA1981DCDA8D37AE7F39F46E133A7A9D0E1576E5B92D6092D5B746E907EFDC12`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="preprod-updated-ac09-bundle"></a>
+## Bộ bằng chứng PREPROD cập nhật đủ các nhánh AC-09 trên LocalDB
+
+Ngày 21/11/2026, bổ sung lượt `ac09-expanded-20261121-062029Z-c750534a` trên Windows SQL Server LocalDB 15.0.4382.1 (`SYNTHETIC_NONPRODUCTION`). Gói này giữ nguyên bốn ZIP từ lượt tổng hợp trước và bổ sung [bằng chứng APP-01 cho đủ năm nhánh AC-09 và ca tranh hạn mức](#ac09-full-localdb-evidence).
+
+| Phạm vi | `tenant-a` | `tenant-b` |
+|---|---|---|
+| Tái lập AC-03 | **84/84** | **84/84** |
+| AC-09 tranh hạn mức | **18/18** | **18/18** |
+| AC-09 `CASH_60`, `CASH_100` | **10/10 mỗi ca** | **10/10 mỗi ca** |
+| AC-09 `CASH_60_CREDIT_20`, `BANK_PENDING`, `CASH_OVERPAY_120` | **15/15 mỗi ca** | **15/15 mỗi ca** |
+| AC-21 qua APP-01, từ khoản thu xác nhận trong fixture | **25/25**, gửi lại **4/4** | **25/25**, gửi lại **4/4** |
+| Khôi phục AC-03 | **84/84**, đối soát xong sau 441,1 ms | Đối chứng, **61 bảng** giữ nguyên dấu vân tay |
+
+- **Gói ZIP cập nhật** [PREPROD-bo-bang-chung-cap-nhat-AC09.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-expanded-20261121-062029Z-c750534a/PREPROD-bo-bang-chung-cap-nhat-AC09.zip).
+- **SHA-256 của ZIP** `CA1981DCDA8D37AE7F39F46E133A7A9D0E1576E5B92D6092D5B746E907EFDC12`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="preprod-four-steps-bundle"></a>
+## Bộ bằng chứng PREPROD cập nhật sau bốn bước
+
+Ghi nhận ngày 21/11/2026. ZIP gồm bốn gói thành phần nguyên bản, bản tóm tắt `tong-hop.md` và `manifest.json` chứa SHA-256 từng gói. Kết quả được ghi nhận trên Windows SQL Server LocalDB 15.0.4382.1, môi trường `SYNTHETIC_NONPRODUCTION`.
+
+| Bước | `tenant-a` | `tenant-b` |
+|---|---|---|
+| [1. Tái lập từ checkout sạch](#ac03-ac09-clean-checkout) | AC-03 **84/84**, AC-09 tranh hạn mức **18/18** | AC-03 **84/84**, AC-09 tranh hạn mức **18/18** |
+| [2. AC-09 thu tiền mặt](#ac09-cash-localdb-evidence) | `CASH_60` **10/10**, `CASH_100` **10/10** | `CASH_60` **10/10**, `CASH_100` **10/10** |
+| [3. AC-21 qua APP-01](#ac21-app-localdb-evidence) | **5/5 mốc**, **25/25 chỉ số**, **4/4 lệnh gửi lại** giữ nguyên SQL | **5/5 mốc**, **25/25 chỉ số**, **4/4 lệnh gửi lại** giữ nguyên SQL |
+| [4. Khôi phục AC-03](#ac03-localdb-restore-evidence) | Bản khôi phục riêng khớp **7/7 mốc**, **84/84 chỉ số** | Tenant đối chứng, dấu vân tay **61 bảng** giống nhau trước và sau |
+
+Ở cả hai tenant, ca AC-09 bán 100 thu 60 cho công nợ 40, hạn mức còn 60 và tiền giữ hộ tăng 60. Thu 100 cho kết quả lần lượt 0, 100 và 100. AC-21 bắt đầu từ fixture khoản thu đã xác nhận và thực hiện bốn lệnh tiếp theo qua HTTP. Câu lệnh khôi phục AC-03 mất 172,5 ms, đến khi hoàn tất đối soát mất 441,1 ms.
+
+**Phạm vi lịch sử của gói này** còn thiếu `CASH_60_CREDIT_20`, `BANK_PENDING` và `CASH_OVERPAY_120`. [Lượt bổ sung AC-09](#ac09-full-localdb-evidence) ghi kết quả ba nhánh qua APP-01 trên LocalDB.
+
+- **Gói ZIP cập nhật** [PREPROD-bo-bang-chung-4-buoc-LocalDB.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/preprod-four-steps-20261121/PREPROD-bo-bang-chung-4-buoc-LocalDB.zip).
+- **SHA-256 của ZIP** `CA75BF21EF48AB7808978D2257707056A973B5DBE6EFCC64C9B2F17932DB84EC`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="preprod-ac03-ac09-ac21-bundle"></a>
+## Bộ bằng chứng tổng hợp AC-03, AC-09 và AC-21
+
+Ghi nhận ngày 21/11/2026. Bộ gồm một workbook tổng hợp và ba gói bằng chứng gốc. Các kết quả dưới đây được quan sát trên **Windows SQL Server LocalDB** (`SYNTHETIC_NONPRODUCTION`).
+
+| Ca | `tenant-a` | `tenant-b` | Phạm vi kiểm chứng |
+|---|---:|---:|---|
+| [AC-03](#ac03-localdb-evidence) | **84/84** | **84/84** | Luồng APP-01 qua 7 mốc, đối soát chứng từ và bút toán cấu thành |
+| [AC-09](#ac09-localdb-evidence) | **18/18** | **18/18** | Hai lệnh tranh cùng hạn mức và gửi lại lệnh trong APP-01 |
+| [AC-21](#ac21-localdb-evidence) | **25/25** | **25/25** | Gói tổng hợp chứa lượt chạy đặc tả SQL-03B. [Lượt kiểm chứng bổ sung qua APP-01](#ac21-app-localdb-evidence) có gói riêng. |
+
+- **Gói ZIP trên laptop** [PREPROD-bo-bang-chung-AC03-AC09-AC21-20261121-053811Z.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/preprod-ac03-ac09-ac21-20261121-053811Z/PREPROD-bo-bang-chung-AC03-AC09-AC21-20261121-053811Z.zip)
+- **SHA-256 của ZIP** `9944D6DDF421D79F99B560008A3CE2FA9D602C43B96BB3BEADB1B47B85934663`
+- **PREPROD vật lý** `NOT_VERIFIED` cho cả ba ca.
+
+<a id="ac03-ac09-clean-checkout"></a>
+## Tái lập AC-03 và AC-09 từ checkout sạch
+
+Ngày 21/11/2026, chạy từ commit `bed914860c1e023d21d582589665c9cc02b30ac2` trong một bản clone local riêng, ở detached HEAD. Git xác nhận checkout sạch trước khi build và sau lượt đối soát. Môi trường `SYNTHETIC_NONPRODUCTION` sử dụng .NET SDK 10.0.404 và Windows SQL Server LocalDB 15.0.4382.1. Mã lượt chạy `repro-20261121-054558Z-87882212`.
+
+| Ca | `tenant-a` | `tenant-b` | So với gói gốc |
+|---|---:|---:|---|
+| AC-03 | **84/84** | **84/84** | Khớp số thực tế SQL, số kỳ vọng và tổng dòng cấu thành ở cả 7 mốc. Mỗi tenant khớp thêm 174 dòng cấu thành và 27 dòng trong sheet chứng từ phát sinh. |
+| AC-09 | **18/18** | **18/18** | Mỗi tenant có 2 lệnh cùng chờ SQL, 1 ghi sổ, 1 bị từ chối `B_CREDIT_INSUFFICIENT` với 0 chứng từ và bút toán. Khớp 7 bút toán của lệnh được ghi. Hai lần gửi lại cùng ID và dữ liệu tenant đối chứng giữ nguyên dấu vân tay SQL trong từng lượt. |
+
+AC-03 dùng seed `AC03-v1` và RunId mới `0811d8e7de284efebc677d85cebf3188`. AC-09 giữ phạm vi `concurrencyNegative` và đạt 2/2 ca Release. Phép đối chiếu dùng các giá trị nghiệp vụ, loại và mã chứng từ ổn định, dòng sổ và kết quả lệnh. GUID, thời điểm chạy và bên thắng trong cuộc tranh hạn mức có thể khác giữa hai lượt.
+
+- **Gói tái lập trên laptop** [PREPROD-AC03-AC09-clean-checkout.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/repro-20261121-054558Z-87882212/PREPROD-AC03-AC09-clean-checkout.zip). Gồm Excel và JSON AC-03, JSON và TRX AC-09, thông tin checkout, mã đối chiếu và kết quả `comparison.json`.
+- **SHA-256 của ZIP** `69C7BC521504CEDB88E76BCE1179563B2DDB8335C8940CCCFD547451B9F92793`.
+- **Hồi quy .NET Release** 306/306 đạt, 0 lỗi và 0 bỏ qua trên cùng checkout. [TRX hồi quy](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/repro-20261121-054558Z-87882212/regression/FmcgDms.Api.Tests_net10.0_x64.trx).
+- **Mốc so sánh** [Bộ bằng chứng tổng hợp gốc](#preprod-ac03-ac09-ac21-bundle), SHA-256 `9944D6DDF421D79F99B560008A3CE2FA9D602C43B96BB3BEADB1B47B85934663`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="ac03-localdb-evidence"></a>
+## Bằng chứng đối soát AC-03 trên LocalDB
+
+Ghi nhận ngày 21/11/2026 cho phiên `AC03Complete`, RunId `0fb94c54cd0047698b7306697f8f63b4`, seed `AC03-v1`. Phiên chạy trên **Windows SQL Server LocalDB** trong môi trường `SYNTHETIC_NONPRODUCTION`. Source ghi trong workbook là `22e70256b99a759bd8c27d296206c0a41960da49+working-tree`.
+
+| Tenant | Mốc đã đối soát | Kết quả trên LocalDB |
+|---|---:|---|
+| `tenant-a` | 7/7 | **84/84 chỉ số khớp** |
+| `tenant-b` | 7/7 | **84/84 chỉ số khớp** |
+
+Ở cả bảy mốc từ `T0` đến `T6_RETURN`, số đọc từ SQL bằng số kỳ vọng AC-03 và bằng tổng các dòng cấu thành. Gói chứa hai workbook và bản tóm tắt bảy mốc, kèm SHA-256 của từng workbook.
+
+- **Gói ZIP trên laptop** [AC03-goi-bang-chung-LocalDB-20261121-050644Z.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/0fb94c54cd0047698b7306697f8f63b4/AC03-goi-bang-chung-LocalDB-20261121-050644Z.zip)
+- **SHA-256 của ZIP** `2A84DA8DD761AF7D04CD32F227227780631C616B4A69FADE33B67429635C99BC`
+- **PREPROD vật lý** `NOT_VERIFIED`. Phạm vi bằng chứng là đối soát nghiệp vụ AC-03 trên LocalDB. Nghiệm thu B.1/B.9 vẫn cần bằng chứng từ môi trường PREPROD vật lý.
+
+<a id="ac03-localdb-restore-evidence"></a>
+## Diễn tập sao lưu và khôi phục AC-03 trên LocalDB
+
+Ngày 21/11/2026, dựng phiên mới `AC03Complete` với RunId `204243739fa54a03bb1c50176de0fa3b`, seed `AC03-v1` và source `bed914860c1e023d21d582589665c9cc02b30ac2` từ checkout sạch. Môi trường `SYNTHETIC_NONPRODUCTION`, Windows SQL Server LocalDB 15.0.4382.1. Sao lưu database `tenant-a` của phiên bằng `FULL COPY_ONLY, CHECKSUM`, kiểm tra `RESTORE VERIFYONLY WITH CHECKSUM`, rồi khôi phục sang database riêng `Fmcg_Ac03Restore_204243739fa54a03bb1c50176de0fa3b` với tệp dữ liệu và nhật ký riêng.
+
+| Mốc đo | Thời gian thực đo |
+|---|---:|
+| Câu lệnh sao lưu FULL | 93,6 ms |
+| Câu lệnh `RESTORE DATABASE` | 172,5 ms |
+| Từ lúc bắt đầu restore đến khi mở được kết nối và xác minh quyền sở hữu | 181,1 ms |
+| Từ lúc bắt đầu restore đến khi hoàn tất đối soát và kiểm tra tenant đối chứng | 441,1 ms |
+
+- **`tenant-a`** khớp **84/84 chỉ số tại 7/7 mốc** giữa báo cáo trước sao lưu, snapshot khôi phục, số tính lại từ sổ theo từng mốc và oracle. Cuối chuyến, kho 55, xe 0, giá vốn 450, công nợ A/B 375/100 và quỹ 200. Toàn bộ 61 bảng người dùng với 124 dòng khớp dấu vân tay dữ liệu giữa nguồn và bản khôi phục.
+- **`tenant-b`** giữ nguyên dấu vân tay từ trước sao lưu đến sau đối soát, trên 61 bảng và 124 dòng. SHA-256 `ADD92B2359772A9BAF8272AE4913B15BEC6007F6F5B1571C770DC9D0C1584F3D`.
+- **Gói bằng chứng** [PREPROD-AC03-LocalDB-restore.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac03-restore-20261121-060703Z-7c2b4fc6/PREPROD-AC03-LocalDB-restore.zip). Gồm tệp `.bak`, báo cáo đối soát 84 ô, dấu vân tay chi tiết, báo cáo nguồn và kịch bản diễn tập. SHA-256 của ZIP `82FCDF8E89FD2366ED00171AF5E5F65A430646B124C266F91D7E6787EAF37D23`. SHA-256 của `.bak` `B97EC6231B3030EBF4D73FCF1DC3BB399D3EA7F4EA5E73C9F72D071CC83C0009`.
+- **Bàn giao** Bản khôi phục ở trạng thái `ONLINE`. Hai database nguồn thử nghiệm đã được dọn qua lệnh có kiểm tra quyền sở hữu và nonce sau khi lưu bằng chứng.
+- **PREPROD vật lý** `NOT_VERIFIED`. Các số đo thuộc lần khôi phục bản FULL trên cùng laptop. PITR, khôi phục ngoài máy và RPO/RTO PREPROD chưa được đo trong lượt này.
+
+<a id="ac09-localdb-evidence"></a>
+## Bằng chứng AC-09 trên LocalDB — hai lệnh tranh cùng hạn mức
+
+Ghi nhận ngày 21/11/2026 cho Run ID `ac09-20261121-051210Z-0d9ced4b`, source `22e70256b99a759bd8c27d296206c0a41960da49+working-tree`. Bài test Release chạy trên hai database Windows SQL Server LocalDB, môi trường `SYNTHETIC_NONPRODUCTION`. Ca này đối chiếu nhánh `concurrencyNegative` trong [oracle AC-09](../../../business/reference-data/expected-results/additional-oracles.json).
+
+| Tenant | Lệnh cùng chờ SQL | Ghi sổ / Từ chối | Chỉ số SQL khớp |
+|---|---:|---:|---:|
+| `tenant-a` | 2 | 1 / 1 | **18/18** |
+| `tenant-b` | 2 | 1 / 1 | **18/18** |
+
+Mỗi lệnh cần 80 từ cùng hạn mức 100. Trên mỗi tenant, lệnh được ghi dùng 80, còn 20, tăng công nợ B 80 và tăng tiền giữ hộ 20. Lệnh còn lại trả `B_CREDIT_INSUFFICIENT`, có 0 chứng từ, 0 dòng chứng từ và 0 bút toán. Gửi lại từng ID giữ nguyên dữ liệu SQL, kể cả database tenant đối chứng.
+
+- **Gói ZIP trên laptop** [AC09-goi-bang-chung-LocalDB-20261121-051210Z-0d9ced4b.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-20261121-051210Z-0d9ced4b/AC09-goi-bang-chung-LocalDB-20261121-051210Z-0d9ced4b.zip)
+- **SHA-256 của ZIP** `1939833BECE719DE6CF528B0C8BD7C8B043DF01FFB3C06738AACD0370F446B06`
+- **Nội dung** Hai workbook, bản tóm tắt, hai báo cáo JSON đọc từ SQL và TRX Release 2/2 ca đạt.
+- **PREPROD vật lý** `NOT_VERIFIED`. Gói ghi nhận ca tranh chấp và gửi lại lệnh của AC-09 trên LocalDB.
+
+<a id="ac09-cash-localdb-evidence"></a>
+## AC-09 bổ sung hai ca thu tiền mặt trên LocalDB
+
+Ngày 21/11/2026, lượt `ac09-cash-20261121-055136Z-871c98dc` chạy lệnh bán hàng B của APP-01 qua HTTP trên hai database Windows SQL Server LocalDB 15.0.4382.1, môi trường `SYNTHETIC_NONPRODUCTION`. Source `bed914860c1e023d21d582589665c9cc02b30ac2+working-tree`; ZIP lưu bản source bài test đã chạy. Mỗi ca bán 100, có hạn mức đầu kỳ 100 và chứng cứ tiền mặt đã xác minh. Đơn vị `SYNTHETIC_UNITLESS`. [Bộ số kỳ vọng AC-09](../../../business/reference-data/expected-results/additional-oracles.json).
+
+| Tenant | Ca | Công nợ B cuối | Hạn mức đã dùng | Hạn mức còn | Tăng tiền giữ hộ | Chỉ số SQL khớp |
+|---|---|---:|---:|---:|---:|---:|
+| `tenant-a` | `CASH_60` | 40 | 40 | 60 | 60 | 10/10 |
+| `tenant-a` | `CASH_100` | 0 | 0 | 100 | 100 | 10/10 |
+| `tenant-b` | `CASH_60` | 40 | 40 | 60 | 60 | 10/10 |
+| `tenant-b` | `CASH_100` | 0 | 0 | 100 | 100 | 10/10 |
+
+Cả bốn ca trả `B_SALE_DELIVERY_POSTED`, tiền vào quỹ tăng 0 và SQL ở tenant đối chứng giữ nguyên dấu vân tay. Bộ test Release đạt 6/6, gồm bốn ca thu tiền mặt và hai ca tranh cùng hạn mức chạy lại.
+
+| Nhánh ngoài phạm vi lượt chạy hai ca tiền mặt | Kỳ vọng nghiệp vụ | Khoảng trống tại thời điểm chạy |
+|---|---|---|
+| `CASH_60_CREDIT_20` | Công nợ 20, hạn mức còn 80, tiền giữ hộ tăng 60 | Lệnh bán B cần thêm khả năng áp dụng 20 tín dụng khách hàng đã giữ trước. |
+| `BANK_PENDING` | Công nợ 100, hạn mức còn 0, tiền giữ hộ tăng 0 | Lệnh bán B hiện yêu cầu chứng cứ `CASH` ở trạng thái `VERIFIED`. Cần đường xử lý khoản chuyển khoản đang chờ với giá trị áp dụng bằng 0. |
+| `CASH_OVERPAY_120` | Công nợ 0, hạn mức còn 100, tín dụng khách hàng mới 20, tiền giữ hộ tăng 120 | Lệnh bán B hiện chặn tiền nhận vượt giá trị bán. Cần ghi riêng số thực thu, số áp dụng và phần thu thừa. |
+
+- **Gói bằng chứng** [PREPROD-AC09-cash-LocalDB.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-cash-20261121-055136Z-871c98dc/PREPROD-AC09-cash-LocalDB.zip). Gồm 6 báo cáo SQL JSON, TRX, nhật ký và source bài test.
+- **SHA-256 của ZIP** `CD38922FAFD80F90B71774EEBFBC279D2367FCE3BDCC4B631DEF966EFE7297B0`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="ac09-full-localdb-evidence"></a>
+## AC-09 qua APP-01 trên LocalDB — tín dụng đã giữ, chuyển khoản chờ và thu thừa
+
+Lượt `ac09-expanded-20261121-062029Z-c750534a` chạy từ `bed914860c1e023d21d582589665c9cc02b30ac2+working-tree`. ZIP lưu source đã thay đổi trong lượt này. Lệnh bán B, ghi sổ và tra audit chạy qua API APP-01 synthetic. Tiền mặt có chứng cứ xác minh, còn chứng cứ chuyển khoản đang chờ và lệnh giữ tín dụng được dựng bằng fixture. Khoản tín dụng dùng ở nhánh hỗn hợp có nguồn từ một giao dịch thu thừa đã ghi trước đó qua APP-01.
+
+| Nhánh | Công nợ B cuối | Hạn mức còn | Tăng tiền giữ hộ | Tín dụng khách hàng | `tenant-a` | `tenant-b` |
+|---|---:|---:|---:|---|---:|---:|
+| `CASH_60_CREDIT_20` | 20 | 80 | 60 | Dùng 20 đã giữ | **15/15** | **15/15** |
+| `BANK_PENDING` | 100 | 0 | 0 | 0 | **15/15** | **15/15** |
+| `CASH_OVERPAY_120` | 0 | 100 | 120 | Sinh mới 20 | **15/15** | **15/15** |
+
+Các giá trị dùng đơn vị giả lập. Chuyển khoản chờ dùng 0 tiền thu, không tạo phiếu thu. Thu 120 áp dụng 100 vào công nợ và ghi riêng 20 tín dụng. Cả sáu lượt gửi lại cùng ID giữ nguyên SQL, tenant đối chứng giữ nguyên dấu vân tay trong từng ca. Gửi lệnh mới với chứng cứ đã dùng hoặc khoản giữ đã tiêu đều bị từ chối. Bộ test Release đạt **318/318**, 0 lỗi và 0 bỏ qua.
+
+- **Gói chi tiết** [PREPROD-AC09-full-local-payment.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac09-expanded-20261121-062029Z-c750534a/PREPROD-AC09-full-local-payment.zip). Gồm 12 báo cáo SQL cho hai tenant, đối chiếu với oracle, TRX và source.
+- **SHA-256 của ZIP** `70D7F017637E699F6B21EE54F354C59254AA2CA400E6DA839F898CEAAD5B5583`.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
+<a id="ac21-localdb-evidence"></a>
+## Bằng chứng AC-21 trên LocalDB — phân bổ tiền thu và bàn giao quỹ
+
+Ghi nhận ngày 21/11/2026 cho Run ID `ac21-20261121-052225Z`. Hai database riêng chạy [đặc tả SQL thực thi SQL-03B](https://github.com/chung6a8m/fmcg-distribution-sql/tree/7c61ac495aed6220b7d234efa910b377e92f70d4) trên **Windows SQL Server LocalDB 15.0.4382.1**, môi trường `SYNTHETIC_NONPRODUCTION`. Các checkpoint được so với [golden oracle AC-21](../../../business/reference-data/expected-results/golden-oracles.json).
+
+| Tenant | Mốc khớp | Chỉ số tiền khớp | Gửi lại cùng ID |
+|---|---:|---:|---:|
+| `tenant-a` | 5/5 | **25/25** | 4/4 giữ nguyên dữ liệu SQL |
+| `tenant-b` | 5/5 | **25/25** | 4/4 giữ nguyên dữ liệu SQL |
+
+Hai lần phân bổ 20.000 và 15.000 đưa công nợ từ 140.000 xuống 105.000 và phần tiền thu chưa phân bổ từ 60.000 xuống 25.000. Đề nghị bàn giao 50.000 có 0 bút toán tiền. Xác nhận chuyển 50.000 từ sổ tiền giữ hộ sang quỹ, để lại lần lượt 10.000 và 50.000. Các số là VND giả lập. Dấu vân tay SQL của tenant đối chứng giữ nguyên trong từng lượt chạy.
+
+- **Gói ZIP trên laptop** [AC21-goi-bang-chung-LocalDB-20261121-052225Z.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac21-20261121-052225Z/AC21-goi-bang-chung-LocalDB-20261121-052225Z.zip)
+- **SHA-256 của ZIP** `8228EA83BB610CE65A31BF871471427738E6EB7F7CFAA5C25833E68AB6DA81C3`
+- **Nội dung** Hai workbook, bản tóm tắt năm mốc, hai báo cáo SQL JSON và bản SQL của từng ca đã chạy.
+- **Phạm vi gói gốc** Hai lượt chạy thực thi thủ tục của SQL-03B trên scratch LocalDB. Phạm vi ứng dụng được ghi ở lượt bổ sung dưới đây. PREPROD vật lý `NOT_VERIFIED`.
+
+<a id="ac21-app-localdb-evidence"></a>
+## AC-21 E2E qua APP-01 trên LocalDB
+
+Ngày 21/11/2026, lượt `ac21-app-20261121-060323Z-b778ac93` chạy trên hai database scratch riêng của Windows SQL Server LocalDB 15.0.4382.1 (`SYNTHETIC_NONPRODUCTION`). Source `bed914860c1e023d21d582589665c9cc02b30ac2+working-tree`; ZIP lưu các tệp source thay đổi đã dùng. Lệnh mới `POST /api/synthetic/app01d/commands/allocate-cash-receipt` dùng danh tính sales thuộc tenant do máy chủ xác thực. Mỗi lần phân bổ ghi chứng từ và một bút toán giảm công nợ, đồng thời cập nhật số áp dụng của khoản thu và khoản phải thu trong cùng giao dịch.
+
+Mốc `CONFIRMED` lấy khoản thu đã xác minh và công nợ mở từ fixture SQL. Hai lệnh phân bổ, đề nghị bàn giao và xác nhận của thủ quỹ đều đi qua HTTP của ứng dụng. Số dưới đây đọc từ SQL và khớp cả [oracle AC-21](../../../business/reference-data/expected-results/golden-oracles.json) lẫn gói SQL-03B gốc. Đơn vị VND giả lập.
+
+| Mốc | Công nợ | Tiền thu chưa phân bổ | Tiền giữ hộ | Quỹ | Đã phân bổ |
+|---|---:|---:|---:|---:|---:|
+| `CONFIRMED` | 140.000 | 60.000 | 60.000 | 0 | 0 |
+| `ALLOC_20K` | 120.000 | 40.000 | 60.000 | 0 | 20.000 |
+| `ALLOC_15K` | 105.000 | 25.000 | 60.000 | 0 | 35.000 |
+| `OFFER_50K` | 105.000 | 25.000 | 60.000 | 0 | 35.000 |
+| `ACCEPT_50K` | 105.000 | 25.000 | 10.000 | 50.000 | 35.000 |
+
+| Tenant | Mốc khớp | Chỉ số tiền khớp | Gửi lại cùng ID |
+|---|---:|---:|---:|
+| `tenant-a` | 5/5 | 25/25 | 4/4 trả kết quả gốc, SQL giữ nguyên |
+| `tenant-b` | 5/5 | 25/25 | 4/4 trả kết quả gốc, SQL giữ nguyên |
+
+Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề nghị và 2 bút toán khi xác nhận. Kiểm tra thêm cùng ID khác số tiền trả HTTP 409, sai vai trò trả 403, phân bổ vượt số dư và tham chiếu sang tenant khác đều bị từ chối. Lượt nghiệp vụ hợp lệ giữ nguyên dấu vân tay SQL ở tenant đối chứng.
+
+- **Gói bằng chứng** [PREPROD-AC21-app-LocalDB.zip](C:/Users/pdchung/AppData/Local/FmcgDms/outputs/ac21-app-20261121-060323Z-b778ac93/PREPROD-AC21-app-LocalDB.zip). Gồm hai báo cáo SQL JSON, đối chiếu gói gốc, TRX, nhật ký và source đã chạy.
+- **SHA-256 của ZIP** `869915FAC008417A045379FF77E34E4A22323E01A9891A4A0EAB472D99501F6D`.
+- **Hồi quy .NET Release** 312/312 đạt, 0 lỗi và 0 bỏ qua.
+- **PREPROD vật lý** `NOT_VERIFIED`.
+
 <a id="lab-e01"></a>
 ## LAB-E01 — Đồng bộ #73/#59 và phạm vi lab
 

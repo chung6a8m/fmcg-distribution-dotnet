@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <ProjectReference Include="../../src/FmcgDms.Api/FmcgDms.Api.csproj" />
     <None Include="../../business/reference-data/expected-results/golden-oracles.json" Link="golden-oracles.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../business/reference-data/expected-results/additional-oracles.json" Link="additional-oracles.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures/app02a4-expected.json" Link="app02a4-expected.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

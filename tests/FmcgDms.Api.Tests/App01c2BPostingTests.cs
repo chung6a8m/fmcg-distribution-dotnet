@@ -258,7 +258,9 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
                  WHERE e.TenantId=@Tenant AND src.TripId=@Trip AND src.SourceKind=N'B_SALE_DELIVERY'
                      AND e.LedgerKind=N'CUSTODY') Custody,
                 (SELECT COALESCE(SUM(e.AmountDelta),0) FROM dbo.LedgerEffect e
-                 WHERE e.TenantId=@Tenant AND e.LedgerKind=N'FUND') Fund,
+                 JOIN dbo.BusinessSourceLine l ON l.Id=e.BusinessSourceLineId AND l.TenantId=e.TenantId
+                 JOIN dbo.BusinessSource src ON src.Id=l.BusinessSourceId AND src.TenantId=l.TenantId
+                 WHERE e.TenantId=@Tenant AND src.TripId=@Trip AND e.LedgerKind=N'FUND') Fund,
                 (SELECT COUNT(*) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND TripId=@Trip) Deliveries,
                 (SELECT COUNT(*) FROM dbo.DeliveryStockIssue i
                  JOIN dbo.SaleDelivery d ON d.Id=i.SaleDeliveryId AND d.TenantId=i.TenantId

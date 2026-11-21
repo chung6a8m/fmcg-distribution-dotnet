@@ -289,7 +289,7 @@ public sealed partial class App01e2CrossCommandRaceTests(SqlScratchFixture fixtu
                 new LoadManifestCommand(Producer, Id(), Id(), s.Manifest), "MANIFEST_LOADED");
     }
 
-    private string CashWitness(string tenant, Scene s)
+    private string CashWitness(string tenant, Scene s, decimal amount = 200)
     {
         string reference = Id();
         using var db = Open(tenant);
@@ -297,9 +297,9 @@ public sealed partial class App01e2CrossCommandRaceTests(SqlScratchFixture fixtu
             INSERT dbo.VerifiedCashEvidence(TenantId,EvidenceRef,TripId,CustomerId,
                 ShipToSnapshotId,PaymentMethod,VerificationStatus,VerifiedAmount,
                 VerifiedBy,VerifiedAtUtc)
-            VALUES(@Tenant,@Ref,@Trip,@Customer,@ShipTo,N'CASH',N'VERIFIED',200,
+            VALUES(@Tenant,@Ref,@Trip,@Customer,@ShipTo,N'CASH',N'VERIFIED',@amount,
                 N'e2-cash-checker',SYSUTCDATETIME())
-            """, new { Tenant = tenant, Ref = reference, s.Trip, s.Customer, s.ShipTo });
+            """, new { Tenant = tenant, Ref = reference, s.Trip, s.Customer, s.ShipTo, amount });
         return reference;
     }
 

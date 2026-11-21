@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="src/FmcgDms.Api/FmcgDms.Api.csproj" />
+  <Project Path="src/FmcgDms.Demo/FmcgDms.Demo.csproj" />
   <Project Path="src/FmcgDms.Preprod.Runtime/FmcgDms.Preprod.Runtime.csproj" />
   <Project Path="src/FmcgDms.Preprod.Identity/FmcgDms.Preprod.Identity.csproj" />
   <Project Path="src/FmcgDms.Preprod.Api/FmcgDms.Preprod.Api.csproj" />
