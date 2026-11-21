@@ -47,6 +47,8 @@ It binds source, local daemon, config, D01 inputs, image content IDs, nonce,
 names, subnets and reservations. It records the exact Compose model and the
 scoped inventory without reporting native secrets or foreign inventory.
 
+For a partial stage with only the APP bridge, use the [D01 resume plan](README.md#resume-a-partially-staged-d02-app-bridge) and the same D02 nonce. D02 rechecks the exact pinned bridge in both live inventories before Plan and keeps the ID pinned through staging. A missing or replaced bridge blocks the operation.
+
 ## Separate operator authorization
 
 After reviewing the plan and target, the operator or custodian supplies a

@@ -53,7 +53,7 @@ CONTAINER_FORMAT = projection(
     ("Name", ".Name"), ("Project", '(index .Config.Labels "com.docker.compose.project")'),
     ("Bindings", ".HostConfig.PortBindings"), ("LivePorts", ".NetworkSettings.Ports"), ("Mounts", ".Mounts"),
 )
-NETWORK_FORMAT = projection(("Name", ".Name"), ("Subnets", ".IPAM.Config"))
+NETWORK_FORMAT = projection(("Id", ".Id"), ("Name", ".Name"), ("Subnets", ".IPAM.Config"))
 IMAGE_FORMAT = projection(("Os", ".Os"), ("Architecture", ".Architecture"), ("RepoDigests", ".RepoDigests"))
 
 
@@ -66,6 +66,10 @@ def validate_plan(plan):
     names = [network["name"] for network in plan["networks"]]
     require(len(set(names)) == len(names) and all(name.startswith(prefix) for name in names + plan["volumes"]),
             "INVALID_PROJECT_NAMESPACE")
+    resume = plan.get("resumeD02")
+    if resume is not None:
+        require(prefix + "app" in names and nonzero_digest(resume["appNetworkId"])
+                and resume["nonce"] != "0" * 32, "INVALID_D02_RESUME_SCOPE")
     networks = [network(entry["subnet"], "INVALID_SUBNET") for entry in plan["networks"]]
     for index, subnet in enumerate(networks):
         require(16 <= subnet.prefixlen <= 29 and any(subnet.subnet_of(block) for block in PRIVATE_NETWORKS)
@@ -385,6 +389,11 @@ def docker_inventory(executable, host, plan=None):
     if not linux_desktop(host["engine"]) or not wsl_backend(host):
         return None
     collect_objects(docker, host)
+    if "resumeD02" in plan:
+        resume_id = plan["resumeD02"]["appNetworkId"]
+        if any(row["id"] == resume_id for row in host["networks"]):
+            row, = inspect_list(docker, "network", [resume_id], "{{json .}}")
+            host["resumeAppNetwork"] = row
     host["images"] = {}
     for image in plan["images"]:
         raw = docker("image", "inspect", "--format", IMAGE_FORMAT, image["reference"], missing="image")
@@ -425,7 +434,7 @@ def collect_objects(docker, host):
         })
     host["networks"] = []
     for row in inspect_list(docker, "network", lines("network", "ls", "--quiet", "--no-trunc"), NETWORK_FORMAT):
-        host["networks"].append({"name": row["Name"],
+        host["networks"].append({"id": row.get("Id"), "name": row["Name"],
                                  "subnets": [item["Subnet"] for item in objects(row["Subnets"] or [])
                                              if item.get("Subnet") and ":" not in item["Subnet"]]})
 
@@ -505,6 +514,28 @@ def image_check(image, observed):
             and bool(aliases.intersection(observed["RepoDigests"] or [])))
 
 
+def resumable_app_network(plan, host, listed):
+    # Reuse the D02 ownership and topology checks for the empty, stopped-stage APP bridge.
+    from tools.app02b_lab.docker_d02_topology import _validate_network, labels, owned_objects
+
+    resume = plan["resumeD02"]
+    name = plan["project"] + "_app"
+    subnet = next((entry["subnet"] for entry in plan["networks"] if entry["name"] == name), None)
+    if (subnet is None or listed["name"] != name or listed.get("id") != resume["appNetworkId"]
+            or listed["subnets"] != [subnet]):
+        return False
+    row = host.get("resumeAppNetwork")
+    if (not isinstance(row, dict) or row.get("Id") != resume["appNetworkId"]
+            or "Containers" not in row or row["Containers"] not in (None, {})):
+        return False
+    try:
+        owned_objects([row], {name}, labels({"project": plan["project"], "nonce": resume["nonce"]}))
+        _validate_network(row, subnet, {})
+    except LabError:
+        return False
+    return True
+
+
 def conflicts(plan, host):
     checks = dict.fromkeys(("PROJECT", "NETWORKS", "PORTS", "VOLUMES"))
     containers = host.get("containers")
@@ -521,11 +552,19 @@ def conflicts(plan, host):
             item.get("project") == project or item.get("name", "").startswith((project + "-", project + "_"))
             for item in containers)
     if networks is not None and routes is not None:
+        if "resumeD02" in plan:
+            matches = [row for row in networks if row["name"].casefold() == (prefix + "app").casefold()
+                       or row.get("id") == plan["resumeD02"]["appNetworkId"]]
+            if len(matches) == 1 and resumable_app_network(plan, host, matches[0]):
+                networks = [row for row in networks if row is not matches[0]]
+            else:
+                checks["NETWORKS"] = False
         occupied = [network(value, "COLLECTION_ERROR") for value in routes]
         occupied.extend(network(value, "COLLECTION_ERROR") for item in networks for value in item["subnets"])
         names = {item["name"] for item in networks}
         planned = [network(item["subnet"], "INVALID_SUBNET") for item in plan["networks"]]
-        checks["NETWORKS"] = (not any(name.startswith(prefix) for name in names)
+        checks["NETWORKS"] = (checks["NETWORKS"] is not False
+                              and not any(name.casefold().startswith(prefix) for name in names)
                               and not any(subnet.overlaps(existing) for subnet in planned for existing in occupied))
     if containers is not None and ports is not None and excluded is not None:
         occupied_ranges = [*excluded, *(span for item in containers for span in item["ports"])]

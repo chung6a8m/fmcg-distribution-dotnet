@@ -91,6 +91,8 @@ def read_config(filename, pwsh):
     baseline_raw = d01.bounded_input(baseline_path)
     baseline = strict_json(baseline_raw)
     d01.validate_plan(baseline)
+    if "resumeD02" in baseline:
+        require(config["nonce"] == baseline["resumeD02"]["nonce"], "D02_RESUME_NONCE_MISMATCH")
     evidence = existing_local_input(baseline["evidenceRoot"], directory=True)
     assert_private(pwsh, [evidence])
     require(report_path.name == "docker-preflight.json" and beneath(report_path.parent, evidence)
@@ -120,6 +122,12 @@ def scoped_inventory(state):
     }
 
 
+def require_pinned_app(networks, project, network_id):
+    if network_id is not None:
+        matches = [row for row in networks if row["Name"] == f"{project}_app"]
+        require(len(matches) == 1 and matches[0].get("Id") == network_id, "D02_RESUME_NETWORK_CHANGED")
+
+
 def require_fresh_host(baseline, hashes, host, state, *, observe_ports=False):
     require(d01.identity_refs(host) == (baseline["hostRef"], baseline["engineRef"]), "D02_TARGET_CHANGED")
     owned = scoped_inventory(state)
@@ -129,7 +137,19 @@ def require_fresh_host(baseline, hashes, host, state, *, observe_ports=False):
                 "networks": [row for row in host["networks"] if row["name"] not in owned["networks"]],
                 "volumes": [name for name in host["volumes"] if name not in owned["volumes"]],
                 "containers": [row for row in host["containers"] if row["name"] not in owned["containers"]]}
-    fresh = d01.evaluate(baseline, scrubbed, source_info(), hashes["d01PlanSha256"])
+    fresh_plan = baseline
+    if "resumeD02" in baseline:
+        pinned = baseline["resumeD02"]["appNetworkId"]
+        name = baseline["project"] + "_app"
+        subnet = next(entry["subnet"] for entry in baseline["networks"] if entry["name"] == name)
+        require_pinned_app(state["networks"], baseline["project"], pinned)
+        matches = [row for row in host["networks"] if row["name"].casefold() == name.casefold()
+                   or row.get("id") == pinned]
+        require(matches == [{"id": pinned, "name": name, "subnets": [subnet]}], "D02_RESUME_NETWORK_CHANGED")
+        # The D02 readback already validated the pinned bridge. Evaluate conflicts
+        # against the remaining resources after removing the owned inventory.
+        fresh_plan = {key: value for key, value in baseline.items() if key != "resumeD02"}
+    fresh = d01.evaluate(fresh_plan, scrubbed, source_info(), hashes["d01PlanSha256"])
     failures = [name for name, result in fresh["checks"].items()
                 if result != "PASS" and not (observe_ports and name == "PORTS")]
     require(not failures and not fresh["issueCodes"], "D02_FRESH_D01_BLOCKED", ",".join(failures))
@@ -152,7 +172,8 @@ def require_plan(plan, expected):
                 for names in observed.values()), "INVALID_D02_PLAN")
 
 
-def apply_change(docker, spec, model, image_ids, *, ensure_current, reviewed_volumes=frozenset()):
+def apply_change(docker, spec, model, image_ids, *, ensure_current, reviewed_volumes=frozenset(),
+                 resume_app_network_id=None):
     """Converge towards the enrolled stopped foundation. Every mutation has a guarded readback."""
     from tools.app02b_lab.docker_d02_topology import labels, validate_state
 
@@ -165,6 +186,7 @@ def apply_change(docker, spec, model, image_ids, *, ensure_current, reviewed_vol
             ensure_current()
         docker.verify()
         state = docker.state(project)
+        require_pinned_app(state["networks"], project, resume_app_network_id)
         volume_names = {row["Name"] for row in state["volumes"]}
         require(seen_volumes <= volume_names, "D02_OWNED_VOLUME_DISAPPEARED")
         validate_state(spec, model, state, image_ids, complete=complete)
@@ -331,7 +353,8 @@ def run(args):
                   "collectedUtc": timestamp(utc_now()), "D03": "BLOCKED", "D04": "BLOCKED"}
         try:
             state = apply_change(docker, spec, model, image_ids, ensure_current=check_current_conditions,
-                                 reviewed_volumes=set(plan["observed"]["volumes"]))
+                                 reviewed_volumes=set(plan["observed"]["volumes"]),
+                                 resume_app_network_id=baseline.get("resumeD02", {}).get("appNetworkId"))
             result.update(status="STAGED", observed=scoped_inventory(state))
         except LabError as error:
             result.update(status="BLOCKED", issue=error.code)

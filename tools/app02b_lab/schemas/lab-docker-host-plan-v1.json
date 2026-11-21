@@ -10,6 +10,15 @@
     "hostRef": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "engineRef": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "project": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,62}$"},
+    "resumeD02": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appNetworkId", "nonce"],
+      "properties": {
+        "appNetworkId": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "nonce": {"type": "string", "pattern": "^[a-f0-9]{32}$"}
+      }
+    },
     "volumes": {
       "type": "array",
       "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{2,62}$"},
