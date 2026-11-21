@@ -1,0 +1,59 @@
+# APP-02B.9 — source-only merge closeout (2026-11-18)
+
+**Disposition** `MERGED / B9_SOURCE_ONLY_CI_TESTED / PHYSICAL_PREPROD_NOT_VERIFIED / G-B01..G-B05 NOT_RUN / NO_GO`. The [B.9 Owner decision](../decisions/owner-app02b9-bounded-source-only-merge-2026-11-18.md) authorized bounded source integration for PR #72 under its visible audit failure. The [original B.1 contract](../security/app-02b1-acceptance-evidence.md) remains the authority for physical acceptance.
+
+## Source lineage
+
+| Increment | Reviewed PR source | Squash merge on main | Dedicated CI |
+|---|---|---|---|
+| B.7 [PR #70](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/70) | [aae771855df0e40b0c7fb0ba391a0bc838cc3c81](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/aae771855df0e40b0c7fb0ba391a0bc838cc3c81) | [1775fa18da20b98bde6af15800012ce5155deb90](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/1775fa18da20b98bde6af15800012ce5155deb90) | [#44291803482 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44291803482/attempts/1) SUCCESS, disposable LocalDB backup/restore |
+| B.8 [PR #71](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/71) | [8e082a9e7e6cbd80ee659a1b3d4f279bd98c4e](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/8e082a9e7e6cbd80ee659a1b3d4f279bd98c4e) | [de5aba4e3ee7a756d017240723df0b9dc936eaa1](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/de5aba4e3ee7a756d017240723df0b9dc936eaa1) | [#44310434361 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44310434361/attempts/1) SUCCESS, source/LocalDB audit checks |
+| B.9 [PR #72](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/72) | [`c73764997f2b6d2d2e248b8d25be3c7d7ac91994`](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/72#pullrequestreview-5958465486) | [216ce71995e036b453775ccaa0097aaad98ea2c9](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/216ce71995e036b453775ccaa0097aaad98ea2c9) | [#44321511677 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511677/attempts/1) SUCCESS, 12/12 validator tests and 11/11 rejected mutations |
+
+The B.9 review is a GitHub `COMMENTED` technical review on the exact PR source. The [synthetic validator artifact](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511677/artifacts/14433634833) `app02b9-synthetic-validator-no-go` has digest `sha256:e630acef45a80dfce6ded1180252ac2461eef6db14db90a2334e3a499918f098`. The missing-bundle result is 30 cases `NOT_RUN`, five gates `NOT_VERIFIED`, and `NO_GO`.
+
+## CI history by run and attempt
+
+| Source context | Workflow run | Retained outcomes |
+|---|---|---|
+| B.4 PR #58 incident, `479c0afe3009c29c706a4792ec41db23033f5ab3` | APP-00A [#44138265648 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44138265648/attempts/1) | FAIL at full npm audit, 11 HIGH findings. |
+| B.6 PR #66 earlier HEAD, `0649b3da16f77762f91a1c21fd851f639e591c05` | APP-00A #44263198813 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44263198813/attempts/1) FAIL at LocalDB startup. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44263198813/attempts/2) FAIL, 295/296 tests, A11-09 tenant-b restart intake HTTP 500. Both attempts skipped downstream audit/browser stages. [#68](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/68) remains open. |
+| B.6 PR #66 reviewed HEAD, `93f1f1610ac89bb5f5ddfbfe828ea2d06f51e07d` | APP-00A [#44278544425 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44278544425/attempts/1) | FAIL at full npm audit (11 HIGH). Downstream browser/PWA steps skipped. |
+| B.7 PR #70 reviewed HEAD | APP-00A [#44291803300 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44291803300/attempts/1) | FAIL. Full npm audit failed. Downstream APP-00A browser/PWA steps were skipped. Seven other workflows succeeded. |
+| B.8 PR #71 reviewed HEAD | APP-00A [#44310434370 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44310434370/attempts/1) | FAIL. Full npm audit failed. Downstream APP-00A browser/PWA steps were skipped. Eight other workflows succeeded. |
+| B.9 PR #72 reviewed HEAD | APP-02B.8 #44321511520 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511520/attempts/1) FAIL in Windows LocalDB bootstrap. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511520/attempts/2) SUCCESS on the same source. |
+| B.9 PR #72 reviewed HEAD | APP-00A #44321511710 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511710/attempts/1) FAIL at LocalDB startup. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44321511710/attempts/2) FAIL at full npm audit (11 HIGH) after 296/296 SQL/.NET tests and zero production-audit findings. Downstream browser/PWA steps skipped. Final PR-source rollup is **9/10 workflows SUCCESS, 1/10 FAIL**. |
+| B.9 squash merge on main | APP-00A #44323688504 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44323688504/attempts/1) FAIL at full npm audit (11 HIGH), downstream browser/PWA steps skipped. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44323688504/attempts/2) SUCCESS on the same commit after advisory withdrawal, including both audits and browser/PWA. Eight other push workflows succeeded. The B.9 dedicated workflow has no push trigger. |
+| Docs PR #73, `d8564ab5274c84ad347ab26f227b3d01dd1562b6` | APP-00A [#44340211064 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44340211064/attempts/1) | FAIL. Full npm audit failed. Downstream APP-00A browser/PWA steps were skipped. Nine other workflows succeeded, including its own B.9 [#44340211200 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44340211200/attempts/1). |
+| Draft #53 PR #74, `aaa32dbaff987494190e628592588317a46e3ce0` | APP-00A [#44341349141 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44341349141/attempts/1) | FAIL. Full npm audit failed. Downstream APP-00A browser/PWA steps were skipped. Its separate source-only B53 [#44341350329 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44341350329/attempts/1) succeeded. |
+| Security PR #61 earlier HEAD, `714848f030b6ac3cd76f190668bd31515f8de62c` | APP-00A #44444818860 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44444818860/attempts/1) FAIL at LocalDB startup. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44444818860/attempts/2) SUCCESS on the same source. |
+| Security PR #61 final HEAD, `a5278409d58fefa62dba730d3bfdd65240f917c7` | APP-00A #44454615684 | [1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44454615684/attempts/1) FAIL, A11-09 tenant-b restart intake HTTP 500. [2](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44454615684/attempts/2) and [3](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44454615684/attempts/3) FAIL at LocalDB startup. [4](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44454615684/attempts/4) SUCCESS on unchanged source, 296/296 tests and 51/51 mandatory steps. [#75](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75) tracks both unresolved failure modes. |
+
+PR #61 recorded 10/10 final-source workflows successful after retries, including [its Security workflow](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44454615725/attempts/1). Its squash merge is [16d96c71a7967c216ebfa599693807a2b54e7435](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/16d96c71a7967c216ebfa599693807a2b54e7435). Each PR retains its own source SHA and check history.
+
+## Live GitHub snapshot (2026-11-21)
+
+| Record | State | GitHub updated at (UTC) | Disposition |
+|---|---|---|---|
+| [#53](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/53) | OPEN | 2026-11-18T16:03:34Z | Current rollback-resistant authority, Worker/CASE enforcement and physical PITR evidence outstanding. |
+| [#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/56) | CLOSED (completed) | 2026-11-19T08:18:41Z | GitHub closure differs from the original LAB-E01 OPEN expectation. The timeline has a closure event without a linked commit or acceptance evidence. Physical acceptance remains open as an obligation. |
+| [#59](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/59) | CLOSED | 2026-11-19T04:13:17Z | `WITHDRAWN_ADVISORY_SCOPED_RISK_ACCEPTED / NOT_PATCHED`. See scope below. |
+| [#60](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/60) | OPEN | 2026-11-18T04:11:21Z | Real SQL/Vault finalizer privilege evidence outstanding. |
+| [#64](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/64) | OPEN | 2026-11-18T07:29:48Z | Actual authorized SQL tenant boundary evidence outstanding. |
+| [#65](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/65) | OPEN | 2026-11-18T07:29:50Z | Actual immutable Maker/Checker provenance outstanding. |
+| [#67](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/67) | OPEN | 2026-11-18T08:03:23Z | Live policy/CASE authority and immutable upstream evidence outstanding. |
+| [#68](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/68) | OPEN | 2026-11-18T08:09:44Z | Earlier A11-09 HTTP 500. Root cause remains undetermined. |
+| [#75](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75) | OPEN | 2026-11-19T04:10:56Z | LocalDB bootstrap and A11-09 restart HTTP 500. Root cause for each remains unverified. |
+| [PR #73](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/73) | OPEN, unmerged, conflicting | 2026-11-18T15:57:05Z | Predecessor of this reconciliation at the same closeout path. Its source and CI are recorded above. |
+| [PR #74](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/74) | OPEN, DRAFT, unmerged | 2026-11-18T16:03:32Z | Source-only #53 candidate. Operational admission and physical acceptance remain blocked. |
+
+### Current #59 scope
+
+The [Owner disposition](../decisions/owner-issue59-conditional-risk-reclassification-2026-11-19.md) applies to the reviewed exact dev-only dependency graph and trusted static glob inputs in `APP00A_SYNTHETIC_CI_BUILD_TOOLS_ONLY`. It expires fail-closed at **`2026-12-19T00:00:00Z`**. Official `picomatch@4.0.7` remains unpatched. Both npm audits remain mandatory. Frontend publication, physical PREPROD, production/Pilot and business posting are outside that scope. The [solo-Owner decision](../decisions/owner-issue59-solo-owner-security-acceptance-2026-11-19.md) applies to C59-B06 for PR #61 and issue #59 only.
+
+## Remaining physical evidence
+
+- All 30 original B.1 cases remain `NOT_RUN / NOT_VERIFIED`. All five gates and RUNTIME-01/02 remain `NOT_VERIFIED`. The program remains `NO_GO` for physical PREPROD acceptance.
+- Required evidence includes two independently identified operator-owned tenant databases, live Control Plane/SQL/Vault authority, actual TLS/network and tenant isolation, restore-safe #53 enforcement through API and Worker/CASE, and real encrypted off-host PITR measuring RPO ≤ 900s and RTO ≤ 14400s through safe service return.
+- Audit/WORM custody, approved retention and key history, alert delivery/ACK and incident evidence, external outcome witness, independent observer/Security/DBA signatures and qualifying exact-source CI remain required.
+- Real AC-11/EV-08 and production P0 remain `NOT_VERIFIED`. APP-02C/D/E runtime, production, Pilot and Go-Live remain `NOT_AUTHORIZED`. The [local lab scope](../decisions/proposed-app02b-local-lab-scope.md) is a proposal under the existing physical contract.
