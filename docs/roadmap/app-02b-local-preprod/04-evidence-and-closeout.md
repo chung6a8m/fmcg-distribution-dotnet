@@ -1,6 +1,6 @@
 # APP-02B LAB — Evidence, CI, Drivers and Closeout
 
-**State:** LAB-E01 `SOURCE_REVIEW` (docs-only); LAB-E02..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
+**State:** LAB-E01 `SOURCE_REVIEW` (docs-only); LAB-E02 `SOURCE_REVIEW`; LAB-E03..E13 `PLANNED`. Baseline `16d96c71a7967c216ebfa599693807a2b54e7435`, 2026-11-19.
 
 **Goal:** chạy các scenario thật, giữ raw evidence và đối chiếu đủ 30 case + 2 runtime probes, với trạng thái closeout đúng phạm vi.
 **Architecture/stack:** [design](design.md); Python collectors/runner, PowerShell entrypoints, GitHub Actions và original B9 validator.
@@ -38,7 +38,7 @@
 <a id="lab-e02"></a>
 ## LAB-E02 — Diagnostics cho LocalDB và A11-09
 
-**Status:** PLANNED. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** SOURCE_REVIEW trong [PR #88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88). PR ghi final HEAD, CI và giới hạn evidence. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** Không có dependency source mới. Setup, approval và live evidence là điều kiện bổ sung.
 
 **Modify (existing):** `tests/FmcgDms.Api.Tests/App01e4TcpRestartHarness.cs`, `App02a3WorkerTests.cs`, `App02a4OracleCases.cs`, `App02a4IndependentSqlOracle.cs`, `.github/workflows/app00a.yml`. **Create:** `tests/FmcgDms.Api.Tests/FailureDiagnosticsTests.cs`, `scripts/Collect-LocalDbDiagnostics.ps1`.
 
