@@ -1,6 +1,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(Mandatory)][string]$PlanFile,
+    [Parameter(Mandatory)][string]$SqlStageReceipt,
     [Parameter(Mandatory)][string]$VaultStageReceipt,
     [Parameter(Mandatory)][string]$VaultTrustReceipt,
     [Parameter(Mandatory)][string]$VaultScope,
@@ -17,5 +18,5 @@ if (-not $IsLinux -or $PSVersionTable.PSVersion.Major -ne 7) {
     exit 1
 }
 $python = Get-Command python3 -CommandType Application
-& $python.Source -I -S -B (Join-Path $PSScriptRoot '../../tools/app02b_lab/docker_d04_peer.py') --plan $PlanFile --stage $VaultStageReceipt --trust $VaultTrustReceipt --vault-scope $VaultScope --vault-ca $VaultCa --sql-ca $SqlCa --enrollment $EnrollmentFile --enrollment-sha256 $EnrollmentSha256 --output $OutputFile
+& $python.Source -I -S -B (Join-Path $PSScriptRoot '../../tools/app02b_lab/docker_d04_peer.py') --plan $PlanFile --sql-stage $SqlStageReceipt --stage $VaultStageReceipt --trust $VaultTrustReceipt --vault-scope $VaultScope --vault-ca $VaultCa --sql-ca $SqlCa --enrollment $EnrollmentFile --enrollment-sha256 $EnrollmentSha256 --output $OutputFile
 exit $LASTEXITCODE

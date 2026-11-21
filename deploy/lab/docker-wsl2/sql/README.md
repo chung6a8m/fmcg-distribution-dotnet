@@ -57,10 +57,20 @@ eventual separately authorized target and keep the CA signing key off the host.
 ~~~
 
 The planner emits a redacted plan and checksum with the exact source,
-manifest, scope and resource fingerprints. `-Apply` returns
-`D04_LIVE_INSTALL_NOT_ENROLLED`. No automated live SQL bootstrap or DDL is
-exposed by the Windows entry point. Before a live setup, an operator must
-approve the exact deployment and vault-to-SQL workload paths, and the DBA
+manifest, scope and resource fingerprints. A separately authorized
+`-Apply` may only stage a stopped service. It requires `-PlanFile`,
+`-EnrollmentFile` and `-EnrollmentSha256` from the operator approval
+channel. The enrollment schema is
+`APP02B-LAB-DOCKER-SQL-STAGE-ENROLLMENT-V1`, operation
+`CREATE_STOPPED_SQL`, matching `nonce`, exact reviewed `planSha256` and
+UTC `expiresUtc`. The command does not pull, start, replace or clean up;
+it checks the current plan and D03 trust again under the shared project
+lock and emits a protected stopped-stage receipt. Reconcile a partial
+stage under operator custody before retrying.
+
+No automated live SQL bootstrap or DDL is exposed by the Windows entry
+point. Before a live setup, an operator must approve the exact deployment
+and vault-to-SQL workload paths, and the DBA
 must separately enroll the instance and the reviewed B.3/B.4/B.5 operating
 contracts. Use the existing B.4 Tenant Tool for any eventual full registry,
 provisioning and finalization workflow. Do not use the disposable CI fixture
@@ -77,7 +87,7 @@ checks the enrolled cluster. Each distinct Vault token may read only
 The KV field set is `login` and `password`. The expected SQL login, SQL
 instance name, derived B.4 tenant names and binding IDs come from the scope.
 Tokens are read without echo and passwords travel to SqlClient in process
-memory via standard input. Keep the plan, D03 stage and peer evidence, D03
+memory via standard input. Keep the D04 plan and stage receipt, D03 stage and peer evidence, D03
 scope and Vault CA as 0600 files under owner-only 0700 directories. The
 redacted result is written once to a new path. The independently supplied
 enrollment uses schema `APP02B-LAB-DOCKER-SQL-PROBE-ENROLLMENT-V1`,
@@ -87,7 +97,7 @@ operator approval channel.
 
 ~~~powershell
 dotnet build tools/lab-d04-sql/FmcgDms.Lab.D04.Sql.csproj -c Release
-./scripts/lab/Test-DockerLabSql.ps1 -PlanFile /private/docker-sql-plan.json -VaultStageReceipt /private/docker-vault-stage.json -VaultTrustReceipt /private/peer-result.json -VaultScope /private/vault-scope.json -VaultCa /private/vault-ca.pem -SqlCa /private/sql-ca.pem -EnrollmentFile /private/sql-probe-approval.json -EnrollmentSha256 $ApprovedEnrollmentSha256 -OutputFile /private/d04-roles-01.json
+./scripts/lab/Test-DockerLabSql.ps1 -PlanFile /private/docker-sql-plan.json -SqlStageReceipt /private/docker-sql-stage.json -VaultStageReceipt /private/docker-vault-stage.json -VaultTrustReceipt /private/peer-result.json -VaultScope /private/vault-scope.json -VaultCa /private/vault-ca.pem -SqlCa /private/sql-ca.pem -EnrollmentFile /private/sql-probe-approval.json -EnrollmentSha256 $ApprovedEnrollmentSha256 -OutputFile /private/d04-roles-01.json
 ~~~
 
 The verifier checks the same SQL Server identity, Developer engine build,

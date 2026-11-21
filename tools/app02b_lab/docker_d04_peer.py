@@ -69,7 +69,7 @@ def sql_run(mode, endpoint, spec, credentials, leaf, *, cli=None):
     if result.returncode:
         # The C# entry point emits one bounded error code only. Never pass through native text.
         code = result.stderr.strip().decode("ascii", errors="replace")
-        code = code if re.fullmatch(r"D04_[A-Za-z0-9_]{1,100}", code) else "D04_SQL_TOOL_FAILED"
+        code = code if re.fullmatch(r"D04_SQL_ERROR_-?[0-9]{1,12}|D04_[A-Za-z0-9_]{1,100}", code) else "D04_SQL_TOOL_FAILED"
         raise LabError(code)
     value = strict_json(result.stdout)
     require(type(value) is dict, "D04_INVALID_SQL_RESULT")
@@ -78,6 +78,7 @@ def sql_run(mode, endpoint, spec, credentials, leaf, *, cli=None):
 
 def run(args):
     plan_raw, plan = _file(args.plan)
+    sql_stage_raw, sql_stage = _file(args.sql_stage)
     stage_raw, stage = _file(args.stage)
     scope_raw, scope = _file(args.vault_scope)
     trust_raw, observation = _file(args.trust)
@@ -91,6 +92,11 @@ def run(args):
             and scope.get("sourceHead") == stage.get("sourceHead")
             and scope.get("nonce") == stage.get("nonce"), "D04_PEER_SCOPE_MISMATCH")
     d04.require_trust(observation, digest(stage_raw), stage.get("sourceHead"))
+    require(sql_stage.get("schema") == "APP02B-LAB-DOCKER-SQL-STAGE-V1"
+            and sql_stage.get("status") == "STAGED" and sql_stage.get("sourceHead") == plan["sourceHead"]
+            and sql_stage.get("operation") == d04.STAGE and sql_stage.get("planSha256") == digest(plan_raw)
+            and sql_stage.get("d03StageSha256") == digest(stage_raw)
+            and d04.d03.d01.nonzero_digest(sql_stage.get("containerRef")), "D04_SQL_STAGE_MISMATCH")
     spec = plan["spec"]
     require(spec == d04.scope(spec["project"], spec["nonce"]) and spec["nonce"] == scope["nonce"],
             "D04_PEER_SCOPE_MISMATCH")
@@ -116,7 +122,7 @@ def run(args):
     value = sql_run("verify", "sql", spec, credentials, leaf)
     peer.output_file(args.output, canonical_json({
         "schema": "APP02B-LAB-DOCKER-SQL-PEER-RESULT-V1", "planSha256": digest(plan_raw),
-        "sourceHead": plan["sourceHead"], "vantage": "OPERATOR_ENROLLED_PRIVATE_PEER",
+        "sqlStageSha256": digest(sql_stage_raw), "sourceHead": plan["sourceHead"], "vantage": "OPERATOR_ENROLLED_PRIVATE_PEER",
         "originalGateStatus": "NOT_VERIFIED", "checks": value, "lifecycle": "NOT_RUN", "pitr": "NOT_RUN",
     }))
     print(value["status"])
@@ -131,7 +137,7 @@ def _file(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    for name in ("plan", "stage", "trust", "vault-scope", "vault-ca", "sql-ca", "enrollment", "output"):
+    for name in ("plan", "sql-stage", "stage", "trust", "vault-scope", "vault-ca", "sql-ca", "enrollment", "output"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--enrollment-sha256", required=True)
     try:

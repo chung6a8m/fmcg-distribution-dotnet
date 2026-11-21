@@ -21,6 +21,8 @@ IMAGE = "mcr.microsoft.com/mssql/server@sha256:ee45df93117986941f5e47e1b074897b1
 VERSION = "17.0.5065.9"
 POLICY = "APP02B-LAB-DOCKER-SQL-PLAN-V1"
 ENROLLMENT = "APP02B-LAB-DOCKER-SQL-PROBE-ENROLLMENT-V1"
+STAGE_ENROLLMENT = "APP02B-LAB-DOCKER-SQL-STAGE-ENROLLMENT-V1"
+STAGE = "CREATE_STOPPED_SQL"
 FILES = ROOT / "deploy/lab/docker-wsl2/sql"
 ROLES = ("apiA", "apiB", "observer")
 
@@ -85,7 +87,7 @@ def require_trust(peer, stage_sha, predecessor):
     require(peer.get("checks") == expected, "D04_D03_ROLE_MATRIX_REQUIRED")
 
 
-def plan(config_path, output, pwsh):
+def observe(config_path, pwsh):
     _, raw = d03.protected_file(config_path, pwsh)
     config = strict_json(raw)
     d02.object_fields(config, "schema d01Plan d02Plan d02Apply d03Plan d03Stage d03Peer sqlCertificate sqlKey "
@@ -158,11 +160,14 @@ def plan(config_path, output, pwsh):
              digest(row["Id"].encode("ascii")) == stage.get("containerRef")]
     require(len(vault) == 1 and (vault[0].get("State") or {}).get("Status") == "running"
             and not (vault[0].get("HostConfig") or {}).get("PortBindings"), "D04_D03_LIVE_TARGET_MISSING")
-    out = output_path(output)
-    require(beneath(out, evidence), "D04_UNSAFE_OUTPUT")
-    assert_private(pwsh, [evidence, out.parent])
-    d02.publish(out, evidence, "docker-sql-plan.json", {
-        "schema": POLICY, "status": "PLAN_ONLY", "apply": "BLOCKED", "image": IMAGE, "version": VERSION,
+    image_id = d03.d01.text_result(docker.run("image", "inspect", "--format", "{{.Id}}", "--", IMAGE))
+    require(re.fullmatch(r"sha256:[a-f0-9]{64}", image_id), "D04_SQL_IMAGE_ID_MISSING")
+    info = bootstrap.stat()
+    require(info.st_nlink == 1, "D04_UNSAFE_SECRET_PATH")
+    document = {
+        "schema": POLICY, "status": "PLAN_ONLY", "operation": STAGE, "image": IMAGE, "version": VERSION,
+        "imageId": image_id, "bootstrapFileRef": digest(canonical_json(
+            [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns])),
         "sourceHead": source, "engineRef": predecessor["engineRef"], **hashes, "spec": spec,
         "d03StageSha256": digest(d03_stage_raw), "d03PeerSha256": digest(d03_peer_raw),
         "d03LeafDerSha256": stage.get("leafDerSha256"), "d03ScopeSha256": peer.get("scopeSha256"),
@@ -170,19 +175,115 @@ def plan(config_path, output, pwsh):
         "composeSha256": digest(canonical_json(model)), "licenseSha256": config["licenseSha256"],
         "networkRef": digest(network[0]["Id"].encode("ascii")),
         "dataVolumeRef": digest(canonical_json([data[0]["Name"], data[0]["CreatedAt"], labels])),
-    })
+    }
+    return document, model, docker, evidence
+
+
+def stage_sql(docker, model, plan, *, ensure_current, env_file=os.devnull):
+    ensure_current()
+    docker.run("compose", "--project-directory", str(ROOT), "--env-file", env_file, "-p", model["name"],
+               "-f", "-", "up", "--no-start", "--no-build", "--no-recreate", "--no-deps", "--pull", "never", "sql",
+               input_data=canonical_json(model))
+    service = model["services"]["sql"]
+    row, = docker._inspect("container", [d03.d01.text_result(docker.run(
+        "container", "inspect", "--format", "{{.Id}}", "--", service["container_name"]))])
+    host, config = row.get("HostConfig") or {}, row.get("Config") or {}
+    settings = row.get("NetworkSettings") or {}
+    network = model["networks"]["data"]["name"]
+    mounts = {item["Destination"]: item for item in row.get("Mounts") or []}
+    expected_capabilities = {cap.removeprefix("CAP_") for cap in host.get("CapAdd") or []}
+    require(re.fullmatch(r"[a-f0-9]{64}", row["Id"]) and row.get("Image") == plan["imageId"]
+            and (row.get("State") or {}).get("Status") == "created"
+            and host.get("NetworkMode") == network and set(settings.get("Networks") or {}) <= {network}
+            and not host.get("PortBindings") and not any((settings.get("Ports") or {}).values())
+            and host.get("PublishAllPorts") is False and host.get("Privileged") is False
+            and host.get("CapDrop") == ["ALL"] and expected_capabilities == {"NET_BIND_SERVICE"}
+            and set(host.get("SecurityOpt") or []) == {"no-new-privileges:true"}
+            and (host.get("RestartPolicy") or {}).get("Name") in ("", "no")
+            and config.get("User") == service["user"] and config.get("Hostname") == service["hostname"]
+            and config.get("Entrypoint") == service["entrypoint"] and not config.get("Cmd")
+            and all((config.get("Labels") or {}).get(k) == v for k, v in service["labels"].items())
+            and not any(item.startswith("MSSQL_SA_PASSWORD=") and item.partition("=")[2]
+                        for item in config.get("Env") or [])
+            and set(mounts) == {item["target"] for item in service["volumes"]}, "D04_STAGE_DRIFT")
+    for item in service["volumes"]:
+        mount = mounts[item["target"]]
+        require(mount["Type"] == item["type"] and mount["RW"] == (item["type"] == "volume"),
+                "D04_STAGE_MOUNT_CHANGED")
+        if item["type"] == "bind":
+            require(d03.bind_matches(mount.get("Source"), item["source"]), "D04_STAGE_BIND_CHANGED")
+        else:
+            require(mount.get("Name") == model["volumes"][item["source"]]["name"], "D04_STAGE_VOLUME_CHANGED")
+    backup, = docker._inspect("volume", [model["volumes"]["backup"]["name"]])
+    require(backup.get("Driver") == "local" and not backup.get("Options")
+            and all((backup.get("Labels") or {}).get(k) == v for k, v in service["labels"].items()),
+            "D04_STAGE_BACKUP_OWNERSHIP")
+    if "networkRef" in plan:
+        data, = docker._inspect("volume", [model["volumes"]["data"]["name"]])
+        bridge_id = d03.d01.text_result(docker.run("network", "inspect", "--format", "{{.Id}}", "--", network))
+        owner = d03.topology.labels(plan["spec"])
+        require(digest(bridge_id.encode("ascii")) == plan["networkRef"]
+                and all((data.get("Labels") or {}).get(k) == v for k, v in owner.items())
+                and digest(canonical_json([data["Name"], data["CreatedAt"], owner])) == plan["dataVolumeRef"],
+                "D04_STAGE_TARGET_CHANGED")
+    return digest(row["Id"].encode("ascii"))
+
+
+def run(args):
+    require(not any(key.upper().startswith("COMPOSE_") for key in os.environ), "D04_COMPOSE_ENV_OVERRIDE")
+    inputs = (args.plan, args.enrollment, args.enrollment_sha256)
+    require(all(inputs) if args.apply else not any(inputs), "D04_INVALID_ARGUMENTS")
+    current, model, docker, evidence = observe(args.config, args.pwsh)
+    out = output_path(args.output)
+    require(beneath(out, evidence), "D04_UNSAFE_OUTPUT")
+    assert_private(args.pwsh, [evidence, out.parent])
+    if not args.apply:
+        d02.publish(out, evidence, "docker-sql-plan.json", current)
+        print("PLAN_ONLY")
+        return
+
+    _, plan_bytes = d03.protected_file(args.plan, args.pwsh)
+    _, approval = d03.protected_file(args.enrollment, args.pwsh)
+    approved = strict_json(plan_bytes)
+    plan_sha = digest(plan_bytes)
+    spec = current["spec"]
+
+    def authorization():
+        d03.authorize(approval, args.enrollment_sha256, plan_sha, spec["nonce"],
+                      STAGE, d02.utc_now(), schema=STAGE_ENROLLMENT)
+
+    def revalidate():
+        authorization()
+        observed, _, _, _ = observe(args.config, args.pwsh)
+        require(approved == current == observed, "D04_STAGE_PLAN_CHANGED")
+        authorization()
+
+    authorization()
+    receipt = {"schema": "APP02B-LAB-DOCKER-SQL-STAGE-V1", "sourceHead": current["sourceHead"],
+               "planSha256": plan_sha, "enrollmentSha256": digest(approval), "operation": STAGE,
+               "collectedUtc": d02.timestamp(d02.utc_now()), "d03StageSha256": current["d03StageSha256"]}
+    with d02.project_lock(spec, current):
+        try:
+            ref = stage_sql(docker, model, current, ensure_current=revalidate)
+        except LabError as error:
+            d02.publish(out, evidence, "docker-sql-stage.json", {**receipt, "status": "BLOCKED", "issue": error.code})
+            raise
+        d02.publish(out, evidence, "docker-sql-stage.json", {**receipt, "status": "STAGED", "containerRef": ref})
+    print("STAGED")
 
 
 def main():
     parser = argparse.ArgumentParser()
     for name in ("config", "output", "pwsh"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--apply", action="store_true")
+    for name in ("plan", "enrollment", "enrollment-sha256"):
+        parser.add_argument("--" + name)
     args = parser.parse_args()
     try:
         require(os.name == "nt" and sys.flags.isolated and sys.flags.no_site
                 and sys.flags.dont_write_bytecode, "D04_WINDOWS_WRAPPER_REQUIRED")
-        plan(args.config, args.output, args.pwsh)
-        print("PLAN_ONLY")
+        run(args)
         return 0
     except LabError as error:
         print(f"BLOCKED {error.code}")

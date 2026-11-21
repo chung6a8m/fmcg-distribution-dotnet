@@ -98,6 +98,8 @@ def run(folder, report):
         docker.run("pull", "--platform", "linux/amd64", image)
         row, = json.loads(docker.run("image", "inspect", image))
         require((row["Os"], row["Architecture"]) == ("linux", "amd64"), "D04_CI_IMAGE_ARCH")
+        if image == d04.IMAGE:
+            sql_image_id = row["Id"]
     for name in (sql_net, vault_net):
         docker.run("network", "create", "--internal", "--label", f"lab-d04-ci={nonce}", name)
     for name in (sql_model["volumes"]["data"]["name"], vault_model["volumes"]["data"]["name"]):
@@ -107,7 +109,9 @@ def run(folder, report):
                    "-f", "-", *action, input_data=canonical_json(model))
 
     report["phase"] = "initialize_disposable_volume_permissions"
-    compose_run(sql_model, "up", "--no-start", "--no-build", "--pull", "never", "sql")
+    ref = d04.stage_sql(docker, sql_model, {"imageId": sql_image_id}, ensure_current=lambda: None)
+    require(d03.d01.nonzero_digest(ref), "D04_CI_STAGE_REF_MISSING")
+    report["checks"]["stopped_private_staging"] = "PASS"
     data_name = sql_model["volumes"]["data"]["name"]
     backup_name = sql_model["volumes"]["backup"]["name"]
     data, = docker._inspect("volume", [data_name])

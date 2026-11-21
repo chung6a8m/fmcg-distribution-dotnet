@@ -36,3 +36,10 @@ class SqlPlanTests(unittest.TestCase):
                                "status": "ROLE_AUDIT_OBSERVED",
                                "vantage": "LINUX_RUNNER_PRIVATE_BRIDGE_IP"},
                               "a" * 64, "b" * 40)
+
+    def test_stage_refuses_to_call_docker_without_scope_check(self):
+        def refuse():
+            raise LabError("D04_STAGE_UNAPPROVED")
+
+        with self.assertRaisesRegex(LabError, "D04_STAGE_UNAPPROVED"):
+            d04.stage_sql(None, {}, {}, ensure_current=refuse)
