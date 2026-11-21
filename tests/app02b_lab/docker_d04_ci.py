@@ -9,7 +9,7 @@ import time
 
 from docker_d03_ci import CiDocker, await_health, certificate, command, must_block
 from tools.app02b_lab import docker_d03 as d03, docker_d04 as d04
-from tools.app02b_lab.contract import LabError, canonical_json, require
+from tools.app02b_lab.contract import LabError, canonical_json, digest, require
 from tools.app02b_lab.docker_d03_client import Vault
 from tools.app02b_lab.docker_d04_peer import credential_path, load_credentials, sql_run, sql_tls
 
@@ -102,17 +102,23 @@ def run(folder, report):
             sql_image_id = row["Id"]
     for name in (sql_net, vault_net):
         docker.run("network", "create", "--internal", "--label", f"lab-d04-ci={nonce}", name)
-    for name in (sql_model["volumes"]["data"]["name"], vault_model["volumes"]["data"]["name"]):
-        docker.run("volume", "create", "--label", f"lab-d04-ci={nonce}", name)
+    data_name = sql_model["volumes"]["data"]["name"]
+    owner = d03.topology.labels(spec)
+    owner_flags = [item for key, value in owner.items() for item in ("--label", f"{key}={value}")]
+    docker.run("volume", "create", "--label", f"lab-d04-ci={nonce}", *owner_flags, data_name)
+    docker.run("volume", "create", "--label", f"lab-d04-ci={nonce}", vault_model["volumes"]["data"]["name"])
     def compose_run(model, *action):
         docker.run("compose", "--project-directory", str(d04.ROOT), "--env-file", "/dev/null", "-p", model["name"],
                    "-f", "-", *action, input_data=canonical_json(model))
 
     report["phase"] = "initialize_disposable_volume_permissions"
-    ref = d04.stage_sql(docker, sql_model, {"imageId": sql_image_id}, ensure_current=lambda: None)
+    data, = docker._inspect("volume", [data_name])
+    bridge_id = docker.run("network", "inspect", "--format", "{{.Id}}", sql_net).strip()
+    target = {"imageId": sql_image_id, "spec": spec, "networkRef": digest(bridge_id),
+              "dataVolumeRef": digest(canonical_json([data_name, data["CreatedAt"], owner]))}
+    ref = d04.stage_sql(docker, sql_model, target, ensure_current=lambda: None)
     require(d03.d01.nonzero_digest(ref), "D04_CI_STAGE_REF_MISSING")
     report["checks"]["stopped_private_staging"] = "PASS"
-    data_name = sql_model["volumes"]["data"]["name"]
     backup_name = sql_model["volumes"]["backup"]["name"]
     data, = docker._inspect("volume", [data_name])
     backup, = docker._inspect("volume", [backup_name])

@@ -91,9 +91,11 @@ memory via standard input. Keep the D04 plan and stage receipt, D03 stage and pe
 scope and Vault CA as 0600 files under owner-only 0700 directories. The
 redacted result is written once to a new path. The independently supplied
 enrollment uses schema `APP02B-LAB-DOCKER-SQL-PROBE-ENROLLMENT-V1`,
-operation `D04_PROBE_ROLLBACK_ONLY`, matching `nonce`, exact
-`planSha256` and UTC `expiresUtc`. Obtain its SHA-256 from the
-operator approval channel.
+operation `D04_PROBE_ROLLBACK_ONLY`, matching `nonce`, a scope digest in
+`planSha256`, and UTC `expiresUtc`. The scope digest is the SHA-256 of
+the UTF-8 JSON `{"planSha256":"<plan file hash>","sqlStageSha256":"<stage receipt hash>"}`
+with one final LF and no other whitespace. Obtain the enrollment file SHA-256
+from the operator approval channel.
 
 ~~~powershell
 dotnet build tools/lab-d04-sql/FmcgDms.Lab.D04.Sql.csproj -c Release

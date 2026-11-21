@@ -107,9 +107,12 @@ def run(args):
     require(digest(sql_ca) == plan.get("sqlCaSha256"), "D04_SQL_CA_MISMATCH")
     peer.custody_parent(args.output.parent)
     permit = peer.read_file(args.enrollment)
+    probe_scope_sha = digest(canonical_json({
+        "planSha256": digest(plan_raw), "sqlStageSha256": digest(sql_stage_raw),
+    }))
 
     def authorize():
-        d04.d03.authorize(permit, args.enrollment_sha256, digest(plan_raw), spec["nonce"],
+        d04.d03.authorize(permit, args.enrollment_sha256, probe_scope_sha, spec["nonce"],
                           "D04_PROBE_ROLLBACK_ONLY", d04.d02.utc_now(), schema=d04.ENROLLMENT)
 
     authorize()
@@ -122,7 +125,7 @@ def run(args):
     value = sql_run("verify", "sql", spec, credentials, leaf)
     peer.output_file(args.output, canonical_json({
         "schema": "APP02B-LAB-DOCKER-SQL-PEER-RESULT-V1", "planSha256": digest(plan_raw),
-        "sqlStageSha256": digest(sql_stage_raw), "sourceHead": plan["sourceHead"], "vantage": "OPERATOR_ENROLLED_PRIVATE_PEER",
+        "sqlStageSha256": digest(sql_stage_raw), "probeScopeSha256": probe_scope_sha, "sourceHead": plan["sourceHead"], "vantage": "OPERATOR_ENROLLED_PRIVATE_PEER",
         "originalGateStatus": "NOT_VERIFIED", "checks": value, "lifecycle": "NOT_RUN", "pitr": "NOT_RUN",
     }))
     print(value["status"])
