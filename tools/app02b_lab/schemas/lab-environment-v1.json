@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fmcgdms:lab-environment-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "environmentId",
+    "hostSha256",
+    "authorizationRecord",
+    "secretReferences",
+    "targets"
+  ],
+  "properties": {
+    "schema": {
+      "const": "APP02B-LAB-ENVIRONMENT-V1"
+    },
+    "environmentId": {
+      "type": "string",
+      "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+    },
+    "hostSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "authorizationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "version",
+        "sha256"
+      ],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "pattern": "^ref-[a-f0-9]{16,64}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "secretReferences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reference",
+          "version"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "pattern": "^ref-[a-f0-9]{16,64}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "minItems": 0,
+      "maxItems": 64,
+      "uniqueItems": true
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "A",
+        "B"
+      ],
+      "properties": {
+        "A": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetRef",
+            "identitySha256",
+            "registryVersion"
+          ],
+          "properties": {
+            "targetRef": {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            "identitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "registryVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "B": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetRef",
+            "identitySha256",
+            "registryVersion"
+          ],
+          "properties": {
+            "targetRef": {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            "identitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "registryVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "admission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "environmentId",
+        "hostSha256",
+        "targets",
+        "evidenceRoot"
+      ],
+      "properties": {
+        "schema": {
+          "const": "APP02B-LAB-ADMISSION-V1"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "hostSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "A",
+            "B"
+          ],
+          "properties": {
+            "A": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "targetRef",
+                "identitySha256",
+                "registryVersion"
+              ],
+              "properties": {
+                "targetRef": {
+                  "type": "string",
+                  "pattern": "^ref-[a-f0-9]{16,64}$"
+                },
+                "identitySha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "registryVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "B": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "targetRef",
+                "identitySha256",
+                "registryVersion"
+              ],
+              "properties": {
+                "targetRef": {
+                  "type": "string",
+                  "pattern": "^ref-[a-f0-9]{16,64}$"
+                },
+                "identitySha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "registryVersion": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "evidenceRoot": {
+          "type": "string",
+          "pattern": "^.{3,1024}$"
+        }
+      }
+    },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "runId",
+        "environmentId",
+        "tenant",
+        "oldBinding",
+        "newBinding",
+        "approvalRecord",
+        "approvedUtc"
+      ],
+      "properties": {
+        "schema": {
+          "const": "APP02B-LAB-LINEAGE-RECEIPT-V1"
+        },
+        "runId": {
+          "type": "string",
+          "pattern": "^b-lab-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8,32}$"
+        },
+        "environmentId": {
+          "type": "string",
+          "pattern": "^lab-[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "tenant": {
+          "enum": [
+            "A",
+            "B"
+          ]
+        },
+        "oldBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetRef",
+            "identitySha256",
+            "registryVersion"
+          ],
+          "properties": {
+            "targetRef": {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            "identitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "registryVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "newBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetRef",
+            "identitySha256",
+            "registryVersion"
+          ],
+          "properties": {
+            "targetRef": {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            "identitySha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "registryVersion": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "approvalRecord": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reference",
+            "version",
+            "sha256"
+          ],
+          "properties": {
+            "reference": {
+              "type": "string",
+              "pattern": "^ref-[a-f0-9]{16,64}$"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "approvedUtc": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

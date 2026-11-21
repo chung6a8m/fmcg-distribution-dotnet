@@ -1,0 +1,46 @@
+name: APP-02B LAB-E05 evidence contract
+
+on:
+  pull_request:
+    paths:
+      - '.gitattributes'
+      - '.github/workflows/app02b-lab-e05.yml'
+      - 'tools/app02b_lab/**'
+      - 'tools/app02b9/expected-v1.json'
+      - 'tests/app02b_lab/**'
+      - 'scripts/lab/Invoke-LabAcceptance.ps1'
+      - 'docs/roadmap/app-02b-local-preprod/lab-e05-contract.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-contract:
+    name: LAB-E05 contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - name: Check out exact source HEAD
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Test contract and PowerShell wrapper with disposable fixtures
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          if ((git rev-parse --verify HEAD).Trim() -ne $env:SOURCE_HEAD) {
+            throw 'Exact source HEAD mismatch'
+          }
+          python --version
+          python -m unittest discover -s tests/app02b_lab -p 'test_*.py' -v

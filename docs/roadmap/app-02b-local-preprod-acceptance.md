@@ -44,7 +44,7 @@ Dependency dưới đây là **source/API prerequisite**. Live run còn cần en
 | [LAB-E02](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e02) | Diagnostics cho LocalDB và A11-09 | — | Artifact lỗi redacted, giữ assertion | SOURCE_REVIEW [#88](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/88) · instrumentation [7abca25](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/7abca25) · final HEAD và evidence trong PR |
 | [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) | Fix LocalDB bootstrap có root cause | LAB-E02 | Regression deterministic và bounded init | PLANNED |
 | [LAB-E04](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e04) | Fix HTTP 500 sau OS restart | LAB-E02 | A/B × Worker on/off regression | PLANNED |
-| [LAB-E05](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e05) | Run context, catalog và schema | — | 30+2 rows, append-only attempts | PLANNED |
+| [LAB-E05](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e05) | Run context, catalog và schema | — | 30+2 rows, append-only attempts | SOURCE_REVIEW ([V1 contract](app-02b-local-preprod/lab-e05-contract.md)) |
 | [LAB-I01](app-02b-local-preprod/01-platform-and-recovery.md#lab-i01) | Preflight Windows và toolchain | LAB-E05 | Inventory read-only, version locks | PLANNED |
 | [LAB-I02](app-02b-local-preprod/01-platform-and-recovery.md#lab-i02) | VM Hyper-V và network | LAB-I01 | APP/DATA/VAULT idempotent, deny probes | PLANNED |
 | [LAB-I03](app-02b-local-preprod/01-platform-and-recovery.md#lab-i03) | Vault bền, TLS và credentials | LAB-I02 | Raft/ACL/rotation/recovery | PLANNED |
