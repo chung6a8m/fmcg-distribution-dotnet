@@ -32,7 +32,7 @@ npm --prefix web ci
 ./scripts/Run-App02C1.ps1
 ```
 
-Open the loopback URL printed by the script and paste the short-lived tenant-a credential from the clipboard. Ctrl+C stops the processes, clears that value if it is still in the clipboard, and removes the two owned DEV databases. Each launch starts fresh. A cleanup attempt that cannot verify instance, database name, both ownership markers and tenant binding fails closed and reports the session ID.
+The launcher uses the existing Vite proxy to the API on loopback port 5116, which must be available. Open the Vite URL printed by the script and paste the short-lived tenant-a credential from the clipboard. Ctrl+C stops the processes, clears that value if it is still in the clipboard, and removes the two owned DEV databases. Each launch starts fresh. A cleanup attempt that cannot verify instance, database name, both ownership markers and tenant binding fails closed and reports the session ID.
 
 ```powershell
 Push-Location web
@@ -41,4 +41,4 @@ Pop-Location
 ./scripts/Run-App02C1.ps1 -Verify
 ```
 
-The verification run builds the API, provisions new synthetic tenant databases and starts Kestrel and Vite on loopback. Playwright signs in against the server and drives the existing React app. An independent SQL query verifies both databases and records before/after expectations, exact API build identity, browser fixture hash and JUnit hash under `TestResults/app02c1`. Browser JUnit and sanitized screenshots are under `web/test-results-app02c1`. Runs marked `+working-tree` are exploratory and do not attest a clean source commit.
+The verification run builds the API, provisions new synthetic tenant databases and starts Kestrel and Vite on loopback. Playwright signs in against the server and drives the existing React app. An independent SQL query verifies both databases and records before/after expectations, exact API build identity, browser fixture hash and JUnit hash under `TestResults/app02c1`. Browser JUnit and sanitized screenshots go under `web/test-results-app02c1/<run-id>`. Runs marked `+working-tree` are exploratory and do not attest a clean source commit.

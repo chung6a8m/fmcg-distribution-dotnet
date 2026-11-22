@@ -14,6 +14,7 @@ internal static class App02c1Dev
 {
     private const string Actor = "c1-dev-sales";
     private const string BrowserTest = "web/e2e-app02c1/customers.spec.ts";
+    private const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
     internal static async Task Run(string mode, string root, string source)
     {
@@ -30,6 +31,7 @@ internal static class App02c1Dev
         if (!apiVersion.EndsWith("+" + sourceHead, StringComparison.Ordinal))
             throw new InvalidOperationException("C.1 API assembly source identity does not match HEAD.");
         string apiSha256 = HashFile(apiPath);
+        CheckApiPort();
 
         using var lifetime = new CancellationTokenSource();
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
@@ -58,9 +60,9 @@ internal static class App02c1Dev
                     """, new { tenant, Actor });
                 if (await BusinessRows(db) != 0) throw new InvalidOperationException("C.1 DEV database was not empty.");
             }
-            int apiPort = FreePort();
-            string apiUrl = $"http://127.0.0.1:{apiPort}";
-            var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath, "--urls", apiUrl);
+            string apiUrl = $"http://127.0.0.1:{ApiPort}";
+            var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath,
+                "--urls", $"http://localhost:{ApiPort}");
             // Only the child API receives the signing key and SQL credentials.
             foreach (string name in apiStart.Environment.Keys.Where(n =>
                 n.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase)
@@ -89,7 +91,6 @@ internal static class App02c1Dev
             string webUrl = $"http://127.0.0.1:{webPort}";
             var viteStart = StartInfo("node", web, vite, "--host", "127.0.0.1", "--port",
                 webPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "--strictPort");
-            viteStart.Environment["APP02C1_API_PORT"] = apiPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
             viteProcess = Start(viteStart);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
@@ -116,6 +117,7 @@ internal static class App02c1Dev
 
             var browserStart = StartInfo("node", web, playwright, "test", "--config", "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
+            browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_A"] = tokenA;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_B"] = tokenB;
             browser = Start(browserStart);
@@ -206,7 +208,7 @@ internal static class App02c1Dev
             source, apiVersion, apiSha256, runId = run.Id, environment = "synthetic DEV Windows LocalDB", instance = DemoRun.Instance,
             observedAtUtc = DateTimeOffset.UtcNow, fixtureVersion = 1,
             browserFixtureSha256 = HashFile(Path.Combine(root, BrowserTest)),
-            browserReportSha256 = HashFile(Path.Combine(root, "web", "test-results-app02c1", "junit.xml")),
+            browserReportSha256 = HashFile(Path.Combine(root, "web", "test-results-app02c1", run.Id, "junit.xml")),
             expected, actual, beforeTenantARows = 0, beforeTenantBRows = 0,
             expectedTenantBRows = 0, actualTenantBRows = otherCount, matches
         }, new JsonSerializerOptions { WriteIndented = true }));
@@ -224,6 +226,24 @@ internal static class App02c1Dev
         """);
 
     private static string HashFile(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static void CheckApiPort()
+    {
+        try
+        {
+            using var ipv4 = new TcpListener(IPAddress.Loopback, ApiPort);
+            ipv4.Start();
+            if (Socket.OSSupportsIPv6)
+            {
+                using var ipv6 = new TcpListener(IPAddress.IPv6Loopback, ApiPort);
+                ipv6.Start();
+            }
+        }
+        catch (SocketException ex)
+        {
+            throw new InvalidOperationException($"C.1 requires the existing Vite API proxy port {ApiPort} to be free.", ex);
+        }
+    }
 
     private static int FreePort()
     {
