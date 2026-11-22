@@ -59,11 +59,21 @@ public sealed class App02c4Schema : Migration
                 C4PriorLineQuantity decimal(18,3) NULL;
             """);
         Execute.Sql("""
+            ALTER TABLE dbo.SaleDelivery ADD
+                LegacyTripBusinessDate AS (CASE WHEN C4EvidenceId IS NULL THEN BusinessDate END) PERSISTED,
+                LegacyOrderShipToSnapshotId AS (CASE WHEN C4EvidenceId IS NULL THEN ShipToSnapshotId END) PERSISTED;
+            """);
+        Execute.Sql("""
             ALTER TABLE dbo.C2CommandScope ADD CONSTRAINT FK_C4Command_Trip
                 FOREIGN KEY(TenantId,DeliveryTripId) REFERENCES dbo.Trip(TenantId,Id);
             ALTER TABLE dbo.C2CommandScope ADD CONSTRAINT CK_C4Command_Scope
                 CHECK(DeliveryTripId IS NULL OR (LoadTripId IS NULL AND RoleCode='sales'));
             ALTER TABLE dbo.SaleDelivery DROP CONSTRAINT FK_SaleDelivery_TripBusinessDate, FK_SaleDelivery_AOrder;
+            ALTER TABLE dbo.SaleDelivery ADD CONSTRAINT FK_SaleDelivery_TripBusinessDate
+                FOREIGN KEY(TenantId,TripId,LegacyTripBusinessDate) REFERENCES dbo.Trip(TenantId,Id,BusinessDate);
+            ALTER TABLE dbo.SaleDelivery ADD CONSTRAINT FK_SaleDelivery_AOrder
+                FOREIGN KEY(TenantId,AOrderId,TripId,CustomerId,LegacyOrderShipToSnapshotId)
+                REFERENCES dbo.AOrder(TenantId,Id,TripId,CustomerId,ShipToSnapshotId);
             ALTER TABLE dbo.SaleDelivery ADD CONSTRAINT FK_SaleDelivery_AOrderIdentity
                 FOREIGN KEY(TenantId,AOrderId,TripId,CustomerId) REFERENCES dbo.AOrder(TenantId,Id,TripId,CustomerId);
             ALTER TABLE dbo.SaleDelivery ADD CONSTRAINT FK_SaleDelivery_C4Evidence
@@ -77,22 +87,19 @@ public sealed class App02c4Schema : Migration
                     OR (C4EvidenceId IS NULL AND C4ShipToAmendmentId IS NULL AND C4PriorLineQuantity IS NULL));
             CREATE UNIQUE INDEX UX_SaleDelivery_C4Evidence ON dbo.SaleDelivery(TenantId,C4EvidenceId) WHERE C4EvidenceId IS NOT NULL;
             """);
-        // Preserve the legacy FK predicates and bind C.4 to its occurred receipt and exact version.
+        // The legacy FKs bind their persisted witnesses. C.4 binds its occurred receipt and exact version.
         Execute.Sql("""
             CREATE TRIGGER dbo.TR_SaleDelivery_Scope ON dbo.SaleDelivery AFTER INSERT AS
             BEGIN
                 SET NOCOUNT ON;
                 IF EXISTS (
                     SELECT 1 FROM inserted i
-                    JOIN dbo.Trip t WITH (HOLDLOCK) ON t.TenantId=i.TenantId AND t.Id=i.TripId
                     JOIN dbo.TripManifestLine ml ON ml.TenantId=i.TenantId AND ml.Id=i.TripManifestLineId
                     JOIN dbo.BusinessSource bs ON bs.TenantId=i.TenantId AND bs.Id=i.BusinessSourceId
-                    LEFT JOIN dbo.AOrder a WITH (HOLDLOCK) ON a.TenantId=i.TenantId AND a.Id=i.AOrderId
                     LEFT JOIN dbo.C2Confirmation c ON c.TenantId=i.TenantId AND c.OrderId=i.AOrderId
                     LEFT JOIN dbo.C4DeliveryEvidence e ON e.TenantId=i.TenantId AND e.Id=i.C4EvidenceId
                     LEFT JOIN dbo.C4ShipToAmendment am ON am.TenantId=i.TenantId AND am.Id=i.C4ShipToAmendmentId
-                    WHERE (i.C4EvidenceId IS NULL AND
-                        (ml.IsC3=1 OR t.BusinessDate<>i.BusinessDate OR a.ShipToSnapshotId<>i.ShipToSnapshotId))
+                    WHERE (i.C4EvidenceId IS NULL AND ml.IsC3=1)
                        OR (i.C4EvidenceId IS NOT NULL AND (ml.IsC3=0 OR c.OrderId IS NULL
                         OR bs.BusinessCommandId<>e.Id OR bs.OccurredAtUtc<>e.OccurredAtUtc
                         OR (e.ShipToVersion=1 AND (am.Id IS NOT NULL OR c.ShipToSnapshotId<>i.ShipToSnapshotId))
@@ -107,26 +114,13 @@ public sealed class App02c4Schema : Migration
             END;
             """);
         Execute.Sql("""
-            CREATE TRIGGER dbo.TR_Trip_LegacyDeliveryDate ON dbo.Trip AFTER UPDATE AS
-            BEGIN
-                SET NOCOUNT ON;
-                IF UPDATE(BusinessDate) AND EXISTS(SELECT 1 FROM inserted i
-                    JOIN dbo.SaleDelivery d WITH (HOLDLOCK) ON d.TenantId=i.TenantId AND d.TripId=i.Id
-                    WHERE d.C4EvidenceId IS NULL AND d.BusinessDate<>i.BusinessDate)
-                    THROW 51606, 'Legacy delivery date is bound to the Trip.', 1;
-            END;
-            """);
-        Execute.Sql("""
             CREATE TRIGGER dbo.TR_AOrder_DeliveryShipTo ON dbo.AOrder AFTER UPDATE AS
             BEGIN
                 SET NOCOUNT ON;
                 IF UPDATE(ShipToSnapshotId) AND EXISTS(SELECT 1 FROM inserted i
                     JOIN deleted old ON old.TenantId=i.TenantId AND old.Id=i.Id
-                    WHERE old.ShipToSnapshotId<>i.ShipToSnapshotId AND (
-                        EXISTS(SELECT 1 FROM dbo.SaleDelivery d WITH (HOLDLOCK)
-                            WHERE d.TenantId=i.TenantId AND d.AOrderId=i.Id AND d.C4EvidenceId IS NULL)
-                        OR EXISTS(SELECT 1 FROM dbo.C2Confirmation c WITH (HOLDLOCK)
-                            WHERE c.TenantId=i.TenantId AND c.OrderId=i.Id)))
+                    WHERE old.ShipToSnapshotId<>i.ShipToSnapshotId AND EXISTS(SELECT 1 FROM dbo.C2Confirmation c WITH (HOLDLOCK)
+                        WHERE c.TenantId=i.TenantId AND c.OrderId=i.Id))
                     THROW 51607, 'The original Order ShipTo is immutable.', 1;
             END;
             """);
