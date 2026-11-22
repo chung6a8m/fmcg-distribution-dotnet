@@ -146,7 +146,7 @@ Phép cộng/trừ chỉ dùng các bucket không chồng nhau trong đúng SKU/
 - **MUST NOT** tự release A remainder, B quota/grant hoặc đóng nguồn chỉ vì xe đã về 0; theo reconciliation và nguồn cho phép.
 - **SHOULD — đề xuất UX v0.1:** đặt tồn và quyền dùng hàng cạnh nhau; mở được nguồn chiếm quyền và chứng từ thay đổi lượng.
 
-**Ranh giới baseline:** C0-R01 và C0-R04 còn DEFERRED/BLOCKING. Không định nghĩa enum/state machine toàn cục cho Confirm/Reserve/Load; không suy partial/repeated load đã hỗ trợ từ prototype.
+**Ranh giới baseline:** C0-R01 và C0-R04 vẫn mở cho hành vi phụ thuộc của C.2–C.4 theo [phân công ngày 22/11](../roadmap/app-02c0-a-online-e2e-contract.md#8-contract-review-dispositions-and-blocking-gates); chúng không chặn công việc C.1 độc lập. Tài liệu UI này không tự chốt enum/state machine cho Confirm/Reserve/Load; không suy partial/repeated load đã hỗ trợ từ prototype.
 Contract A mục tiêu tách Confirm và Reserve; hành vi lịch sử APP-01 có thứ tự khác. UI phải nêu phiên bản/mapping đang áp dụng và không cho load khi thiếu reservation hợp lệ.
 
 ## UX-B09 — AR, custody, quỹ, advance và CustomerCredit

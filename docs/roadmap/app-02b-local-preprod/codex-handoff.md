@@ -1,6 +1,8 @@
 # APP-02B LAB — Codex Implementation Handoff
 
-**Scope:** execution instructions for one planned increment at a time. The roadmap PR itself implements no runtime or acceptance result. Read [master](../app-02b-local-preprod-acceptance.md), [design](design.md) and the increment's source dependencies before editing.
+**Scope:** execution instructions for one planned APP-02B LAB increment at a time. The roadmap PR itself implements no runtime or acceptance result. Read [master](../app-02b-local-preprod-acceptance.md), [design](design.md) and the increment's source dependencies before editing.
+
+**APP-02C DEV handoff (2026-11-22):** C.1–C.5 instead use the [standing DEV Owner decision](../../decisions/owner-app02c-dev-first-2026-11-22.md) and [C DEV handoff](../app-02c-dev-handoff.md): sequential source/migrations/UI and actual UI→API→SQL with dedicated synthetic data, initially within the original nonce-owned LocalDB safeguards. This B lab sequence, host capacity, Docker setup and physical `PREPROD_FOUNDATION_VERIFIED` are not blanket C development prerequisites. Keep applicable feature contracts, authority/tenant, transactions/idempotency and tests/review; retain physical gaps in [operations debt](../app-02c-operations-debt.md). The current amendment is docs-only and C implementation is `NOT_STARTED`; no B lab or physical acceptance is upgraded.
 
 ## 1. Prompt giao việc cho một PR
 
@@ -188,7 +190,7 @@ Use one existing spec/closeout section per increment as the canonical record. Ap
 - A documentation commit D may reference verified H and M. It cannot be its own pre-known final SHA and cannot inherit H's runtime acceptance. Keep B05-06 source/review correlation and revalidation intact; never add a tree-equivalence waiver to the physical oracle.
 - Keep source merge, CI scope, actual operator-host/lab observations and original physical acceptance in separate fields. LOCAL_OPERATOR_LAB / SOLO_OWNER_SELF_ATTESTED does not establish independent human review, off-host custody or PREPROD_FOUNDATION_VERIFIED. Preserve FAIL, BLOCKED, NOT_RUN and NOT_VERIFIED with their evidence/reasons.
 - When an older documentation PR is superseded, compare its diff with the merged canonical record, retain useful exact-source reviews/artifact hashes and failed CI history, then close it without merge under the authorized scope. Record the successor PR and observed closure; preserve its historical source rather than copying stale states over main. PR #73 is the [recorded example](../../closeout/2026-11-18-app-02b9-source-only.md#pr-73-predecessor-disposition).
-- Each handoff names the next real dependency or evidence gap. Current sequence: rerun I01 on the intended laptop and resolve reported FAIL/UNKNOWN; implement guarded I02; then I03–I05 for LOCAL_LAB_READY. E03/E04 investigate #75 independently. An unavailable host/approval stays a named live prerequisite while independent source work proceeds.
+- Each handoff names the next real dependency or evidence gap. Current sequence for this B lab track: rerun I01 on the intended laptop and resolve reported FAIL/UNKNOWN; implement guarded I02; then I03–I05 for LOCAL_LAB_READY. E03/E04 investigate #75 independently. An unavailable host/approval stays a named live prerequisite while independent source work proceeds.
 
 ## 6. Review checklist
 

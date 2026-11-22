@@ -38,7 +38,7 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 | Mức kiểm zoom/phóng chữ ngoài phạm vi đã có | Owner ghi rõ phạm vi, giữ lịch sử ngoại lệ | Không mở lại 125% APP-00B/C |
 | Component/grid/icon/docking library | Đã chốt ADR theo từng increment (OWN-UX-08) | Tên thư viện cụ thể vẫn chưa chọn; không kế thừa repo khác |
 | Runtime theme selection / brand override | Light/Dark/System đã được duyệt (OWN-UX-06); UI-01 được ủy quyền có điều kiện (OWN-UX-09) | Controller/switcher Light/Dark/System đã có trong UI-01 synthetic; chưa có tenant brand override hay nghiệm thu thiết bị thực |
-| Confirm/Reserve, ShipTo, policy validity, partial/repeated load | Contract increments của APP-02C và C0-R01…06 | Giữ trạng thái blocking/deferred ở baseline |
+| Confirm/Reserve, ShipTo, policy validity, partial/repeated load | [C DEV handoff](../roadmap/app-02c-dev-handoff.md): R02→C.1; R01→C.2; R03→C.2/C.4/C.5; R04→C.2 counters/C.3/C.4 | Chốt trong increment sở hữu trước behavior phụ thuộc; không là blanket gate trước C.1. R06 expectations theo feature; R05 và R06 physical thuộc operations/acceptance |
 | Mốc stale, SLA, tuổi nợ, KPI, giá/thuế, hạn mức | Business/policy contract được phê duyệt | Chưa thiết lập; không lấy số demo |
 | Offline drafts, GPS/ảnh/chữ ký bắt buộc, scan | Product/security contract riêng | Không hứa các năng lực chưa có |
 
@@ -49,9 +49,15 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 - [APP-02C.0 contract](../roadmap/app-02c0-a-online-e2e-contract.md).
 - [Prototype mapping và provenance](prototype-mapping.md).
 
+## Ủy quyền UI Sales A trong APP-02C DEV (22/11/2026)
+
+[Quyết định DEV-first của Owner](../decisions/owner-app02c-dev-first-2026-11-22.md) cấp quyền liên tục cho C.1–C.5 source/migrations/UI và chạy thật UI→API→SQL với dữ liệu synthetic trong DEV riêng, ban đầu dùng nonce-owned LocalDB và các guard hiện hành. Mỗi increment có UI tối thiểu của feature; C.5 tích hợp workspace/report. Không cần blanket PREPROD foundation hoặc một vòng cấp quyền lại cho cùng scope. [C DEV handoff](../roadmap/app-02c-dev-handoff.md) giữ các điều kiện nghiệp vụ/kỹ thuật theo feature; [operations debt](../roadmap/app-02c-operations-debt.md) giữ physical/PREPROD/C.6 và Pilot riêng. Amendment hiện tại là DOCS_ONLY, C implementation `NOT_STARTED`.
+
+[PR #86](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/86) UI-04 là OPEN / DOCS_ONLY readiness candidate cần rebase và đối chiếu quyết định mới, không là dependency trước C.1 hoặc bằng chứng UI đã triển khai/merge. UI-05 vẫn `NOT_AUTHORIZED`. Quyết định mới thay timing/authorization của DEV; các receipts và giới hạn bằng chứng UI-01..03 dưới đây vẫn là lịch sử đúng scope.
+
 ## Ủy quyền UI-03 riêng (20/11/2026)
 
-Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. UI-03 đã được review/merge qua [PR #84](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/84), trạng thái **`MERGED / UI03_100_PERCENT_CI_VERIFIED`** chỉ trong synthetic/nonproduction browser CI. Final source `dcd2870`, merge `f17397e`, 10/10 workflows và 20/20 jobs SUCCESS; [closeout](../closeout/2026-11-20-ui-03.md). [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Không được tích hợp APP-02C, tự coi client fixture là durable server evidence hoặc mở UI-04/05.
+Owner trực tiếp yêu cầu **“Triển khai UI-03”** và cấp quyền triển khai **Synthetic Source/Command Recovery Lab** riêng. UI-03 đã được review/merge qua [PR #84](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/84), trạng thái **`MERGED / UI03_100_PERCENT_CI_VERIFIED`** chỉ trong synthetic/nonproduction browser CI. Final source `dcd2870`, merge `f17397e`, 10/10 workflows và 20/20 jobs SUCCESS; [closeout](../closeout/2026-11-20-ui-03.md). [Ranh giới ủy quyền](../decisions/owner-ui03-2026-11-20.md) · [ADR/spec](ui-03-source-command-recovery.md) · [verification](ui-03-verification.md). Ủy quyền UI-03 này không cấp phép tích hợp APP-02C hoặc mở UI-04/05; quyền C.1–C.5 DEV đến từ quyết định riêng 22/11/2026 ở trên. Client fixture không phải durable server evidence.
 
 ## Ủy quyền UI-02 riêng (20/11/2026)
 

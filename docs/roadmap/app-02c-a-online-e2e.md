@@ -1,63 +1,46 @@
 # APP-02C — A_ONLINE Vertical E2E Roadmap (C.0–C.6)
 
-> **OWNER-APPROVED PLANNING STRUCTURE — DOCS-ONLY BASELINE (2026-11-19).** Interview: [OWN-APP02C-01..10](../decisions/owner-app02c-2026-11-19.md) all `OWNER_APPROVED`, **Option 1**. **Only APP-02C.0 documents are authorized**; C.1–C.6 source, SQL migrations, UI changes and PREPROD A_ONLINE effect routes remain `NOT_AUTHORIZED`. [PR #77](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/77) is the C.0 review/CI/merge record. C-PLAN is approved only when that record confirms independent review, all required final-source CI and merge; no future implementation or physical acceptance follows from C.0 approval.
+> **CURRENT AUTHORITY — C.1–C.5 DEV AUTHORIZED (2026-11-22).** [OWN-APP02C-DEV-01..06](../decisions/owner-app02c-dev-first-2026-11-22.md) explicitly separates application development from unfinished physical operations. C.1–C.5 source, owned DEV migrations, UI and integrated UI→API→SQL execution with synthetic data are authorized sequentially. Implementation is **NOT_STARTED**, integrated C DEV execution **NOT_RUN**. C.6 physical acceptance and operational runtime admission retain their separate gates. This update is documentation only.
+
+The [ten original business choices](../decisions/owner-app02c-2026-11-19.md) remain the C baseline. C.0 is `CONTRACT_APPROVED (DOCS_ONLY)` via [merged PR #77](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/77). The new Owner decision changes timing/environment authority, not the locked business rules or historical test results.
 
 Refs: [C.0 business/API/UI/oracle contract](app-02c0-a-online-e2e-contract.md) · [APP-02 master roadmap](app-02.md) · [APP-02B PREPROD gates](app-02b-preprod-foundation.md) · [B.1 physical matrix](../security/app-02b1-acceptance-evidence.md) · [B.9 protocol](app-02b9-independent-preprod-oracle.md).
 
 ## 1. Scope and dependency chain
 
-```text
-C.0 Owner decisions / contract / roadmap                  [DOCS ONLY; NOW AUTHORIZED]
-       |
-       +-- C-PLAN (reviewed docs / exact-HEAD CI)
-       |
-       +-- APP-02B PREPROD_FOUNDATION_VERIFIED ------------ [DEFAULT C.1+ PREREQUISITE]
-       |
-       +-- NEW C-DEV OWNER DECISION + APPLICABLE BLOCKERS - [C.1+ NOT AUTHORIZED]
-                |
-                +-- C.1 Customer / Outlet / Flexible ShipTo
-                        |
-                        +-- C.2 A Confirm / approved policy / Reserve
-                                |
-                                +-- C.3 Atomic LoadManifest MAIN -> TRIP
-                                        |
-                                        +-- C.4 Partial Delivery / AR / due dates
-                                                |
-                                                +-- C.5 UI Workspace / AR Reporting
-                                                        |
-                                       APP-02B G-B01..05 + C-PREPROD + actual policies
-                                                        |
-                                                        +-- C.6 Independent physical E2E
-                                                                |
-                                                           C-E2E (A-only verified)
-```
+The implementation sequence remains **C.1 → C.2 → C.3 → C.4 → C.5**, one independently reviewable increment/PR at a time. Start C.1 with its data contract and minimum DEV composition. Each successor requires the predecessor functionality it consumes, its own reviewed business semantics and meaningful verification; it does not wait for the entire operations backlog.
 
-The plan is sequential: one independently reviewable **increment and PR at a time**. Default C.1+ entry requires APP-02B `PREPROD_FOUNDATION_VERIFIED`, new scope-bound C-DEV Owner authorization and closure of the applicable [C0-R01..06 blockers](app-02c0-a-online-e2e-contract.md#8-contract-review-dispositions-and-blocking-gates). Any proposal for inert source/CI work before physical B completion requires a **new Owner decision explicitly changing that timing prerequisite**, naming increments, permitted environments, controls, review/CI conditions and prohibitions; generic implementation approval is insufficient. No such exception or C code/migration authorization exists today. A source-only exception cannot grant physical acceptance: real runtime testing/admission still requires full `C-PREPROD` and its separate Owner decision, with no inherited B source-only waiver.
+The Owner's 2026-11-22 decision is standing authorization for this sequence in the named DEV environment. **`PREPROD_FOUNDATION_VERIFIED` is no longer a prerequisite for C.1–C.5 development or synthetic integrated DEV runs.** Do not ask for the same blanket authorization again. Work on C0-R01–R04 is part of the owning increment, before dependent behavior is accepted; unresolved unrelated rows do not block its start. See [the scoped dispositions](app-02c0-a-online-e2e-contract.md#8-contract-review-dispositions-and-blocking-gates).
 
-## 2. Proposed increment specifications (7 total, no implementation underway)
+The initial DEV target uses existing nonce-owned LocalDB protections and real API/SQL code. C.1 must implement the missing integrated runtime/browser wiring; it is not already verified. Read the [Codex DEV handoff](app-02c-dev-handoff.md). Vault, full LAB topology and physical reviewer staffing are not prerequisites. The [operations debt register](app-02c-operations-debt.md) records their later triggers.
 
-| Increment | Deliverables in a **future separately authorized PR** | Independent exit evidence | Status today |
+**Physical acceptance stays separate:** after the business flow exists, entry to C.6 still needs C-PREPROD, applicable B physical evidence and approved operational policies, or a separately reviewed replacement acceptance contract. Source/DEV results do not earn those states or permit real data, production or Pilot.
+
+## 2. Increment specifications and current progress
+
+| Increment | Deliverables in its implementation PR | Independent exit evidence | Status on 2026-11-22 |
 |---|---|---|---|
 | **C.0 — Owner Decisions & E2E Contract** | Frozen ten decisions, bounded business/API/UI/data contract, proposed independent scenario matrix, evidence schema and this roadmap. Scope limited to Markdown in `docs/` plus docs-only README/APP-02 cross-reference updates. | `C-PLAN`: reviewer approves authority consistency, BR/POL/AC lineage, no `business/` edits, no undocumented implementation authorization; exact PR final-HEAD required CI and merge. | Docs only; disposition in **[PR #77](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/77)** |
-| **C.1 — Customer, Outlet & Flexible ShipTo** | Authoritative Customer debtor and 0..n Outlet, registered/ad-hoc ShipTo validation, immutable snapshots and auditable amendment versioning, API/DTO/UI contract test stubs as applicable. | AC-02 focused positive + unauthorized address/tenant, stale amendment, master-change and snapshot mutation negatives; two SQL tenants where applicable. | `PROPOSED / NOT_AUTHORIZED` |
-| **C.2 — A Confirm & Reservation** | After C0-R01/R03 and applicable R04 closure, adapt APP-01A's current Reserve→Confirm preconditions to the approved Confirm→Reserve target, integrating B.3 actor, B.4 binding, B.5 revocation fence and B.6 approved policy/frozen snapshots. Existing command names do not prove compatibility. | Explicit confirmed-unreserved/partial/full states, Reserve retry without reconfirmation, no unreserved Load, policy `UNSET` denial, per-command idempotency, A/B non-overlap/race; zero AR/COGS; two-tenant negative; preserve historical regressions. | `PROPOSED / NOT_AUTHORIZED` |
-| **C.3 — Atomic Load Manifest** | After C0-R04 closure, adapt the APP-01B.2 atomic MAIN→TRIP movement pattern with reservation-to-load source binding, independently tracked loaded/warehouse remainder, reviewed partial-load uniqueness and recovery; do not debit the existing delivery-consumed counter at Load. | Exact stock/value and entitlement reconciliation, partial/repeated/competing-load guards, no AR/COGS, whole requested manifest rollback, lost ACK, wrong tenant, concurrency. | `PROPOSED / NOT_AUTHORIZED` |
-| **C.4 — Partial Delivery & Due-Dated AR** | After applicable R03/R04 closure, adapt APP-01C.3 per-Delivery posting to the reviewed load/entitlement model; one delivery consumption, source-bound stock/COGS/AR, `HELD` remainder, seller-local due date from the immutable Confirm terms and correction/reconciliation. | AC-03 A subset including load40/deliver25/held15; AC-08 master-mutation and policy expiry/supersession without historical rebind; current authority still enforced; independently checked AR/stock/COGS and overdelivery/race/rollback/CASE negatives. | `PROPOSED / NOT_AUTHORIZED` |
-| **C.5 — Business Workspace & Reporting** | Desktop-first Customer/Order/Trip/Delivery screens using existing web app; explicit commands, persisted outcome lookup, frozen snapshot/audit displays; SQL-authoritative Customer/Delivery/due/`asOf` AR reports. | UI→API behavior, permissions, lost ACK/no double-command, asOf/pending correctness, accessibility/browser/PWA/Playwright baseline preserved; no offline writes. | `PROPOSED / NOT_AUTHORIZED` |
+| **C.1 — Customer, Outlet & Flexible ShipTo** | Begin with R02 contract work; authoritative Customer debtor and 0..n Outlet, registered/ad-hoc ShipTo validation, immutable snapshot/version and amendment boundaries. Supply owned DEV composition, migrations, server-authorized API and a minimum usable Customer/ShipTo screen in the existing web app. | Actual UI→API→SQL create/read/update path; focused AC-02 component coverage, wrong tenant/permission/target, stale version and snapshot mutation negatives; two SQL tenants. Future Confirm/Delivery assertions are handed to C.2/C.4, not claimed now. | `DEV_AUTHORIZED / NOT_STARTED` |
+| **C.2 — A Confirm & Reservation** | Resolve R01/R03 and affected R04 semantics within this increment. Adapt APP-01A Reserve→Confirm to Confirm→Reserve, wiring the used B.3/B.4/B.5 authority and B.6 policy paths for DEV. Add working order/Confirm/Reserve UI with truthful intermediate states. | Confirmed-unreserved/partial/full states, Reserve retry without reconfirmation, no unreserved Load, policy `UNSET` denial, replay/conflict and A/B competing allocation; zero AR/COGS; current actor/two-tenant denial; UI/API/SQL evidence. | `DEV_AUTHORIZED / AFTER_C1 / NOT_STARTED` |
+| **C.3 — Atomic Load Manifest** | Close applicable R04 logistics semantics; adapt APP-01B.2 MAIN→TRIP movement with reservation binding, loaded/warehouse remainder, partial-load uniqueness and recovery. Add the usable manifest/Load UI; do not debit the delivery-consumed counter at Load. | Stock/value and entitlement reconciliation, partial/repeated/competing-load guards, no AR/COGS, whole manifest rollback, lost ACK, wrong tenant, concurrency and UI/API/SQL evidence. | `DEV_AUTHORIZED / AFTER_C2 / NOT_STARTED` |
+| **C.4 — Partial Delivery & Due-Dated AR** | Apply reviewed R03/R04 semantics to APP-01C.3: one delivery consumption, source-bound stock/COGS/AR, `HELD` remainder, seller-local due date from Confirm terms and reconciliation. Add usable partial-delivery and resulting AR views. | AC-03 A subset load40/deliver25/held15; AC-08 master/policy changes without historical rebind; current authority; independently checked AR/stock/COGS; overdelivery/race/rollback/CASE and UI/API/SQL negatives. | `DEV_AUTHORIZED / AFTER_C3 / NOT_STARTED` |
+| **C.5 — Business Workspace & Reporting** | Integrate and refine the C.1–C.4 screens in the existing app; command outcome recovery, snapshot/audit views and SQL-authoritative Customer/Delivery/due/`asOf` AR reporting. Complete the full A flow in DEV. | Full scoped DEV UI→API→SQL flow, permissions, lost ACK/no double-command, `asOf`/pending correctness, keyboard/theme/density/browser/PWA checks and SQL reconciliation. No offline writes. | `DEV_AUTHORIZED / AFTER_C4 / NOT_STARTED` |
 | **C.6 — Independent Physical E2E Acceptance** | Freeze and execute approved scenario/expected matrix across full UI→API→SQL, two operator-owned physical PREPROD tenants and negative/fault/restart suites; independently observed SQL/oracle; closeout. | `C-E2E` only after `C-PREPROD`; exact reviewed HEAD and full required CI, independent expected/actual/difference, witnesses and Owner signoff. Remains A-scope only. | `PROPOSED / NOT_AUTHORIZED / NOT_RUN` |
 
-**Every later increment has a fresh authorization and exit review.** C.1 may not start merely because C.0 is merged. C.6's separate status will not imply APP-02D/E, production or Pilot readiness.
+Each C.1–C.5 increment has its own exit review and final-source CI under the standing DEV authorization. C.6 needs its separate physical admission decision. Neither C.5 DEV completion nor C.6's A-only result implies APP-02D/E, production or Pilot readiness.
 
-## 3. Four gates (proposed contract, not gate results)
+## 3. Development and physical gates
 
 | Gate | Required entry/exit conditions | Current gate state |
 |---|---|---|
 | **`C-PLAN` — Contract Approved** | Ten decisions captured; [C.0 contract](app-02c0-a-online-e2e-contract.md) and roadmap reviewed against canonical Business Baseline and B dependencies; C0-R01..06 resolved or explicitly **DEFERRED / BLOCKING** with affected gates, closure artifacts and approving roles; docs-only final diff, reviewer approval, final source-head required CI and merge. Deferred rows remain open for future work. | See [PR #77 review/CI/merge record](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/77); no approval inferred from planning alone |
-| **`C-DEV` — Explicit Implementation Authorization** | Default APP-02B `PREPROD_FOUNDATION_VERIFIED`, closure of applicable C0 blockers, and new scope-bound Owner approval before *any* C.1+ code/DB/UI work, with named increment(s), permitted environment, security/tenant/business constraints, PR/reviewer/CI conditions and prohibitions. A pre-B inert source/CI proposal needs an explicit new decision changing that timing prerequisite; this PR grants none. No inherited B debt exceptions or physical/runtime waiver. | `NOT_AUTHORIZED` |
+| **`C-DEV` — Implementation and synthetic DEV authorization** | [2026-11-22 Owner decision](../decisions/owner-app02c-dev-first-2026-11-22.md); C.1–C.5 source/migrations/UI and integrated execution in the bounded DEV target. Resolve applicable semantics in the owning increment; preserve security/correctness and reviewed CI. No blanket B physical prerequisite. | `OWNER_APPROVED / DEV_AUTHORIZED`; implementation `NOT_STARTED` |
+| **Integrated DEV verification — per increment** | Real scoped UI/API/SQL path, versioned reviewed expectations, negative cases, final source and environment lineage, independent review and actual results. This is a development result, not physical C-E2E. | `NOT_RUN` |
 | **`C-PREPROD` — Physical A Test Runtime Admission** | APP-02B `PREPROD_FOUNDATION_VERIFIED`: **30/30 B.1** cases all PASS, 5/5 G-B gates all PASS, RUNTIME-01/02, distinct physical A/B tenant DB and independent Security/DBA/observer evidence; #53 restore-safe revocation and security findings closed/accepted for this scope, recovery/alerts real; APP-02C commercial policies approved and a separate Owner authorization for nonproduction A test runs. | `BLOCKED / NOT_VERIFIED` |
 | **`C-E2E` — Independent A_ONLINE E2E** | Authorized physical UI→API→SQL run with approved case/expected fixture, source/actor/policy/stock/COGS/AR due-date lineage, peer-tenant denial and fault/restart/lost ACK, signed independent actual/expected/difference, exact CI/review/head/image/DB/TestRunId, zero blocking findings, documented Owner acceptance. No production/Pilot promotion. | `NOT_RUN` |
 
-**APP-02B gate status cannot be inferred from the source-only B.9 validator.** B.9's separate operator and independent review requirements are prerequisites, not replaceable by the C oracle or a prior solo-Owner code review exception.
+**APP-02B gate status cannot be inferred from source or DEV execution.** B.9's operator/independent-review requirements apply to its physical acceptance and C-PREPROD/C.6, not C.1–C.5 DEV entry. The 2026-11-22 decision supplies new DEV authority; it does not inherit or broaden old source-only risk exceptions.
 
 ## 4. Business traceability by increment
 
@@ -66,12 +49,14 @@ The plan is sequential: one independently reviewable **increment and PR at a tim
 | AC-02, BR-02, POL-02: Customer debtor, optional Outlet, ShipTo snapshot | `business/acceptance.md`, `business/business-rules.md`, `business/policies.md` | C.1 & C.5; actual EV-02 still pending until physical witness |
 | AC-03 **A subset**: A40 / A25 / held15, AR_A375; no AR/COGS at Load | same sources + existing APP-01A/B/C/E contracts | C.2–C.4 + C.6; B31/B20/custody/fund/full COGS450 remain D scope and cannot be falsely counted as C PASS |
 | AC-08, BR-10, POL-10: terms snapshot, delivery-local N days | same sources | C.2, C.4, C.5, C.6; approved actual seller timezone/terms required |
-| Tenant, revoke, restore/current actor and policy | BR-01/17, APP-02B.3–B.7 | C.1–C.6; B G-B01..05 and #53 dependency; do not reuse synthetic JWT/LocalDB as real auth |
+| Tenant, revoke, restore/current actor and policy | BR-01/17, APP-02B.3–B.7 | C.1–C.5 retain current server/SQL authority in DEV; physical restore/independent B evidence is assessed at C-PREPROD/C.6. Synthetic credentials/targets never authorize an operational tenant. |
 | Idempotency and recovery | BR-16, APP-01E, APP-02A | C.2–C.6; retain immutable command/source identity and negative cases |
 | Reporting source/asOf/unknown | BR-23, POL-23 | C.4–C.6; no dual-AR ledger or default zero for missing external data |
 | G-STOCK, G-CUT, G-IDEMP, G-LEDGER, G-INV; EV-01..15; full AC list | Product Verification scope | Outside C acceptance; remain `NOT_VERIFIED` for production/Pilot |
 
 ## 5. PREPROD blockers and CI risk ledger — snapshot 2026-11-19
+
+**Historical snapshot retained for provenance, not current GitHub issue status or C-DEV admission.** Some issues/PRs below have since closed. Consult current records before acting; a GitHub closure alone does not prove physical acceptance. For current development classification and re-entry triggers use the [operations debt register](app-02c-operations-debt.md). No old issue status below reinstates the superseded blanket development prerequisite.
 
 | Ref | Verified GitHub state | Gate impact / required next action |
 |---|---|---|
@@ -83,25 +68,26 @@ The plan is sequential: one independently reviewable **increment and PR at a tim
 | [#52](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/52), [#54](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/54), [#55](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/55) | OPEN — real PREPROD IAM/host/audit dependencies | Actual operator Identity SQL/refresh, host TLS/Vault/RUNTIME-01/02, immutable identity/security audit, approved MFA/key governance and independent physical evidence must be completed before C-PREPROD. |
 | [#60](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/60), [#64](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/64), [#65](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/65), [#67](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/67) | Security/DBA/physical evidence required; consult current issue states before C-PREPROD | SQL finalizer privilege retirement, physical tenant SQL DML boundary, Maker/Checker provenance and B.6 live CASE/policy binding must be independently established. |
 
-The prior C.0 interview and this draft are **not** a replacement for these physical dependencies or a source-level security waiver.
+The new DEV decision changes when application work may proceed. It is **not** physical completion or a source-level security waiver; concrete CI/security defects still require scoped assessment.
 
-## 6. Proposed PR sequencing and merge/closeout protocol
+## 6. PR sequencing and merge/closeout protocol
 
-1. **C.0 docs PR (first, only currently authorized increment):** propose changes to exactly the three new Markdown files in this review package; optionally update `docs/roadmap/app-02.md` and README to add *links and honest current states* in the same docs-only PR, provided independently reviewed. No C source file, migration, workflow, test, `business/` or lock changes. Do not copy this bundle's review memo into the repo by default.
-2. At C.0 docs review, **freeze authority**: 10 decisions; distinguish `OWNER_APPROVED`, `C-PLAN REVIEW_PENDING`, `CONTRACT_APPROVED` and physical verification. Verify relative links and cross-document states, including #59 and #73. Never call docs-only CI a PREPROD gate pass.
-3. Before C.1, request **new Owner decision** with exact allowed source/CI and permitted physical environment. Document risk/security and dependencies; no inherited authorization from C.0.
-4. For each later PR: one increment; scoped AC/BR/POL acceptance, explicit source-identity semantics, two-tenant independent SQL/negative coverage when applicable, no required skips, no rerun laundering, full APP-00A + frontend/PWA/Playwright and relevant B/APP-01E/APP-02A regressions on exact final reviewed HEAD. Updated HEAD invalidates previous review/CI evidence.
-5. Keep per-PR closeout with source SHA, artifact SHA-256, TestRunId, independent reviewer/Owner disposition, actual `PASS/FAIL/NOT_RUN/BLOCKED`, outstanding dependencies, accepted exceptions and next action. Never infer full AC-03/EV/P0 from a C slice.
-6. Before C.6 physical acceptance, satisfy `C-PREPROD`; freeze independent C fixture, obtain real two-tenant PREPROD operator evidence and preserve B.9 externally trusted reviewer/observer requirements. If solo-dev staffing cannot meet required independence, **halt that gate** pending explicit appropriate Owner decision and substantive controls—not a self-issued independent signature.
+1. **This documentation amendment:** record the approved DEV timing/scope, revise the active C gates and entrypoints, and add the handoff/debt register. Preserve the locked baseline and all historical physical evidence. No application, migration, test or workflow change is part of this amendment.
+2. **Next implementation PR: C.1.** Read the [DEV handoff](app-02c-dev-handoff.md); start R02 contract work and minimum API/SQL/browser composition, then deliver the Customer/ShipTo flow. Do not turn missing LAB/Vault/B.9 acceptance into another prerequisite project or another blanket Owner interview.
+3. **C.2–C.5:** continue sequentially under the same DEV authorization. Each PR owns its applicable contract detail, UI/API/SQL behavior and operations debt updates. A material business ambiguity pauses only its dependent behavior; record resolved technical choices and ask only for genuinely new Owner business decisions.
+4. For each implementation PR: scoped AC/BR/POL expected results, explicit command/source semantics, two-tenant SQL/negative coverage when applicable, meaningful UI integration evidence and relevant APP-01E/APP-02A/B regressions. Keep required APP-00A/frontend/PWA/dependency checks on the final reviewed HEAD. Do not turn failed/skipped required checks into PASS or claim a rerun fixed an unresolved defect.
+5. Record source SHA, environment/data scope, artifact hashes, TestRunId, expected/actual result, reviewer disposition, real `PASS/FAIL/NOT_RUN/BLOCKED`, remaining debt and next action in the increment's substantive closeout. Update this roadmap's progress in that same PR. No acknowledgement-only documentation chain and no full AC-03/EV/P0 claim from an A slice.
+6. **C.6 physical acceptance:** separately satisfy C-PREPROD, re-evaluate [operations debt](app-02c-operations-debt.md), freeze the physical C fixture and obtain the applicable real two-tenant operator/reviewer evidence. An unmet physical reviewer requirement blocks that physical claim; it does not revoke ongoing C.1–C.5 DEV authorization.
 
-## 7. Future C closeout/status vocabulary (proposal)
+## 7. Status vocabulary
 
-- `OWNER_APPROVED_DECISIONS_10_OF_10` — the ten interview choices have been made.
-- `C0_DOCS_PR_REVIEW_PENDING` — three proposed Markdown artifacts exist, **in docs-only PR / not merged**.
-- `C0_CONTRACT_APPROVED_DOCS_ONLY` — **future conditional**, after approved PR review, exact CI and merge.
-- `C1_C6_NOT_AUTHORIZED` — no permission to implement/execute later increment.
-- `C_PREPROD_NOT_VERIFIED` — no physical runtime admission and no real A_ONLINE E2E PASS.
-- `C_E2E_NOT_RUN` — no independent real UI→API→SQL acceptance yet.
-- `PRODUCTION_PILOT_GO_LIVE_NOT_AUTHORIZED` — separate Product Verification, EV/P0 and Tenant/Owner gates remain required.
+| State | Meaning on this amendment |
+|---|---|
+| `C0_CONTRACT_APPROVED_DOCS_ONLY` | C.0 baseline reviewed and merged in PR #77; original business decisions retained. |
+| `C_DEV_AUTHORIZED` | Owner approved C.1–C.5 source/migrations/UI and bounded integrated DEV execution on 2026-11-22. |
+| `NOT_STARTED` / `IN_PROGRESS` / `IMPLEMENTED` | Per-increment implementation progress, separate from permission and testing. C.1–C.5 are currently `NOT_STARTED`. |
+| `DEV_INTEGRATION_NOT_RUN` / scoped `DEV_INTEGRATION_VERIFIED` | Actual development UI/API/SQL evidence. All C integrated runs are currently `NOT_RUN`; record the scope before using a verified label. |
+| `C_PREPROD_NOT_VERIFIED` / `C_E2E_NOT_RUN` | Physical operational admission and C.6 results remain unearned. A real SQL DEV run is still a DEV result. |
+| `PRODUCTION_PILOT_GO_LIVE_NOT_AUTHORIZED` | Separate Product Verification, EV/P0 and Owner/Tenant admission remain required. |
 
-**No future label is earned automatically by drafting this roadmap or by closing the C.0 docs PR.**
+The old blanket `C1_C6_NOT_AUTHORIZED` is historical. It must not be used to reject C.1–C.5 DEV work covered by the new decision; C.6 keeps its separate physical scope.
