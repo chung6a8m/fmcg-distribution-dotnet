@@ -31,5 +31,5 @@ The automated run uses a full browser, Kestrel and two nonce-owned LocalDB tenan
 ## DEV acceptance
 
 1. Verify API shapes on guarded LocalDB. Check Confirm without reserve, policy failures and ShipTo freshness, then partial and full reservation, insufficient/over-reservation, actor/tenant denial, replay/conflict, transactional rollback and no legacy Load bypass.
-2. Reuse the C.1 launcher and browser harness. From the actual web app, create a Customer and ShipTo, create a draft, Confirm and reserve in two steps. Observe each state and independently compare both tenant databases, frozen values and zero posting effects. Fixtures and CI evidence are synthetic only.
+2. Reuse the C.1 launcher and browser harness. Use the Customer seeded with the approved synthetic policy, create its ShipTo in the web app, then create a draft, Confirm and reserve in two steps. Observe each state and independently compare both tenant databases, frozen values and zero posting effects. Fixtures and CI evidence are synthetic only.
 3. Exercise full regression, retain execution and artifact IDs and submit one C.2 PR.
