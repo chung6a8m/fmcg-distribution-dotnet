@@ -10,14 +10,19 @@ public static class ScratchMigrator
 {
     public static void Migrate(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information, bool bindBeforeFeatureMigrations = false) =>
-        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations, beforeD1: false);
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations, throughVersion: null);
 
     public static void MigrateBeforeD1(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
-        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true, beforeD1: true);
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true, throughVersion: 202611220004);
+
+    public static void MigrateBeforeD2(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: 202611220007);
 
     private static void MigrateCore(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, bool beforeD1)
+        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -32,10 +37,10 @@ public static class ScratchMigrator
             throw new InvalidOperationException("Scratch database name does not match nonce and tenant.");
         if (!cb.DataSource.StartsWith(@"(localdb)\", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("APP-00A supports LocalDB scratch only.");
-        if (beforeD1 && (!string.Equals(cb.DataSource, @"(localdb)\MSSQLLocalDB", StringComparison.OrdinalIgnoreCase)
+        if (bindBeforeFeatureMigrations && (!string.Equals(cb.DataSource, @"(localdb)\MSSQLLocalDB", StringComparison.OrdinalIgnoreCase)
             || !string.IsNullOrEmpty(cb.AttachDBFilename) || !cb.IntegratedSecurity || cb.UserInstance
             || !string.IsNullOrEmpty(cb.FailoverPartner)))
-            throw new InvalidOperationException("The D.1 upgrade fixture requires the default integrated LocalDB scratch target.");
+            throw new InvalidOperationException("The feature upgrade fixture requires the default integrated LocalDB scratch target.");
 
         using var conn = new SqlConnection(connectionString);
         conn.Open();
@@ -65,8 +70,8 @@ public static class ScratchMigrator
             runner.MigrateUp(202611150001);
             BindTenant();
         }
-        if (beforeD1)
-            runner.MigrateUp(202611220004);
+        if (throughVersion is long version)
+            runner.MigrateUp(version);
         else
             runner.MigrateUp();
         BindTenant();

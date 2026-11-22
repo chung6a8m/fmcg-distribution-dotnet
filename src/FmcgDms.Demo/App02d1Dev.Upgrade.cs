@@ -16,7 +16,7 @@ internal sealed partial class App02d1Dev
     private sealed record UpgradeEvidence(long BeforeVersion, long AfterVersion, bool WrongMarkerDenied,
         bool WrongBindingDenied, HistoricalFacts Before, HistoricalFacts After);
 
-    internal async Task PrepareUpgrade(string tenant)
+    internal async Task PrepareUpgrade(string tenant, bool leaveAtD1 = false)
     {
         await run.Verify(tenant);
         string connection = run.Connection(tenant);
@@ -73,11 +73,13 @@ internal sealed partial class App02d1Dev
             """);
         HistoricalFacts before = await ObserveHistoricalFacts(connection);
 
-        ScratchMigrator.Migrate(connection, tenant, run.Id, LogLevel.Warning, bindBeforeFeatureMigrations: true);
+        ScratchMigrator.MigrateBeforeD2(connection, tenant, run.Id, LogLevel.Warning);
         await run.Verify(tenant);
         long afterVersion = await owner.QuerySingleAsync<long>("SELECT MAX(Version) FROM dbo.VersionInfo");
         HistoricalFacts after = await ObserveHistoricalFacts(connection);
         upgrade.Add(tenant, new(beforeVersion, afterVersion, markerDenied, bindingDenied, before, after));
+        if (!leaveAtD1)
+            ScratchMigrator.Migrate(connection, tenant, run.Id, LogLevel.Warning, bindBeforeFeatureMigrations: true);
     }
 
     private bool RefusedMigration(string connection, string tenant, string reason)

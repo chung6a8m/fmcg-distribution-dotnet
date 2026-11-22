@@ -49,6 +49,7 @@ export function SalesWorkspace() {
     <header className="page-heading c1-header">
       <div><h1>Sales A</h1><p>DEV tổng hợp{session && ' · ' + session.identity.tenantId}</p></div>
       <div className="button-row"><ThemeSelect /><a className="page-link" href="/sales/b-stock">Kho B · DEV</a>
+        <a className="page-link" href="/sales/b-sale">Bán và giao hàng B · DEV</a>
         {session && <Button onClick={() => setSession(null)}>Đổi phiên DEV</Button>}
       </div>
     </header>
