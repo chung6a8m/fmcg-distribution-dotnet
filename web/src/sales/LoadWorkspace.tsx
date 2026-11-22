@@ -176,6 +176,7 @@ export function LoadWorkspace() {
       <p>APP-02C.3 · DEV</p>
       <ThemeSelect />
       <a className="page-link" href="/sales/orders">Đơn A và giữ hàng</a>
+      <a className="page-link" href="/sales/delivery">Giao hàng và công nợ A</a>
     </header>
     {!session ? <form className="panel panel-content" onSubmit={connect}>
       <Field name="token" type="password" label="Mã truy cập DEV" autoComplete="off" required />

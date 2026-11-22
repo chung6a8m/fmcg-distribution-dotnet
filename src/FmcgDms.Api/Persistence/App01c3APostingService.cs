@@ -44,7 +44,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
         public string? ReasonCode { get; set; }
     }
 
-    private sealed class TripScope
+    internal sealed class TripScope
     {
         public Guid VehicleLocationId { get; set; }
         public DateTime BusinessDate { get; set; }
@@ -53,7 +53,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
         public bool VehicleActive { get; set; }
     }
 
-    private sealed class FrozenRight
+    internal sealed class FrozenRight
     {
         public Guid ManifestLineId { get; set; }
         public Guid LoadSourceLineId { get; set; }
@@ -379,6 +379,16 @@ public sealed class App01c3APostingService(TenantConnections connections)
             return BusinessCommandOutcome.Rejected("A_DUE_DATE_INVALID");
         }
 
+        return await PostValidatedDelivery(db, tx, tenant, actor, commandId, request, trip, right,
+            frozen, payable, due, ct);
+    }
+
+    internal static async Task<BusinessCommandOutcome> PostValidatedDelivery(
+        SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid commandId,
+        PostAPartialDeliveryCommand request, TripScope trip, FrozenRight right, FrozenOrderTotals frozen,
+        decimal payable, DateTime due, CancellationToken ct, Guid? evidence = null, Guid? amendment = null,
+        DateTime? occurred = null, decimal? priorLineQuantity = null)
+    {
         // Both B20 and A25 derive cost from exactly the same source-backed
         // vehicle on-hand, with four-decimal moving-average rounding.
         var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql("""
@@ -440,18 +450,22 @@ public sealed class App01c3APostingService(TenantConnections connections)
         // is in the same SERIALIZABLE SQL transaction as the command envelope.
         Guid sourceId = Guid.NewGuid(), sourceLine = Guid.NewGuid();
         Guid deliveryId = Guid.NewGuid(), itemId = Guid.NewGuid();
+        var sourceParameters = new DynamicParameters(new
+        {
+            Id = sourceId, Line = sourceLine, Tenant = tenant, Command = commandId, Number = request.SourceNumber,
+            Actor = actor, Customer = request.CustomerId, Trip = request.TripId, Sku = request.SkuId,
+            Qty = request.BaseQuantity, Payable = payable
+        });
+        sourceParameters.Add("Occurred", occurred, DbType.DateTime2);
         await db.ExecuteAsync(Sql("""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
                 SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc)
             VALUES(@Id,@Tenant,@Command,N'A_DELIVERY',@Number,@Actor,
-                @Customer,@Trip,SYSUTCDATETIME());
+                @Customer,@Trip,COALESCE(@Occurred,SYSUTCDATETIME()));
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,
                 SkuId,BaseQuantity,Amount)
             VALUES(@Line,@Tenant,@Id,1,@Sku,@Qty,@Payable);
-            """, new { Id = sourceId, Line = sourceLine, Tenant = tenant,
-                Command = commandId, Number = request.SourceNumber, Actor = actor,
-                Customer = request.CustomerId, Trip = request.TripId,
-                Sku = request.SkuId, Qty = request.BaseQuantity, Payable = payable }, tx, ct));
+            """, sourceParameters, tx, ct));
 
         if (await db.ExecuteAsync(Sql("""
             UPDATE dbo.StockRight SET ConsumedBaseQuantity=ConsumedBaseQuantity+@Qty,
@@ -476,10 +490,11 @@ public sealed class App01c3APostingService(TenantConnections connections)
             INSERT dbo.SaleDelivery(Id,TenantId,TripId,CustomerId,ShipToSnapshotId,
                 TripManifestLineId,LoadSourceLineId,StockRightId,RightKind,SkuId,
                 AOrderId,AOrderLineId,BusinessSourceId,BusinessSourceKind,BusinessSourceLineId,
-                BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible)
+                BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible,
+                C4EvidenceId,C4ShipToAmendmentId,C4PriorLineQuantity)
             VALUES(@Delivery,@Tenant,@Trip,@Customer,@ShipTo,@ManifestLine,
                 @LoadLine,@Right,'A',@Sku,@Order,@OrderLine,@Source,N'A_DELIVERY',@SourceLine,
-                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0);
+                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0,@Evidence,@Amendment,@PriorLineQuantity);
             INSERT dbo.DeliveryStockIssue(Id,TenantId,SaleDeliveryId,
                 BusinessSourceLineId,TripManifestLineId,SkuId,BaseQuantity,CostAmount)
             VALUES(@Issue,@Tenant,@Delivery,@SourceLine,@ManifestLine,@Sku,@Qty,@Cost);
@@ -493,7 +508,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 LoadLine = right.LoadSourceLineId, Right = right.StockRightId,
                 Sku = request.SkuId, Source = sourceId, SourceLine = sourceLine,
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
-                Date = trip.BusinessDate, Due = due }, tx, ct));
+                Date = trip.BusinessDate, Due = due, Evidence = evidence, Amendment = amendment, PriorLineQuantity = priorLineQuantity }, tx, ct));
 
         var effects = new[]
         {
@@ -541,7 +556,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
         return BusinessCommandOutcome.Applied("A_PARTIAL_DELIVERY_POSTED", sourceId);
     }
 
-    private sealed class FrozenOrderTotals
+    internal sealed class FrozenOrderTotals
     {
         public int OrderLines { get; set; }
         public int FrozenLines { get; set; }

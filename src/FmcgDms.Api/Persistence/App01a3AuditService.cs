@@ -48,6 +48,9 @@ public sealed class App01a3AuditService(TenantConnections connections)
         public decimal ConfirmedBaseQuantity { get; set; }
         public decimal UnitPriceSnapshot { get; set; }
         public int TermsDaysSnapshot { get; set; }
+        public decimal? C4PriorLineQuantity { get; set; }
+        public decimal? C4Discount { get; set; }
+        public decimal? C4Tax { get; set; }
         public decimal? IssuedQuantity { get; set; }
         public decimal? IssuedCost { get; set; }
         public decimal? ArOriginal { get; set; }
@@ -243,7 +246,8 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 SELECT d.Id AS DeliveryId,d.BusinessSourceLineId,
                     d.BaseQuantity,d.PayableAmount,d.CostAmount,d.BusinessDate,
                     snap.ConfirmedBaseQuantity,snap.UnitPriceSnapshot,
-                    snap.TermsDaysSnapshot,
+                    snap.TermsDaysSnapshot,d.C4PriorLineQuantity,
+                    cp.DiscountPerUnit AS C4Discount,cp.TaxRate AS C4Tax,
                     i.BaseQuantity AS IssuedQuantity,i.CostAmount AS IssuedCost,
                     ar.OriginalAmount AS ArOriginal,
                     ar.AppliedAmount-COALESCE(laterAr.Applied,0) AS ArApplied,
@@ -260,6 +264,8 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 JOIN dbo.AConfirmedLineSnapshot snap
                     ON snap.TenantId=d.TenantId AND snap.AOrderLineId=d.AOrderLineId
                     AND snap.AOrderId=d.AOrderId AND snap.SkuId=d.SkuId
+                LEFT JOIN dbo.C2LinePolicy lp ON lp.TenantId=snap.TenantId AND lp.OrderLineId=snap.AOrderLineId
+                LEFT JOIN dbo.C2CommercialPolicy cp ON cp.TenantId=lp.TenantId AND cp.Id=lp.PolicyId
                 LEFT JOIN dbo.DeliveryStockIssue i ON i.TenantId=d.TenantId
                     AND i.SaleDeliveryId=d.Id
                 LEFT JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId
@@ -393,13 +399,25 @@ public sealed class App01a3AuditService(TenantConnections connections)
                 bool Leg(string key, string kind, decimal qty, decimal amount) =>
                     legs.Count(e => e.EffectKey == key && e.LedgerKind == kind
                         && e.QuantityDelta == qty && e.AmountDelta == amount) == 1;
+                bool c4 = p.C4PriorLineQuantity.HasValue;
                 bool dateValid = p.DueBusinessDate.HasValue
-                    && p.TermsDaysSnapshot is >= 1 and <= 365
+                    && p.TermsDaysSnapshot >= (c4 ? 0 : 1) && p.TermsDaysSnapshot <= 365
                     && p.BusinessDate.Date.AddDays(p.TermsDaysSnapshot)
                         == p.DueBusinessDate.Value.Date;
+                bool amountValid = p.UnitPriceSnapshot > 0 && p.PayableAmount == p.BaseQuantity * p.UnitPriceSnapshot;
+                if (c4)
+                {
+                    amountValid = false;
+                    if (p.C4Discount is decimal discount && p.C4Tax is decimal tax)
+                    {
+                        decimal unit = (p.UnitPriceSnapshot - discount) * (1 + tax);
+                        decimal prior = p.C4PriorLineQuantity!.Value;
+                        decimal Gross(decimal qty) => decimal.Round(qty * unit, 4, MidpointRounding.AwayFromZero);
+                        amountValid = p.PayableAmount == Gross(prior + p.BaseQuantity) - Gross(prior);
+                    }
+                }
                 if (p.BaseQuantity <= 0 || p.BaseQuantity > p.ConfirmedBaseQuantity
-                    || p.UnitPriceSnapshot <= 0
-                    || p.PayableAmount != p.BaseQuantity * p.UnitPriceSnapshot
+                    || !amountValid
                     || p.IssuedQuantity != p.BaseQuantity || p.IssuedCost != p.CostAmount
                     || p.ArOriginal != p.PayableAmount || p.ArApplied != 0
                     || p.ArOutstanding != p.PayableAmount || !dateValid

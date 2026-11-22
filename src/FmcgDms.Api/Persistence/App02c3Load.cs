@@ -177,8 +177,8 @@ public sealed partial class App01a2CommandService
                 WHERE l.TenantId=r.TenantId AND l.StockRightId=r.Id AND l.IsC3=1
             ) totals
             WHERE r.TenantId=@Tenant AND r.TripId=@Trip AND r.RightKind='A' AND r.Status='HELD'
-                AND r.ConsumedBaseQuantity=0 AND r.ReleasedBaseQuantity=0 AND o.Status='CONFIRMED'
-                AND totals.Loaded<=r.GrantedBaseQuantity
+                AND r.ReleasedBaseQuantity=0 AND o.Status IN ('CONFIRMED','PARTIALLY_DELIVERED')
+                AND r.ConsumedBaseQuantity<=totals.Loaded AND totals.Loaded<=r.GrantedBaseQuantity
             """;
         string rightFilter = rightIds is null ? "" : " AND r.Id IN @Ids";
         return db.QueryAsync<C3RightView>(Sql(sql + rightFilter + " ORDER BY w.Code,sku.Code,r.Id",

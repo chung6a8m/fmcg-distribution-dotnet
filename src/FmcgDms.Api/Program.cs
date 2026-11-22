@@ -49,6 +49,9 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App02c2Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c3Routes.Map(app);
+    if (app.Configuration.GetValue<bool>("App02C4:Enabled") && app.Configuration.GetValue<bool>("App02C3:Enabled")
+        && app.Configuration.GetValue<bool>("App02C2:Enabled"))
+        App02c4Routes.Map(app);
 }
 
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))

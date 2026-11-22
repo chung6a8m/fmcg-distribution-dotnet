@@ -10,7 +10,7 @@ public sealed record C2Identity(string TenantId, string ActorId, string SessionI
 public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<C2Option> Trips,
     IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses);
 public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, decimal Ordered, decimal Reserved,
-    decimal? UnitPrice, int? PolicyVersion, int? TermsDays);
+    decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered);
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
     Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines);
 
@@ -19,7 +19,7 @@ public sealed partial class App01a2CommandService
     private sealed record C2Header(Guid Id, string Customer, string Trip, string ShipTo,
         DateTime? BusinessDate, Guid? ConfirmSourceId);
     private sealed record C2LineRow(Guid OrderId, Guid? LineId, string Sku, string BaseUom, decimal Ordered,
-        decimal Reserved, decimal? UnitPrice, int? PolicyVersion, int? TermsDays);
+        decimal Reserved, decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered);
 
     public Task<C2Catalog> CatalogC2(ClaimsPrincipal principal, CancellationToken ct) =>
         ReadC2(principal, async (db, tx, tenant, _) =>
@@ -67,7 +67,8 @@ public sealed partial class App01a2CommandService
                 WHERE d.TenantId=@Tenant ORDER BY d.Id;
                 SELECT d.DraftId AS OrderId,ol.Id AS LineId,s.Code AS Sku,COALESCE(p.BaseUom,d.BaseUom) AS BaseUom,
                     d.BaseQuantity AS Ordered,COALESCE(h.Reserved,0) AS Reserved,
-                    a.UnitPriceSnapshot AS UnitPrice,p.PolicyVersion,a.TermsDaysSnapshot AS TermsDays
+                    a.UnitPriceSnapshot AS UnitPrice,p.PolicyVersion,a.TermsDaysSnapshot AS TermsDays,
+                    qty.Delivered
                 FROM dbo.C2OrderDraftLine d JOIN dbo.Sku s ON s.TenantId=d.TenantId AND s.Id=d.SkuId
                 LEFT JOIN dbo.AOrderLine ol ON ol.TenantId=d.TenantId AND ol.AOrderId=d.DraftId AND ol.LineNumber=d.LineNumber
                 LEFT JOIN dbo.AConfirmedLineSnapshot a ON a.TenantId=ol.TenantId AND a.AOrderLineId=ol.Id
@@ -77,6 +78,8 @@ public sealed partial class App01a2CommandService
                     FROM dbo.AReservation ar JOIN dbo.StockRight r ON r.TenantId=ar.TenantId AND r.Id=ar.StockRightId
                     WHERE ar.TenantId=ol.TenantId AND ar.AOrderLineId=ol.Id AND r.Status='HELD' AND r.RightKind='A'
                 ) h
+                CROSS APPLY (SELECT COALESCE(SUM(BaseQuantity),0) AS Delivered FROM dbo.SaleDelivery
+                    WHERE TenantId=ol.TenantId AND AOrderLineId=ol.Id AND RightKind='A') qty
                 WHERE d.TenantId=@Tenant ORDER BY d.DraftId,d.LineNumber;
                 """, new { Tenant = tenant }, tx, ct));
             var headers = (await grid.ReadAsync<C2Header>()).AsList();
@@ -84,8 +87,10 @@ public sealed partial class App01a2CommandService
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
-                    l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays)).ToArray();
+                    l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays, l.Delivered)).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
+                    orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
+                    orderLines.Any(l => l.Delivered > 0) ? "PARTIALLY_DELIVERED" :
                     orderLines.All(l => l.Reserved == l.Ordered) ? "CONFIRMED_FULLY_RESERVED" :
                     orderLines.Any(l => l.Reserved > 0) ? "CONFIRMED_PARTIALLY_RESERVED" : "CONFIRMED_UNRESERVED";
                 return new C2OrderView(h.Id, h.Customer, h.Trip, h.ShipTo, h.BusinessDate, h.ConfirmSourceId, status, orderLines);
@@ -101,7 +106,7 @@ public sealed partial class App01a2CommandService
                 JOIN dbo.App02ActorRoleGrant g WITH (HOLDLOCK)
                     ON g.TenantId=c.TenantId AND g.ActorId=@Actor AND g.RoleCode=s.RoleCode AND g.IsActive=1
                 WHERE c.TenantId=@Tenant AND c.ProducerId=@Producer AND c.CommandId=@Command
-                    AND s.LoadTripId IS NULL
+                    AND s.LoadTripId IS NULL AND s.DeliveryTripId IS NULL
                     AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor AND c.Status IN ('APPLIED','REJECTED')
                     AND ((@Sales=1 AND s.RoleCode='sales') OR (@Warehouse=1 AND s.RoleCode='warehouse'))
                 """, new
