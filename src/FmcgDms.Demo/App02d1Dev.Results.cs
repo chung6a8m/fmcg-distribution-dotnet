@@ -186,6 +186,19 @@ internal sealed partial class App02d1Dev
             ORDER BY l.RightKind,l.LoadedBaseQuantity
             """,s)).ToArray();
         Expect(string.Join(",",observed),"A|40.000|400.0000|2,B|10.000|100.0000|2,B|20.000|200.0000|2","manifest lineage and paired transfer legs");
+        var legs=(await read.QueryAsync<string>("""
+            SELECT CONCAT(l.RightKind,'|',l.LoadedBaseQuantity,'|',e.EffectKey,'|',e.QuantityDelta,'|',e.AmountDelta)
+            FROM dbo.TripManifestLine l JOIN dbo.LedgerEffect e
+                ON e.BusinessSourceLineId=l.LoadSourceLineId AND e.TenantId=l.TenantId
+            WHERE l.TripId=@Trip AND e.LedgerKind='PHYSICAL_STOCK'
+            ORDER BY l.RightKind,l.LoadedBaseQuantity,e.EffectKey
+            """,s)).ToArray();
+        Expect(string.Join(",",legs),string.Join(",",new[]
+        {
+            "A|40.000|PHYSICAL-IN|40.000|400.0000","A|40.000|PHYSICAL-OUT|-40.000|-400.0000",
+            "B|10.000|PHYSICAL-IN|10.000|100.0000","B|10.000|PHYSICAL-OUT|-10.000|-100.0000",
+            "B|20.000|PHYSICAL-IN|20.000|200.0000","B|20.000|PHYSICAL-OUT|-20.000|-200.0000"
+        }),"Exact signed MAIN/TRIP ledger deltas per source");
         var grants=(await read.QueryAsync<string>("""
             SELECT CONCAT(g.GrantedAmount,'|',g.ConsumedAmount,'|',a.PolicyVersion,'|',
                 IIF(g.ShipToSnapshotId=@ShipTo,'BOUND','WRONG'),'|',
