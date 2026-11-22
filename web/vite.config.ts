@@ -1,9 +1,17 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
+function apiTarget(mode: string) {
+  const port = loadEnv(mode, '.', 'APP02C1_API_').APP02C1_API_PORT
+  if (port && (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535)) {
+    throw new Error('Invalid APP02C1_API_PORT')
+  }
+  return port ? `http://127.0.0.1:${port}` : 'http://localhost:5116'
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
@@ -24,5 +32,5 @@ export default defineConfig({
       }
     })
   ],
-  server: { proxy: { '/health': 'http://localhost:5116', '/api': 'http://localhost:5116' } }
-})
+  server: { proxy: { '/health': apiTarget(mode), '/api': apiTarget(mode) } }
+}))

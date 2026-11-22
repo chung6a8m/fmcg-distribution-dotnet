@@ -28,7 +28,13 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
     /// Fail closed unless the signed synthetic tenant maps to its own, marked LocalDB scratch.
     /// Production APP-01 tenant connections must use a separate real-authenticated path.
     /// </summary>
-    public async Task<SqlConnection> OpenSyntheticScratchAsync(ClaimsPrincipal principal, CancellationToken ct)
+    public Task<SqlConnection> OpenSyntheticScratchAsync(ClaimsPrincipal principal, CancellationToken ct) =>
+        OpenScratchAsync(principal, ct, c1: false);
+
+    internal Task<SqlConnection> OpenApp02c1Async(ClaimsPrincipal principal, CancellationToken ct) =>
+        OpenScratchAsync(principal, ct, c1: true);
+
+    private async Task<SqlConnection> OpenScratchAsync(ClaimsPrincipal principal, CancellationToken ct, bool c1)
     {
         if ((!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest"))
             || !config.GetValue<bool>("SyntheticAuth:Enabled"))
@@ -48,6 +54,13 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
             throw new UnauthorizedAccessException("Synthetic diagnostics require a LocalDB scratch database.");
 
         string expectedNonce = name.Groups["nonce"].Value;
+        if (c1 && (!config.GetValue<bool>("App02C1:Enabled")
+            || !string.Equals(target.DataSource, @"(localdb)\MSSQLLocalDB", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(config["App02C1:Nonce"], expectedNonce, StringComparison.Ordinal)
+            || !target.IntegratedSecurity || target.UserInstance
+            || !string.IsNullOrEmpty(target.FailoverPartner)))
+            throw new UnauthorizedAccessException("C.1 requires its explicitly owned DEV session.");
+
         var connection = new SqlConnection(target.ConnectionString);
         try
         {

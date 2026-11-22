@@ -22,6 +22,7 @@ builder.Services.AddScoped<App02a3ProcessingService>();
 builder.Services.AddScoped<App02a3OutboxService>();
 builder.Services.AddScoped<App02a3CaseService>();
 builder.Services.AddScoped<App02a3CorrectionService>();
+builder.Services.AddScoped<App02c1Service>();
 builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
@@ -42,6 +43,9 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", scope = "APP-
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled"))
 {
+    if (app.Configuration.GetValue<bool>("App02C1:Enabled"))
+        App02c1Routes.Map(app);
+
     // Synthetic diagnostics ONLY. Not a production business API.
     var diag = app.MapGroup("/api/diagnostics").RequireAuthorization();
     diag.MapGet("/tenant", async (ClaimsPrincipal principal, TenantConnections db, CancellationToken ct) =>

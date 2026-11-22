@@ -1,0 +1,41 @@
+@layer components {
+  .c1-page { max-width: 1280px; }
+  .c1-header, .c1-session-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .c1-sign-in { max-width: 440px; }
+  .c1-layout {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) minmax(0, 3fr);
+    align-items: start;
+    gap: 16px;
+  }
+  .c1-detail, .c1-fields { display: grid; gap: 12px; min-width: 0; }
+  .c1-section-heading { padding: 0 0 8px; }
+  .c1-customers, .c1-rows { list-style: none; margin: 0; padding: 0; }
+  .c1-customers { display: grid; gap: 8px; }
+  .c1-customers button { display: grid; width: 100%; text-align: start; }
+  .c1-customers button span { font-weight: 400; }
+  .c1-customers [aria-current="true"] {
+    border-inline-start: 3px solid var(--fmcg-color-selection-indicator);
+    background: var(--fmcg-color-surface-subtle);
+  }
+  .c1-rows > li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .c1-rows > li + li { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
+  .c1-rows p { color: var(--fmcg-color-text-secondary); }
+  @media (max-width: 680px) {
+    .c1-layout, .c1-fields .field-pair { grid-template-columns: minmax(0, 1fr); }
+    .c1-page :is(.button, .page-link, input, select) { min-height: 48px; }
+  }
+}
