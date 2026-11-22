@@ -201,10 +201,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))
                 throw new InvalidOperationException("Only completed outcomes can be persisted.");
-            await db.ExecuteAsync(Sql("""
+            await db.ExecuteAsync(Sql($"""
                 UPDATE dbo.BusinessCommand
                 SET Status=@Status,OutcomeCode=@Outcome,ReasonCode=@Reason,
-                    CompletedAtUtc=SYSUTCDATETIME()
+                    CompletedAtUtc={App02c6Clock.SqlUtcNow}
                 WHERE TenantId=@Tenant AND Id=@Id AND Status=N'RECEIVED'
                 """, new
                 {
@@ -240,10 +240,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
     private static async Task InsertReceivedCommand(SqlConnection db, SqlTransaction tx, string tenant,
         string actor, IApp01aCommand request, Guid id, byte[] hash, string? role, Guid? loadTrip, Guid? deliveryTrip, CancellationToken ct)
     {
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
-                PayloadHashVersion,PayloadHash,ActorId,Status)
-            VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED')
+                PayloadHashVersion,PayloadHash,ActorId,Status,SubmittedAtUtc)
+            VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED',{App02c6Clock.SqlUtcNow})
             """, new { Id = id, Tenant = tenant, Producer = request.ProducerId, Command = request.CommandId,
                 Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
         if (role is not null)
@@ -325,10 +325,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         string actor, Guid? customerId, Guid? tripId, CancellationToken ct)
     {
         Guid id = Guid.NewGuid();
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
-                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc)
-            VALUES(@Id,@Tenant,@Command,@Kind,@Number,@Actor,@Customer,@Trip,SYSUTCDATETIME())
+                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc,RecordedAtUtc)
+            VALUES(@Id,@Tenant,@Command,@Kind,@Number,@Actor,@Customer,@Trip,{App02c6Clock.SqlUtcNow},{App02c6Clock.SqlUtcNow})
             """, new
             {
                 Id = id, Tenant = tenant, Command = commandRowId, Kind = kind,
@@ -626,7 +626,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_B", null,
                     request.SkuId, request.StockLocationId, request.BaseQuantity, 0, token);
                 return BusinessCommandOutcome.Applied("B_QUOTA_GRANTED", source);
-            }, ct);
+            }, ct, connections.UsesApp02c6Clock ? "warehouse" : null);
 
     public Task<BusinessCommandOutcome> GrantBCreditAsync(
         ClaimsPrincipal principal, GrantBCreditCommand request, CancellationToken ct) =>

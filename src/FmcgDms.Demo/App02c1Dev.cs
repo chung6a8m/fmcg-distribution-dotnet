@@ -37,11 +37,13 @@ internal static class App02c1Dev
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        bool c5 = increment == "App02C5";
+        bool c6 = increment == "App02C6";
+        if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
+        bool c5 = c6 || increment == "App02C5";
         bool c4 = c5 || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = c3 || increment == "App02C2";
-        string feature = c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -52,6 +54,7 @@ internal static class App02c1Dev
         Process? browser = null;
         Exception? failure = null;
         bool clipboardIssued = false;
+        var acceptance = c6 ? new App02c6Dev(root, run, source, apiSha256) : null;
         try
         {
             foreach (string tenant in DemoRun.Tenants)
@@ -65,16 +68,20 @@ internal static class App02c1Dev
                     VALUES(@tenant,@Actor,N'sales',1,N'c1-dev-launcher')
                     """, new { tenant, Actor });
                 if (await BusinessRows(db) != 0) throw new InvalidOperationException("C.1 DEV database was not empty.");
-                if (c2) await App02c2DevFixture.Seed(db, tenant, Actor);
-                if (c3 && tenant == "tenant-a") await App02c3DevFixture.Seed(db, tenant, Actor, !c4 && mode == "Verify");
-                if (c4 && tenant == "tenant-a") await App02c4DevFixture.Seed(db, tenant, Actor, mode == "Verify");
+                if (c2) await App02c2DevFixture.Seed(db, tenant, Actor, acceptance?.InitialTime.UtcDateTime);
+                if (c3 && (c6 || tenant == "tenant-a"))
+                    await App02c3DevFixture.Seed(db, tenant, Actor, c6 || (!c4 && mode == "Verify"));
+                if (c4 && (c6 || tenant == "tenant-a"))
+                    await App02c4DevFixture.Seed(db, tenant, Actor, mode == "Verify");
+                if (acceptance is not null) await acceptance.Prepare(db, tenant);
             }
             string apiUrl = $"http://127.0.0.1:{ApiPort}";
             var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath,
                 "--urls", $"http://localhost:{ApiPort}");
             // Only the child API receives the signing key and SQL credentials.
             foreach (string name in apiStart.Environment.Keys.Where(n =>
-                n.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase)
+                n.StartsWith("App02C6__", StringComparison.OrdinalIgnoreCase)
+                || n.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("ASPNETCORE_", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("SyntheticAuth__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("TenantDatabases__", StringComparison.OrdinalIgnoreCase)).ToArray())
@@ -97,6 +104,11 @@ internal static class App02c1Dev
             apiStart.Environment["Logging__LogLevel__Default"] = "Warning";
             foreach (string tenant in DemoRun.Tenants)
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
+            if (acceptance is not null)
+            {
+                await acceptance.SetClock(acceptance.CanonicalTime);
+                apiStart.Environment["App02C6__ClockFile"] = acceptance.ClockPath;
+            }
             api = Start(apiStart);
 
             using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
@@ -130,7 +142,7 @@ internal static class App02c1Dev
             }
 
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
@@ -142,7 +154,28 @@ internal static class App02c1Dev
             if (c4)
                 foreach (var (slot, tenant) in new[] { ("A", "tenant-a"), ("B", "tenant-b") })
                     browserStart.Environment["APP02C4_SALES_TOKEN_" + slot] = Token(key, tenant, ["sales"]);
+            if (acceptance is not null)
+            {
+                browserStart.Environment["APP02C6_CHECKPOINTS"] = acceptance.CheckpointPath;
+                browserStart.Environment["APP02C6_CANONICAL_UTC"] = acceptance.CanonicalTime.ToString("O");
+            }
             browser = Start(browserStart);
+            if (acceptance is not null)
+            {
+                await acceptance.ServeCheckpoints(browser, lifetime.Token);
+                await acceptance.Complete(browser.ExitCode, client, webUrl, tokenA, tokenB, Actor,
+                    Token(key, "tenant-a", ["sales", "case_checker"], App02c6Dev.Checker),
+                    Token(key, "tenant-a", ["system_admin"]),
+                    Token(key, "tenant-a", ["warehouse"]),
+                    () => Token(key, "tenant-a", roles, uniqueSession: true),
+                    async () =>
+                    {
+                        await Stop(api);
+                        api = Start(apiStart);
+                        await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
+                    }, lifetime.Token);
+                return;
+            }
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"{feature} browser verification exited {browser.ExitCode}.");
             if (c5)
@@ -332,14 +365,15 @@ internal static class App02c1Dev
         }
     }
 
-    private static string Token(string key, string tenant, string[] roles)
+    private static string Token(string key, string tenant, string[] roles, string actor = Actor, bool uniqueSession = false)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            iss = "fmcg-synthetic-app00", aud = "fmcg-synthetic-app00", sub = Actor, actor_id = Actor,
+            iss = "fmcg-synthetic-app00", aud = "fmcg-synthetic-app00", sub = actor, actor_id = actor,
             tenant_id = tenant, synthetic_role = roles,
-            iat = now, nbf = now - 1, exp = now + 900
+            iat = now, nbf = now - 1, exp = now + 900,
+            jti = uniqueSession ? Guid.NewGuid().ToString("N") : null
         });
         static string B64(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         string value = B64("""{"alg":"HS256","typ":"JWT"}"""u8.ToArray()) + "." + B64(payload);

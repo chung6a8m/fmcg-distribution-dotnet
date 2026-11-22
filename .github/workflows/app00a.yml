@@ -815,6 +815,9 @@ jobs:
       - name: APP-02C.5 Sales A workspace and historical AR through browser, API and LocalDB
         shell: pwsh
         run: ./scripts/Run-App02C5.ps1 -Verify
+      - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
+        shell: pwsh
+        run: ./scripts/Run-App02C6.ps1
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -828,6 +831,7 @@ jobs:
             web/test-results-app02c3/
             web/test-results-app02c4/
             web/test-results-app02c5/
+            web/test-results-app02c6/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web
