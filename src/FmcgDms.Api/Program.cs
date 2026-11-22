@@ -9,6 +9,7 @@ using FmcgDms.Api.Tenancy;
 var builder = WebApplication.CreateBuilder(args);
 SyntheticAuth.Configure(builder);
 builder.Services.AddSingleton<TenantConnections>();
+builder.Services.AddSingleton<App02d4Runtime>();
 builder.Services.AddScoped<App01a2CommandService>();
 builder.Services.AddScoped<App01b2CommandService>();
 builder.Services.AddScoped<App01c2BPostingService>();
@@ -33,6 +34,9 @@ if (app02d2)
 bool app02d3 = App02d3Runtime.Enabled(app.Configuration, app.Environment);
 if (app02d3)
     await App02d3Runtime.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(), CancellationToken.None);
+bool app02d4 = App02d4Runtime.Enabled(app.Configuration, app.Environment);
+if (app02d4)
+    await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
 bool app02c6 = !app02d1 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
@@ -79,6 +83,8 @@ else if (app02d1)
 
 if (app02d3)
     App02d3Routes.Map(app);
+if (app02d4)
+    app.Services.GetRequiredService<App02d4Runtime>().Map(app);
 
 bool legacySynthetic = (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")

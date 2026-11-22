@@ -1,0 +1,10 @@
+@layer components {
+  .d4-identifier { overflow-wrap: anywhere; }
+  .d4-table { overflow-x: auto; margin-block-start: var(--fmcg-space-12); }
+  .d4-table caption { text-align: start; }
+  .d4-table :is(th, td) { vertical-align: top; }
+  .d4-table:focus-visible {
+    outline: var(--fmcg-focus-width) solid var(--fmcg-color-focus-ring);
+    outline-offset: var(--fmcg-focus-offset);
+  }
+}
