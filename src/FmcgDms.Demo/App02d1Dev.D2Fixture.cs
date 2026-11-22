@@ -10,10 +10,10 @@ internal sealed record D2Scene(string Tenant, Guid Trip, Guid Customer, Guid Shi
 internal sealed partial class App02d1Dev
 {
     internal async Task<D2Scene> SeedD2(string tenant, string code, bool withOutlet = false, decimal grantCap = 100,
-        bool bindD2 = true, D3StockFixture? stock = null)
+        bool bindD2 = true, D3StockFixture? stock = null, DateTimeOffset? fixtureTime = null)
     {
         stock ??= new();
-        var scene = await Seed(tenant, code, grantCap, openingQuantity: stock.OpeningQuantity, openingValue: stock.OpeningValue);
+        var scene = await Seed(tenant, code, grantCap, openingQuantity: stock.OpeningQuantity, openingValue: stock.OpeningValue, fixtureTime: fixtureTime);
         await using (var owner = await Write(tenant))
             await owner.ExecuteAsync("""
                 INSERT dbo.C4DeliveryWriter (TenantId,TripId,ActorId) VALUES(@Tenant,@Trip,@actor);

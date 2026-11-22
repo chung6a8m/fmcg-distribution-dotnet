@@ -10,7 +10,13 @@ public static class ScratchMigrator
 {
     public static void Migrate(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information, bool bindBeforeFeatureMigrations = false) =>
-        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations, throughVersion: null);
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations, throughVersion: 202611220010);
+
+    // D.4 stays opt-in on its guarded LocalDB rehearsal path.
+    public static void MigrateD4(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: 202611230001);
 
     public static void MigrateBeforeD1(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
@@ -56,6 +62,9 @@ public static class ScratchMigrator
 
         string? bound = conn.ExecuteScalar<string?>(
             "IF OBJECT_ID(N'dbo.AppTenantBinding', N'U') IS NOT NULL SELECT TOP(1) TenantId FROM dbo.AppTenantBinding");
+        if (throughVersion == 202611230001 && (bound != tenantId || conn.ExecuteScalar<string?>(
+            "IF OBJECT_ID(N'dbo.LocalDemoOwner', N'U') IS NOT NULL SELECT TOP(1) RunId FROM dbo.LocalDemoOwner") != expectedNonce))
+            throw new InvalidOperationException("D.4 requires an existing tenant binding before migration.");
         if (bound is not null && bound != tenantId)
             throw new InvalidOperationException("DB is already bound to a different tenant.");
 

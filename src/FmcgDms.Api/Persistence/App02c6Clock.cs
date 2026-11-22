@@ -40,7 +40,7 @@ internal static class App02c6Clock
             "EXEC sys.sp_set_session_context @key=@Key,@value=@Utc,@read_only=1", args, cancellationToken: ct));
     }
 
-    private static DateTime Read(string path)
+    internal static DateTime Read(string path)
     {
         string value = File.ReadAllText(path).Trim();
         if (!DateTime.TryParseExact(value, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var instant)

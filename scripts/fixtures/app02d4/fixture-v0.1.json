@@ -1,0 +1,20 @@
+{
+  "version": "D4-v0.1",
+  "tenants": { "tenant-a": "D4-T1", "tenant-b": "D4-T2" },
+  "currencyUnit": "SYNTHETIC_UNITLESS",
+  "timezone": "Asia/Bangkok",
+  "profile": "MOCK-V1",
+  "setupUtc": "2026-11-23T03:05:00Z",
+  "operationUtc": "2026-11-23T03:45:00Z",
+  "fromUtc": "2026-11-23T03:10:00Z",
+  "partialCutoffUtc": "2026-11-23T03:30:00Z",
+  "fullCutoffUtc": "2026-11-23T04:00:00Z",
+  "correctionUtc": "2026-11-23T04:05:00Z",
+  "finalAsOfUtc": "2026-11-23T04:10:00Z",
+  "deliveries": [
+    { "key": "A10", "seller": "D4-A", "occurredUtc": "2026-11-23T03:10:00Z", "quantity": 10 },
+    { "key": "A15", "seller": "D4-A", "occurredUtc": "2026-11-23T03:20:00Z", "quantity": 15 },
+    { "key": "B20", "seller": "D4-B", "occurredUtc": "2026-11-23T03:30:00Z", "quantity": 20, "cash": 200 }
+  ],
+  "missingChannel": { "seller": "D4-NO-CHANNEL", "occurredUtc": "2026-11-23T03:35:00Z" }
+}
