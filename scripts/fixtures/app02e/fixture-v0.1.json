@@ -1,0 +1,356 @@
+{
+  "version": "APP-02E-DEV-v0.1",
+  "status": "OWNER_APPROVAL_PENDING",
+  "executionStatus": "NOT_RUN",
+  "baseline": {
+    "commit": "fb2bb1f69425bf30e8dbefc613b6f83c8c0e0704",
+    "tree": "73b64295b70de7993805ac03f6ac62f2ad8614b1"
+  },
+  "environment": {
+    "class": "SYNTHETIC_NONPRODUCTION",
+    "platform": "Windows",
+    "instance": "(localdb)\\MSSQLLocalDB",
+    "dotnetSdk": "10.0.404",
+    "nodeMajor": 26,
+    "tenants": [
+      "tenant-a",
+      "tenant-b"
+    ],
+    "businessUnit": "SYNTHETIC_UNITLESS",
+    "invoiceEligible": false,
+    "offlineBusinessWrites": false,
+    "bNoChannel": "BLOCKED",
+    "concurrency": "sequential suites; nonce-owned scratch per parent runner",
+    "temporaryGuardDatabases": "track owned probe DBs and cleanup; outside case-scope denominator"
+  },
+  "parentEvidence": {
+    "textSha256Normalization": "UTF-8, CRLF normalized to LF; all paths relative to repository root",
+    "sha256": {
+      "business/acceptance.md": "CA8D8654E79B8F5B4D2CA8C0BB5417892ABA3FB2C70754380382DECCDBE41F8B",
+      "business/reference-data/expected-results/golden-oracles.json": "8273CE3114EBFF437A616B3E77022707CD3629EE743870AA745ACCE75E1562CF",
+      "business/reference-data/expected-results/additional-oracles.json": "F3BB3EF11090FA6B550B2EB929CAAE86CD432F57C95489CA3168664EFF97D0A1",
+      "tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json": "8A38FEF7EA95156A4C0DD6282BE99F47840B0FAD8086813151AF70B0D9E7E7A1",
+      "docs/roadmap/app-02c6-localdb-acceptance-matrix.md": "04743B66AF77F02D3DA86EED229498D6AC947C201B5C189A3BF79BB96DFA6290",
+      "docs/roadmap/app-02d1-dev-acceptance-matrix.md": "E776C40ADEA1262F2C1B0052B32549747195C128EF2A9560EACC18E521EB9BCF",
+      "docs/roadmap/app-02d2-dev-acceptance-matrix.md": "210757E3799F300737F6D6BE63196A3934C1C89B0F3E8388D7699AA717344165",
+      "scripts/fixtures/app02d2/fixture-v0.1.json": "17812B16601E1DCBDB6477C6EE4C8F0FE5E8FB62A10F4B0A136076713ECBBFCD",
+      "scripts/fixtures/app02d2/expected-v0.1.json": "06630EC3464F1058BAC1509E2BE46E230CD52B49F17D2B9E59598C159A92285D",
+      "docs/roadmap/app-02d3-dev-acceptance-matrix.md": "573A81A0106F2D2B1CE444D55E0C36CAB8619E9F5ABFC629104A17FAAFAB9BFF",
+      "scripts/fixtures/app02d3/fixture-v0.1.json": "C453346BCDF5AE74403FCB3E2057CFD49D44ECD8B7D05A0804C308EEF463B0A5",
+      "docs/roadmap/app-02d4-dev-acceptance-matrix.md": "502E7FDC58CA41FB8C94AD72E5B41DD21FAAEE3B815E7AD51DCB8A9BDCEC165E",
+      "scripts/fixtures/app02d4/fixture-v0.1.json": "BF3DAFBB0C65397155FD625916FE30B9AEEA22E18F279F61E70131367765B987",
+      "scripts/fixtures/app02d4/expected-results-v0.1.json": "6D50CC1CED8A14F8FE4595BE04EA719580632E645B8E383ED63865EBCB226752"
+    }
+  },
+  "suites": [
+    {
+      "matrixRow": "E-02",
+      "suite": "A4",
+      "caseIds": [
+        "A11-01",
+        "A11-02",
+        "A11-03",
+        "A11-04",
+        "A11-05",
+        "A11-06",
+        "A11-07",
+        "A11-08",
+        "A11-09",
+        "A11-10",
+        "A11-11",
+        "A11-12"
+      ],
+      "perCaseScope": [
+        "tenant-a",
+        "tenant-b"
+      ],
+      "fixtureClock": "suite-native: real test runtime for worker/fault/restart; recorded UTC",
+      "run": "dotnet test --solution FmcgDms.slnx -c Release -- --report-trx --filter-method 'FmcgDms.Api.Tests.App01e2CrossCommandRaceTests.App02a4_A11_*'",
+      "validator": "scripts/Verify-App02A4.ps1",
+      "checks": {
+        "sqlReports": 24,
+        "sqlCheckpoints": 60,
+        "sqlCells": 1440,
+        "mutationSentinels": 5
+      }
+    },
+    {
+      "matrixRow": "E-03",
+      "suite": "C6",
+      "caseIds": [
+        "DEV-01",
+        "DEV-02",
+        "DEV-03",
+        "DEV-04",
+        "DEV-05",
+        "DEV-06",
+        "DEV-07",
+        "DEV-08",
+        "DEV-09",
+        "DEV-10",
+        "DEV-11"
+      ],
+      "scopesByCase": {
+        "DEV-01": [
+          "tenant-a",
+          "tenant-b"
+        ],
+        "DEV-02": [
+          "tenant-a"
+        ],
+        "DEV-03": [
+          "tenant-a",
+          "tenant-b"
+        ],
+        "DEV-04": [
+          "tenant-a"
+        ],
+        "DEV-05": [
+          "tenant-a",
+          "tenant-b"
+        ],
+        "DEV-06": [
+          "tenant-a",
+          "tenant-b"
+        ],
+        "DEV-07": [
+          "tenant-a"
+        ],
+        "DEV-08": [
+          "tenant-a"
+        ],
+        "DEV-09": [
+          "A/B"
+        ],
+        "DEV-10": [
+          "tenant-a"
+        ],
+        "DEV-11": [
+          "tenant-a"
+        ]
+      },
+      "fixtureClock": "2026-10-31T17:05:00Z canonical; advanced start 2026-10-31T16:00:00Z; original case offsets",
+      "run": "scripts/Run-App02C6.ps1",
+      "requiredBrowserScenarios": 3
+    },
+    {
+      "matrixRow": "E-04",
+      "suite": "D1",
+      "caseIds": [
+        "D1-01",
+        "D1-02",
+        "D1-03",
+        "D1-04",
+        "D1-05",
+        "D1-06",
+        "D1-07",
+        "D1-08",
+        "D1-09",
+        "D1-10",
+        "D1-11",
+        "D1-12",
+        "D1-13",
+        "D1-14"
+      ],
+      "perCaseScope": [
+        "tenant-a",
+        "tenant-b"
+      ],
+      "fixtureClock": "2026-11-22T04:00:00Z plus original window probes",
+      "run": "scripts/Run-App02D1.ps1",
+      "requiredBrowserScenarios": 2
+    },
+    {
+      "matrixRow": "E-05",
+      "suite": "D2",
+      "caseIds": [
+        "D2-01",
+        "D2-02",
+        "D2-03",
+        "D2-04",
+        "D2-05",
+        "D2-06",
+        "D2-07",
+        "D2-08",
+        "D2-09",
+        "D2-10",
+        "D2-11",
+        "D2-12",
+        "D2-13",
+        "D2-14",
+        "D2-15",
+        "D2-16",
+        "D2-17",
+        "D2-18"
+      ],
+      "perCaseScope": [
+        "tenant-a",
+        "tenant-b"
+      ],
+      "fixtureClock": "2026-11-22T04:00:00Z plus original window probes",
+      "run": "scripts/Run-App02D2.ps1",
+      "requiredBrowserScenarios": 12
+    },
+    {
+      "matrixRow": "E-06",
+      "suite": "D3",
+      "caseIds": [
+        "D3-01",
+        "D3-02",
+        "D3-03",
+        "D3-04",
+        "D3-05",
+        "D3-06",
+        "D3-07",
+        "D3-08",
+        "D3-09",
+        "D3-10",
+        "D3-11",
+        "D3-12",
+        "D3-13",
+        "D3-14",
+        "D3-15",
+        "D3-16",
+        "D3-17",
+        "D3-18"
+      ],
+      "perCaseScope": [
+        "tenant-a",
+        "tenant-b"
+      ],
+      "fixtureClock": "2026-11-22T04:00:00Z plus original case offsets",
+      "run": "scripts/Run-App02D3.ps1",
+      "requiredBrowserScenarios": 2,
+      "checks": {
+        "ac03Cells": 182
+      }
+    },
+    {
+      "matrixRow": "E-07",
+      "suite": "D4",
+      "caseIds": [
+        "D4-01",
+        "D4-02",
+        "D4-03",
+        "D4-04",
+        "D4-05",
+        "D4-06",
+        "D4-07",
+        "D4-08",
+        "D4-09",
+        "D4-10",
+        "D4-11",
+        "D4-12",
+        "D4-13",
+        "D4-14",
+        "D4-15",
+        "D4-16",
+        "D4-17",
+        "D4-18"
+      ],
+      "perCaseScope": [
+        "tenant-a",
+        "tenant-b"
+      ],
+      "fixtureClock": "Reuse fixture D4-v0.1, including 2026-11-23T04:00:00Z and 04:10Z asOf",
+      "run": "scripts/Run-App02D4.ps1",
+      "requiredBrowserScenarios": 2
+    }
+  ],
+  "count": {
+    "suites": 6,
+    "caseIds": 91,
+    "caseScopeRuns": 175
+  },
+  "anchors": {
+    "C6": {
+      "delivery": {
+        "qty": 25,
+        "openAr": 375,
+        "cogs": 250,
+        "remainingOnTruck": 15
+      },
+      "dueDatesFromFrozenTerms": [
+        "2026-11-08",
+        "2026-11-15",
+        "2026-11-22"
+      ],
+      "openArBeforeAllocation": 375,
+      "openArAfterAllocation": 275
+    },
+    "D1": {
+      "openingQuantity": 100,
+      "openingValue": 1000,
+      "aReservation": 40,
+      "bQuota": 30,
+      "creditCap": 100,
+      "bLoads": [
+        10,
+        20
+      ],
+      "loadedMainQuantity": 30,
+      "loadedTruckQuantity": 70,
+      "preDeliveryAr": 0,
+      "preDeliveryCogs": 0
+    },
+    "D2": {
+      "salesAndCredit": "Use scripts/fixtures/app02d2/expected-v0.1.json for every case"
+    },
+    "D3": {
+      "closing": {
+        "mainQty": 55,
+        "mainValue": 550,
+        "truckQty": 0,
+        "cogs": 450,
+        "arA": 375,
+        "arB": 100,
+        "custody": 0,
+        "fund": 200,
+        "aHeld": 15
+      },
+      "ac03Oracle": "business/reference-data/expected-results/golden-oracles.json#AC-03"
+    },
+    "D4": {
+      "columns": [
+        "quantity",
+        "gross",
+        "ar",
+        "cost"
+      ],
+      "expected": [
+        45,
+        675,
+        475,
+        450
+      ],
+      "incorrect": [
+        45,
+        685,
+        485,
+        450
+      ],
+      "correction": [
+        0,
+        -10,
+        -10,
+        0
+      ],
+      "corrected": [
+        45,
+        675,
+        475,
+        450
+      ],
+      "firstMatchingLines": 2,
+      "finalMatchingLines": 3
+    }
+  },
+  "externalGates": {
+    "preprod": "FOUNDATION_ONLY / NO_GO",
+    "cPreprod": "BLOCKED / NOT_VERIFIED",
+    "physicalE2E": "NOT_RUN",
+    "p0": "NOT_VERIFIED",
+    "pilot": "NOT_AUTHORIZED",
+    "goLive": "NOT_AUTHORIZED"
+  }
+}
