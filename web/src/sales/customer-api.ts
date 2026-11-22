@@ -23,9 +23,13 @@ export class HttpError extends Error {
 }
 
 export async function request(token: string, path: string, body?: string) {
+  return requestSalesApi(base, token, path, body)
+}
+
+export async function requestSalesApi(api: string, token: string, path: string, body?: string) {
   const headers = new Headers({ Authorization: 'Bearer ' + token, Accept: 'application/json' })
   if (body !== undefined) headers.set('Content-Type', 'application/json')
-  return fetch(base + path, {
+  return fetch(api + path, {
     method: body === undefined ? 'GET' : 'POST', headers, body, cache: 'no-store',
     signal: AbortSignal.timeout(15_000), redirect: 'error',
   })

@@ -16,7 +16,7 @@ internal static class App02c1Dev
     private const string BrowserTest = "web/e2e-app02c1/customers.spec.ts";
     private const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
-    internal static async Task Run(string mode, string root, string source)
+    internal static async Task Run(string mode, string root, string source, bool c2)
     {
         if (mode is not ("Verify" or "Interactive")) throw new ArgumentException("Invalid C.1 DEV mode.");
         string web = Path.Combine(root, "web");
@@ -37,10 +37,11 @@ internal static class App02c1Dev
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        Console.WriteLine($"APP-02C.1 DEV session {run.Id}, source {source}");
+        string feature = c2 ? "APP-02C.2" : "APP-02C.1";
+        Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        string tokenA = Token(key, "tenant-a");
-        string tokenB = Token(key, "tenant-b");
+        string tokenA = Token(key, "tenant-a", c2);
+        string tokenB = Token(key, "tenant-b", c2);
         Process? api = null;
         Process? viteProcess = null;
         Process? browser = null;
@@ -59,6 +60,7 @@ internal static class App02c1Dev
                     VALUES(@tenant,@Actor,N'sales',1,N'c1-dev-launcher')
                     """, new { tenant, Actor });
                 if (await BusinessRows(db) != 0) throw new InvalidOperationException("C.1 DEV database was not empty.");
+                if (c2) await App02c2DevFixture.Seed(db, tenant, Actor);
             }
             string apiUrl = $"http://127.0.0.1:{ApiPort}";
             var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath,
@@ -80,6 +82,8 @@ internal static class App02c1Dev
             apiStart.Environment["App02Worker__Enabled"] = "false";
             apiStart.Environment["App02C1__Enabled"] = "true";
             apiStart.Environment["App02C1__Nonce"] = run.Id;
+            apiStart.Environment["App02C2__Enabled"] = c2 ? "true" : "false";
+            apiStart.Environment["App02C2__DedicatedRuntime"] = c2 ? "true" : "false";
             apiStart.Environment["Logging__LogLevel__Default"] = "Warning";
             foreach (string tenant in DemoRun.Tenants)
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
@@ -109,13 +113,14 @@ internal static class App02c1Dev
             {
                 await CopyCredential(tokenA);
                 clipboardIssued = true;
-                Console.WriteLine($"Open {webUrl}/sales/customers. Paste the short-lived tenant-a credential from the clipboard.");
+                Console.WriteLine($"Open {webUrl}/sales/{(c2 ? "orders" : "customers")}. Paste the short-lived tenant-a credential from the clipboard.");
                 Console.WriteLine("Press Ctrl+C to stop the session and remove its owned databases.");
                 await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
                 return;
             }
 
-            var browserStart = StartInfo("node", web, playwright, "test", "--config", "playwright.app02c1.config.ts");
+            var browserStart = StartInfo("node", web, playwright, "test", "--config",
+                c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_A"] = tokenA;
@@ -123,7 +128,8 @@ internal static class App02c1Dev
             browser = Start(browserStart);
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"C.1 browser verification exited {browser.ExitCode}.");
-            await VerifySql(run, root, source, apiVersion, apiSha256);
+            if (c2) await App02c2DevFixture.Verify(run, root, source, apiVersion, apiSha256);
+            else await VerifySql(run, root, source, apiVersion, apiSha256);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested && mode == "Interactive") { }
         catch (Exception ex) { failure = ex; throw; }
@@ -305,13 +311,14 @@ internal static class App02c1Dev
         }
     }
 
-    private static string Token(string key, string tenant)
+    private static string Token(string key, string tenant, bool c2)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
             iss = "fmcg-synthetic-app00", aud = "fmcg-synthetic-app00", sub = Actor, actor_id = Actor,
-            tenant_id = tenant, synthetic_role = "sales", iat = now, nbf = now - 1, exp = now + 900
+            tenant_id = tenant, synthetic_role = c2 ? new[] { "sales", "warehouse" } : new[] { "sales" },
+            iat = now, nbf = now - 1, exp = now + 900
         });
         static string B64(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         string value = B64("""{"alg":"HS256","typ":"JWT"}"""u8.ToArray()) + "." + B64(payload);

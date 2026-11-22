@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $Verify)
+param([switch] $Verify, [ValidateSet('App02C1', 'App02C2')] [string] $Increment = 'App02C1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -15,7 +15,7 @@ try {
     sqllocaldb start MSSQLLocalDB
     if ($LASTEXITCODE -ne 0) { throw 'MSSQLLocalDB did not start.' }
     $mode = if ($Verify) { 'Verify' } else { 'Interactive' }
-    dotnet src/FmcgDms.Demo/bin/Release/net10.0/FmcgDms.Demo.dll App02C1 $mode $repo $source
-    if ($LASTEXITCODE -ne 0) { throw 'APP-02C.1 DEV session failed.' }
+    dotnet src/FmcgDms.Demo/bin/Release/net10.0/FmcgDms.Demo.dll $Increment $mode $repo $source
+    if ($LASTEXITCODE -ne 0) { throw "$Increment DEV session failed." }
 }
 finally { Pop-Location }

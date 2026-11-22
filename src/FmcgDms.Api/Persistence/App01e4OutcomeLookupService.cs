@@ -71,6 +71,8 @@ public sealed class App01e4OutcomeLookupService(TenantConnections connections)
                 ) s
                 WHERE c.TenantId=@Tenant AND c.ActorId=@Actor
                   AND c.ProducerId=@Producer AND c.CommandId=@Command
+                  AND NOT EXISTS (SELECT 1 FROM dbo.C2CommandScope c2
+                      WHERE c2.TenantId=c.TenantId AND c2.CommandRowId=c.Id)
                   -- The scratch database may use a case-insensitive SQL
                   -- collation. Different signed actors/identities must not
                   -- discover one another's outcomes through CI collation.

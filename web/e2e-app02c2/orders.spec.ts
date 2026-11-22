@@ -1,0 +1,77 @@
+import { expect, test, type Page } from '@playwright/test'
+
+async function signIn(page: Page, route: 'customers' | 'orders', slot: 'A' | 'B') {
+  const token = process.env[`APP02C1_BROWSER_TOKEN_${slot}`]
+  if (!token) throw new Error('Missing synthetic browser credential')
+  await page.goto('/sales/' + route)
+  await page.getByLabel('Mã truy cập DEV').evaluate((input: HTMLInputElement, value) => { input.value = value }, token)
+  await page.getByRole('button', { name: 'Kết nối', exact: true }).click()
+}
+
+test('C.1 direct ShipTo flows through draft, Confirm and separate Reserve commits', async ({ page, browser, context }, info) => {
+  const faults: string[] = []
+  page.on('pageerror', error => faults.push(error.message))
+  await signIn(page, 'customers', 'A')
+  await page.getByRole('button', { name: /C2-FIXTURE/ }).click()
+  await page.getByRole('button', { name: 'Nhập địa chỉ một lần' }).click()
+  await page.getByLabel('Quốc gia').selectOption('VN')
+  await page.getByLabel('Vùng DEV').selectOption('HCM')
+  await page.getByLabel('Khu vực').fill(' Khu   DEV ')
+  await page.getByLabel('Địa chỉ giao', { exact: true }).fill(' 02   Duong DEV ')
+  await page.getByLabel('Người nhận').fill('Nguoi Nhan')
+  await page.getByRole('button', { name: 'Lưu lựa chọn' }).click()
+  await expect(page.getByText('02 Duong DEV, Khu DEV, HCM, VN')).toBeVisible()
+
+  await signIn(page, 'orders', 'A')
+  await page.getByRole('combobox', { name: 'Khách hàng', exact: true }).selectOption({ label: 'C2-FIXTURE · Khách hàng C.2 DEV' })
+  await page.getByRole('combobox', { name: 'ShipTo đã chọn' }).selectOption({ label: '02 Duong DEV · Khu DEV · Một lần' })
+  await page.getByRole('combobox', { name: 'Chuyến' }).selectOption({ label: 'C2-TRIP' })
+  await page.getByRole('combobox', { name: 'SKU dòng 1' }).selectOption({ label: 'C2-SKU · Hàng tổng hợp' })
+  await page.getByLabel('Số lượng dòng 1').fill('40')
+  await page.getByRole('button', { name: 'Lưu đơn nháp' }).click()
+  await expect(page.getByText('Đơn nháp', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reserve hàng' })).toHaveCount(0)
+  await page.route('**/app02c2/confirm', async route => {
+    const response = await route.fetch()
+    expect(response.status()).toBe(200)
+    await route.abort('failed')
+  }, { times: 1 })
+  await page.getByRole('button', { name: 'Confirm đơn' }).press('Enter')
+  await expect(page.getByText(/Chưa rõ kết quả/)).toBeVisible()
+  await signIn(page, 'orders', 'A')
+  await page.getByRole('button', { name: 'Tra cứu kết quả' }).click()
+  await expect(page.getByText('Đã Confirm · Chưa giữ hàng')).toBeVisible()
+  await expect(page.getByText('Chính sách v1 · Giá 15 · Hạn 7 ngày')).toBeVisible()
+  await expect(page.getByText('02 Duong DEV, Khu DEV, HCM, VN')).toBeVisible()
+
+  await page.getByRole('combobox', { name: 'Kho', exact: true }).selectOption({ label: 'C2-MAIN' })
+  await page.getByLabel('Số lượng giữ').fill('41')
+  await page.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText('Số lượng yêu cầu vượt phần còn thiếu của dòng đơn.')).toBeVisible()
+  await expect(page.getByText('Đã Confirm · Chưa giữ hàng')).toBeVisible()
+  await page.getByLabel('Số lượng giữ').fill('15')
+  await context.setOffline(true)
+  await expect(page.getByRole('button', { name: 'Reserve hàng' })).toBeDisabled()
+  await context.setOffline(false)
+  await page.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText('Đã giữ một phần')).toBeVisible()
+  await expect(page.getByText(/Đã giữ 15 EA/)).toBeVisible()
+  await page.getByLabel('Số lượng giữ').fill('25')
+  await page.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText('Đã giữ đủ', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Đã giữ 40 EA/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reserve hàng' })).toHaveCount(0)
+  await page.setViewportSize({ width: 320, height: 800 })
+  await page.getByLabel('Chế độ hiển thị').selectOption('dark')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+  await page.screenshot({ path: info.outputPath('orders-narrow-dark.png'), fullPage: true })
+  expect(faults).toEqual([])
+
+  const other = await browser.newContext()
+  try {
+    const pageB = await other.newPage()
+    await signIn(pageB, 'orders', 'B')
+    await expect(pageB.getByText('Chưa có đơn A.')).toBeVisible()
+  } finally { await other.close() }
+})

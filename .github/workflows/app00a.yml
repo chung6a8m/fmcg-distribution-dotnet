@@ -104,7 +104,7 @@ jobs:
           APP02A3_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           APP02A4_TEST_RUN_ID: app02a4-${{ github.run_id }}-${{ github.run_attempt }}
           APP02A4_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 304 -- --report-trx --coverage --coverage-output-format cobertura
+        run: dotnet test --solution FmcgDms.slnx -c Release --no-build --minimum-expected-tests 313 -- --report-trx --coverage --coverage-output-format cobertura
       - name: Record reproducible APP-01B.3 TestRunId and PR head
         if: always()
         shell: pwsh
@@ -803,6 +803,9 @@ jobs:
       - name: APP-02C.1 real browser, API and two-tenant LocalDB comparison
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Verify
+      - name: APP-02C.2 Confirm and Reserve in browser, API and two-tenant LocalDB
+        shell: pwsh
+        run: ./scripts/Run-App02C2.ps1 -Verify
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -812,6 +815,7 @@ jobs:
             web/playwright-report/
             web/test-results/
             web/test-results-app02c1/
+            web/test-results-app02c2/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web

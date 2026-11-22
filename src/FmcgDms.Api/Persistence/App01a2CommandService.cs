@@ -14,7 +14,7 @@ namespace FmcgDms.Api.Persistence;
 /// ledger effect and pool allocation commits in one explicit SQL transaction.
 /// Not a sale, stock transfer, real customer credit approval or production API.
 /// </summary>
-public sealed class App01a2CommandService(TenantConnections connections)
+public sealed partial class App01a2CommandService(TenantConnections connections)
 {
     private const string StockSourceKind = "STOCK_ALLOC"; // common A/B source namespace
     private const string CreditSourceKind = "B_CREDIT_GRANT";
@@ -112,7 +112,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
         ClaimsPrincipal principal, IApp01aCommand request, string kind,
         (string Key, string Value)[] fields,
         Func<SqlConnection, SqlTransaction, string, string, Guid, CancellationToken,
-            Task<BusinessCommandOutcome>> apply, CancellationToken ct)
+            Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null)
     {
         // Never persist a malformed producer/command identity: the scope cannot
         // be deduplicated reliably. All valid identities, including business
@@ -124,7 +124,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
         // Even when called without HTTP endpoint policies, business operations
         // require a signed, role-scoped synthetic actor. Never infer roles from
         // tenant identity, warehouse assignment, headers or request payload.
-        string requiredRole = kind == "CONFIRM_A_ORDER" ? "sales" : "warehouse";
+        string requiredRole = c2Role ?? (kind == "CONFIRM_A_ORDER" ? "sales" : "warehouse");
         if (!principal.HasClaim("synthetic_role", requiredRole))
             throw new UnauthorizedAccessException("Insufficient synthetic role.");
         string tenant = SyntheticAuth.GetTenantId(principal);
@@ -139,11 +139,15 @@ public sealed class App01a2CommandService(TenantConnections connections)
             kind, tenant, actor, request.SourceNumber, fields);
         // This opens only server-routed nonce-owned LocalDB with an exact
         // AppTenantBinding match. Real/non-scratch databases fail closed.
-        await using SqlConnection db = await connections.OpenSyntheticScratchAsync(principal, ct);
+        await using SqlConnection db = c2Role is null
+            ? await connections.OpenSyntheticScratchAsync(principal, ct)
+            : await connections.OpenApp02c2Async(principal, ct);
         await using SqlTransaction tx =
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            if (c2Role is not null)
+                await App02a3Sql.RequireRole(db, tx, tenant, actor, c2Role, ct);
             // Lock by command identity BEFORE the read. A second request for the
             // same key blocks until the first commits, then sees its final row.
             string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
@@ -164,6 +168,10 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 """, new { Tenant = tenant, Producer = request.ProducerId, Command = request.CommandId }, tx, ct));
             if (existing is not null)
             {
+                if (c2Role is not null && await db.ExecuteScalarAsync<int>(Sql("""
+                    SELECT COUNT(*) FROM dbo.C2CommandScope WHERE TenantId=@Tenant AND CommandRowId=@Id AND RoleCode=@Role
+                    """, new { Tenant = tenant, existing.Id, Role = c2Role }, tx, ct)) == 0)
+                    return BusinessCommandOutcome.Conflict();
                 if (existing.PayloadHashVersion != CommandPayloadHash.Version
                     || !CryptographicOperations.FixedTimeEquals(existing.PayloadHash, hash))
                 {
@@ -191,6 +199,10 @@ public sealed class App01a2CommandService(TenantConnections connections)
                     Id = commandRowId, Tenant = tenant, Producer = request.ProducerId,
                     Command = request.CommandId, Version = CommandPayloadHash.Version, Hash = hash, Actor = actor
                 }, tx, ct));
+            if (c2Role is not null)
+                await db.ExecuteAsync(Sql("""
+                    INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode) VALUES(@Tenant,@Id,@Role)
+                    """, new { Tenant = tenant, Id = commandRowId, Role = c2Role }, tx, ct));
 
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))
@@ -333,12 +345,18 @@ public sealed class App01a2CommandService(TenantConnections connections)
 
     public Task<BusinessCommandOutcome> ReserveAStockAsync(
         ClaimsPrincipal principal, ReserveAStockCommand request, CancellationToken ct) =>
-        ExecuteAsync(principal, request, "RESERVE_A_STOCK",
+        ReserveAStockCore(principal, request, null, ct);
+
+    private Task<BusinessCommandOutcome> ReserveAStockCore(
+        ClaimsPrincipal principal, ReserveAStockCommand request, Guid? expectedConfirmSource, CancellationToken ct) =>
+        ExecuteAsync(principal, request, expectedConfirmSource.HasValue ? "C2_RESERVE_A" : "RESERVE_A_STOCK",
             [
                 ("OrderId", request.OrderId.ToString("N")),
                 ("OrderLineId", request.OrderLineId.ToString("N")),
                 ("StockLocationId", request.StockLocationId.ToString("N")),
-                ("BaseQuantity", CommandPayloadHash.Decimal(request.BaseQuantity))
+                ("BaseQuantity", CommandPayloadHash.Decimal(request.BaseQuantity)),
+                ..(expectedConfirmSource.HasValue
+                    ? new[] { ("ConfirmSource", expectedConfirmSource.Value.ToString("N")) } : [])
             ],
             async (db, tx, tenant, actor, commandId, token) =>
             {
@@ -353,7 +371,15 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 var order = await FindOrder(db, tx, tenant, request.OrderId, token);
                 if (order is null) return BusinessCommandOutcome.Rejected("ORDER_NOT_FOUND");
                 if (!order.CustomerActive) return BusinessCommandOutcome.Rejected("CUSTOMER_INACTIVE");
-                if (order.Status != "DRAFT") return BusinessCommandOutcome.Rejected("ORDER_NOT_DRAFT");
+                if (expectedConfirmSource is Guid expected)
+                {
+                    if (order.Status != "CONFIRMED") return BusinessCommandOutcome.Rejected("C2_ORDER_NOT_CONFIRMED");
+                    Guid? actual = await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
+                        SELECT ConfirmSourceId FROM dbo.C2Confirmation WHERE TenantId=@Tenant AND OrderId=@OrderId
+                        """, new { Tenant = tenant, OrderId = order.Id }, tx, token));
+                    if (actual != expected) return BusinessCommandOutcome.Rejected("C2_STALE_CONFIRM");
+                }
+                else if (order.Status != "DRAFT") return BusinessCommandOutcome.Rejected("ORDER_NOT_DRAFT");
                 if (!order.TripId.HasValue) return BusinessCommandOutcome.Rejected("ORDER_TRIP_REQUIRED");
                 var trip = await FindTrip(db, tx, tenant, order.TripId.Value, token);
                 if (!IsPreparedTrip(trip))
@@ -365,6 +391,16 @@ public sealed class App01a2CommandService(TenantConnections connections)
                     WHERE TenantId=@Tenant AND AOrderId=@Order AND Id=@Line
                     """, new { Tenant = tenant, Order = order.Id, Line = request.OrderLineId }, tx, token));
                 if (line is null) return BusinessCommandOutcome.Rejected("ORDER_LINE_NOT_FOUND");
+                if (expectedConfirmSource.HasValue && await db.ExecuteScalarAsync<int>(Sql("""
+                    SELECT COUNT(*) FROM dbo.AConfirmedLineSnapshot s
+                    JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
+                    JOIN dbo.Sku sku ON sku.TenantId=s.TenantId AND sku.Id=s.SkuId
+                    WHERE s.TenantId=@Tenant AND s.AOrderId=@OrderId AND s.AOrderLineId=@LineId
+                        AND s.ConfirmBusinessSourceId=@Expected
+                        AND CONVERT(varbinary(48),p.BaseUom)=CONVERT(varbinary(48),sku.BaseUom)
+                    """, new { Tenant = tenant, OrderId = order.Id, LineId = line.Id, Expected = expectedConfirmSource },
+                        tx, token)) != 1)
+                    return BusinessCommandOutcome.Rejected("C2_FROZEN_LINE_INVALID");
 
                 decimal held = await db.ExecuteScalarAsync<decimal>(Sql("""
                     SELECT COALESCE(SUM(r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity),0)
@@ -409,7 +445,7 @@ public sealed class App01a2CommandService(TenantConnections connections)
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_A",
                     order.CustomerId, line.SkuId, request.StockLocationId, request.BaseQuantity, 0, token);
                 return BusinessCommandOutcome.Applied("A_STOCK_RESERVED", source);
-            }, ct);
+            }, ct, expectedConfirmSource.HasValue ? "warehouse" : null);
 
     public Task<BusinessCommandOutcome> ConfirmAOrderAsync(
         ClaimsPrincipal principal, ConfirmAOrderCommand request, CancellationToken ct) =>

@@ -10,6 +10,8 @@ import './style.css'
 
 const CustomerWorkspace = lazy(() => import('./sales/CustomerWorkspace')
   .then(module => ({ default: module.CustomerWorkspace })))
+const OrderWorkspace = lazy(() => import('./sales/OrderWorkspace')
+  .then(module => ({ default: module.OrderWorkspace })))
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
 
@@ -45,6 +47,7 @@ function HealthShell() {
       <a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a>
       <a className="page-link" href="/ui/command-recovery">UI-03 · Source & Recovery Lab</a>
       <a className="page-link" href="/sales/customers">Khách hàng và địa chỉ giao · DEV</a>
+      <a className="page-link" href="/sales/orders">Đơn A và giữ hàng · DEV</a>
     </section>
     <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
@@ -75,7 +78,9 @@ function App() {
         : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo />
           : location.pathname === '/sales/customers'
             ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình khách hàng…</p>}><CustomerWorkspace /></Suspense>
-            : <HealthShell />}
+            : location.pathname === '/sales/orders'
+              ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình đơn hàng…</p>}><OrderWorkspace /></Suspense>
+              : <HealthShell />}
   </>
 }
 

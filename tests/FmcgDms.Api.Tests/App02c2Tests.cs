@@ -1,0 +1,330 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Dapper;
+using Microsoft.Data.SqlClient;
+using Xunit;
+
+namespace FmcgDms.Api.Tests;
+
+[Collection("SqlScratch")]
+public sealed class App02c2Tests(SqlScratchFixture fixture)
+{
+    private const string Root = "/api/synthetic/app02c2";
+    private readonly CancellationToken ct = TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task Catalog_and_commands_require_current_grants_and_owned_tenant()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true, dedicatedC2: true);
+        using var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(Root + "/catalog", ct)).StatusCode);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", "c2-authority", ["sales"]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.GetAsync(Root + "/catalog", ct)).StatusCode);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        await db.ExecuteAsync("""
+            INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+            VALUES(N'tenant-a',N'c2-authority',N'sales',1,N'c2-test')
+            """);
+        Assert.Equal(HttpStatusCode.OK, (await actor.GetAsync(Root + "/catalog", ct)).StatusCode);
+        var reserve = new { commandId = Guid.NewGuid(), orderId = Guid.NewGuid() };
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.PostAsJsonAsync(Root + "/reserve", reserve, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await actor.PostAsJsonAsync("/api/synthetic/app01a/commands/grant-b-quota", reserve, ct)).StatusCode);
+        using var peer = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-b", "c2-authority", ["sales"]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await peer.GetAsync(Root + "/catalog", ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Confirm_freezes_policy_and_direct_ShipTo_and_Reserve_replays_under_current_authority()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        var selection = await Direct(actor, seed);
+        var draft = await Draft(actor, seed, selection);
+        var confirm = new { commandId = Guid.NewGuid(), orderId = draft };
+        Guid source = Source(await Post(actor, Root + "/confirm", confirm));
+        Assert.True((await Post(actor, Root + "/confirm", confirm)).GetProperty("replayed").GetBoolean());
+        Assert.Equal(0m, await db.ExecuteScalarAsync<decimal>(
+            "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE SkuId=@Sku", seed));
+        Assert.Equal("CONFIRMED_UNRESERVED", (await Order(actor, draft)).GetProperty("status").GetString());
+        Assert.Equal("C2_SHIP_TO_ALREADY_BOUND", Reason(await Post(actor, Root + "/confirm", new
+        {
+            commandId = Guid.NewGuid(), orderId = await Draft(actor, seed, selection)
+        }, HttpStatusCode.UnprocessableEntity)));
+
+        await AddPolicy(db, seed, 2, "UNSET");
+        var denied = await Draft(actor, seed, await Direct(actor, seed));
+        Assert.Equal("C2_POLICY_REQUIRED", Reason(await Post(actor, Root + "/confirm",
+            new { commandId = Guid.NewGuid(), orderId = denied }, HttpStatusCode.UnprocessableEntity)));
+        var line = (await Order(actor, draft)).GetProperty("lines")[0];
+        Assert.Equal(15m, line.GetProperty("unitPrice").GetDecimal());
+        Assert.Equal(7, line.GetProperty("termsDays").GetInt32());
+        Assert.Equal(1, line.GetProperty("policyVersion").GetInt32());
+        Guid lineId = line.GetProperty("lineId").GetGuid();
+        var reserve = new { commandId = Guid.NewGuid(), orderId = draft, lineId, locationId = seed.Warehouse,
+            quantity = 15m, confirmSourceId = source };
+        using var peer = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-b", seed.Actor, ["sales", "warehouse"]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await peer.PostAsJsonAsync(Root + "/reserve", reserve, ct)).StatusCode);
+
+        Guid rightSource = Source(await Post(actor, Root + "/reserve", reserve));
+        var replay = await Post(actor, Root + "/reserve", reserve);
+        Assert.Equal(rightSource, Source(replay));
+        Assert.True(replay.GetProperty("replayed").GetBoolean());
+        Assert.Equal("CONFLICT", (await Post(actor, Root + "/reserve",
+            new { reserve.commandId, reserve.orderId, reserve.lineId, reserve.locationId, quantity = 16m, reserve.confirmSourceId },
+            HttpStatusCode.Conflict)).GetProperty("status").GetString());
+        Assert.Equal("CONFIRMED_PARTIALLY_RESERVED", (await Order(actor, draft)).GetProperty("status").GetString());
+        Assert.Equal(15m, await db.ExecuteScalarAsync<decimal>("SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE SkuId=@Sku", seed));
+        Assert.Equal(0m, await db.ExecuteScalarAsync<decimal>(
+            "SELECT SUM(ConsumedBaseQuantity+ReleasedBaseQuantity) FROM dbo.StockRight WHERE SkuId=@Sku", seed));
+
+        await db.ExecuteAsync("""
+            UPDATE dbo.App02ActorRoleGrant SET IsActive=0 WHERE TenantId='tenant-a' AND ActorId=@Actor AND RoleCode='warehouse'
+            """, seed);
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.PostAsJsonAsync(Root + "/reserve", reserve, ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await actor.GetAsync(Root + $"/commands/{reserve.commandId}", ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Approval_without_effective_checker_and_superseded_registered_address_cannot_confirm()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        var registration = await Post(actor, "/api/synthetic/app02c1/registered-ship-tos/save",
+            new { commandId = Guid.NewGuid(), customerId = seed.Customer, address = Address });
+        Guid registeredId = registration.GetProperty("id").GetGuid();
+        var selected = await Post(actor, "/api/synthetic/app02c1/ship-to-selections", new
+        {
+            commandId = Guid.NewGuid(), customerId = seed.Customer, registeredId, revision = 1
+        });
+        Guid draft = await Draft(actor, seed, selected.GetProperty("id").GetGuid());
+        await Post(actor, "/api/synthetic/app02c1/registered-ship-tos/save",
+            new { commandId = Guid.NewGuid(), customerId = seed.Customer, id = registeredId, revision = 1, address = Address });
+        Assert.Equal("C2_SHIP_TO_STALE", Reason(await Post(actor, Root + "/confirm",
+            new { commandId = Guid.NewGuid(), orderId = draft }, HttpStatusCode.UnprocessableEntity)));
+        var direct = await Draft(actor, seed, await Direct(actor, seed));
+        await AddPolicy(db, seed, 2, "APPROVED", expired: true);
+        Assert.Equal("C2_POLICY_REQUIRED", Reason(await Post(actor, Root + "/confirm",
+            new { commandId = Guid.NewGuid(), orderId = direct }, HttpStatusCode.UnprocessableEntity)));
+        await AddPolicy(db, seed, 3, "APPROVED", checker: seed.Actor);
+        Assert.Equal("C2_POLICY_REQUIRED", Reason(await Post(actor, Root + "/confirm",
+            new { commandId = Guid.NewGuid(), orderId = direct }, HttpStatusCode.UnprocessableEntity)));
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.AOrder WHERE CustomerId=@Customer", seed));
+    }
+
+    [Fact]
+    public async Task Competing_A_reservation_and_legacy_B_quota_share_the_pool()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        Guid draft = await Draft(actor, seed, await Direct(actor, seed), 70m);
+        Guid source = Source(await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = draft }));
+        Guid lineId = (await Order(actor, draft)).GetProperty("lines")[0].GetProperty("lineId").GetGuid();
+        var a = actor.PostAsJsonAsync(Root + "/reserve", new { commandId = Guid.NewGuid(), orderId = draft, lineId,
+            locationId = seed.Warehouse, quantity = 70m, confirmSourceId = source }, ct);
+        var b = actor.PostAsJsonAsync("/api/synthetic/app01a/commands/grant-b-quota", new
+        {
+            producerId = seed.Actor, commandId = Guid.NewGuid().ToString("N"), sourceNumber = Guid.NewGuid().ToString("N"),
+            tripId = seed.Trip, stockLocationId = seed.Warehouse, skuId = seed.Sku, baseQuantity = 60m
+        }, ct);
+        await Task.WhenAll(a, b);
+        using var aResponse = await a;
+        using var bResponse = await b;
+        var outcomes = new[] { await aResponse.Content.ReadFromJsonAsync<JsonElement>(ct),
+            await bResponse.Content.ReadFromJsonAsync<JsonElement>(ct) };
+        Assert.Single(outcomes, result => result.GetProperty("status").GetString() == "APPLIED");
+        Assert.Single(outcomes, result => Reason(result) == "STOCK_INSUFFICIENT");
+        Assert.Contains(await db.ExecuteScalarAsync<decimal>(
+            "SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE SkuId=@Sku", seed), new[] { 60m, 70m });
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.StockRight WHERE SkuId=@Sku", seed));
+    }
+
+    [Fact]
+    public async Task Failed_confirm_rolls_back_snapshot_binding_and_command_then_retries_once()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        Guid draft = await Draft(actor, seed, await Direct(actor, seed));
+        Guid commandId = Guid.NewGuid();
+        var confirm = new { commandId, orderId = draft };
+        await db.ExecuteAsync("""
+            CREATE TRIGGER dbo.C2_TestPolicyFreezeFault ON dbo.C2LinePolicy AFTER INSERT AS
+            BEGIN
+                THROW 51024, 'C.2 synthetic fault', 1;
+            END
+            """);
+        try
+        {
+            try
+            {
+                using var failed = await actor.PostAsJsonAsync(Root + "/confirm", confirm, ct);
+                Assert.Equal(HttpStatusCode.InternalServerError, failed.StatusCode);
+            }
+            catch (SqlException error) { Assert.Equal(51024, error.Number); }
+        }
+        finally { await db.ExecuteAsync("DROP TRIGGER dbo.C2_TestPolicyFreezeFault"); }
+        Assert.Equal(HttpStatusCode.NotFound, (await actor.GetAsync(Root + $"/commands/{commandId}", ct)).StatusCode);
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.ShipToSnapshot WHERE CustomerId=@Customer", seed));
+        Assert.Equal("DRAFT", (await Order(actor, draft)).GetProperty("status").GetString());
+        Assert.False((await Post(actor, Root + "/confirm", confirm)).GetProperty("replayed").GetBoolean());
+        Assert.Equal(1, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.ShipToSnapshot WHERE CustomerId=@Customer", seed));
+    }
+
+    [Fact]
+    public async Task Fully_reserved_C2_order_is_not_eligible_for_legacy_manifest_load()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        Guid draft = await Draft(actor, seed, await Direct(actor, seed));
+        Guid source = Source(await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = draft }));
+        Guid lineId = (await Order(actor, draft)).GetProperty("lines")[0].GetProperty("lineId").GetGuid();
+        await Post(actor, Root + "/reserve", new { commandId = Guid.NewGuid(), orderId = draft, lineId,
+            locationId = seed.Warehouse, quantity = 40m, confirmSourceId = source });
+        Assert.Equal("CONFIRMED_FULLY_RESERVED", (await Order(actor, draft)).GetProperty("status").GetString());
+        Guid manifest = Guid.NewGuid();
+        await db.ExecuteAsync("""
+            INSERT dbo.TripManifest(Id,TenantId,ManifestNumber,TripId,WarehouseLocationId,VehicleLocationId)
+            VALUES(@Manifest,N'tenant-a',@Actor,@Trip,@Warehouse,@Vehicle);
+            INSERT dbo.TripManifestLine(Id,TenantId,TripManifestId,TripId,WarehouseLocationId,VehicleLocationId,
+                LineNumber,SkuId,StockRightId,RightKind,PlannedBaseQuantity)
+            SELECT NEWID(),TenantId,@Manifest,TripId,@Warehouse,@Vehicle,1,SkuId,Id,RightKind,GrantedBaseQuantity
+            FROM dbo.StockRight WHERE TenantId=N'tenant-a' AND SkuId=@Sku;
+            """, new { Manifest = manifest, seed.Actor, seed.Trip, seed.Warehouse, seed.Vehicle, seed.Sku });
+        var outcome = await Post(actor, "/api/synthetic/app01b/commands/load-manifest", new
+        {
+            producerId = seed.Actor, commandId = Guid.NewGuid().ToString("N"), sourceNumber = Guid.NewGuid().ToString("N"),
+            manifestId = manifest
+        });
+        Assert.Equal("MANIFEST_RIGHT_NOT_ELIGIBLE", Reason(outcome));
+        Assert.Equal(0m, await db.ExecuteScalarAsync<decimal>(
+            "SELECT LoadedBaseQuantity FROM dbo.TripManifestLine WHERE TripManifestId=@manifest", new { manifest }));
+    }
+
+    [Fact]
+    public async Task Gross_is_calculated_from_approved_discount_and_tax_and_capped_before_Confirm()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales"]);
+        await AddPolicy(db, seed, 2, "APPROVED", discount: 2m, tax: 0.1m, creditCap: 571.9999m);
+        var draft = await Draft(actor, seed, await Direct(actor, seed));
+        var denied = await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = draft }, HttpStatusCode.UnprocessableEntity);
+        Assert.Equal("C2_CREDIT_CAP_EXCEEDED", Reason(denied));
+        Assert.Equal("DRAFT", (await Order(actor, draft)).GetProperty("status").GetString());
+        await AddPolicy(db, seed, 3, "APPROVED", discount: 2m, tax: 0.1m, creditCap: 572m);
+        await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = draft });
+        Assert.Equal(572m, await db.ExecuteScalarAsync<decimal>("""
+            SELECT p.GrossAmount FROM dbo.C2LinePolicy p JOIN dbo.AOrderLine l
+                ON l.TenantId=p.TenantId AND l.Id=p.OrderLineId WHERE l.AOrderId=@draft AND p.PolicyVersion=3
+            """, new { draft }));
+    }
+
+    [Fact]
+    public async Task Draft_and_confirmed_quantities_cannot_be_reinterpreted_under_a_changed_base_unit()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        Guid draft = await Draft(actor, seed, await Direct(actor, seed));
+        await db.ExecuteAsync("UPDATE dbo.Sku SET BaseUom=N'CASE' WHERE Id=@Sku", seed);
+        Assert.Equal("EA", (await Order(actor, draft)).GetProperty("lines")[0].GetProperty("baseUom").GetString());
+        Assert.Equal("C2_BASE_UOM_CHANGED", Reason(await Post(actor, Root + "/confirm",
+            new { commandId = Guid.NewGuid(), orderId = draft }, HttpStatusCode.UnprocessableEntity)));
+        await db.ExecuteAsync("UPDATE dbo.Sku SET BaseUom=N'EA' WHERE Id=@Sku", seed);
+        Guid source = Source(await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = draft }));
+        Guid lineId = (await Order(actor, draft)).GetProperty("lines")[0].GetProperty("lineId").GetGuid();
+        await db.ExecuteAsync("UPDATE dbo.Sku SET BaseUom=N'CASE' WHERE Id=@Sku", seed);
+        Assert.Equal("C2_FROZEN_LINE_INVALID", Reason(await Post(actor, Root + "/reserve",
+            new { commandId = Guid.NewGuid(), orderId = draft, lineId, locationId = seed.Warehouse,
+                quantity = 40m, confirmSourceId = source }, HttpStatusCode.UnprocessableEntity)));
+        Assert.Equal(0m, await db.ExecuteScalarAsync<decimal>("SELECT AllocatedBaseQuantity FROM dbo.StockPool WHERE SkuId=@Sku", seed));
+    }
+
+    [Fact]
+    public async Task Draft_lines_cannot_be_appended_after_commit()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales"]);
+        Guid draft = await Draft(actor, seed, await Direct(actor, seed));
+        Guid other = Guid.NewGuid();
+        await db.ExecuteAsync("INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom) VALUES(@other,N'tenant-a',@code,N'DEV',N'EA')",
+            new { other, code = other.ToString("N") });
+        var failure = await Assert.ThrowsAsync<SqlException>(() => db.ExecuteAsync("""
+            INSERT dbo.C2OrderDraftLine(TenantId,DraftId,LineNumber,SkuId,BaseQuantity,BaseUom)
+            VALUES(N'tenant-a',@draft,2,@other,1,N'EA')
+            """, new { draft, other }));
+        Assert.Equal(51025, failure.Number);
+    }
+
+    private sealed record Scene(Guid Customer, Guid Sku, Guid Warehouse, Guid Vehicle, Guid Trip, string Actor);
+    private static readonly object Address = new
+    {
+        country = "VN", region = "HCM", locality = "Khu DEV", line = "Dia chi DEV", recipient = "Nguoi Nhan"
+    };
+
+    private static async Task<Scene> Seed(SqlConnection db)
+    {
+        var scene = new Scene(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "c2-" + Guid.NewGuid().ToString("N")[..10]);
+        await db.ExecuteAsync("""
+            INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+            VALUES(N'tenant-a',@Actor,N'sales',1,N'c2-test'),(N'tenant-a',@Actor,N'warehouse',1,N'c2-test');
+            INSERT dbo.Customer(Id,TenantId,Code,Name) VALUES(@Customer,N'tenant-a',@Actor,N'C.2 DEV');
+            INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom) VALUES(@Sku,N'tenant-a',@Actor,N'Hàng DEV',N'EA');
+            INSERT dbo.StockLocation(Id,TenantId,Code,Kind)
+            VALUES(@Warehouse,N'tenant-a',@Actor+N'-MAIN',N'WAREHOUSE'),(@Vehicle,N'tenant-a',@Actor+N'-TRUCK',N'VEHICLE');
+            INSERT dbo.Trip(Id,TenantId,Code,BusinessDate,VehicleLocationId)
+            VALUES(@Trip,N'tenant-a',@Actor,CAST(SYSUTCDATETIME() AS date),@Vehicle);
+            INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
+            VALUES(N'tenant-a',@Warehouse,@Sku,100);
+            """, scene);
+        await AddPolicy(db, scene, 1, "APPROVED");
+        return scene;
+    }
+
+    private static Task AddPolicy(SqlConnection db, Scene seed, int version, string decision,
+        bool expired = false, string checker = "c2-test-checker",
+        decimal discount = 0, decimal tax = 0, decimal creditCap = 2000) => db.ExecuteAsync("""
+            DECLARE @now datetime2(7)=SYSUTCDATETIME();
+            INSERT dbo.C2CommercialPolicy(TenantId,Id,CustomerId,SkuId,Version,Decision,EffectiveFromUtc,EffectiveUntilUtc,
+                Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
+            VALUES(N'tenant-a',NEWID(),@Customer,@Sku,@Version,@Decision,DATEADD(day,-2,@now),DATEADD(day,@Until,@now),
+                N'c2-test-maker',@Checker,DATEADD(day,-2,@now),N'c2-test-proof',15,@discount,@tax,7,@creditCap,'Asia/Ho_Chi_Minh');
+            """, new { seed.Customer, seed.Sku, Version = version, Decision = decision, Until = expired ? -1 : 1, Checker = checker,
+                discount, tax, creditCap });
+
+    private async Task<Guid> Direct(HttpClient actor, Scene seed) => (await Post(actor, "/api/synthetic/app02c1/ship-to-selections",
+        new { commandId = Guid.NewGuid(), customerId = seed.Customer, address = Address })).GetProperty("id").GetGuid();
+
+    private async Task<Guid> Draft(HttpClient actor, Scene seed, Guid selectionId, decimal quantity = 40) =>
+        Source(await Post(actor, Root + "/drafts", new { commandId = Guid.NewGuid(), customerId = seed.Customer,
+            tripId = seed.Trip, selectionId, lines = new[] { new { skuId = seed.Sku, quantity } } }));
+
+    private async Task<JsonElement> Order(HttpClient actor, Guid id) =>
+        (await actor.GetFromJsonAsync<JsonElement[]>(Root + "/orders", ct))!.Single(o => o.GetProperty("id").GetGuid() == id);
+
+    private async Task<JsonElement> Post(HttpClient actor, string path, object request, HttpStatusCode expected = HttpStatusCode.OK)
+    {
+        using var response = await actor.PostAsJsonAsync(path, request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        Assert.True(response.StatusCode == expected, $"{path}: expected {expected}, got {response.StatusCode} {body}");
+        return JsonSerializer.Deserialize<JsonElement>(body);
+    }
+
+    private static Guid Source(JsonElement outcome) => outcome.GetProperty("sourceId").GetGuid();
+    private static string? Reason(JsonElement outcome) => outcome.GetProperty("reasonCode").GetString();
+}
