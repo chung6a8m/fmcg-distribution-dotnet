@@ -193,6 +193,7 @@ export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string 
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [loadError, setLoadError] = useState('')
   const operation = useRef(false)
+  const connecting = useRef(false)
   const feedbackRef = useRef<HTMLDivElement>(null)
   const editOpener = useRef<HTMLElement | null>(null)
   const loginField = useRef<HTMLInputElement>(null)
@@ -221,6 +222,8 @@ export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string 
   }, [workspaceToken])
 
   async function signInToken(token: string) {
+    if (connecting.current) return
+    connecting.current = true
     setLoading(true)
     setLoadError('')
     try {
@@ -232,7 +235,10 @@ export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string 
       setPending(restorePending(identity))
     } catch (error) {
       setLoadError(readError(error))
-    } finally { setLoading(false) }
+    } finally {
+      connecting.current = false
+      setLoading(false)
+    }
   }
 
   async function refresh(token: string, id?: string) {

@@ -15,11 +15,17 @@ function open(page: Page, name: string) {
 test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async ({ page, browser, context }, info) => {
   const errors: string[] = []
   let deliveryPosts = 0
+  let customerListReads = 0
+  let orderListReads = 0
   page.on('pageerror', error => errors.push(error.message))
   page.on('request', request => {
+    if (request.method() === 'GET' && request.url().endsWith('/app02c1/customers')) customerListReads++
+    if (request.method() === 'GET' && request.url().endsWith('/app02c2/orders')) orderListReads++
     if (request.method() === 'POST' && request.url().endsWith('/app02c4/deliver')) deliveryPosts++
   })
   await signIn(page)
+  await expect(page.getByRole('button', { name: /C2-FIXTURE/ })).toBeEnabled()
+  expect.soft(customerListReads, 'one initial Customer list read').toBe(1)
   await page.getByRole('button', { name: /C2-FIXTURE/ }).click()
   await page.getByRole('button', { name: 'Nhập địa chỉ một lần' }).click()
   await page.getByLabel('Quốc gia').selectOption('VN')
@@ -31,6 +37,8 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   await expect(page.getByText('04 Duong DEV, Khu DEV, HCM, VN')).toBeVisible()
 
   await open(page, 'Đơn A và giữ hàng')
+  await expect(page.getByRole('combobox', { name: 'Khách hàng', exact: true })).toBeEnabled()
+  expect.soft(orderListReads, 'one initial Order list read').toBe(1)
   await page.getByRole('combobox', { name: 'Khách hàng', exact: true }).selectOption({ label: 'C2-FIXTURE · Khách hàng C.2 DEV' })
   await page.getByRole('combobox', { name: 'ShipTo đã chọn' }).selectOption({ label: '04 Duong DEV · Khu DEV · Một lần' })
   await page.getByRole('combobox', { name: 'Chuyến' }).selectOption({ label: 'C2-TRIP' })

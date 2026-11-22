@@ -157,7 +157,7 @@ export function ArReport({ token, orderId }: { token: string; orderId: string })
             <span>{c.reconciled}/{c.expected} · Còn nợ {decimal(c.knownBalance)} · Quá hạn {decimal(c.knownOverdue)}</span>
           </li>)}
         </ul>
-        {report.sources.map(source => <SourceDetail key={source.commandId} source={source} />)}
+        {report.sources.map(source => <SourceDetail key={JSON.stringify([source.owner, source.commandId])} source={source} />)}
       </>}
     </section>}
   </section>

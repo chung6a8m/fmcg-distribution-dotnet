@@ -142,6 +142,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
   const [busy, setBusy] = useState(false)
   const [offline, setOffline] = useState(!navigator.onLine)
   const active = useRef(false)
+  const connecting = useRef(false)
   useEffect(() => {
     const sync = () => setOffline(!navigator.onLine)
     window.addEventListener('online', sync)
@@ -165,6 +166,8 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
   }, [workspaceToken])
 
   async function connectToken(token: string) {
+    if (connecting.current) return
+    connecting.current = true
     setBusy(true)
     setNotice('')
     try {
@@ -176,7 +179,10 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
       setOrders(existing)
       setPending(restore(identity))
     } catch (error) { setNotice(failure(error)) }
-    finally { setBusy(false) }
+    finally {
+      connecting.current = false
+      setBusy(false)
+    }
   }
 
   async function resolve(command: Command, lookup: boolean) {
