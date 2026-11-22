@@ -35,8 +35,30 @@
   .c1-rows > li + li { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
   .c1-rows p { color: var(--fmcg-color-text-secondary); }
   .c3-source { overflow-wrap: anywhere; }
+  .sales-layout {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .sales-nav, .sales-pane { display: grid; gap: 12px; min-width: 0; }
+  .sales-nav .button { text-align: start; }
+  .sales-nav [aria-current="page"] {
+    border-inline-start: 3px solid var(--fmcg-color-selection-indicator);
+    background: var(--fmcg-color-surface-subtle);
+  }
+  .sales-filter {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  .sales-pane summary { cursor: pointer; }
+  .sales-facts { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr); gap: 6px 12px; }
+  .sales-facts dd { margin: 0; overflow-wrap: anywhere; }
   @media (max-width: 680px) {
-    .c1-layout, .c1-fields .field-pair { grid-template-columns: minmax(0, 1fr); }
+    .c1-layout, .c1-fields .field-pair, .sales-layout, .sales-facts { grid-template-columns: minmax(0, 1fr); }
     .c1-page :is(.button, .page-link, input, select) { min-height: 48px; }
+    .sales-pane summary { min-height: 48px; padding-block: 12px; }
   }
 }

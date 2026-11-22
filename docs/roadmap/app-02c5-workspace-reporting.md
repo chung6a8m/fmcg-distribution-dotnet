@@ -1,0 +1,20 @@
+# APP-02C.5 — Sales A workspace and AR report
+
+The standing DEV approval covers the existing React app and guarded LocalDB runtime. Use native controls and the adopted theme and density, with one in-memory credential for the workspace and a sidebar for the existing four screens and AR. Each screen keeps its existing permission and original-command recovery checks.
+
+## Report contract (C0-R03)
+
+- Read only, within the current SQL Sales grant and assigned C.4 trips. Filter by debtor Customer, Order, Delivery, due date, overdue and cutoff. A Delivery filter matches one visible posted Delivery. When filtering by due or overdue, retain unresolved sources in the remaining scope because they may belong to that filter. A filter outside the authorized scope returns no sources. JSON export reruns the query with the report cutoff, independently rechecks current authority and sends `Cache-Control: no-store`.
+- Use one serializable SQL view of the tenant. Default cutoff is SQL UTC, with optional explicit inclusive UTC cutoff. A receipt enters scope by its C.4 evidence time. A Delivery enters posted coverage when the stored source, completed command and ledger are visible by the cutoff and the AR, stock issue and ledger amounts reconcile. Allocation balance uses the applied allocation source, terminal command and matching ledger effect visible by that cutoff. C.5 adds no new settlement or correction commands. Due comes from the persisted per-Delivery date and is validated against frozen Confirm terms. Positive balances become overdue the day after due in the C.4 supported seller timezone. The cutoff governs the persisted business timeline. Customer display names and access grants reflect current SQL.
+- Coverage is reconciled postings / server-recorded delivery evidence in the selected scope. When no evidence exists, coverage and balances are unavailable. Pending and rejected occurred receipts retain their original command, owner and next action. Incomplete reports may show reconciled rows and their known balances, with an explicit incomplete total. The denominator describes server-recorded evidence only. Outside or unrecorded events are unknown. Display the synthetic unit without currency conversion.
+- Order detail shows the Confirm and address snapshot IDs, policy source hash, reserved, loaded and held quantities, and links to the filtered AR source trail. Keep the existing read-only command lookup and explicit same-payload replay. Retain pending requests in the open browser page if session storage fails. Navigation and reconnect issue reads only.
+
+## Implementation and R06 expectations
+
+1. Drive the full A flow from the workspace with a shared DEV session. Confirm and Load produce zero AR effects and no Delivery coverage. Reserve and Load 40.001, deliver 25 at 15 and source cost 10, and leave 15.001 held. C.5 uses a fractional remainder to exercise three-decimal precision alongside C.4's existing integer fixture. SQL must contain one AR 375, COGS 250 and due on seller-local delivery date + 7.
+2. Lose the Delivery ACK after commit, switch panes with session storage unavailable, and recover the original ID with zero duplicate AR. Inject the existing 13-unit fault, so the receipt is visible as pending and the report shows 1/2 with known balance 375. An earlier cutoff must exclude later evidence and must retain the completed 25-unit Delivery when it falls in scope. A historical cutoff before the due date reports no overdue balance.
+3. Verify Sales and trip scope, revoked or missing authorization, filter isolation, pure GET and no cache. Check keyboard, Light/Dark, 320px and offline through the browser. Independently compare final SQL effects and two-tenant isolation using the C.4 oracle. Record actual local and CI evidence with source lineage.
+
+## Run
+
+Run `npm ci` in `web/` and install Playwright Chromium before `./scripts/Run-App02C5.ps1 -Verify`. Run the same script without `-Verify` for an interactive session. The launcher uses the existing nonce-owned LocalDB lifecycle and shares the synthetic credential through the local clipboard.

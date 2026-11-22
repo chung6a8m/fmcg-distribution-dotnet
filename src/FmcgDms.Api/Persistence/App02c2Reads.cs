@@ -10,16 +10,18 @@ public sealed record C2Identity(string TenantId, string ActorId, string SessionI
 public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<C2Option> Trips,
     IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses);
 public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, decimal Ordered, decimal Reserved,
-    decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered);
+    decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered, decimal Loaded, decimal HeldOnTrip,
+    string? PolicySourceHash);
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
-    Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines);
+    Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin);
 
 public sealed partial class App01a2CommandService
 {
     private sealed record C2Header(Guid Id, string Customer, string Trip, string ShipTo,
-        DateTime? BusinessDate, Guid? ConfirmSourceId);
+        DateTime? BusinessDate, Guid? ConfirmSourceId, Guid? ShipToSnapshotId, string ShipToOrigin);
     private sealed record C2LineRow(Guid OrderId, Guid? LineId, string Sku, string BaseUom, decimal Ordered,
-        decimal Reserved, decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered);
+        decimal Reserved, decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered,
+        decimal Loaded, decimal HeldOnTrip, string? PolicySourceHash);
 
     public Task<C2Catalog> CatalogC2(ClaimsPrincipal principal, CancellationToken ct) =>
         ReadC2(principal, async (db, tx, tenant, _) =>
@@ -56,7 +58,8 @@ public sealed partial class App01a2CommandService
         {
             using var grid = await db.QueryMultipleAsync(Sql("""
                 SELECT d.Id,c.Name AS Customer,t.Code AS Trip,
-                    COALESCE(s.Address,JSON_VALUE(sel.Payload,'$.line')) AS ShipTo,o.BusinessDate,x.ConfirmSourceId
+                    COALESCE(s.Address,JSON_VALUE(sel.Payload,'$.line')) AS ShipTo,o.BusinessDate,x.ConfirmSourceId,
+                    x.ShipToSnapshotId,sel.Origin AS ShipToOrigin
                 FROM dbo.C2OrderDraft d
                 JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
                 JOIN dbo.Trip t ON t.TenantId=d.TenantId AND t.Id=d.TripId
@@ -68,7 +71,7 @@ public sealed partial class App01a2CommandService
                 SELECT d.DraftId AS OrderId,ol.Id AS LineId,s.Code AS Sku,COALESCE(p.BaseUom,d.BaseUom) AS BaseUom,
                     d.BaseQuantity AS Ordered,COALESCE(h.Reserved,0) AS Reserved,
                     a.UnitPriceSnapshot AS UnitPrice,p.PolicyVersion,a.TermsDaysSnapshot AS TermsDays,
-                    qty.Delivered
+                    qty.Delivered,load.Loaded,load.HeldOnTrip,CONVERT(varchar(64),p.SourceHash,2) AS PolicySourceHash
                 FROM dbo.C2OrderDraftLine d JOIN dbo.Sku s ON s.TenantId=d.TenantId AND s.Id=d.SkuId
                 LEFT JOIN dbo.AOrderLine ol ON ol.TenantId=d.TenantId AND ol.AOrderId=d.DraftId AND ol.LineNumber=d.LineNumber
                 LEFT JOIN dbo.AConfirmedLineSnapshot a ON a.TenantId=ol.TenantId AND a.AOrderLineId=ol.Id
@@ -80,6 +83,15 @@ public sealed partial class App01a2CommandService
                 ) h
                 CROSS APPLY (SELECT COALESCE(SUM(BaseQuantity),0) AS Delivered FROM dbo.SaleDelivery
                     WHERE TenantId=ol.TenantId AND AOrderLineId=ol.Id AND RightKind='A') qty
+                CROSS APPLY (
+                    SELECT COALESCE(SUM(l.LoadedBaseQuantity),0) AS Loaded,
+                        COALESCE(SUM(l.LoadedBaseQuantity-used.Delivered),0) AS HeldOnTrip
+                    FROM dbo.AReservation r JOIN dbo.TripManifestLine l
+                      ON l.TenantId=r.TenantId AND l.StockRightId=r.StockRightId AND l.IsC3=1
+                    CROSS APPLY (SELECT CONVERT(decimal(18,3),COALESCE(SUM(BaseQuantity),0)) AS Delivered FROM dbo.SaleDelivery
+                        WHERE TenantId=l.TenantId AND TripManifestLineId=l.Id) used
+                    WHERE r.TenantId=ol.TenantId AND r.AOrderLineId=ol.Id
+                ) load
                 WHERE d.TenantId=@Tenant ORDER BY d.DraftId,d.LineNumber;
                 """, new { Tenant = tenant }, tx, ct));
             var headers = (await grid.ReadAsync<C2Header>()).AsList();
@@ -87,13 +99,15 @@ public sealed partial class App01a2CommandService
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
-                    l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays, l.Delivered)).ToArray();
+                    l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays,
+                    l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
                     orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
                     orderLines.Any(l => l.Delivered > 0) ? "PARTIALLY_DELIVERED" :
                     orderLines.All(l => l.Reserved == l.Ordered) ? "CONFIRMED_FULLY_RESERVED" :
                     orderLines.Any(l => l.Reserved > 0) ? "CONFIRMED_PARTIALLY_RESERVED" : "CONFIRMED_UNRESERVED";
-                return new C2OrderView(h.Id, h.Customer, h.Trip, h.ShipTo, h.BusinessDate, h.ConfirmSourceId, status, orderLines);
+                return new C2OrderView(h.Id, h.Customer, h.Trip, h.ShipTo, h.BusinessDate, h.ConfirmSourceId, status,
+                    orderLines, h.ShipToSnapshotId, h.ShipToOrigin);
             }).ToArray();
         }, ct);
 

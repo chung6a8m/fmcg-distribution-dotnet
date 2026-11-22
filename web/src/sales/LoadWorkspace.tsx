@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
-import { HttpError, readError, requestSalesApi, type Identity } from './customer-api'
+import { forgetPending, HttpError, pendingJson, readError, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
 const api = '/api/synthetic/app02c3'
@@ -24,19 +24,18 @@ function displayQuantity(quantity: string) {
   return quantity.includes('.') ? quantity.replace(/0+$/, '').replace(/\.$/, '') : quantity
 }
 
-function stored(identity: Identity, value?: Command | null): Command | null {
-  const key = 'app02c3.pending.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
+function pendingKey(identity: Identity) {
+  return 'app02c3.pending.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
+}
+
+function restore(identity: Identity): Command | null {
   try {
-    if (value === undefined) {
-      const raw = sessionStorage.getItem(key)
-      if (!raw) return null
-      const command = JSON.parse(raw) as Command
-      const guid = /^[a-f0-9-]{36}$/
-      return guid.test(command.commandId) && guid.test(command.tripId) && Array.isArray(command.lines) ? command : null
-    }
-    if (value) sessionStorage.setItem(key, JSON.stringify(value))
-    else sessionStorage.removeItem(key)
-  } catch { /* The pending request is also held in memory for the open screen. */ }
+    const raw = pendingJson(pendingKey(identity))
+    if (!raw) return null
+    const command = JSON.parse(raw) as Command
+    const guid = /^[a-f0-9-]{36}$/
+    return guid.test(command.commandId) && guid.test(command.tripId) && Array.isArray(command.lines) ? command : null
+  } catch { /* Unreadable saved requests are ignored. */ }
   return null
 }
 
@@ -46,7 +45,7 @@ async function get<T>(token: string, path: string, service = api): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function LoadWorkspace() {
+export function LoadWorkspace({ workspaceToken }: { workspaceToken?: string }) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
   const [trip, setTrip] = useState('')
@@ -95,9 +94,18 @@ export function LoadWorkspace() {
     event.preventDefault()
     const token = String(new FormData(event.currentTarget).get('token') ?? '').trim()
     event.currentTarget.reset()
+    void connectToken(token)
+  }
+
+  const openWorkspace = useEffectEvent((token: string) => { void connectToken(token) })
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
+
+  function connectToken(token: string) {
     void work(async () => {
       const [identity, available] = await Promise.all([get<Identity>(token, '/session', ordersApi), get<Trip[]>(token, '/trips')])
-      const saved = stored(identity)
+      const saved = restore(identity)
       setSession({ token, identity })
       setTrips(available)
       setPending(saved)
@@ -111,7 +119,7 @@ export function LoadWorkspace() {
     const { token, identity } = session
     await work(async () => {
       if (!lookup) {
-        stored(identity, command)
+        rememberPending(pendingKey(identity), command)
         setPending(command)
       }
       let message: string
@@ -142,7 +150,7 @@ export function LoadWorkspace() {
         return
       }
       setPending(null)
-      stored(identity, null)
+      forgetPending(pendingKey(identity), command.commandId)
       try { await refresh(token, trip, warehouse) }
       catch { message += ' Hãy tải lại số lượng trước khi nạp tiếp.' }
       setNotice(message)
@@ -170,21 +178,24 @@ export function LoadWorkspace() {
     void resolve({ commandId: crypto.randomUUID(), tripId: trip, lines }, false)
   }
 
-  return <main className="page c1-page">
-    <header className="page-heading">
+  const Container = workspaceToken ? 'section' : 'main'
+  return <Container className={workspaceToken ? 'sales-pane c1-page' : 'page c1-page'}>
+    {workspaceToken ? <h2>Nạp hàng lên xe</h2> : <header className="page-heading">
       <h1>Nạp hàng lên xe</h1>
       <p>APP-02C.3 · DEV</p>
       <ThemeSelect />
       <a className="page-link" href="/sales/orders">Đơn A và giữ hàng</a>
       <a className="page-link" href="/sales/delivery">Giao hàng và công nợ A</a>
-    </header>
-    {!session ? <form className="panel panel-content" onSubmit={connect}>
+    </header>}
+    {!session ? workspaceToken
+      ? <Button disabled={busy || offline} onClick={() => void connectToken(workspaceToken)}>Tải màn hình</Button>
+      : <form className="panel panel-content" onSubmit={connect}>
       <Field name="token" type="password" label="Mã truy cập DEV" autoComplete="off" required />
       <Button type="submit" variant="primary" disabled={off}>Kết nối</Button>
     </form> : <section className="panel panel-content" aria-label="Lập đợt nạp">
-      <Button disabled={busy} onClick={() => { setSession(null); setRights([]); setPending(null); setNotice(''); setSource('') }}>
+      {!workspaceToken && <Button disabled={busy} onClick={() => { setSession(null); setRights([]); setPending(null); setNotice(''); setSource('') }}>
         Đổi phiên DEV
-      </Button>
+      </Button>}
       {trips.length === 0 ? <p>Chưa có chuyến được phân công.</p> : <>
         <label className="field">Chuyến
           <select value={trip} disabled={off || !!pending}
@@ -221,5 +232,5 @@ export function LoadWorkspace() {
     {offline && <p role="status">Cần kết nối để nạp hàng.</p>}
     {notice && <p role="status">{notice}</p>}
     {source && <p className="c3-source">Mã nguồn nạp {source}</p>}
-  </main>
+  </Container>
 }
