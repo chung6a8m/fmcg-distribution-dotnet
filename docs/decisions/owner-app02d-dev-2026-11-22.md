@@ -1,0 +1,21 @@
+# Owner decision for APP-02D DEV and D.0
+
+**Decision date:** 22/11/2026 (Asia/Bangkok)
+**Status:** `DEV_ENVIRONMENT_APPROVED / D0_CONTRACT_APPROVED / D1_DEV_AUTHORIZED`
+
+The Owner approved Windows LocalDB with two synthetic tenants for APP-02D DEV and directed D.0 to prepare the roadmap, contract and acceptance matrix for review before D.1.
+
+> Tôi duyệt phạm vi APP-02D DEV trên Windows LocalDB với hai tenant giả lập. Hãy triển khai D.0, cập nhật roadmap và chuẩn bị hợp đồng cùng ma trận nghiệm thu để tôi duyệt trước D.1. Giữ nguyên các cổng PREPROD và nghiệm thu vật lý.
+
+| Ref | Decision |
+|---|---|
+| **OWN-APP02D-DEV-01** | Use Windows and two dedicated, nonce-owned synthetic LocalDB databases. Use the existing React application and server-validated synthetic identity path when implementation is authorized. Keep the ownership and tenant-binding guards for open, migration, reset and DROP. |
+| **OWN-APP02D-DEV-02** | D.0 may document the [DEV roadmap and draft contract](../roadmap/app-02d0-dev-contract.md) and the [draft D.1 matrix](../roadmap/app-02d1-dev-acceptance-matrix.md). Owner approval of the contract and matrix is the entry decision for D.1 source, migrations, UI and integrated DEV execution. D.2–D.4 are proposed increments with their own contract and evidence. |
+| **OWN-APP02D-DEV-03** | Keep the locked business baseline, online-only writes, `SYNTHETIC_UNITLESS`, `invoiceEligible=false` and `B_NO_CHANNEL BLOCKED`. Synthetic fixture limits and approval identities apply only in the owned DEV environment. |
+| **OWN-APP02D-DEV-04** | Preserve C-PREPROD `BLOCKED / NOT_VERIFIED`, physical C-E2E `NOT_RUN`, the existing B.1/B.9 and RUNTIME-01/02 requirements, and PREPROD `FOUNDATION_ONLY / NO_GO`. Operational B_ONLINE/Mixed admission, production, EV/P0, Pilot and Go-Live retain their existing conditions and authority. |
+
+The signed [C.6 DEV closeout](../closeout/2026-11-22-app-02c6-localdb.md) is the predecessor evidence. D.0 records design and scope.
+
+## D.1 contract and matrix approval
+
+On 22/11/2026 (Asia/Bangkok) the Owner approved D.0 and matrix D.1 v0.1, authorized D.1 source, migrations, workspace and execution of all 14 cases on Windows LocalDB with two synthetic tenants, and reserved signoff until after SQL review. The approved documents are preserved as submitted. SHA-256 after normalizing line endings to LF is `0AAAAE73A161C0C3ECF17F34D7D747F84AF3031CA6430CBB57298832EC73F30B` for the contract and `E776C40ADEA1262F2C1B0052B32549747195C128EF2A9560EACC18E521EB9BCF` for the matrix. The historical draft markers identify the texts submitted for approval.

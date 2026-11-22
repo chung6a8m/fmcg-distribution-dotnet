@@ -78,7 +78,7 @@ public sealed partial class App01a2CommandService
             if (await db.ExecuteScalarAsync<int>(Sql("""
                 SELECT COUNT(*) FROM dbo.TripManifestLine l
                 JOIN dbo.PhysicalStockMovement m ON m.TenantId=l.TenantId AND m.TripManifestLineId=l.Id
-                WHERE l.TenantId=@Tenant AND l.Id=@ManifestLineId AND l.TripId=@TripId AND l.IsC3=1
+                WHERE l.TenantId=@Tenant AND l.Id=@ManifestLineId AND l.TripId=@TripId AND l.IsC3=1 AND l.RightKind='A'
                 """, args, tx, ct)) != 1)
                 return new C4Receipt(null, "C4_LOADED_LINE_NOT_FOUND");
             if (await db.ExecuteScalarAsync<int>(Sql("""

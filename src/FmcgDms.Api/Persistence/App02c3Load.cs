@@ -13,7 +13,7 @@ public sealed record C3LoadLine(Guid RightId,
     [property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)] decimal Quantity);
 public sealed record C3LoadInput(Guid CommandId, Guid TripId, C3LoadLine?[]? Lines);
 public sealed record C3TripView(Guid Id, string Code);
-public sealed record C3RightView(Guid Id, Guid OrderId, Guid WarehouseId, string WarehouseCode, Guid SkuId,
+public sealed record C3RightView(Guid Id, Guid? OrderId, Guid WarehouseId, string WarehouseCode, Guid SkuId,
     string SkuCode, string BaseUom,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Granted,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Loaded,
@@ -23,7 +23,17 @@ public sealed partial class App01a2CommandService
 {
     private const string ManifestLoadSource = "MANIFEST_LOAD";
 
-    public Task<BusinessCommandOutcome> LoadC3(ClaimsPrincipal principal, C3LoadInput input, CancellationToken ct)
+    public Task<BusinessCommandOutcome> LoadC3(ClaimsPrincipal principal, C3LoadInput input, CancellationToken ct) =>
+        LoadManifest(principal, input, ct, d1Load: false);
+
+    public Task<BusinessCommandOutcome> LoadD1(ClaimsPrincipal principal, C3LoadInput input, CancellationToken ct)
+    {
+        RequireD1Mode();
+        return LoadManifest(principal, input, ct, d1Load: true);
+    }
+
+    private Task<BusinessCommandOutcome> LoadManifest(ClaimsPrincipal principal, C3LoadInput input,
+        CancellationToken ct, bool d1Load)
     {
         const int maxLines = 100;
         if (input.Lines is { Length: > maxLines })
@@ -31,7 +41,7 @@ public sealed partial class App01a2CommandService
         var lines = (input.Lines ?? []).OfType<C3LoadLine>().OrderBy(l => l.RightId).ToArray();
         bool validShape = input.Lines is { Length: > 0 } && input.Lines.Length == lines.Length;
         var key = C2Key(principal, input.CommandId);
-        return ExecuteAsync(principal, key, "C3_LOAD_MANIFEST",
+        return ExecuteAsync(principal, key, d1Load ? "D1_LOAD_MANIFEST" : "C3_LOAD_MANIFEST",
             [("Trip", input.TripId.ToString("N")),
              ("SubmittedLines", input.Lines?.Length.ToString(CultureInfo.InvariantCulture) ?? "missing"),
              ..lines.SelectMany((l, i) => new[]
@@ -42,13 +52,14 @@ public sealed partial class App01a2CommandService
             })],
             (db, tx, tenant, actor, command, token) =>
                 validShape
-                    ? ApplyLoadC3(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, token)
+                    ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load, token)
                     : Task.FromResult(BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES")),
-            ct, "warehouse", input.TripId);
+            ct, "warehouse", input.TripId, d1Load: d1Load);
     }
 
-    private static async Task<BusinessCommandOutcome> ApplyLoadC3(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, CancellationToken ct)
+    private static async Task<BusinessCommandOutcome> ApplyPartialLoad(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load,
+        CancellationToken ct)
     {
         if (lines.Select(l => l.RightId).Distinct().Count() != lines.Length
             || lines.Any(l => l.RightId == Guid.Empty || !ValidQuantity(l.Quantity)
@@ -61,10 +72,13 @@ public sealed partial class App01a2CommandService
         if (await SourceUsed(db, tx, tenant, ManifestLoadSource, number, ct))
             return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
 
-        var rights = (await EligibleC3Rights(db, tx, tenant, tripId, lines.Select(l => l.RightId).ToArray(), ct))
-            .ToDictionary(r => r.Id);
+        Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
+        var rights = (d1Load
+                ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, ct)
+                : await EligibleC3Rights(db, tx, tenant, tripId, rightIds, ct))
+            .ToDictionary(right => right.Id);
         if (rights.Count != lines.Length)
-            return BusinessCommandOutcome.Rejected("C3_RESERVATION_NOT_ELIGIBLE");
+            return BusinessCommandOutcome.Rejected(d1Load ? "D1_QUOTA_NOT_ELIGIBLE" : "C3_RESERVATION_NOT_ELIGIBLE");
         if (lines.Any(l => l.ExpectedWarehouseHeld != rights[l.RightId].WarehouseHeld))
             return BusinessCommandOutcome.Rejected("C3_STALE_WAREHOUSE_HELD");
         Guid warehouse = rights[lines[0].RightId].WarehouseId;
@@ -79,7 +93,7 @@ public sealed partial class App01a2CommandService
         var manifestLines = lines.Select((l, i) => new ManifestLine
         {
             Id = Guid.NewGuid(), LineNumber = i + 1, SkuId = rights[l.RightId].SkuId,
-            StockRightId = l.RightId, RightKind = "A", PlannedBaseQuantity = l.Quantity
+            StockRightId = l.RightId, RightKind = d1Load ? "B" : "A", PlannedBaseQuantity = l.Quantity
         }).ToArray();
         var transfers = new List<SkuTransfer>();
         foreach (var group in manifestLines.GroupBy(l => l.SkuId).OrderBy(g => g.Key))
@@ -114,9 +128,10 @@ public sealed partial class App01a2CommandService
                 INSERT dbo.TripManifestLine(Id,TenantId,TripManifestId,TripId,WarehouseLocationId,VehicleLocationId,
                     LineNumber,SkuId,StockRightId,RightKind,PlannedBaseQuantity,IsC3)
                 VALUES(@Id,@Tenant,@Manifest,@TripId,@WarehouseLocationId,@VehicleLocationId,
-                    @LineNumber,@SkuId,@StockRightId,'A',@PlannedBaseQuantity,1)
+                    @LineNumber,@SkuId,@StockRightId,@RightKind,@PlannedBaseQuantity,1)
                 """, new { line.Id, Tenant = tenant, Manifest = manifest.Id, manifest.TripId, manifest.WarehouseLocationId,
-                    manifest.VehicleLocationId, line.LineNumber, line.SkuId, line.StockRightId, line.PlannedBaseQuantity }, tx, ct));
+                    manifest.VehicleLocationId, line.LineNumber, line.SkuId, line.StockRightId, line.RightKind,
+                    line.PlannedBaseQuantity }, tx, ct));
         foreach (var transfer in transfers)
         {
             int changed = await db.ExecuteAsync(Sql("""
