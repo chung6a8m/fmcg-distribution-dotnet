@@ -29,7 +29,7 @@ internal static class App02c4DevFixture
                 """);
     }
 
-    internal static async Task Verify(DemoRun run, string root, string source, string apiVersion, string apiSha256)
+    internal static async Task Verify(DemoRun run, string root, string source, string apiVersion, string apiSha256, bool c5)
     {
         await run.Verify("tenant-a");
         await run.Verify("tenant-b");
@@ -82,10 +82,10 @@ internal static class App02c4DevFixture
             "DELIVERY-EFFECT|PHYSICAL-OUT|-25.000|-250.0000",
             "DELIVERY-EFFECT|RIGHT-A-USED|-25.000|0.0000",
             "DELIVERY|PARTIALLY_DELIVERED|25.000|375.0000|250.0000|LOCAL|04 Duong DEV, Khu DEV, HCM, VN",
-            "LOAD|40.000|400.0000|MANIFEST_LOAD",
-            "PHYSICAL|C2-MAIN|60.000|600.0000",
-            "PHYSICAL|C2-TRUCK|15.000|150.0000",
-            "RIGHT|HELD|40.000|25.000|15.000"
+            c5 ? "LOAD|40.001|400.0100|MANIFEST_LOAD" : "LOAD|40.000|400.0000|MANIFEST_LOAD",
+            c5 ? "PHYSICAL|C2-MAIN|59.999|599.9900" : "PHYSICAL|C2-MAIN|60.000|600.0000",
+            c5 ? "PHYSICAL|C2-TRUCK|15.001|150.0100" : "PHYSICAL|C2-TRUCK|15.000|150.0000",
+            c5 ? "RIGHT|HELD|40.001|25.000|15.001" : "RIGHT|HELD|40.000|25.000|15.000"
         ];
         int peer = await b.QuerySingleAsync<int>("""
             SELECT (SELECT COUNT(*) FROM dbo.C4DeliveryEvidence)+(SELECT COUNT(*) FROM dbo.C4DeliveryWriter)
@@ -99,7 +99,8 @@ internal static class App02c4DevFixture
             FROM dbo.SaleDelivery d JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId AND ar.SaleDeliveryId=d.Id
             WHERE d.C4EvidenceId IS NOT NULL
             """);
-        string dir = Path.Combine(root, "TestResults", "app02c4");
+        string increment = c5 ? "app02c5" : "app02c4";
+        string dir = Path.Combine(root, "TestResults", increment);
         Directory.CreateDirectory(dir);
         string file = Path.Combine(dir, run.Id + "-sql.json");
         static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
@@ -107,11 +108,11 @@ internal static class App02c4DevFixture
         {
             source, apiVersion, apiSha256, runId = run.Id, environment = "Synthetic Windows LocalDB", instance = DemoRun.Instance,
             fixtureVersion = 1, observedAtUtc = DateTime.UtcNow,
-            browserFixtureSha256 = Hash(Path.Combine(root, "web", "e2e-app02c4", "delivery.spec.ts")),
-            browserReportSha256 = Hash(Path.Combine(root, "web", "test-results-app02c4", run.Id, "junit.xml")),
+            browserFixtureSha256 = Hash(Path.Combine(root, "web", "e2e-" + increment, c5 ? "workspace.spec.ts" : "delivery.spec.ts")),
+            browserReportSha256 = Hash(Path.Combine(root, "web", "test-results-" + increment, run.Id, "junit.xml")),
             dates, expected, actual, expectedTenantBEffects = 0, actualTenantBEffects = peer, matches
         }, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"APP-02C.4 SQL comparison: {file}");
+        Console.WriteLine($"{increment} SQL comparison: {file}");
         if (!matches) throw new InvalidOperationException("C.4 SQL rows differ from the fixture expectations.");
     }
 }

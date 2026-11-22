@@ -45,9 +45,35 @@ function pendingKey(identity: Identity) {
   return 'app02c1.pending.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
 }
 
+// A pane can unmount while its command is in flight. Retain the original
+// request for this page even when access to sessionStorage is blocked.
+const pendingInMemory = new Map<string, string | null>()
+
+export function pendingJson(key: string) {
+  if (pendingInMemory.has(key)) return pendingInMemory.get(key) ?? null
+  try { return sessionStorage.getItem(key) } catch { return null }
+}
+
+export function rememberPending(key: string, command: object) {
+  const value = JSON.stringify(command)
+  pendingInMemory.set(key, value)
+  try { sessionStorage.setItem(key, value) } catch { /* In-memory recovery stays available. */ }
+}
+
+export function forgetPending(key: string, originalId: string) {
+  try {
+    const raw = pendingJson(key)
+    if (!raw) return
+    const command = JSON.parse(raw)
+    if ((command.commandId ?? command.id) !== originalId) return
+    pendingInMemory.set(key, null)
+    sessionStorage.removeItem(key)
+  } catch { /* In-memory recovery stays available. */ }
+}
+
 export function restorePending(identity: Identity): Pending | null {
   try {
-    const raw = sessionStorage.getItem(pendingKey(identity))
+    const raw = pendingJson(pendingKey(identity))
     if (!raw) return null
     const item = JSON.parse(raw) as Pending
     return paths.includes(item.path) && /^[a-f0-9-]{36}$/.test(item.commandId)
@@ -57,13 +83,12 @@ export function restorePending(identity: Identity): Pending | null {
   }
 }
 
-export function storePending(identity: Identity, pending: Pending | null) {
-  try {
-    if (pending) sessionStorage.setItem(pendingKey(identity), JSON.stringify(pending))
-    else sessionStorage.removeItem(pendingKey(identity))
-  } catch {
-    // The open session still retains the original request in memory.
-  }
+export function storePending(identity: Identity, pending: Pending) {
+  rememberPending(pendingKey(identity), pending)
+}
+
+export function clearPending(identity: Identity, id: string) {
+  forgetPending(pendingKey(identity), id)
 }
 
 const codes: Record<string, string> = {

@@ -812,6 +812,9 @@ jobs:
       - name: APP-02C.4 Load, partial Delivery, due-dated AR and rollback through browser, API and LocalDB
         shell: pwsh
         run: ./scripts/Run-App02C4.ps1 -Verify
+      - name: APP-02C.5 Sales A workspace and historical AR through browser, API and LocalDB
+        shell: pwsh
+        run: ./scripts/Run-App02C5.ps1 -Verify
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -824,6 +827,7 @@ jobs:
             web/test-results-app02c2/
             web/test-results-app02c3/
             web/test-results-app02c4/
+            web/test-results-app02c5/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web

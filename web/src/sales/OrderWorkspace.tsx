@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Field, Notice, ThemeSelect } from '../ui/controls'
-import { HttpError, read, requestSalesApi, type Detail, type Identity } from './customer-api'
+import { forgetPending, HttpError, pendingJson, read, rememberPending, requestSalesApi, type Detail, type Identity } from './customer-api'
 import './customers.css'
 
 const api = '/api/synthetic/app02c2'
@@ -9,9 +9,10 @@ type Authority = Identity & { sales: boolean; warehouse: boolean }
 type Option = { id: string; label: string }
 type Catalog = { customers: Option[]; trips: Option[]; skus: Option[]; warehouses: Option[] }
 type Line = { lineId: string | null; sku: string; baseUom: string; ordered: number; reserved: number;
-  delivered: number; unitPrice: number | null; policyVersion: number | null; termsDays: number | null }
+  delivered: number; unitPrice: number | null; policyVersion: number | null; termsDays: number | null
+  loaded: number; heldOnTrip: number; policySourceHash: string | null }
 type Order = { id: string; customer: string; trip: string; shipTo: string; businessDate: string | null;
-  confirmSourceId: string | null; status: string; lines: Line[] }
+  confirmSourceId: string | null; status: string; lines: Line[]; shipToSnapshotId: string | null; shipToOrigin: string }
 type Command = { path: '/drafts' | '/confirm' | '/reserve'; id: string; body: string }
 type Session = { token: string; identity: Authority }
 
@@ -44,7 +45,7 @@ function key(identity: Authority) {
 
 function restore(identity: Authority): Command | null {
   try {
-    const raw = sessionStorage.getItem(key(identity))
+    const raw = pendingJson(key(identity))
     if (!raw) return null
     const item = JSON.parse(raw) as Command
     if (['/drafts', '/confirm', '/reserve'].includes(item.path) && /^[a-f0-9-]{36}$/.test(item.id)
@@ -53,12 +54,6 @@ function restore(identity: Authority): Command | null {
   return null
 }
 
-function persist(identity: Authority, command: Command | null) {
-  try {
-    if (command) sessionStorage.setItem(key(identity), JSON.stringify(command))
-    else sessionStorage.removeItem(key(identity))
-  } catch { /* Preserve the in-memory request when browser storage is unavailable. */ }
-}
 
 async function get<T>(token: string, path: string): Promise<T> {
   const response = await requestSalesApi(api, token, path)
@@ -138,7 +133,7 @@ function DraftForm({ session, catalog, disabled, save }: {
   </form>
 }
 
-export function OrderWorkspace() {
+export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: string; onOpenAr?: (orderId: string) => void }) {
   const [session, setSession] = useState<Session | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
@@ -147,6 +142,7 @@ export function OrderWorkspace() {
   const [busy, setBusy] = useState(false)
   const [offline, setOffline] = useState(!navigator.onLine)
   const active = useRef(false)
+  const connecting = useRef(false)
   useEffect(() => {
     const sync = () => setOffline(!navigator.onLine)
     window.addEventListener('online', sync)
@@ -161,6 +157,17 @@ export function OrderWorkspace() {
     event.preventDefault()
     const token = String(new FormData(event.currentTarget).get('token') ?? '').trim()
     event.currentTarget.reset()
+    void connectToken(token)
+  }
+
+  const openWorkspace = useEffectEvent((token: string) => { void connectToken(token) })
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
+
+  async function connectToken(token: string) {
+    if (connecting.current) return
+    connecting.current = true
     setBusy(true)
     setNotice('')
     try {
@@ -172,7 +179,10 @@ export function OrderWorkspace() {
       setOrders(existing)
       setPending(restore(identity))
     } catch (error) { setNotice(failure(error)) }
-    finally { setBusy(false) }
+    finally {
+      connecting.current = false
+      setBusy(false)
+    }
   }
 
   async function resolve(command: Command, lookup: boolean) {
@@ -194,7 +204,7 @@ export function OrderWorkspace() {
         return
       }
       if (result.status !== 'APPLIED' && result.status !== 'REJECTED') throw new Error('Unknown outcome')
-      persist(session.identity, null)
+      forgetPending(key(session.identity), command.id)
       setPending(null)
       setNotice(result.status === 'APPLIED' ? 'Đã ghi vào cơ sở dữ liệu.'
         : rejections[result.reasonCode ?? ''] ?? `Yêu cầu bị từ chối (${result.reasonCode ?? 'UNKNOWN'}).`)
@@ -213,13 +223,14 @@ export function OrderWorkspace() {
     const id = crypto.randomUUID()
     const command = { path, id, body: JSON.stringify({ ...fields, commandId: id }) }
     setPending(command)
-    persist(session.identity, command)
+    rememberPending(key(session.identity), command)
     void resolve(command, false)
   }
 
   const disabled = busy || offline || pending !== null
-  return <main className="page c1-page">
-    <header className="page-heading c1-header">
+  const Container = workspaceToken ? 'section' : 'main'
+  return <Container className={workspaceToken ? 'sales-pane c1-page' : 'page c1-page'}>
+    {workspaceToken ? <h2>Đơn A và giữ hàng</h2> : <header className="page-heading c1-header">
       <div>
         <a className="page-link" href="/">Trang chính</a>
         <h1>Đơn A và giữ hàng</h1>
@@ -228,15 +239,17 @@ export function OrderWorkspace() {
         <a className="page-link" href="/sales/load">Nạp hàng lên xe</a>
       </div>
       <ThemeSelect />
-    </header>
+    </header>}
     {offline && <div role="status"><Notice title="Đang ngoại tuyến" tone="warning">Kết nối mạng để gửi yêu cầu.</Notice></div>}
-    {!session ? <form className="panel panel-content c1-sign-in" onSubmit={connect}>
+    {!session ? workspaceToken
+      ? <Button disabled={busy || offline} onClick={() => void connectToken(workspaceToken)}>Tải màn hình</Button>
+      : <form className="panel panel-content c1-sign-in" onSubmit={connect}>
       <h2>Kết nối phiên DEV</h2>
       <Field label="Mã truy cập DEV" name="token" type="password" autoComplete="off" required />
       <Button type="submit" variant="primary" disabled={busy || offline}>Kết nối</Button>
     </form> : catalog && <>
       <div className="button-row">
-        <Button disabled={busy} onClick={() => { setSession(null); setOrders([]); setPending(null); setNotice('') }}>Đổi phiên DEV</Button>
+        {!workspaceToken && <Button disabled={busy} onClick={() => { setSession(null); setOrders([]); setPending(null); setNotice('') }}>Đổi phiên DEV</Button>}
         <Button disabled={busy || offline} onClick={() => {
           setBusy(true)
           void get<Order[]>(session.token, '/orders').then(setOrders)
@@ -258,12 +271,23 @@ export function OrderWorkspace() {
           <h3>{order.customer} · {order.trip}</h3>
           <p>{order.shipTo}</p>
           <p><strong>{labels[order.status] ?? order.status}</strong>{order.businessDate && ' · ' + order.businessDate.slice(0, 10)}</p>
+          {workspaceToken && order.confirmSourceId && <details>
+            <summary>Nguồn và địa chỉ đã Confirm</summary>
+            <p className="c3-source">Nguồn Confirm {order.confirmSourceId}</p>
+            <p className="c3-source">Mã đơn {order.id}</p>
+            <p className="c3-source">Bản chụp địa chỉ {order.shipToSnapshotId} · {order.shipToOrigin === 'DIRECT' ? 'Một lần' : 'Đã đăng ký'}</p>
+            {onOpenAr && session.identity.sales && <Button onClick={() => onOpenAr(order.id)}>Công nợ theo đơn</Button>}
+          </details>}
           {order.status === 'DRAFT' && session.identity.sales &&
             <Button disabled={disabled} variant="primary" onClick={() => save('/confirm', { orderId: order.id })}>Confirm đơn</Button>}
           {order.lines.map(line => <div className="panel panel-content" key={line.sku}>
             <p>{line.sku} · Đặt {line.ordered} {line.baseUom} · Đã giữ {line.reserved} {line.baseUom}</p>
             {line.delivered > 0 && <p>Đã giao {line.delivered} {line.baseUom}</p>}
+            {workspaceToken && order.confirmSourceId && <p>Đã nạp {line.loaded} {line.baseUom} · Còn giữ trên xe {line.heldOnTrip} {line.baseUom}</p>}
             {line.policyVersion !== null && <p>Chính sách v{line.policyVersion} · Giá {line.unitPrice} · Hạn {line.termsDays} ngày</p>}
+            {workspaceToken && line.policySourceHash && <details>
+              <summary>Nguồn chính sách</summary><p className="c3-source">{line.policySourceHash}</p>
+            </details>}
             {session.identity.warehouse && order.confirmSourceId && line.lineId && line.reserved + line.delivered < line.ordered &&
               <form className="c1-fields" aria-label={`Giữ hàng ${line.sku}`} onSubmit={event => {
                 event.preventDefault()
@@ -285,5 +309,5 @@ export function OrderWorkspace() {
       </section>
     </>}
     {notice && <p role="status">{notice}</p>}
-  </main>
+  </Container>
 }

@@ -83,7 +83,7 @@ public sealed partial class App01a2CommandService
             OUTER APPLY (SELECT TOP(1) Version,ShipToSnapshotId FROM dbo.C4ShipToAmendment
                 WHERE TenantId=o.TenantId AND OrderId=o.Id ORDER BY Version DESC) am
             JOIN dbo.ShipToSnapshot adr ON adr.TenantId=o.TenantId AND adr.Id=COALESCE(am.ShipToSnapshotId,cf.ShipToSnapshotId)
-            CROSS APPLY (SELECT COALESCE(SUM(BaseQuantity),0) AS Delivered FROM dbo.SaleDelivery
+            CROSS APPLY (SELECT CONVERT(decimal(18,3),COALESCE(SUM(BaseQuantity),0)) AS Delivered FROM dbo.SaleDelivery
                 WHERE TenantId=l.TenantId AND TripManifestLineId=l.Id) d
             WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.IsC3=1
             ORDER BY c.Name,k.Code,l.Id

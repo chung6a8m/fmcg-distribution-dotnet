@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Field, Notice, ThemeSelect } from '../ui/controls'
 import {
-  HttpError, outcomeMessage, read, readError, request, restorePending, storePending,
+  clearPending, HttpError, outcomeMessage, read, readError, request, restorePending, storePending,
   type Address, type CommandPath, type Customer, type Detail, type Identity,
   type Outcome, type Outlet, type Pending, type Registered,
 } from './customer-api'
@@ -181,7 +181,7 @@ function CustomerDetail({ detail, editing, disabled, edit, select }: {
   </>
 }
 
-export function CustomerWorkspace() {
+export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string }) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -193,6 +193,7 @@ export function CustomerWorkspace() {
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [loadError, setLoadError] = useState('')
   const operation = useRef(false)
+  const connecting = useRef(false)
   const feedbackRef = useRef<HTMLDivElement>(null)
   const editOpener = useRef<HTMLElement | null>(null)
   const loginField = useRef<HTMLInputElement>(null)
@@ -212,6 +213,17 @@ export function CustomerWorkspace() {
     event.preventDefault()
     const token = String(new FormData(event.currentTarget).get('token') ?? '').trim()
     if (loginField.current) loginField.current.value = ''
+    void signInToken(token)
+  }
+
+  const openWorkspace = useEffectEvent((token: string) => { void signInToken(token) })
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
+
+  async function signInToken(token: string) {
+    if (connecting.current) return
+    connecting.current = true
     setLoading(true)
     setLoadError('')
     try {
@@ -223,7 +235,10 @@ export function CustomerWorkspace() {
       setPending(restorePending(identity))
     } catch (error) {
       setLoadError(readError(error))
-    } finally { setLoading(false) }
+    } finally {
+      connecting.current = false
+      setLoading(false)
+    }
   }
 
   async function refresh(token: string, id?: string) {
@@ -277,7 +292,7 @@ export function CustomerWorkspace() {
         setFeedback({ tone: 'danger', text: outcomeMessage(result.code) + ' Tra cứu yêu cầu đã ghi.' })
         return
       }
-      storePending(session.identity, null)
+      clearPending(session.identity, command.commandId)
       setPending(null)
       setFeedback({ tone: result.code === 'APPLIED' ? 'success' : 'danger', text: outcomeMessage(result.code) })
       if (result.code === 'APPLIED') {
@@ -306,8 +321,9 @@ export function CustomerWorkspace() {
   const busy = loading || sending
   const selectionLocked = busy || editor !== null || pending !== null
   const unavailable = busy || offline || pending !== null || loadError !== ''
-  return <main className="page c1-page">
-    <header className="page-heading c1-header">
+  const Container = workspaceToken ? 'section' : 'main'
+  return <Container className={workspaceToken ? 'sales-pane c1-page' : 'page c1-page'}>
+    {workspaceToken ? <h2>Khách hàng và địa chỉ giao</h2> : <header className="page-heading c1-header">
       <div>
         <a className="page-link" href="/">Trang chính</a>
         <h1>Khách hàng và địa chỉ giao</h1>
@@ -326,9 +342,11 @@ export function CustomerWorkspace() {
           setLoadError('')
         }}>Đổi phiên DEV</Button>}
       </div>
-    </header>
+    </header>}
     {offline && <div role="status"><Notice tone="warning" title="Đang ngoại tuyến">Kết nối mạng để gửi yêu cầu.</Notice></div>}
-    {!session ? <form className="panel panel-content c1-sign-in" onSubmit={signIn}>
+    {!session ? workspaceToken
+      ? <Button disabled={busy || offline} onClick={() => void signInToken(workspaceToken)}>Tải màn hình</Button>
+      : <form className="panel panel-content c1-sign-in" onSubmit={signIn}>
       <h2>Kết nối phiên DEV</h2>
       <Field ref={loginField} label="Mã truy cập DEV" name="token" type="password" autoComplete="off" spellCheck={false} required />
       <Button type="submit" variant="primary" disabled={busy || offline}>Kết nối</Button>
@@ -373,5 +391,5 @@ export function CustomerWorkspace() {
     {loadError && <div role="alert"><Notice tone="danger" title="Lỗi kết nối">{loadError}</Notice>
       {session && <Button disabled={busy || offline} onClick={() => void refresh(session.token, lastRequested.current)}>Thử tải lại</Button>}
     </div>}
-  </main>
+  </Container>
 }

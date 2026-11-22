@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
-import { HttpError, readError, requestSalesApi, type Identity } from './customer-api'
+import { forgetPending, HttpError, pendingJson, readError, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
 const api = '/api/synthetic/app02c4'
@@ -25,16 +25,19 @@ function displayQuantity(value: string) {
   return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value
 }
 
-function storage(identity: Identity, pending?: Pending | null): Pending | null {
-  const key = 'app02c4.delivery.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
+function pendingKey(identity: Identity) {
+  return 'app02c4.delivery.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
+}
+
+function restore(identity: Identity): Pending | null {
   try {
-    if (pending === undefined) {
-      const raw = sessionStorage.getItem(key)
-      return raw ? JSON.parse(raw) as Pending : null
-    }
-    if (pending) sessionStorage.setItem(key, JSON.stringify(pending))
-    else sessionStorage.removeItem(key)
-  } catch { /* The original command also remains in the open screen. */ }
+    const raw = pendingJson(pendingKey(identity))
+    if (!raw) return null
+    const value = JSON.parse(raw) as Pending
+    const guid = /^[a-f0-9-]{36}$/
+    if (guid.test(value.commandId) && guid.test(value.tripId) && guid.test(value.manifestLineId)
+        && Number.isInteger(value.shipToVersion) && /^\d{1,15}(\.\d{1,3})?$/.test(value.quantity)) return value
+  } catch { /* Unreadable saved requests are ignored. */ }
   return null
 }
 
@@ -44,7 +47,7 @@ async function get<T>(token: string, path: string, service = api): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function DeliveryWorkspace() {
+export function DeliveryWorkspace({ workspaceToken }: { workspaceToken?: string }) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
   const [trip, setTrip] = useState('')
@@ -89,11 +92,20 @@ export function DeliveryWorkspace() {
     event.preventDefault()
     const token = String(new FormData(event.currentTarget).get('token') ?? '').trim()
     event.currentTarget.reset()
+    void connectToken(token)
+  }
+
+  const openWorkspace = useEffectEvent((token: string) => { void connectToken(token) })
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
+
+  function connectToken(token: string) {
     void work(async () => {
       const [identity, available] = await Promise.all([
         get<Identity>(token, '/session', '/api/synthetic/app02c2'), get<Trip[]>(token, '/trips'),
       ])
-      const saved = storage(identity)
+      const saved = restore(identity)
       setSession({ token, identity })
       setTrips(available)
       setPending(saved)
@@ -106,7 +118,7 @@ export function DeliveryWorkspace() {
     const { token, identity } = session
     void work(async () => {
       if (!lookup) {
-        storage(identity, command)
+        rememberPending(pendingKey(identity), command)
         setPending(command)
       }
       let message: string
@@ -132,7 +144,7 @@ export function DeliveryWorkspace() {
         setNotice('Chưa rõ kết quả ghi sổ. Hãy tra cứu trước khi ghi lần giao mới.')
         return
       }
-      storage(identity, null)
+      forgetPending(pendingKey(identity), command.commandId)
       setPending(null)
       try { await refresh(token, trip) }
       catch { message += ' Hãy tải lại dữ liệu giao hàng.' }
@@ -141,21 +153,24 @@ export function DeliveryWorkspace() {
   }
 
   const disabled = busy || offline || !!pending
-  return <main className="page c1-page">
-    <header className="page-heading c1-header">
+  const Container = workspaceToken ? 'section' : 'main'
+  return <Container className={workspaceToken ? 'sales-pane c1-page' : 'page c1-page'}>
+    {workspaceToken ? <h2>Giao hàng và công nợ A</h2> : <header className="page-heading c1-header">
       <div>
         <h1>Giao hàng và công nợ A</h1>
         <p>APP-02C.4 · DEV</p>
         <a className="page-link" href="/sales/load">Nạp hàng lên xe</a>
       </div>
       <ThemeSelect />
-    </header>
-    {!session ? <form className="panel panel-content c1-sign-in" onSubmit={connect}>
+    </header>}
+    {!session ? workspaceToken
+      ? <Button disabled={busy || offline} onClick={() => void connectToken(workspaceToken)}>Tải màn hình</Button>
+      : <form className="panel panel-content c1-sign-in" onSubmit={connect}>
       <Field name="token" label="Mã truy cập DEV" type="password" autoComplete="off" required />
       <Button type="submit" variant="primary" disabled={disabled}>Kết nối</Button>
     </form> : <>
       <div className="button-row">
-        <Button disabled={busy} onClick={() => { setSession(null); setData(null); setPending(null); setNotice('') }}>Đổi phiên DEV</Button>
+        {!workspaceToken && <Button disabled={busy} onClick={() => { setSession(null); setData(null); setPending(null); setNotice('') }}>Đổi phiên DEV</Button>}
         <Button disabled={disabled || !trip} onClick={() => { void work(() => refresh(session.token, trip)) }}>Tải lại chuyến</Button>
       </div>
       {trips.length > 0 ? <label className="field">Chuyến giao
@@ -205,19 +220,23 @@ export function DeliveryWorkspace() {
         </section>
         {data.cases.length > 0 && <section className="panel panel-content" aria-label="Giao hàng cần đối soát">
           <h2>Giao hàng cần đối soát</h2>
-          {data.cases.map(item => <div key={item.commandId}>
-            <p className="c3-source">
-              {displayQuantity(item.quantity)} · {item.reasonCode ? labels[item.reasonCode] ?? 'Ghi sổ bị từ chối' : 'Chờ ghi sổ'} · {item.commandId}
-            </p>
-            {item.canRetry && <Button disabled={disabled} onClick={() => resolve({
-              tripId: trip, commandId: item.commandId, manifestLineId: item.manifestLineId,
-              shipToVersion: item.shipToVersion, quantity: item.quantity,
-            }, false)}>Ghi lại lần giao đã lưu</Button>}
-          </div>)}
+          {data.cases.map(item => {
+            const original = { tripId: trip, commandId: item.commandId, manifestLineId: item.manifestLineId,
+              shipToVersion: item.shipToVersion, quantity: item.quantity }
+            return <div key={item.commandId}>
+              <p className="c3-source">
+                {displayQuantity(item.quantity)} · {item.reasonCode ? labels[item.reasonCode] ?? 'Ghi sổ bị từ chối' : 'Chờ ghi sổ'} · {item.commandId}
+              </p>
+              {item.canRetry && <div className="button-row">
+                <Button disabled={disabled} onClick={() => resolve(original, true)}>Tra cứu lần giao đã lưu</Button>
+                <Button disabled={disabled} onClick={() => resolve(original, false)}>Ghi lại lần giao đã lưu</Button>
+              </div>}
+            </div>
+          })}
         </section>}
       </>}
     </>}
     {offline && <p role="status">Cần kết nối để ghi giao hàng.</p>}
     {notice && <p role="status">{notice}</p>}
-  </main>
+  </Container>
 }
