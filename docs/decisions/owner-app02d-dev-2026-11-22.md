@@ -35,3 +35,7 @@ On 22/11/2026 (Asia/Bangkok) the Owner signed APP-02D.2 DEV acceptance on `99539
 ## D.3 contract, fixture and matrix approval
 
 On 22/11/2026 (Asia/Bangkok) the Owner approved the D.3 contract, fixture and matrix v0.1 and authorized implementation and all 18 cases on Windows LocalDB with two synthetic tenants. DEV signoff follows SQL review. The [D.3 contract](../roadmap/app-02d3-dev-contract.md) and [D.3 matrix](../roadmap/app-02d3-dev-acceptance-matrix.md) have LF-normalized SHA-256 `EEABE9CF574836054287A7CB2CE11367395C7BA8AF86028B75FE9A002D62D1D4` and `573A81A0106F2D2B1CE444D55E0C36CAB8619E9F5ABFC629104A17FAAFAB9BFF`, respectively. Decision OWN-APP02D-DEV-04 continues to apply.
+
+## D.3 DEV signoff
+
+On 23/11/2026 (Asia/Bangkok) the Owner signed APP-02D.3 DEV acceptance on `3e61d440241d233b86661936ba442d9f56e449c2` and authorized merging [PR #116](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/116). The signed scope is D.3 matrix v0.1 on Windows LocalDB with two synthetic tenants. The [D.3 closeout](../closeout/2026-11-22-app-02d3-localdb.md) records local and hosted SQL evidence, hosted CI and the implementation merge. Decision OWN-APP02D-DEV-04 continues to apply.
