@@ -1,7 +1,7 @@
 # Owner decision for APP-02D DEV and D.0
 
 **Decision date:** 22/11/2026 (Asia/Bangkok)
-**Status:** `DEV_ENVIRONMENT_APPROVED / D0_CONTRACT_APPROVED / D1_DEV_AUTHORIZED`
+**Status:** `DEV_ENVIRONMENT_APPROVED / D0_CONTRACT_APPROVED / D1_DEV_ACCEPTANCE_VERIFIED`
 
 The Owner approved Windows LocalDB with two synthetic tenants for APP-02D DEV and directed D.0 to prepare the roadmap, contract and acceptance matrix for review before D.1.
 
@@ -19,3 +19,7 @@ The signed [C.6 DEV closeout](../closeout/2026-11-22-app-02c6-localdb.md) is the
 ## D.1 contract and matrix approval
 
 On 22/11/2026 (Asia/Bangkok) the Owner approved D.0 and matrix D.1 v0.1, authorized D.1 source, migrations, workspace and execution of all 14 cases on Windows LocalDB with two synthetic tenants, and reserved signoff until after SQL review. The approved documents are preserved as submitted. SHA-256 after normalizing line endings to LF is `0AAAAE73A161C0C3ECF17F34D7D747F84AF3031CA6430CBB57298832EC73F30B` for the contract and `E776C40ADEA1262F2C1B0052B32549747195C128EF2A9560EACC18E521EB9BCF` for the matrix. The historical draft markers identify the texts submitted for approval.
+
+## D.1 DEV signoff
+
+On 22/11/2026 (Asia/Bangkok) the Owner signed APP-02D.1 DEV acceptance on `ff6d2b9d9cc4620774ab47817971ffbae695d62a` and authorized merging [PR #112](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/112). The signed scope is matrix D.1 v0.1 on Windows LocalDB with two synthetic tenants. The [D.1 closeout](../closeout/2026-11-22-app-02d1-localdb.md) records the SQL evidence, hosted CI and implementation merge. Decision OWN-APP02D-DEV-04 continues to apply.
