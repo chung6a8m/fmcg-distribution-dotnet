@@ -12,7 +12,7 @@ test('renders the actual API liveness contract', async ({ page }) => {
   }))
   await page.goto('/')
   await expect(page.getByRole('status')).toHaveText('API hoạt động')
-  await expect(page.getByText('Chưa có business write hoặc offline command queue.')).toBeVisible()
+  await expect(page.getByText('Cần kết nối để ghi nghiệp vụ.')).toBeVisible()
 })
 
 test('reports disconnected when an absent API returns the SPA HTML fallback', async ({ page }) => {

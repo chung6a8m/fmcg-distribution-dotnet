@@ -9,7 +9,7 @@ namespace FmcgDms.Api.Persistence;
 public static class ScratchMigrator
 {
     public static void Migrate(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel = LogLevel.Information)
+        LogLevel minimumLogLevel = LogLevel.Information, bool bindBeforeFeatureMigrations = false)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -44,12 +44,25 @@ public static class ScratchMigrator
                 .ScanIn(typeof(AppSchema).Assembly).For.Migrations())
             .BuildServiceProvider();
         using var scope = provider.CreateScope();
-        scope.ServiceProvider.GetRequiredService<IMigrationRunner>().MigrateUp();
+        var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
 
-        if (conn.ExecuteScalar<int>("SELECT COUNT(1) FROM dbo.AppTenantBinding WHERE Slot=1") == 0)
-            conn.Execute("INSERT INTO dbo.AppTenantBinding(Slot,TenantId,BoundAtUtc) VALUES (1,@TenantId,SYSUTCDATETIME())",
-                new { TenantId = tenantId });
-        if (conn.ExecuteScalar<string>("SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1") != tenantId)
-            throw new InvalidOperationException("Unexpected tenant binding after migration.");
+        // The disposable C.1 launcher must be able to prove the tenant binding
+        // before cleanup even if a later feature migration fails.
+        if (bindBeforeFeatureMigrations && bound is null)
+        {
+            runner.MigrateUp(202611150001);
+            BindTenant();
+        }
+        runner.MigrateUp();
+        BindTenant();
+
+        void BindTenant()
+        {
+            if (conn.ExecuteScalar<int>("SELECT COUNT(1) FROM dbo.AppTenantBinding WHERE Slot=1") == 0)
+                conn.Execute("INSERT INTO dbo.AppTenantBinding(Slot,TenantId,BoundAtUtc) VALUES (1,@TenantId,SYSUTCDATETIME())",
+                    new { TenantId = tenantId });
+            if (conn.ExecuteScalar<string>("SELECT TenantId FROM dbo.AppTenantBinding WHERE Slot=1") != tenantId)
+                throw new InvalidOperationException("Unexpected tenant binding after migration.");
+        }
     }
 }

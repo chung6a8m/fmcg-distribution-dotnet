@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState } from 'react'
+import { lazy, StrictMode, Suspense, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import { isLiveApiResponse } from './health'
@@ -7,6 +7,9 @@ import { FoundationsDemo } from './ui/FoundationsDemo'
 import { DataEntryDemo } from './ui/DataEntryDemo'
 import { SourceCommandDemo } from './ui/SourceCommandDemo'
 import './style.css'
+
+const CustomerWorkspace = lazy(() => import('./sales/CustomerWorkspace')
+  .then(module => ({ default: module.CustomerWorkspace })))
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
 
@@ -33,7 +36,7 @@ function HealthShell() {
     <section className="panel panel-content" aria-labelledby="connection">
       <h2 id="connection">Trạng thái kết nối</h2>
       <p role="status">{status}</p>
-      <p><strong>Online-first.</strong> Chưa có business write hoặc offline command queue.</p>
+      <p><strong>Online-first.</strong> Cần kết nối để ghi nghiệp vụ.</p>
     </section>
     <section className="panel panel-content">
       <h2>Nền tảng giao diện</h2>
@@ -41,6 +44,7 @@ function HealthShell() {
       <a className="page-link" href="/ui/foundations">Nền tảng giao diện</a>
       <a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a>
       <a className="page-link" href="/ui/command-recovery">UI-03 · Source & Recovery Lab</a>
+      <a className="page-link" href="/sales/customers">Khách hàng và địa chỉ giao · DEV</a>
     </section>
     <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
@@ -68,7 +72,10 @@ function App() {
     </section>}
     {location.pathname === '/ui/foundations' ? <FoundationsDemo />
       : location.pathname === '/ui/data-entry' ? <DataEntryDemo />
-        : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo /> : <HealthShell />}
+        : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo />
+          : location.pathname === '/sales/customers'
+            ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình khách hàng…</p>}><CustomerWorkspace /></Suspense>
+            : <HealthShell />}
   </>
 }
 

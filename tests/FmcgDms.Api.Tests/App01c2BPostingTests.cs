@@ -209,12 +209,11 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
                 ShipToSnapshotId,PaymentMethod,VerificationStatus,VerifiedAmount,
                 VerifiedBy,VerifiedAtUtc)
             VALUES(@Tenant,@Evidence,@Trip,@Customer,@ShipTo,N'CASH',@Status,@Amount,
-                @VerifiedBy,@VerifiedAt);
+                @VerifiedBy,CASE WHEN @Status=N'VERIFIED' THEN DATEADD(second,-1,SYSUTCDATETIME()) END);
             """, new { Tenant = tenant, Evidence = evidence, Trip = trip ?? s.Trip,
                 Customer = customer ?? s.Customer, ShipTo = shipTo ?? s.ShipTo,
                 Status = status, Amount = amount,
-                VerifiedBy = status == "VERIFIED" ? verifier : null,
-                VerifiedAt = status == "VERIFIED" ? (DateTime?)DateTime.UtcNow : null });
+                VerifiedBy = status == "VERIFIED" ? verifier : null });
         return evidence;
     }
 
@@ -388,7 +387,8 @@ public sealed class App01c2BPostingTests(SqlScratchFixture fixture)
             EqualState(before, State(A,s));
         }
         var validRef = CashWitness(A,s,200m);
-        Assert.Equal("APPLIED", (await Post(client, Sale(s,validRef))).Outcome.Status);
+        var valid = await Post(client, Sale(s,validRef));
+        Assert.True(valid.Outcome.Status == "APPLIED", valid.Outcome.ReasonCode ?? valid.Outcome.Status);
         var after = State(A,s);
         Assert.Equal("CASH_EVIDENCE_ALREADY_USED", (await Post(client,
             Sale(s,validRef,qty:10m,price:30m,cash:200m))).Outcome.ReasonCode);

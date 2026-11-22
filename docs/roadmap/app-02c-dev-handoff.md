@@ -1,6 +1,6 @@
 # APP-02C — DEV implementation handoff
 
-> **Standing scope:** [Owner DEV-first decision, 22/11/2026](../decisions/owner-app02c-dev-first-2026-11-22.md) authorizes C.1–C.5 source, forward DB migrations, UI and dedicated synthetic DEV integrated runs. **Current delivery is documentation only: implementation `NOT_STARTED`; new C DEV acceptance `NOT_RUN`.** Physical PREPROD gates do not block starting this DEV scope. They retain their own acceptance requirements.
+> **Standing scope.** The [Owner DEV-first decision, 22/11/2026](../decisions/owner-app02c-dev-first-2026-11-22.md) authorizes C.1–C.5 source, forward DB migrations, UI and dedicated synthetic DEV integrated runs. Current C.1 source, commands and limits are in the [local DEV closeout](../closeout/2026-11-22-app-02c1-dev.md). The source inventory and C.1 sequence below describe the starting baseline. Physical PREPROD retains its own acceptance requirements.
 
 [C roadmap](app-02c-a-online-e2e.md) · [C.0 contract](app-02c0-a-online-e2e-contract.md) · [Operations debt](app-02c-operations-debt.md).
 

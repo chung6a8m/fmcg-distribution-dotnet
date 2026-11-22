@@ -14,6 +14,11 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The demo requires Windows LocalDB.");
+if (args is ["App02C1", var c1Mode, var c1Root, var c1Source])
+{
+    await App02c1Dev.Run(c1Mode, c1Root, c1Source);
+    return;
+}
 if (args.Length != 3) throw new ArgumentException("Expected operation, RunId and source identity.");
 string mode = args[0];
 var run = new DemoRun(args[1]);

@@ -80,11 +80,12 @@ public sealed class SqlScratchFixture : IAsyncLifetime
     }
 
     public TestApiFactory CreateFactory(string? tenantAOverride = null,
-        bool syntheticEnabled = true, string environment = "IntegrationTest") =>
-        new(this, tenantAOverride, syntheticEnabled, environment);
+        bool syntheticEnabled = true, string environment = "IntegrationTest",
+        bool c1Enabled = true, string? c1Nonce = null) =>
+        new(this, tenantAOverride, syntheticEnabled, environment, c1Enabled, c1Nonce);
 
     public static string IssueSyntheticToken(string tenantId,
-        string actor = "synthetic-actor", string[]? roles = null, string? subject = null)
+        string actor = "synthetic-actor", string[]? roles = null, string? subject = null, int expiresInSeconds = 900)
     {
         roles ??= ["warehouse", "sales", "auditor"]; // legacy composite TEST actor only
         long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -95,7 +96,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
             ["sub"] = subject ?? actor, ["actor_id"] = actor,
             ["producer_id"] = actor, // signed synthetic test producer bound to actor
             ["synthetic_role"] = roles,
-            ["tenant_id"] = tenantId, ["iat"] = now, ["nbf"] = now - 1, ["exp"] = now + 900
+            ["tenant_id"] = tenantId, ["iat"] = now, ["nbf"] = now - 1, ["exp"] = now + expiresInSeconds
         }));
         string data = head + "." + body;
         var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(TestKey), Encoding.ASCII.GetBytes(data));
@@ -115,7 +116,8 @@ public sealed class SqlScratchFixture : IAsyncLifetime
 
 public sealed class TestApiFactory(
     SqlScratchFixture fixture, string? tenantAOverride = null,
-    bool syntheticEnabled = true, string environment = "IntegrationTest") : WebApplicationFactory<Program>
+    bool syntheticEnabled = true, string environment = "IntegrationTest",
+    bool c1Enabled = true, string? c1Nonce = null) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -127,6 +129,8 @@ public sealed class TestApiFactory(
                 ["SyntheticAuth:SigningKey"] = SqlScratchFixture.TestKey,
                 ["SyntheticAuth:Issuer"] = "fmcg-synthetic-app00",
                 ["SyntheticAuth:Audience"] = "fmcg-synthetic-app00",
+                ["App02C1:Enabled"] = c1Enabled ? "true" : "false",
+                ["App02C1:Nonce"] = c1Nonce ?? fixture.Nonce,
                 ["TenantDatabases:tenant-a"] = tenantAOverride ?? fixture.TenantAConnectionString,
                 ["TenantDatabases:tenant-b"] = fixture.TenantBConnectionString
             }));

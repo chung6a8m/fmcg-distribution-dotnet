@@ -12,3 +12,5 @@
 *.log
 **/playwright-report/
 **/test-results/
+web/tsconfig.tsbuildinfo
+web/test-results-app02c1/
