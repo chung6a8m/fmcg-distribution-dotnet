@@ -1,0 +1,57 @@
+{
+  "version": "D3-v0.1",
+  "tenants": [
+    "tenant-a",
+    "tenant-b"
+  ],
+  "utc": "2026-11-22T04:00:00Z",
+  "price": 15,
+  "termsDays": 7,
+  "main": 100,
+  "value": 1000,
+  "reservationA": 40,
+  "quotaB": 30,
+  "creditB": 100,
+  "loads": [
+    [
+      "A",
+      40
+    ],
+    [
+      "B",
+      10
+    ],
+    [
+      "B",
+      20
+    ]
+  ],
+  "bSale": [
+    20,
+    200
+  ],
+  "aDelivery": 25,
+  "offer": 200,
+  "variants": {
+    "partialB": [
+      5,
+      7
+    ],
+    "fractional": [
+      1,
+      1,
+      1
+    ],
+    "AC10": [
+      120000,
+      80000,
+      50000
+    ],
+    "AC21": [
+      105000,
+      25000,
+      60000,
+      50000
+    ]
+  }
+}

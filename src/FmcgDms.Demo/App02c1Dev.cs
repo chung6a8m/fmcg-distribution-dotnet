@@ -39,14 +39,15 @@ internal static class App02c1Dev
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
+        bool d3 = increment == "App02D3";
         bool d2 = increment == "App02D2";
-        bool d1 = d2 || increment == "App02D1";
+        bool d1 = d3 || d2 || increment == "App02D1";
         if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
         bool c5 = d1 || c6 || increment == "App02C5";
         bool c4 = c5 || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = c3 || increment == "App02C2";
-        string feature = d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -62,6 +63,8 @@ internal static class App02c1Dev
         bool clipboardIssued = false;
         var d2Run = d2 ? new App02d2Dev(root, run, source, apiSha256, d1Run!) : null;
         d2Run?.VerifyDocuments();
+        var d3Run = d3 ? new App02d3Dev(root, run, source, apiSha256, d1Run!, Sign) : null;
+        d3Run?.VerifyDocuments();
         var acceptance = c6 ? new App02c6Dev(root, run, source, apiSha256) : null;
         try
         {
@@ -72,7 +75,7 @@ internal static class App02c1Dev
                 await run.Verify(tenant);
                 if (d1Run is not null)
                 {
-                    await d1Run.PrepareUpgrade(tenant, leaveAtD1: d2);
+                    await d1Run.PrepareUpgrade(tenant, leaveAtD1: d2, leaveAtD2: d3);
                     await d1Run.Prepare(tenant);
                     continue;
                 }
@@ -97,6 +100,7 @@ internal static class App02c1Dev
                 n.StartsWith("App02C6__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("App02D1__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("App02D2__", StringComparison.OrdinalIgnoreCase)
+                || n.StartsWith("App02D3__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("ASPNETCORE_", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("SyntheticAuth__", StringComparison.OrdinalIgnoreCase)
@@ -131,6 +135,7 @@ internal static class App02c1Dev
                 apiStart.Environment["App02D1__Enabled"] = "true";
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
+            if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
             api = Start(apiStart);
 
             using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
@@ -166,7 +171,7 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
@@ -182,6 +187,28 @@ internal static class App02c1Dev
             {
                 browserStart.Environment["APP02C6_CHECKPOINTS"] = acceptance.CheckpointPath;
                 browserStart.Environment["APP02C6_CANONICAL_UTC"] = acceptance.CanonicalTime.ToString("O");
+            }
+            if (d3Run is not null)
+            {
+                async Task Restart(string profile)
+                {
+                    await Stop(api);
+                    apiStart.Environment["App02D3__Enabled"] = profile == "on" ? "true" : "false";
+                    apiStart.Environment["App02D2__Enabled"] = profile == "legacy" ? "false" : "true";
+                    apiStart.Environment["App02D1__Enabled"] = profile == "legacy" ? "false" : "true";
+                    apiStart.Environment["App02C2__DedicatedRuntime"] = profile == "legacy" ? "false" : "true";
+                    apiStart.Environment["App02C3__Enabled"] = profile == "legacy" ? "false" : "true";
+                    if (profile == "legacy") apiStart.Environment.Remove("App02C6__ClockFile");
+                    else apiStart.Environment["App02C6__ClockFile"] = d1Run!.ClockPath;
+                    api = Start(apiStart);
+                    await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
+                }
+                await d3Run.Initialize(client, webUrl, lifetime.Token, Restart);
+                d3Run.ConfigureBrowser(browserStart);
+                browser = Start(browserStart);
+                await d3Run.Serve(browser);
+                await d3Run.Complete(browser.ExitCode);
+                return;
             }
             if (d2Run is not null)
             {

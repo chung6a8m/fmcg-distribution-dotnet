@@ -146,9 +146,6 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             fields.Add(("SelectionId", d2.SelectionId.ToString("N")));
             fields.Add(("OutletId", d2.OutletId?.ToString("N") ?? ""));
         }
-        byte[] hash = CommandPayloadHash.Compute(d2 is null ? Kind : "APP02D2_B_SALE_DELIVERY",
-            tenant, actor, request.SourceNumber, fields.ToArray());
-
         await using SqlConnection db = d2 is null
             ? await connections.OpenSyntheticScratchAsync(principal, ct)
             : await OpenD2(principal, ct);
@@ -158,10 +155,21 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         {
             string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
+            bool mixedRuntime = d2 is not null && connections.UsesApp02d3;
+            if (mixedRuntime)
+                await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
             await LockAsync(db, tx, key, ct);
             if (d2 is not null)
-                await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
+            {
+                if (mixedRuntime)
+                    await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + request.TripId.ToString("N"), ct);
+                else
+                    await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
+                d2 = d2 with { D3Mode = await IsD3Trip(db, tx, tenant, request.TripId, ct), D3Runtime = mixedRuntime };
+            }
 
+            string commandKind = d2 is null ? Kind : d2.D3Mode ? "APP02D3_B_SALE_DELIVERY" : "APP02D2_B_SALE_DELIVERY";
+            byte[] hash = CommandPayloadHash.Compute(commandKind, tenant, actor, request.SourceNumber, fields.ToArray());
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
                 FROM dbo.BusinessCommand WITH (UPDLOCK,HOLDLOCK)
@@ -237,6 +245,15 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             return BusinessCommandOutcome.Rejected("BANK_PENDING_INPUT_INVALID");
         if (request.PendingBankEvidenceRef is null && !ValidKey(request.VerificationEvidenceRef, 128))
             return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_INVALID");
+        if (d2 is { D3Mode: true })
+        {
+            var price = await EffectiveD3Price(db, tx, tenant, request.TripId, request.SkuId, ct);
+            if (price is null)
+                return BusinessCommandOutcome.Rejected("D3_PRICE_PROFILE_INVALID");
+            request = request with { UnitPrice = price.UnitPrice };
+            d2 = d2 with { Price = price };
+        }
+
         if (!ValidQuantity(request.BaseQuantity) || !ValidMoney(request.UnitPrice)
             || (request.PendingBankEvidenceRef is null && !ValidMoney(request.ReceivedCashAmount)))
             return BusinessCommandOutcome.Rejected("AMOUNT_OR_QUANTITY_INVALID");
@@ -369,7 +386,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 - right.ReleasedBaseQuantity < request.BaseQuantity)
             return BusinessCommandOutcome.Rejected("B_QUOTA_INSUFFICIENT");
 
-        var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql("""
+        var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql($"""
             SELECT b.OnHandBaseQuantity,b.OnHandCostAmount,
                 o.BaseQuantity + COALESCE(loaded.Qty,0) - COALESCE(issued.Qty,0)
                     - COALESCE(unloaded.Qty,0)
@@ -400,12 +417,16 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             -- Reused vehicles must subtract completed T6 unloads from the
             -- immutable opening + load - delivery source reconciliation.
             OUTER APPLY (
-                SELECT SUM(ul.BaseQuantity) AS Qty,SUM(ul.CostAmount) AS Cost
-                FROM dbo.TripUnloadLine ul WITH (HOLDLOCK)
-                JOIN dbo.TripUnload u WITH (HOLDLOCK)
-                    ON u.TenantId=ul.TenantId AND u.Id=ul.TripUnloadId
-                WHERE ul.TenantId=b.TenantId AND u.VehicleLocationId=b.StockLocationId
-                    AND ul.SkuId=b.SkuId
+                SELECT SUM(returnLine.BaseQuantity) AS Qty,SUM(returnLine.CostAmount) AS Cost
+                FROM (
+                    SELECT ul.BaseQuantity,ul.CostAmount
+                    FROM dbo.TripUnloadLine ul WITH (HOLDLOCK)
+                    JOIN dbo.TripUnload u WITH (HOLDLOCK)
+                        ON u.TenantId=ul.TenantId AND u.Id=ul.TripUnloadId
+                    WHERE ul.TenantId=b.TenantId AND u.VehicleLocationId=b.StockLocationId
+                        AND ul.SkuId=b.SkuId
+                    {App02d3Runtime.VehicleReturns(d2?.D3Runtime == true)}
+                ) returnLine
             ) unloaded
             WHERE b.TenantId=@Tenant AND b.StockLocationId=@Vehicle AND b.SkuId=@Sku
             """, new { Tenant = tenant, Vehicle = trip.VehicleLocationId,
@@ -546,6 +567,9 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 Sku = request.SkuId, Source = sourceId, SourceLine = sourceLine,
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
                 Date = trip.BusinessDate, D2Selection = d2?.SelectionId }, tx, ct));
+
+        if (d2?.Price is { } price)
+            await RecordD3Price(db, tx, tenant, deliveryId, request, price, ct);
 
         if (payment.CashReceived > 0)
         {

@@ -23,6 +23,8 @@ const BStockWorkspace = lazy(() => import('./sales/BStockWorkspace')
   .then(module => ({ default: module.BStockWorkspace })))
 const BSaleWorkspace = lazy(() => import('./sales/BSaleWorkspace')
   .then(module => ({ default: module.BSaleWorkspace })))
+const MixedTripWorkspace = lazy(() => import('./sales/MixedTripWorkspace')
+  .then(module => ({ default: module.MixedTripWorkspace })))
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
 
@@ -61,6 +63,7 @@ function HealthShell() {
       <a className="page-link" href="/sales/customers">Khách hàng và địa chỉ giao · DEV</a>
       <a className="page-link" href="/sales/orders">Đơn A và giữ hàng · DEV</a>
       <a className="page-link" href="/sales/load">Nạp hàng lên xe · DEV</a>
+      <a className="page-link" href="/sales/mixed-trip">Đối soát chuyến Mixed · DEV</a>
       <a className="page-link" href="/sales/b-sale">Bán và giao hàng B · DEV</a>
       <a className="page-link" href="/sales/b-stock">Quota, hạn mức và nạp hàng B · DEV</a>
       <a className="page-link" href="/sales/delivery">Giao hàng và công nợ A · DEV</a>
@@ -94,6 +97,8 @@ function App() {
         : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo />
           : location.pathname === '/sales'
             ? <Suspense fallback={<p className="page" role="status">Đang tải Sales A…</p>}><SalesWorkspace /></Suspense>
+          : location.pathname === '/sales/mixed-trip'
+            ? <Suspense fallback={<p className="page" role="status">Đang tải chuyến Mixed…</p>}><MixedTripWorkspace /></Suspense>
           : location.pathname === '/sales/b-sale'
             ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình bán B…</p>}><BSaleWorkspace /></Suspense>
           : location.pathname === '/sales/b-stock'

@@ -11,7 +11,8 @@ namespace FmcgDms.Api.Persistence;
 public sealed partial class App01c2BPostingService
 {
     private const decimal D2FixtureUnitPrice = 10m;
-    private sealed record D2PostingContext(Guid SelectionId, Guid? OutletId, D2PreviewResult? Preview = null);
+    private sealed record D2PostingContext(Guid SelectionId, Guid? OutletId, D2PreviewResult? Preview = null,
+        bool D3Mode = false, D3Price? Price = null, bool D3Runtime = false);
     private sealed class D2PreviewResult
     {
         internal D2SalePreview? Value { get; set; }
@@ -124,7 +125,8 @@ public sealed partial class App01c2BPostingService
             if (!ValidKey(input.SourceNumber, 80))
                 return (preview.Value, BusinessCommandOutcome.Rejected("INVALID_COMMAND_IDENTITY"));
             var outcome = await ValidateAndPost(db, tx, tenant, actor, Guid.Empty, D2Command(input),
-                new D2PostingContext(input.SelectionId, input.OutletId, preview), ct);
+                new D2PostingContext(input.SelectionId, input.OutletId, preview,
+                    await IsD3Trip(db, tx, tenant, input.TripId, ct), D3Runtime: connections.UsesApp02d3), ct);
             return (preview.Value, outcome);
         }, ct);
 
