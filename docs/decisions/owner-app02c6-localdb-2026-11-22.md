@@ -1,6 +1,6 @@
 # Owner decision — APP-02C.6 Windows + LocalDB acceptance
 
-**Decision date:** 2026-11-22 (Asia/Bangkok). **Status:** `DEV_SCOPE_APPROVED / MATRIX_V0.1_APPROVED / EXECUTION_BLOCKED`.
+**Decision date:** 2026-11-22 (Asia/Bangkok). **Status:** `MERGED / A_ONLINE_DEV_ACCEPTANCE_VERIFIED`.
 
 The Owner approved the Windows + LocalDB alternative with two synthetic tenants and requested the decision, roadmap and acceptance matrix for approval before execution:
 
@@ -17,4 +17,6 @@ The Owner approved the Windows + LocalDB alternative with two synthetic tenants 
 
 On 2026-11-22 the Owner approved the [matrix v0.1 and fixture](../roadmap/app-02c6-localdb-acceptance-matrix.md), requested all 11 cases on Windows LocalDB with two synthetic tenants, and reserved acceptance signoff until after reviewing SQL reconciliation. The approved text SHA-256 is `04743B66AF77F02D3DA86EED229498D6AC947C201B5C189A3BF79BB96DFA6290`. Its draft marker records the version submitted for approval.
 
-The [C roadmap](../roadmap/app-02c-a-online-e2e.md) records both paths. The [DEV execution report](../closeout/2026-11-22-app-02c6-localdb-attempt.md) records the baseline run, the blockers and the outstanding 11-case acceptance. Owner signoff is pending.
+## DEV acceptance signoff
+
+On 22/11/2026 (Asia/Bangkok), after inspecting the SQL reconciliation, the Owner signed acceptance for commit `22e5c50694b85f21b6bc670022ee12ed6e04e469` and directed the merge of PR #110. This awards `A_ONLINE_DEV_ACCEPTANCE_VERIFIED` for the approved A_ONLINE matrix v0.1 on Windows LocalDB with two synthetic tenants. The [DEV closeout](../closeout/2026-11-22-app-02c6-localdb.md) records CI, evidence hashes and the merge. OWN-APP02C6-04 governs the physical and operational gates.
