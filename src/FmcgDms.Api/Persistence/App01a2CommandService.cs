@@ -113,7 +113,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         (string Key, string Value)[] fields,
         Func<SqlConnection, SqlTransaction, string, string, Guid, CancellationToken,
             Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null,
-        Guid? loadTrip = null, Guid? deliveryTrip = null, bool amendment = false, Guid? pendingCommand = null)
+        Guid? loadTrip = null, Guid? deliveryTrip = null, bool amendment = false, Guid? pendingCommand = null,
+        Guid? d1GrantTrip = null, bool d1Load = false)
     {
         // Never persist a malformed producer/command identity: the scope cannot
         // be deduplicated reliably. All valid identities, including business
@@ -155,6 +156,17 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 await App02a3Sql.RequireRole(db, tx, tenant, actor, c2Role, ct);
             if (loadTrip is Guid trip)
                 await RequireC3Writer(db, tx, tenant, actor, trip, ct);
+            if (d1GrantTrip is Guid grantTrip)
+            {
+                if (!connections.UsesApp02d1)
+                    throw new UnauthorizedAccessException("D.1 DEV commands are disabled.");
+                if (c2Role == "warehouse")
+                    await RequireC3Writer(db, tx, tenant, actor, grantTrip, ct);
+                else if (await db.ExecuteScalarAsync<int>(Sql("""
+                    SELECT COUNT(*) FROM dbo.Trip WITH (HOLDLOCK) WHERE TenantId=@Tenant AND Id=@Trip
+                    """, new { Tenant = tenant, Trip = grantTrip }, tx, ct)) != 1)
+                    throw new UnauthorizedAccessException("D.1 grant trip is unavailable.");
+            }
             if (deliveryTrip is Guid c4Trip)
                 await RequireC4Authority(principal, db, tx, tenant, actor, c4Trip, amendment, ct);
             await LockCommand(db, tx, tenant, request, ct);
@@ -170,7 +182,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     SELECT COUNT(*) FROM dbo.C2CommandScope WHERE TenantId=@Tenant AND CommandRowId=@Id AND RoleCode=@Role
                         AND (LoadTripId=@LoadTrip OR (LoadTripId IS NULL AND @LoadTrip IS NULL))
                         AND (DeliveryTripId=@DeliveryTrip OR (DeliveryTripId IS NULL AND @DeliveryTrip IS NULL))
-                    """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip }, tx, ct)) == 0)
+                        AND (D1GrantTripId=@D1GrantTrip OR (D1GrantTripId IS NULL AND @D1GrantTrip IS NULL))
+                        AND IsD1Load=@IsD1Load
+                    """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip,
+                        D1GrantTrip = d1GrantTrip, IsD1Load = d1Load }, tx, ct)) == 0)
                     return BusinessCommandOutcome.Conflict();
                 if (existing.PayloadHashVersion != CommandPayloadHash.Version
                     || !CryptographicOperations.FixedTimeEquals(existing.PayloadHash, hash))
@@ -196,7 +211,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
 
             Guid commandRowId = existing?.Id ?? Guid.NewGuid();
             if (existing is null)
-                await InsertReceivedCommand(db, tx, tenant, actor, request, commandRowId, hash, c2Role, loadTrip, deliveryTrip, ct);
+                await InsertReceivedCommand(db, tx, tenant, actor, request, commandRowId, hash, c2Role, loadTrip, deliveryTrip, ct, d1GrantTrip, d1Load);
 
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))
@@ -238,7 +253,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
     }
 
     private static async Task InsertReceivedCommand(SqlConnection db, SqlTransaction tx, string tenant,
-        string actor, IApp01aCommand request, Guid id, byte[] hash, string? role, Guid? loadTrip, Guid? deliveryTrip, CancellationToken ct)
+        string actor, IApp01aCommand request, Guid id, byte[] hash, string? role, Guid? loadTrip, Guid? deliveryTrip,
+        CancellationToken ct, Guid? d1GrantTrip = null, bool d1Load = false)
     {
         await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
@@ -248,9 +264,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
         if (role is not null)
             await db.ExecuteAsync(Sql("""
-                INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId,DeliveryTripId)
-                VALUES(@Tenant,@Id,@Role,@LoadTrip,@DeliveryTrip)
-                """, new { Tenant = tenant, Id = id, Role = role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip }, tx, ct));
+                INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId,DeliveryTripId,D1GrantTripId,IsD1Load)
+                VALUES(@Tenant,@Id,@Role,@LoadTrip,@DeliveryTrip,@D1GrantTrip,@IsD1Load)
+                """, new { Tenant = tenant, Id = id, Role = role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip,
+                    D1GrantTrip = d1GrantTrip, IsD1Load = d1Load }, tx, ct));
     }
 
     private static async Task<bool> SourceUsed(SqlConnection db, SqlTransaction tx,
@@ -581,7 +598,11 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
 
     public Task<BusinessCommandOutcome> GrantBQuotaAsync(
         ClaimsPrincipal principal, GrantBQuotaCommand request, CancellationToken ct) =>
-        ExecuteAsync(principal, request, "GRANT_B_QUOTA",
+        GrantQuota(principal, request, d1: false, ct);
+
+    private Task<BusinessCommandOutcome> GrantQuota(
+        ClaimsPrincipal principal, GrantBQuotaCommand request, bool d1, CancellationToken ct) =>
+        ExecuteAsync(principal, request, d1 ? "D1_GRANT_B_QUOTA" : "GRANT_B_QUOTA",
             [
                 ("TripId", request.TripId.ToString("N")),
                 ("StockLocationId", request.StockLocationId.ToString("N")),
@@ -600,6 +621,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 var trip = await FindTrip(db, tx, tenant, request.TripId, token);
                 if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
+                if (d1 && await HasLegacyManifest(db, tx, tenant, request.TripId, token))
+                    return BusinessCommandOutcome.Rejected("LEGACY_MANIFEST_EXISTS");
                 string? stockError = await AllocateStock(db, tx, tenant, request.StockLocationId,
                     request.SkuId, request.BaseQuantity, token);
                 if (stockError is not null) return BusinessCommandOutcome.Rejected(stockError);
@@ -626,11 +649,16 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_B", null,
                     request.SkuId, request.StockLocationId, request.BaseQuantity, 0, token);
                 return BusinessCommandOutcome.Applied("B_QUOTA_GRANTED", source);
-            }, ct, connections.UsesApp02c6Clock ? "warehouse" : null);
+            }, ct, d1 || connections.UsesApp02c6Clock ? "warehouse" : null,
+            d1GrantTrip: d1 ? request.TripId : null);
 
     public Task<BusinessCommandOutcome> GrantBCreditAsync(
         ClaimsPrincipal principal, GrantBCreditCommand request, CancellationToken ct) =>
-        ExecuteAsync(principal, request, "GRANT_B_CREDIT",
+        GrantCredit(principal, request, d1: false, ct);
+
+    private Task<BusinessCommandOutcome> GrantCredit(
+        ClaimsPrincipal principal, GrantBCreditCommand request, bool d1, CancellationToken ct) =>
+        ExecuteAsync(principal, request, d1 ? "D1_GRANT_B_CREDIT" : "GRANT_B_CREDIT",
             [
                 ("TripId", request.TripId.ToString("N")),
                 ("CustomerId", request.CustomerId.ToString("N")),
@@ -653,6 +681,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 var trip = await FindTrip(db, tx, tenant, request.TripId, token);
                 if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
+                if (d1 && await HasLegacyManifest(db, tx, tenant, request.TripId, token))
+                    return BusinessCommandOutcome.Rejected("LEGACY_MANIFEST_EXISTS");
                 int matched = await db.ExecuteScalarAsync<int>(Sql("""
                     SELECT COUNT(*) FROM dbo.Customer c
                     JOIN dbo.ShipToSnapshot s ON s.TenantId=c.TenantId
@@ -680,8 +710,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 // one unexpired, versioned AP-01 decision with a different checker.
                 // Multiple active approvals are ambiguous: fail closed instead of
                 // silently selecting a more permissive limit.
-                var approvals = (await db.QueryAsync<CheckedCreditApproval>(Sql("""
-                    DECLARE @NowUtc datetime2(7) = SYSUTCDATETIME();
+                var approvals = (await db.QueryAsync<CheckedCreditApproval>(Sql($"""
+                    DECLARE @NowUtc datetime2(7) = {(d1 ? App02c6Clock.SqlUtcNow : "SYSUTCDATETIME()")};
                     SELECT TOP (2) Id,ApprovedLimit,ProposedBy,CheckedBy
                     FROM dbo.CreditPolicyApproval WITH (UPDLOCK,HOLDLOCK)
                     WHERE TenantId=@Tenant AND TripId=@Trip AND CustomerId=@Customer
@@ -704,6 +734,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     || string.Equals(approval.ProposedBy, approval.CheckedBy, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(actor, approval.CheckedBy, StringComparison.OrdinalIgnoreCase))
                     return BusinessCommandOutcome.Rejected("CREDIT_CHECKER_CONFLICT");
+                if (d1 && await db.ExecuteScalarAsync<int>(Sql("""
+                    SELECT COUNT(*) FROM dbo.App02ActorRoleGrant WITH (HOLDLOCK)
+                    WHERE TenantId=@Tenant AND IsActive=1 AND
+                        ((ActorId=@Maker AND RoleCode=N'credit_maker')
+                         OR (ActorId=@Checker AND RoleCode=N'credit_checker'))
+                    """, new { Tenant = tenant, Maker = approval.ProposedBy, Checker = approval.CheckedBy }, tx, token)) != 2)
+                    return BusinessCommandOutcome.Rejected("CREDIT_APPROVAL_AUTHORITY_REQUIRED");
                 if (pool.ApprovedLimit > approval.ApprovedLimit)
                     return BusinessCommandOutcome.Rejected("CREDIT_POLICY_LIMIT_MISMATCH");
                 if (pool.ApprovedLimit - pool.GrantedAmount < request.Amount)
@@ -738,5 +775,5 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_CREDIT_B",
                     request.CustomerId, null, null, 0, request.Amount, token);
                 return BusinessCommandOutcome.Applied("B_CREDIT_GRANTED", source);
-            }, ct);
+            }, ct, d1 ? "finance" : null, d1GrantTrip: d1 ? request.TripId : null);
 }

@@ -19,7 +19,7 @@ internal sealed class DemoRun(string id)
         IntegratedSecurity = true, Encrypt = false, Pooling = false
     }.ConnectionString;
 
-    public async Task Create(string tenant, bool bindBeforeFeatureMigrations = false)
+    public async Task Create(string tenant, bool bindBeforeFeatureMigrations = false, bool beforeD1 = false)
     {
         await using var master = new SqlConnection(Connection());
         if (await master.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM sys.databases WHERE name=@name",
@@ -35,7 +35,10 @@ internal sealed class DemoRun(string id)
             CREATE TABLE dbo.LocalDemoScene(Slot int PRIMARY KEY CHECK (Slot=1), Data nvarchar(max) NOT NULL);
             CREATE TABLE dbo.LocalDemoCheckpoint(Step int PRIMARY KEY, Data nvarchar(max) NOT NULL);
             """, new { Id });
-        ScratchMigrator.Migrate(Connection(tenant), tenant, Id, LogLevel.Warning, bindBeforeFeatureMigrations);
+        if (beforeD1)
+            ScratchMigrator.MigrateBeforeD1(Connection(tenant), tenant, Id, LogLevel.Warning);
+        else
+            ScratchMigrator.Migrate(Connection(tenant), tenant, Id, LogLevel.Warning, bindBeforeFeatureMigrations);
     }
 
     public async Task Verify(string tenant)

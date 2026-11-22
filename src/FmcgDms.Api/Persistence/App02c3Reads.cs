@@ -39,6 +39,17 @@ public sealed partial class App01a2CommandService
         }, ct);
 
     public Task<BusinessCommandOutcome?> OutcomeC3(ClaimsPrincipal principal, Guid trip, Guid id, CancellationToken ct) =>
+        OutcomePartialLoad(principal, trip, id, false, ct);
+
+    public Task<BusinessCommandOutcome?> OutcomeD1Load(ClaimsPrincipal principal, Guid trip, Guid id,
+        CancellationToken ct)
+    {
+        RequireD1Mode();
+        return OutcomePartialLoad(principal, trip, id, true, ct);
+    }
+
+    private Task<BusinessCommandOutcome?> OutcomePartialLoad(ClaimsPrincipal principal, Guid trip, Guid id,
+        bool d1Load, CancellationToken ct) =>
         ReadC3<BusinessCommandOutcome?>(principal, trip, async (db, tx, tenant, actor) =>
         {
             var row = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
@@ -46,9 +57,9 @@ public sealed partial class App01a2CommandService
                 JOIN dbo.C2CommandScope s ON s.TenantId=c.TenantId AND s.CommandRowId=c.Id
                 WHERE c.TenantId=@Tenant AND c.ProducerId=@Producer AND c.CommandId=@Command
                     AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor AND c.Status IN ('APPLIED','REJECTED')
-                    AND s.LoadTripId=@Trip AND s.RoleCode='warehouse'
+                    AND s.LoadTripId=@Trip AND s.RoleCode='warehouse' AND s.IsD1Load=@D1Load
                 """, new { Tenant = tenant, Producer = C2Producer(principal), Command = id.ToString("N"), Actor = actor,
-                    Trip = trip }, tx, ct));
+                    Trip = trip, D1Load = d1Load }, tx, ct));
             if (row is null) return null;
             Guid? source = await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
                 SELECT Id FROM dbo.BusinessSource WHERE TenantId=@Tenant AND BusinessCommandId=@Id

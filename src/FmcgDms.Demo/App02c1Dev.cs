@@ -39,16 +39,21 @@ internal static class App02c1Dev
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
-        bool c5 = c6 || increment == "App02C5";
+        bool d1 = increment == "App02D1";
+        if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
+        bool c5 = d1 || c6 || increment == "App02C5";
         bool c4 = c5 || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = c3 || increment == "App02C2";
-        string feature = c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
-        string tokenA = Token(key, "tenant-a", roles);
-        string tokenB = Token(key, "tenant-b", roles);
+        string Sign(string tenant, string role, string actor) => Token(key, tenant, [role], actor, uniqueSession: true);
+        var d1Run = d1 ? new App02d1Dev(root, run, source, apiSha256, Sign) : null;
+        d1Run?.VerifyDocuments();
+        string tokenA = d1Run?.Credential("tenant-a", "sales") ?? Token(key, "tenant-a", roles);
+        string tokenB = d1Run?.Credential("tenant-b", "sales") ?? Token(key, "tenant-b", roles);
         Process? api = null;
         Process? viteProcess = null;
         Process? browser = null;
@@ -60,8 +65,14 @@ internal static class App02c1Dev
             foreach (string tenant in DemoRun.Tenants)
             {
                 lifetime.Token.ThrowIfCancellationRequested();
-                await run.Create(tenant, bindBeforeFeatureMigrations: true);
+                await run.Create(tenant, bindBeforeFeatureMigrations: true, beforeD1: d1);
                 await run.Verify(tenant);
+                if (d1Run is not null)
+                {
+                    await d1Run.PrepareUpgrade(tenant);
+                    await d1Run.Prepare(tenant);
+                    continue;
+                }
                 await using var db = new SqlConnection(run.Connection(tenant));
                 await db.ExecuteAsync("""
                     INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
@@ -81,6 +92,7 @@ internal static class App02c1Dev
             // Only the child API receives the signing key and SQL credentials.
             foreach (string name in apiStart.Environment.Keys.Where(n =>
                 n.StartsWith("App02C6__", StringComparison.OrdinalIgnoreCase)
+                || n.StartsWith("App02D1__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("Kestrel__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("ASPNETCORE_", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("SyntheticAuth__", StringComparison.OrdinalIgnoreCase)
@@ -108,6 +120,12 @@ internal static class App02c1Dev
             {
                 await acceptance.SetClock(acceptance.CanonicalTime);
                 apiStart.Environment["App02C6__ClockFile"] = acceptance.ClockPath;
+            }
+            if (d1Run is not null)
+            {
+                await d1Run.SetClock(App02d1Dev.StartTime);
+                apiStart.Environment["App02D1__Enabled"] = "true";
+                apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             api = Start(apiStart);
 
@@ -141,8 +159,10 @@ internal static class App02c1Dev
                 return;
             }
 
+            if (d1Run is not null)
+                await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
@@ -159,7 +179,24 @@ internal static class App02c1Dev
                 browserStart.Environment["APP02C6_CHECKPOINTS"] = acceptance.CheckpointPath;
                 browserStart.Environment["APP02C6_CANONICAL_UTC"] = acceptance.CanonicalTime.ToString("O");
             }
+            d1Run?.ConfigureBrowser(browserStart);
             browser = Start(browserStart);
+            if (d1Run is not null)
+            {
+                await d1Run.Serve(browser);
+                await d1Run.Complete(browser.ExitCode, async legacy =>
+                {
+                    await Stop(api);
+                    apiStart.Environment["App02D1__Enabled"] = legacy ? "false" : "true";
+                    apiStart.Environment["App02C2__DedicatedRuntime"] = legacy ? "false" : "true";
+                    apiStart.Environment["App02C3__Enabled"] = legacy ? "false" : "true";
+                    if (legacy) apiStart.Environment.Remove("App02C6__ClockFile");
+                    else apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
+                    api = Start(apiStart);
+                    await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
+                });
+                return;
+            }
             if (acceptance is not null)
             {
                 await acceptance.ServeCheckpoints(browser, lifetime.Token);

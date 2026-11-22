@@ -74,6 +74,8 @@ public static class SyntheticAuth
         {
             options.AddPolicy("SyntheticWarehouse", p => p.RequireAuthenticatedUser()
                 .RequireClaim("synthetic_role", "warehouse"));
+            options.AddPolicy("SyntheticFinance", p => p.RequireAuthenticatedUser()
+                .RequireClaim("synthetic_role", "finance"));
             options.AddPolicy("SyntheticSales", p => p.RequireAuthenticatedUser()
                 .RequireClaim("synthetic_role", "sales"));
             options.AddPolicy("SyntheticCashier", p => p.RequireAuthenticatedUser()

@@ -16,6 +16,7 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
 
     private readonly string? clockPath = App02c6Clock.GetConfiguredPath(config, host);
     internal bool UsesApp02c6Clock => clockPath is not null;
+    internal bool UsesApp02d1 { get; } = App02d1Runtime.Enabled(config, host);
 
     private string Resolve(ClaimsPrincipal principal)
     {

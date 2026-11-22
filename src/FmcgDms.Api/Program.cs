@@ -26,7 +26,8 @@ builder.Services.AddScoped<App02c1Service>();
 builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
-bool app02c6 = App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
+bool app02d1 = App02d1Runtime.Enabled(app.Configuration, app.Environment);
+bool app02c6 = !app02d1 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {
@@ -57,6 +58,12 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         if (app.Configuration.GetValue<bool>("App02C5:Enabled"))
             App02c5Routes.Map(app);
     }
+}
+
+if (app02d1)
+{
+    App02d1GrantRoutes.Map(app);
+    App02d1LoadRoutes.Map(app);
 }
 
 bool legacySynthetic = (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
