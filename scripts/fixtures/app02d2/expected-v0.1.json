@@ -1,0 +1,118 @@
+{
+  "D2-01": {
+    "migrationFrom": 202611220007,
+    "migrationTo": 202611220008,
+    "protectedChanges": 0
+  },
+  "D2-02": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0
+  },
+  "D2-03": {
+    "qty": 10,
+    "ar": 0,
+    "cash": 100,
+    "cashApplied": 100,
+    "credit": 0
+  },
+  "D2-04": {
+    "qty": 10,
+    "ar": 100,
+    "cash": 0,
+    "cashApplied": 0,
+    "credit": 0
+  },
+  "D2-05": {
+    "qty": 10,
+    "ar": 20,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": -20
+  },
+  "D2-06": {
+    "qty": 10,
+    "ar": 0,
+    "cash": 120,
+    "cashApplied": 100,
+    "credit": 20
+  },
+  "D2-07": {
+    "protectedChanges": 0
+  },
+  "D2-08": {
+    "protectedChanges": 0
+  },
+  "D2-09": {
+    "protectedChanges": 0
+  },
+  "D2-10": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "grantRemaining": 0
+  },
+  "D2-11": {
+    "qty": 6,
+    "ar": 0,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "winners": 1
+  },
+  "D2-12": {
+    "qty": 8,
+    "ar": 80,
+    "cash": 0,
+    "cashApplied": 0,
+    "credit": 0,
+    "winners": 1
+  },
+  "D2-13": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "rollbackPoints": 2
+  },
+  "D2-14": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "winners": 1
+  },
+  "D2-15": {
+    "protectedChanges": 0,
+    "invoiceEligible": false
+  },
+  "D2-16": {
+    "protectedChanges": 0,
+    "peerProtectedChanges": 0
+  },
+  "D2-17": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "offlinePosts": 0
+  },
+  "D2-18": {
+    "qty": 10,
+    "ar": 40,
+    "cash": 60,
+    "cashApplied": 60,
+    "credit": 0,
+    "oldAr": 70,
+    "oldCustody": 15,
+    "fund": 25,
+    "advance": 10
+  }
+}

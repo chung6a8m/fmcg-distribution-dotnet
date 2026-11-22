@@ -57,7 +57,7 @@ internal sealed partial class App02d1Dev
                 (SELECT * FROM dbo.TripManifestLine ORDER BY Id FOR JSON PATH, INCLUDE_NULL_VALUES),
                 (SELECT * FROM dbo.PhysicalStockBalance ORDER BY StockLocationId,SkuId FOR JSON PATH, INCLUDE_NULL_VALUES),
                 (SELECT * FROM dbo.LedgerEffect ORDER BY Id FOR JSON PATH, INCLUDE_NULL_VALUES),
-                (SELECT * FROM dbo.SaleDelivery ORDER BY Id FOR JSON PATH, INCLUDE_NULL_VALUES),
+                (SELECT Id,TenantId,TripId,CustomerId,ShipToSnapshotId,TripManifestLineId,StockRightId,RightKind,SkuId,BusinessSourceId,BusinessSourceLineId,BaseQuantity,PayableAmount,CostAmount,BusinessDate,InvoiceEligible FROM dbo.SaleDelivery ORDER BY Id FOR JSON PATH, INCLUDE_NULL_VALUES),
                 (SELECT * FROM dbo.ReceivableOpenItem ORDER BY Id FOR JSON PATH, INCLUDE_NULL_VALUES))),2)
             """);
     }

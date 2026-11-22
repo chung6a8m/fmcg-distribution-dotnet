@@ -89,6 +89,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
     private sealed class CreditGrant
     {
         public Guid Id { get; set; }
+        public Guid? ApprovalId { get; set; }
+        public bool D1Source { get; set; }
         public decimal GrantedAmount { get; set; }
         public decimal ConsumedAmount { get; set; }
         public decimal ReleasedAmount { get; set; }
@@ -104,8 +106,12 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
     /// business rejections). SQL faults roll back the command row as well.
     /// Cross-kind idempotency shares APP-01A's persisted key and app-lock name.
     /// </summary>
-    public async Task<BusinessCommandOutcome> PostBSaleDeliveryReceiptAsync(
-        ClaimsPrincipal principal, PostBSaleDeliveryReceiptCommand request, CancellationToken ct)
+    public Task<BusinessCommandOutcome> PostBSaleDeliveryReceiptAsync(
+        ClaimsPrincipal principal, PostBSaleDeliveryReceiptCommand request, CancellationToken ct) =>
+        PostSale(principal, request, null, ct);
+
+    private async Task<BusinessCommandOutcome> PostSale(ClaimsPrincipal principal,
+        PostBSaleDeliveryReceiptCommand request, D2PostingContext? d2, CancellationToken ct)
     {
         if (!ValidKey(request.ProducerId, 128) || !ValidKey(request.CommandId, 128)
             || !ValidKey(request.SourceNumber, 80))
@@ -135,9 +141,17 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             fields.Add(("PendingBankEvidenceRef", request.PendingBankEvidenceRef));
         if (request.CustomerCreditReservationId is Guid reservationId)
             fields.Add(("CustomerCreditReservationId", reservationId.ToString("N")));
-        byte[] hash = CommandPayloadHash.Compute(Kind, tenant, actor, request.SourceNumber, fields.ToArray());
+        if (d2 is not null)
+        {
+            fields.Add(("SelectionId", d2.SelectionId.ToString("N")));
+            fields.Add(("OutletId", d2.OutletId?.ToString("N") ?? ""));
+        }
+        byte[] hash = CommandPayloadHash.Compute(d2 is null ? Kind : "APP02D2_B_SALE_DELIVERY",
+            tenant, actor, request.SourceNumber, fields.ToArray());
 
-        await using SqlConnection db = await connections.OpenSyntheticScratchAsync(principal, ct);
+        await using SqlConnection db = d2 is null
+            ? await connections.OpenSyntheticScratchAsync(principal, ct)
+            : await OpenD2(principal, ct);
         await using SqlTransaction tx =
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
@@ -145,6 +159,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
             await LockAsync(db, tx, key, ct);
+            if (d2 is not null)
+                await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
 
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
@@ -180,46 +196,18 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                     Command = request.CommandId, Version = CommandPayloadHash.Version,
                     Hash = hash, Actor = actor }, tx, ct));
 
-            // The Trip lock is shared by all B20 commands regardless of command
-            // key; APP-01C.3 must adopt this same lock for A/B vehicle races.
-            // Other APP-01A/B commands also lock Trip rows via UPDLOCK/HOLDLOCK.
-            BusinessCommandOutcome result;
-            if (request.TripId == Guid.Empty || request.CustomerId == Guid.Empty
-                || request.ShipToSnapshotId == Guid.Empty || request.TripManifestLineId == Guid.Empty
-                || request.SkuId == Guid.Empty)
-                result = BusinessCommandOutcome.Rejected("INVALID_REFERENCE");
-            else if (request.PendingBankEvidenceRef is not null
-                && (!ValidKey(request.PendingBankEvidenceRef, 128)
-                    || request.ReceivedCashAmount != 0 || !string.IsNullOrEmpty(request.VerificationEvidenceRef)
-                    || request.CustomerCreditReservationId is not null))
-                result = BusinessCommandOutcome.Rejected("BANK_PENDING_INPUT_INVALID");
-            else if (request.PendingBankEvidenceRef is null && !ValidKey(request.VerificationEvidenceRef, 128))
-                result = BusinessCommandOutcome.Rejected("CASH_EVIDENCE_INVALID");
-            else if (!ValidQuantity(request.BaseQuantity) || !ValidMoney(request.UnitPrice)
-                || (request.PendingBankEvidenceRef is null && !ValidMoney(request.ReceivedCashAmount)))
-                result = BusinessCommandOutcome.Rejected("AMOUNT_OR_QUANTITY_INVALID");
-            else
-            {
-                decimal payable;
-                try { payable = checked(request.BaseQuantity * request.UnitPrice); }
-                catch (OverflowException) { payable = -1m; }
-                if (!ValidMoney(payable))
-                    result = BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID");
-                else
-                {
-                    await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" +
-                        request.TripId.ToString("N"), ct);
-                    result = await PostAsync(db, tx, tenant, actor, commandId,
-                        request, payable, ct);
-                }
-            }
+            if (d2 is not null)
+                await db.ExecuteAsync(Sql("""
+                    INSERT dbo.D2SaleCommandScope(TenantId,CommandRowId,TripId) VALUES(@Tenant,@Command,@Trip)
+                    """, new { Tenant = tenant, Command = commandId, Trip = request.TripId }, tx, ct));
+            BusinessCommandOutcome result = await ValidateAndPost(db, tx, tenant, actor, commandId, request, d2, ct);
 
             if (result.Status is not ("APPLIED" or "REJECTED"))
                 throw new InvalidOperationException("Command cannot persist an incomplete outcome.");
-            if (await db.ExecuteAsync(Sql("""
+            if (await db.ExecuteAsync(Sql($"""
                 UPDATE dbo.BusinessCommand SET
                     Status=@Status,OutcomeCode=@Outcome,ReasonCode=@Reason,
-                    CompletedAtUtc=SYSUTCDATETIME()
+                    CompletedAtUtc={(d2 is null ? "SYSUTCDATETIME()" : App02c6Clock.SqlUtcNow)}
                 WHERE TenantId=@Tenant AND Id=@Id AND Status=N'RECEIVED'
                 """, new { Tenant = tenant, Id = commandId, result.Status,
                     Outcome = result.OutcomeCode, Reason = result.ReasonCode }, tx, ct)) != 1)
@@ -233,6 +221,34 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             catch (InvalidOperationException) { /* SQL Server already rolled back. */ }
             throw;
         }
+    }
+
+    private static async Task<BusinessCommandOutcome> ValidateAndPost(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, Guid commandId, PostBSaleDeliveryReceiptCommand request,
+        D2PostingContext? d2, CancellationToken ct)
+    {
+        if (request.TripId == Guid.Empty || request.CustomerId == Guid.Empty
+            || request.ShipToSnapshotId == Guid.Empty || request.TripManifestLineId == Guid.Empty
+            || request.SkuId == Guid.Empty)
+            return BusinessCommandOutcome.Rejected("INVALID_REFERENCE");
+        if (request.PendingBankEvidenceRef is not null
+            && (!ValidKey(request.PendingBankEvidenceRef, 128) || request.ReceivedCashAmount != 0
+                || !string.IsNullOrEmpty(request.VerificationEvidenceRef) || request.CustomerCreditReservationId is not null))
+            return BusinessCommandOutcome.Rejected("BANK_PENDING_INPUT_INVALID");
+        if (request.PendingBankEvidenceRef is null && !ValidKey(request.VerificationEvidenceRef, 128))
+            return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_INVALID");
+        if (!ValidQuantity(request.BaseQuantity) || !ValidMoney(request.UnitPrice)
+            || (request.PendingBankEvidenceRef is null && !ValidMoney(request.ReceivedCashAmount)))
+            return BusinessCommandOutcome.Rejected("AMOUNT_OR_QUANTITY_INVALID");
+
+        decimal payable;
+        try { payable = checked(request.BaseQuantity * request.UnitPrice); }
+        catch (OverflowException) { return BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID"); }
+        if (!ValidMoney(payable))
+            return BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID");
+
+        await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + request.TripId.ToString("N"), ct);
+        return await PostAsync(db, tx, tenant, actor, commandId, request, payable, d2, ct);
     }
 
     private static async Task LockAsync(SqlConnection db, SqlTransaction tx,
@@ -250,7 +266,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
     private static async Task<BusinessCommandOutcome> PostAsync(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
         Guid commandId, PostBSaleDeliveryReceiptCommand request,
-        decimal payable, CancellationToken ct)
+        decimal payable, D2PostingContext? d2, CancellationToken ct)
     {
         // Source identity is globally unique by tenant/kind/number; check it
         // before mutable quota/credit preflight so a reused source never gets
@@ -269,7 +285,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         {
             Tenant = tenant, Trip = request.TripId, Customer = request.CustomerId,
             ShipTo = request.ShipToSnapshotId, ManifestLine = request.TripManifestLineId,
-            request.SkuId, Evidence = request.VerificationEvidenceRef
+            request.SkuId, Evidence = request.VerificationEvidenceRef, D2 = d2 is not null
         };
         var trip = await db.QuerySingleOrDefaultAsync<TripScope>(Sql("""
             SELECT t.VehicleLocationId,t.BusinessDate,t.Status,
@@ -291,13 +307,16 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 JOIN dbo.Sku k WITH (HOLDLOCK) ON k.TenantId=c.TenantId
                     AND k.Id=@SkuId
                 WHERE c.TenantId=@Tenant AND c.Id=@Customer AND sh.Id=@ShipTo
-                    AND c.IsActive=1 AND k.IsActive=1
+                    AND c.IsActive=1 AND k.IsActive=1 AND (@D2=0 OR k.BaseUom=N'EA')
             ) THEN 1 ELSE 0 END AS bit)
             """, p, tx, ct));
         if (!customerSkuEligible)
             return BusinessCommandOutcome.Rejected("CUSTOMER_SHIPTO_OR_SKU_NOT_ELIGIBLE");
 
-        var right = await db.QuerySingleOrDefaultAsync<ManifestRight>(Sql("""
+        if (d2 is not null && !await MatchesD2Selection(db, tx, tenant, request, d2, ct))
+            return BusinessCommandOutcome.Rejected("D2_SHIPTO_SELECTION_INVALID");
+
+        var right = await db.QuerySingleOrDefaultAsync<ManifestRight>(Sql($"""
             SELECT l.Id AS ManifestLineId,l.LoadSourceLineId,l.StockRightId,
                 l.SkuId,l.LoadedBaseQuantity,
                 r.GrantedBaseQuantity,r.ConsumedBaseQuantity,r.ReleasedBaseQuantity,
@@ -305,7 +324,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             FROM dbo.TripManifestLine l WITH (UPDLOCK,HOLDLOCK)
             JOIN dbo.TripManifest m WITH (HOLDLOCK)
                 ON m.TenantId=l.TenantId AND m.Id=l.TripManifestId
-                AND m.TripId=l.TripId AND m.Status=N'LOADED' AND m.IsC3=0
+                AND m.TripId=l.TripId AND m.Status=N'LOADED' AND m.IsC3=@D2 AND l.IsC3=@D2
             JOIN dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
                 ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
                 AND r.TripId=l.TripId AND r.SkuId=l.SkuId AND r.RightKind='B'
@@ -325,6 +344,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             WHERE l.TenantId=@Tenant AND l.Id=@ManifestLine AND l.TripId=@Trip
                 AND l.SkuId=@SkuId AND l.RightKind='B'
                 AND l.LoadSourceLineId IS NOT NULL AND l.LoadedBaseQuantity>0
+                {(d2 is null ? "" : D2ManifestProof)}
             """, p, tx, ct));
         if (right is null)
             return BusinessCommandOutcome.Rejected("B_LOADED_RIGHT_NOT_FOUND");
@@ -336,7 +356,12 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             FROM dbo.SaleDelivery WITH (UPDLOCK,HOLDLOCK)
             WHERE TenantId=@Tenant AND TripManifestLineId=@ManifestLine
             """, p, tx, ct));
-        if (postedQty != right.ConsumedBaseQuantity)
+        decimal rightPosted = d2 is null ? postedQty : await db.ExecuteScalarAsync<decimal>(Sql("""
+            SELECT COALESCE(SUM(BaseQuantity),0)
+            FROM dbo.SaleDelivery WITH (UPDLOCK,HOLDLOCK)
+            WHERE TenantId=@Tenant AND StockRightId=@Right AND RightKind='B'
+            """, new { Tenant = tenant, Right = right.StockRightId }, tx, ct));
+        if (rightPosted != right.ConsumedBaseQuantity)
             return BusinessCommandOutcome.Rejected("B_RIGHT_SOURCE_DRIFT");
         if (right.RightStatus != "HELD"
             || right.LoadedBaseQuantity - postedQty < request.BaseQuantity
@@ -402,12 +427,23 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         if (cost < 0 || cost > MaximumAmount)
             return BusinessCommandOutcome.Rejected("VEHICLE_COST_INVALID");
 
-        var (payment, rejection) = await ResolvePaymentAsync(db, tx, tenant, actor, request, payable, ct);
+        DateTime? d2Now = d2 is null ? null : await db.ExecuteScalarAsync<DateTime>(
+            Sql($"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct));
+        var (payment, rejection) = await ResolvePaymentAsync(db, tx, tenant, actor, request, payable,
+            d2Now, ct);
         if (payment is null)
             return BusinessCommandOutcome.Rejected(rejection!);
         decimal creditDue = payable - payment.TotalApplied;
-        var grants = (await db.QueryAsync<CreditGrant>(Sql("""
-            SELECT g.Id,g.GrantedAmount,g.ConsumedAmount,g.ReleasedAmount,g.Status,
+        Guid? d2Approval = null;
+        if (d2 is not null && creditDue > 0)
+        {
+            var (approvalId, error) = await EffectiveD2Approval(db, tx, tenant, request, ct);
+            if (error is not null) return BusinessCommandOutcome.Rejected(error);
+            d2Approval = approvalId;
+        }
+        List<CreditGrant> grants = d2 is not null && creditDue == 0 ? [] : (await db.QueryAsync<CreditGrant>(Sql($"""
+            SELECT g.Id,g.ApprovalId,g.GrantedAmount,g.ConsumedAmount,g.ReleasedAmount,g.Status,
+                {(d2 is null ? "CAST(0 AS bit)" : D2GrantProof)} AS D1Source,
                 (SELECT COALESCE(SUM(c.ConsumedAmount),0)
                  FROM dbo.BGrantConsumption c WITH (HOLDLOCK)
                  WHERE c.TenantId=g.TenantId AND c.BCreditGrantId=g.Id)
@@ -435,7 +471,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         foreach (var g in grants)
         {
             if (uncovered == 0) break;
-            if (g.Status != "HELD" || !g.Approved) continue;
+            if (g.Status != "HELD" || !g.Approved
+                || (d2 is not null && (!g.D1Source || g.ApprovalId != d2Approval || g.ReleasedAmount != 0))) continue;
             decimal remaining = g.GrantedAmount - g.ConsumedAmount - g.ReleasedAmount;
             if (remaining <= 0) continue;
             decimal spend = Math.Min(remaining, uncovered);
@@ -445,6 +482,13 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         if (uncovered > 0)
             return BusinessCommandOutcome.Rejected("B_CREDIT_INSUFFICIENT");
 
+        if (d2?.Preview is { } preview)
+        {
+            preview.Value = new D2SalePreview(payable, payment.CashReceived, payment.CashApplied,
+                payment.CreditApplied, creditDue, payment.CreditIssued, cost, payment.PendingBank);
+            return BusinessCommandOutcome.Applied("D2_PREVIEW_READY", Guid.Empty);
+        }
+
         // All writes below are covered by the SAME explicit Serializable tx.
         Guid sourceId = Guid.NewGuid(), sourceLine = Guid.NewGuid();
         Guid deliveryId = Guid.NewGuid(), itemId = Guid.NewGuid(), receiptId = Guid.NewGuid();
@@ -452,14 +496,14 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
                 SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc)
             VALUES(@Id,@Tenant,@Command,N'B_SALE_DELIVERY',@Number,@Actor,
-                @Customer,@Trip,SYSUTCDATETIME());
+                @Customer,@Trip,COALESCE(@Now,SYSUTCDATETIME()));
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,
                 SkuId,BaseQuantity,Amount)
             VALUES(@Line,@Tenant,@Id,1,@Sku,@Qty,@Payable);
             """, new { Id = sourceId, Line = sourceLine, Tenant = tenant,
                 Command = commandId, Number = request.SourceNumber, Actor = actor,
                 Customer = request.CustomerId, Trip = request.TripId,
-                Sku = request.SkuId, Qty = request.BaseQuantity, Payable = payable }, tx, ct));
+                Sku = request.SkuId, Qty = request.BaseQuantity, Payable = payable, Now = d2Now }, tx, ct));
 
         if (await db.ExecuteAsync(Sql("""
             UPDATE dbo.StockRight SET ConsumedBaseQuantity=ConsumedBaseQuantity+@Qty,
@@ -481,14 +525,14 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 Sku = request.SkuId, Qty = request.BaseQuantity, Cost = cost }, tx, ct)) != 1)
             throw new InvalidOperationException("Vehicle custody changed under lock.");
 
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.SaleDelivery(Id,TenantId,TripId,CustomerId,ShipToSnapshotId,
                 TripManifestLineId,LoadSourceLineId,StockRightId,RightKind,SkuId,
                 BusinessSourceId,BusinessSourceKind,BusinessSourceLineId,
-                BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible)
+                BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible{(d2 is null ? "" : ",D2SelectionId")})
             VALUES(@Delivery,@Tenant,@Trip,@Customer,@ShipTo,@ManifestLine,
                 @LoadLine,@Right,'B',@Sku,@Source,N'B_SALE_DELIVERY',@SourceLine,
-                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0);
+                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0{(d2 is null ? "" : ",@D2Selection")});
             INSERT dbo.DeliveryStockIssue(Id,TenantId,SaleDeliveryId,
                 BusinessSourceLineId,TripManifestLineId,SkuId,BaseQuantity,CostAmount)
             VALUES(@Issue,@Tenant,@Delivery,@SourceLine,@ManifestLine,@Sku,@Qty,@Cost);
@@ -501,7 +545,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 LoadLine = right.LoadSourceLineId, Right = right.StockRightId,
                 Sku = request.SkuId, Source = sourceId, SourceLine = sourceLine,
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
-                Date = trip.BusinessDate }, tx, ct));
+                Date = trip.BusinessDate, D2Selection = d2?.SelectionId }, tx, ct));
 
         if (payment.CashReceived > 0)
         {
@@ -606,7 +650,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             || posted.CreditUsed != creditDue || posted.EffectCount != effects.Count)
             throw new InvalidOperationException("B source-ledger posting is incomplete.");
 
-        return BusinessCommandOutcome.Applied("B_SALE_DELIVERY_POSTED", sourceId);
+        return BusinessCommandOutcome.Applied(d2 is not null && payment.PendingBank
+            ? "D2_BANK_PENDING_POSTED" : "B_SALE_DELIVERY_POSTED", sourceId);
     }
 
     private sealed record PostingEffect(string Key, string Kind,

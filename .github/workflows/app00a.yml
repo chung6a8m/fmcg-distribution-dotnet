@@ -821,6 +821,9 @@ jobs:
       - name: APP-02D.1 B quota, credit and partial load synthetic matrix
         shell: pwsh
         run: ./scripts/Run-App02D1.ps1
+      - name: APP-02D.2 atomic B sale and receipt synthetic matrix
+        shell: pwsh
+        run: ./scripts/Run-App02D2.ps1
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -836,6 +839,7 @@ jobs:
             web/test-results-app02c5/
             web/test-results-app02c6/
             web/test-results-app02d1/
+            web/test-results-app02d2/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web

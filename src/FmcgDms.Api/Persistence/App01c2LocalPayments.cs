@@ -14,7 +14,7 @@ public sealed partial class App01c2BPostingService
 
     private static async Task<(LocalPayment? Payment, string? Rejection)> ResolvePaymentAsync(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
-        PostBSaleDeliveryReceiptCommand request, decimal payable, CancellationToken ct)
+        PostBSaleDeliveryReceiptCommand request, decimal payable, DateTime? now, CancellationToken ct)
     {
         var scope = new
         {
@@ -51,7 +51,7 @@ public sealed partial class App01c2BPostingService
             || witness.VerifiedAmount != request.ReceivedCashAmount
             || witness.PaymentMethod != "CASH" || witness.VerificationStatus != "VERIFIED"
             || witness.VerifiedAtUtc is null
-            || witness.VerifiedAtUtc.Value > DateTime.UtcNow
+            || witness.VerifiedAtUtc.Value > (now ?? DateTime.UtcNow)
             || string.IsNullOrWhiteSpace(witness.VerifiedBy)
             || string.Equals(witness.VerifiedBy?.Trim(), actor, StringComparison.OrdinalIgnoreCase))
             return (null, "CASH_EVIDENCE_NOT_VERIFIED");

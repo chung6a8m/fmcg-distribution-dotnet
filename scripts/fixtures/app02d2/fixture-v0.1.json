@@ -1,0 +1,52 @@
+{
+  "version": "D2-v0.1",
+  "tenants": [
+    "tenant-a",
+    "tenant-b"
+  ],
+  "clock": "2026-11-22T04:00:00Z",
+  "policyStart": "2026-11-22T03:00:00Z",
+  "policyEnd": "2026-11-22T05:00:00Z",
+  "cashWitnessTime": "2026-11-22T03:55:00Z",
+  "boundaryWitnessTime": "2026-11-22T02:56:00Z",
+  "unitPrice": 10,
+  "grant": 100,
+  "main": 30,
+  "mainValue": 300,
+  "truck": 70,
+  "truckValue": 700,
+  "aLoaded": 40,
+  "bLoaded": 30,
+  "batches": [
+    10,
+    20
+  ],
+  "browserCases": [
+    {
+      "caseId": "D2-02",
+      "cash": 60
+    },
+    {
+      "caseId": "D2-03",
+      "cash": 100,
+      "outlet": true
+    },
+    {
+      "caseId": "D2-04",
+      "bank": 60
+    },
+    {
+      "caseId": "D2-05",
+      "cash": 60,
+      "reserved": 20
+    },
+    {
+      "caseId": "D2-06",
+      "cash": 120
+    },
+    {
+      "caseId": "D2-17",
+      "cash": 60
+    }
+  ]
+}
