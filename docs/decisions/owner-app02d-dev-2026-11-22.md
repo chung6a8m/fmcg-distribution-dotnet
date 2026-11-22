@@ -39,3 +39,11 @@ On 22/11/2026 (Asia/Bangkok) the Owner approved the D.3 contract, fixture and ma
 ## D.3 DEV signoff
 
 On 23/11/2026 (Asia/Bangkok) the Owner signed APP-02D.3 DEV acceptance on `3e61d440241d233b86661936ba442d9f56e449c2` and authorized merging [PR #116](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/116). The signed scope is D.3 matrix v0.1 on Windows LocalDB with two synthetic tenants. The [D.3 closeout](../closeout/2026-11-22-app-02d3-localdb.md) records local and hosted SQL evidence, hosted CI and the implementation merge. Decision OWN-APP02D-DEV-04 continues to apply.
+
+## D.4 contract, fixture, clock and matrix approval
+
+On 23/11/2026 (Asia/Bangkok) the Owner approved the D.4 contract, fixture, fixed test clock and matrix v0.1, and authorized all 18 cases per synthetic tenant on Windows LocalDB. The approved texts remain frozen, including their historical draft markers. LF-normalized SHA-256 values are `D30D3E50110C2CC2FF051B1D06555E48702D532DF8F766C4D11F6AA30BBDEAB2` for the contract, `502E7FDC58CA41FB8C94AD72E5B41DD21FAAEE3B815E7AD51DCB8A9BDCEC165E` for the matrix, `BF3DAFBB0C65397155FD625916FE30B9AEEA22E18F279F61E70131367765B987` for the fixture and `6D50CC1CED8A14F8FE4595BE04EA719580632E645B8E383ED63865EBCB226752` for the expected results. [D.4 contract](../roadmap/app-02d4-dev-contract.md) · [D.4 matrix](../roadmap/app-02d4-dev-acceptance-matrix.md) · [Fixture and expected results](../../scripts/fixtures/app02d4)
+
+## D.4 DEV signoff
+
+On 23/11/2026 (Asia/Bangkok) the Owner signed APP-02D.4 DEV acceptance on `a6df2ed18c77fd0be47c228fa0c63e63c0e16f70` and authorized the merge. The signed scope is D.4 matrix v0.1 on Windows LocalDB with two synthetic tenants. Decision OWN-APP02D-DEV-04 continues to apply. [PR #118](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/118) · [D.4 closeout](../closeout/2026-11-23-app-02d4-localdb.md)
