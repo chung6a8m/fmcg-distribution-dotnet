@@ -276,6 +276,8 @@ public sealed class App01b2CommandService(TenantConnections connections)
                             CAST(CASE
                                 WHEN r.RightKind='A' AND ao.Status=N'CONFIRMED'
                                     AND ao.TripId=@Trip AND al.SkuId=r.SkuId
+                                    AND NOT EXISTS (SELECT 1 FROM dbo.C2Confirmation c2
+                                        WHERE c2.TenantId=ao.TenantId AND c2.OrderId=ao.Id)
                                     -- ConfirmAOrder requires the whole A-order line
                                     -- to be reserved. Recheck the *sum* (one line
                                     -- may have several independent A reservations)

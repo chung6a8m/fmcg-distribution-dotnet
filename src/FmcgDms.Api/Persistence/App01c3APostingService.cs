@@ -302,6 +302,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 AND l.TripId=@Trip AND l.SkuId=@Sku
                 AND l.RightKind='A' AND l.LoadSourceLineId IS NOT NULL
                 AND l.LoadedBaseQuantity>0
+                AND NOT EXISTS (SELECT 1 FROM dbo.C2Confirmation c2 WHERE c2.TenantId=o.TenantId AND c2.OrderId=o.Id)
             """, p, tx, ct));
         if (right is null)
             return BusinessCommandOutcome.Rejected("A_FROZEN_LOADED_RIGHT_NOT_FOUND");

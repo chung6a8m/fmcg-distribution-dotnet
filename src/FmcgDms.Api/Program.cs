@@ -45,7 +45,14 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
 {
     if (app.Configuration.GetValue<bool>("App02C1:Enabled"))
         App02c1Routes.Map(app);
+    if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
+        App02c2Routes.Map(app);
+}
 
+if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
+    && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
+    && !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime"))
+{
     // Synthetic diagnostics ONLY. Not a production business API.
     var diag = app.MapGroup("/api/diagnostics").RequireAuthorization();
     diag.MapGet("/tenant", async (ClaimsPrincipal principal, TenantConnections db, CancellationToken ct) =>
