@@ -81,6 +81,9 @@ internal sealed partial class App02d2Dev
         }) await NoEffect(tenant, Fresh(invalid), label);
         await NoEffect(tenant, Fresh(input), "Unassigned Sales actor", "other-sales");
         await NoEffect(tenant, Fresh(input), "Warehouse-only actor", "warehouse");
+        await d1.SetD2SalesAuthority(tenant, false);
+        try { await NoEffect(tenant, Fresh(input), "Assigned writer whose Sales role is revoked"); }
+        finally { await d1.SetD2SalesAuthority(tenant, true); }
         await using var db = await Owner(tenant);
         await db.ExecuteAsync("UPDATE dbo.Customer SET IsActive=0 WHERE TenantId=@Tenant AND Id=@Customer", s);
         try { await NoEffect(tenant, Fresh(input), "Inactive Customer"); }
