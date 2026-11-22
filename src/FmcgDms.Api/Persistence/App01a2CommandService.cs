@@ -170,6 +170,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             if (deliveryTrip is Guid c4Trip)
                 await RequireC4Authority(principal, db, tx, tenant, actor, c4Trip, amendment, ct);
             await LockCommand(db, tx, tenant, request, ct);
+            if (connections.UsesApp02d3 && (loadTrip ?? deliveryTrip ?? d1GrantTrip) is Guid mixedTrip)
+                await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + mixedTrip.ToString("N"), ct);
 
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode

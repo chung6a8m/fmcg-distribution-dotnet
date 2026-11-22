@@ -30,6 +30,9 @@ bool app02d1 = App02d1Runtime.Enabled(app.Configuration, app.Environment);
 bool app02d2 = App02d2Runtime.Enabled(app.Configuration, app.Environment);
 if (app02d2)
     await App02d2Runtime.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(), CancellationToken.None);
+bool app02d3 = App02d3Runtime.Enabled(app.Configuration, app.Environment);
+if (app02d3)
+    await App02d3Runtime.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(), CancellationToken.None);
 bool app02c6 = !app02d1 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
@@ -73,6 +76,9 @@ if (app02d2)
     App02d2Routes.Map(app);
 else if (app02d1)
     App02d2Routes.MapChannelBlocked(app);
+
+if (app02d3)
+    App02d3Routes.Map(app);
 
 bool legacySynthetic = (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")

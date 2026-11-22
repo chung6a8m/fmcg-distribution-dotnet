@@ -169,7 +169,8 @@ internal sealed partial class App02d1Dev(string root, DemoRun run, string source
     }
 
     private async Task<Scene> Seed(string tenant, string code, decimal cap = 100, string decision = "APPROVED",
-        DateTimeOffset? from = null, DateTimeOffset? until = null, string? maker = null, string? checker = null)
+        DateTimeOffset? from = null, DateTimeOffset? until = null, string? maker = null, string? checker = null,
+        decimal openingQuantity = 100, decimal openingValue = 1000)
     {
         var s = new Scene(tenant,Guid.NewGuid(),Guid.NewGuid(),Guid.Empty,Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid());
         await using var db = await Write(tenant);
@@ -181,17 +182,17 @@ internal sealed partial class App02d1Dev(string root, DemoRun run, string source
             INSERT dbo.Trip(Id,TenantId,Code,BusinessDate,VehicleLocationId)
                 VALUES(@Trip,@Tenant,@code,'20261122',@Truck);
             INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
-                VALUES(@Tenant,@Main,@Sku,100);
+                VALUES(@Tenant,@Main,@Sku,@openingQuantity);
             INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,SnapshotCode,BaseQuantity,CostAmount)
-                VALUES(@Tenant,@Main,@Sku,'D1-v0.1',100,1000),(@Tenant,@Truck,@Sku,'D1-v0.1',0,0);
+                VALUES(@Tenant,@Main,@Sku,'D1-v0.1',@openingQuantity,@openingValue),(@Tenant,@Truck,@Sku,'D1-v0.1',0,0);
             INSERT dbo.PhysicalStockBalance(TenantId,StockLocationId,SkuId,OnHandBaseQuantity,OnHandCostAmount)
-                VALUES(@Tenant,@Main,@Sku,100,1000),(@Tenant,@Truck,@Sku,0,0);
+                VALUES(@Tenant,@Main,@Sku,@openingQuantity,@openingValue),(@Tenant,@Truck,@Sku,0,0);
             INSERT dbo.C3TripWriter VALUES(@Tenant,@Trip,@writer);
             INSERT dbo.C2CommercialPolicy(TenantId,Id,CustomerId,SkuId,Version,Decision,EffectiveFromUtc,EffectiveUntilUtc,
                 Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
                 VALUES(@Tenant,NEWID(),@Customer,@Sku,1,'APPROVED','20261121','20261123',
                     'd1-price-maker','d1-price-checker','20261121','D1-v0.1',15,0,0,7,1000,'Asia/Ho_Chi_Minh');
-            """,new { s.Tenant,s.Trip,s.Customer,s.Sku,s.Main,s.Truck,code,writer=Actor(tenant,"warehouse") });
+            """,new { s.Tenant,s.Trip,s.Customer,s.Sku,s.Main,s.Truck,code,openingQuantity,openingValue,writer=Actor(tenant,"warehouse") });
         return await SeedCredit(s,cap,decision,from,until,maker,checker);
     }
 

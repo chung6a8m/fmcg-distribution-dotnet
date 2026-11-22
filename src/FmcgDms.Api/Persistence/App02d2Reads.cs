@@ -14,7 +14,12 @@ public sealed partial class App01c2BPostingService
         string actor = App02a3Sql.Actor(user);
         await using var db = await OpenD2(user, ct);
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        if (trip is Guid tripId) await RequireD2Writer(db, tx, tenant, actor, tripId, ct);
+        if (trip is Guid tripId)
+        {
+            await RequireD2Writer(db, tx, tenant, actor, tripId, ct);
+            if (connections.UsesApp02d3)
+                await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
+        }
         else await App02a3Sql.RequireRole(db, tx, tenant, actor, "sales", ct);
         T result = await read(db, tx, tenant, actor);
         await tx.CommitAsync(ct);
@@ -82,7 +87,16 @@ public sealed partial class App01c2BPostingService
                 WHERE b.TenantId=@Tenant
                 ORDER BY c.Code,sh.Address,sh.Id
                 """, new { Tenant = tenant }, tx, ct));
-            return new D2Workspace(tripId, lines.ToArray(), selections.GroupBy(s => (s.CustomerId, s.CustomerLabel))
+            var presentedLines = lines.ToArray();
+            if (await IsD3Trip(db, tx, tenant, tripId, ct))
+            {
+                var prices = new Dictionary<Guid, D3Price?>();
+                foreach (Guid sku in presentedLines.Select(l => l.SkuId).Distinct())
+                    prices.Add(sku, await EffectiveD3Price(db, tx, tenant, tripId, sku, ct));
+                presentedLines = presentedLines.Where(l => prices[l.SkuId] is not null)
+                    .Select(l => l with { UnitPrice = prices[l.SkuId]!.UnitPrice }).ToArray();
+            }
+            return new D2Workspace(tripId, presentedLines, selections.GroupBy(s => (s.CustomerId, s.CustomerLabel))
                 .Select(c => new D2CustomerOption(c.Key.CustomerId, c.Key.CustomerLabel, c
                     .Select(s => new D2SelectionOption(s.SelectionId, s.ShipToSnapshotId, s.OutletId, s.Label)).ToArray()))
                 .ToArray());

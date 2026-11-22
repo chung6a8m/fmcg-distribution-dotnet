@@ -62,6 +62,7 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         public decimal CountedAmount { get; set; }
         public string CountedBy { get; set; } = "";
         public string VerificationStatus { get; set; } = "";
+        public DateTime CountedAtUtc { get; set; }
     }
 
     private sealed class ManifestScope
@@ -134,7 +135,7 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         ClaimsPrincipal principal, T request, string kind, string requiredRole,
         Guid tripId, (string Key, string Value)[] fields,
         Func<SqlConnection, SqlTransaction, string, string, Guid, T,
-            CancellationToken, Task<BusinessCommandOutcome>> handler, CancellationToken ct)
+            CancellationToken, Task<BusinessCommandOutcome>> handler, CancellationToken ct, bool d3 = false)
         where T : IApp01aCommand
     {
         if (!ValidKey(request.ProducerId, 128) || !ValidKey(request.CommandId, 128)
@@ -150,12 +151,16 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             throw new UnauthorizedAccessException("Invalid actor identity.");
 
         byte[] hash = CommandPayloadHash.Compute(kind, tenant, actor, request.SourceNumber, fields);
-        await using SqlConnection db = await connections.OpenSyntheticScratchAsync(principal, ct);
+        await using SqlConnection db = d3
+            ? await OpenD3(principal, ct)
+            : await connections.OpenSyntheticScratchAsync(principal, ct);
         await using SqlTransaction tx =
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
-            if (connections.UsesApp02c6Clock)
+            if (d3)
+                await App02a3Sql.RequireRole(db, tx, tenant, actor, requiredRole, ct);
+            else if (connections.UsesApp02c6Clock)
             {
                 await App02a3Sql.RequireRole(db, tx, tenant, actor, requiredRole, ct);
                 if (await db.ExecuteScalarAsync<int>(Sql("""
@@ -167,6 +172,11 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             string commandLock = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
             await LockAsync(db, tx, commandLock, ct);
+            if (d3)
+            {
+                await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
+                await RequireD3Trip(db, tx, tenant, actor, tripId, [requiredRole], ct);
+            }
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
                 FROM dbo.BusinessCommand WITH (UPDLOCK,HOLDLOCK)
@@ -201,6 +211,12 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
                     Producer = request.ProducerId, Command = request.CommandId,
                     Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
 
+            if (d3)
+                await db.ExecuteAsync(Sql("""
+                    INSERT dbo.D3CommandScope(TenantId,CommandRowId,TripId,RoleCode)
+                    VALUES(@Tenant,@Command,@Trip,@Role)
+                    """, new { Tenant = tenant, Command = commandId, Trip = tripId, Role = requiredRole }, tx, ct));
+
             BusinessCommandOutcome outcome;
             if (tripId == Guid.Empty)
                 outcome = BusinessCommandOutcome.Rejected("TRIP_REFERENCE_INVALID");
@@ -208,8 +224,9 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             {
                 // Exactly the same lock resource as APP-01C.2 and C.3 delivery
                 // posting: a delivery cannot race cashier settlement/unload.
-                await LockAsync(db, tx,
-                    "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
+                if (!d3)
+                    await LockAsync(db, tx,
+                        "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
                 outcome = await handler(db, tx, tenant, actor, commandId, request, ct);
             }
 
@@ -312,11 +329,16 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         return custody >= 0 && receipts - accepted == custody && accepted == fund;
     }
 
-    private static async Task<BusinessCommandOutcome> OfferAsync(
+    private static Task<BusinessCommandOutcome> OfferAsync(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
-        Guid commandId, OfferCashHandoverCommand req, CancellationToken ct)
+        Guid commandId, OfferCashHandoverCommand req, CancellationToken ct) =>
+        OfferCore(db, tx, tenant, actor, commandId, req, false, ct);
+
+    private static async Task<BusinessCommandOutcome> OfferCore(
+        SqlConnection db, SqlTransaction tx, string tenant, string actor,
+        Guid commandId, OfferCashHandoverCommand req, bool d3, CancellationToken ct)
     {
-        if (!ValidAmount(req.OfferedAmount))
+        if (!ValidAmount(req.OfferedAmount) || (d3 && decimal.Round(req.OfferedAmount, 4) != req.OfferedAmount))
             return BusinessCommandOutcome.Rejected("OFFER_AMOUNT_INVALID");
         if (await SourceUsed(db, tx, tenant, "CASH_HANDOVER_OFFER", req.SourceNumber, ct))
             return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
@@ -329,17 +351,20 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             return BusinessCommandOutcome.Rejected("CUSTODY_SOURCE_DRIFT");
         if (custody < req.OfferedAmount)
             return BusinessCommandOutcome.Rejected("CUSTODY_INSUFFICIENT");
+        if (d3 && await HasPendingD3CashOffer(db, tx, tenant, req.TripId, ct))
+            return BusinessCommandOutcome.Rejected("CASH_HANDOVER_ALREADY_PENDING");
 
+        string clock = d3 ? App02c6Clock.SqlUtcNow : "SYSUTCDATETIME()";
         Guid source = Guid.NewGuid(), line = Guid.NewGuid();
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
                 SourceNumber,ActorId,TripId,OccurredAtUtc)
             VALUES(@Source,@Tenant,@Command,N'CASH_HANDOVER_OFFER',
-                @Number,@Actor,@Trip,SYSUTCDATETIME());
+                @Number,@Actor,@Trip,{clock});
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,Amount)
             VALUES(@Line,@Tenant,@Source,1,@Amount);
-            INSERT dbo.CashHandoverOffer(Id,TenantId,TripId,SourceLineId,OfferedAmount,OfferedBy)
-            VALUES(@Source,@Tenant,@Trip,@Line,@Amount,@Actor);
+            INSERT dbo.CashHandoverOffer(Id,TenantId,TripId,SourceLineId,OfferedAmount,OfferedBy,OfferedAtUtc)
+            VALUES(@Source,@Tenant,@Trip,@Line,@Amount,@Actor,{clock});
             """, new { Source = source, Line = line, Tenant = tenant,
                 Command = commandId, Number = req.SourceNumber,
                 Actor = actor, Trip = req.TripId, Amount = req.OfferedAmount }, tx, ct));
@@ -351,9 +376,14 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         return BusinessCommandOutcome.Applied("CASH_HANDOVER_OFFERED", source);
     }
 
-    internal static async Task<BusinessCommandOutcome> AcceptAsync(
+    internal static Task<BusinessCommandOutcome> AcceptAsync(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
-        Guid commandId, AcceptCashHandoverCommand req, CancellationToken ct)
+        Guid commandId, AcceptCashHandoverCommand req, CancellationToken ct) =>
+        AcceptCore(db, tx, tenant, actor, commandId, req, false, ct);
+
+    private static async Task<BusinessCommandOutcome> AcceptCore(
+        SqlConnection db, SqlTransaction tx, string tenant, string actor,
+        Guid commandId, AcceptCashHandoverCommand req, bool d3, CancellationToken ct)
     {
         if (req.OfferId == Guid.Empty || !ValidKey(req.CountEvidenceRef, 128))
             return BusinessCommandOutcome.Rejected("ACCEPT_REFERENCE_INVALID");
@@ -376,8 +406,15 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         if (offer is null || offer.SourceKind != "CASH_HANDOVER_OFFER"
             || offer.SourceLines != 1)
             return BusinessCommandOutcome.Rejected("OFFER_NOT_FOUND_OR_INVALID");
-        if (offer.OfferedBy == actor)
+        if (string.Equals(offer.OfferedBy, actor, d3 ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             return BusinessCommandOutcome.Rejected("CASHIER_MUST_BE_INDEPENDENT");
+        if (d3 && await db.ExecuteScalarAsync<int>(Sql("""
+            SELECT COUNT(*) FROM dbo.BusinessSource s
+            JOIN dbo.D3CommandScope scope ON scope.TenantId=s.TenantId AND scope.CommandRowId=s.BusinessCommandId
+                AND scope.TripId=s.TripId AND scope.RoleCode='sales'
+            WHERE s.TenantId=@Tenant AND s.Id=@Offer AND s.TripId=@Trip;
+            """, new { Tenant = tenant, Offer = req.OfferId, Trip = req.TripId }, tx, ct)) != 1)
+            return BusinessCommandOutcome.Rejected("OFFER_NOT_FOUND_OR_INVALID");
         if (await db.ExecuteScalarAsync<int>(Sql("""
             SELECT COUNT(*) FROM dbo.CashHandoverAcceptance WITH (UPDLOCK,HOLDLOCK)
             WHERE TenantId=@Tenant AND OfferId=@Offer;
@@ -385,13 +422,16 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             return BusinessCommandOutcome.Rejected("OFFER_ALREADY_ACCEPTED");
 
         var witness = await db.QuerySingleOrDefaultAsync<CountScope>(Sql("""
-            SELECT TripId,CountedAmount,CountedBy,VerificationStatus
+            SELECT TripId,CountedAmount,CountedBy,VerificationStatus,CountedAtUtc
             FROM dbo.CashierCountEvidence WITH (UPDLOCK,HOLDLOCK)
             WHERE TenantId=@Tenant AND EvidenceRef=@Evidence;
             """, new { Tenant = tenant, Evidence = req.CountEvidenceRef }, tx, ct));
         if (witness is null || witness.TripId != req.TripId
             || witness.CountedBy != actor || witness.VerificationStatus != "VERIFIED"
             || witness.CountedAmount != offer.OfferedAmount)
+            return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
+        if (d3 && witness.CountedAtUtc > await db.ExecuteScalarAsync<DateTime>(Sql(
+                $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)))
             return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
         if (await db.ExecuteScalarAsync<int>(Sql("""
             SELECT COUNT(*) FROM dbo.CashHandoverAcceptance WITH (UPDLOCK,HOLDLOCK)
@@ -405,17 +445,18 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
         if (custody < offer.OfferedAmount)
             return BusinessCommandOutcome.Rejected("CUSTODY_INSUFFICIENT");
 
+        string clock = d3 ? App02c6Clock.SqlUtcNow : "SYSUTCDATETIME()";
         Guid source = Guid.NewGuid(), line = Guid.NewGuid();
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
                 SourceNumber,ActorId,TripId,OccurredAtUtc)
             VALUES(@Source,@Tenant,@Command,N'CASH_HANDOVER_ACCEPT',
-                @Number,@Actor,@Trip,SYSUTCDATETIME());
+                @Number,@Actor,@Trip,{clock});
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,Amount)
             VALUES(@Line,@Tenant,@Source,1,@Amount);
             INSERT dbo.CashHandoverAcceptance(Id,TenantId,TripId,OfferId,
-                SourceLineId,EvidenceRef,AcceptedBy,AcceptedAmount)
-            VALUES(@Source,@Tenant,@Trip,@Offer,@Line,@Evidence,@Actor,@Amount);
+                SourceLineId,EvidenceRef,AcceptedBy,AcceptedAmount,AcceptedAtUtc)
+            VALUES(@Source,@Tenant,@Trip,@Offer,@Line,@Evidence,@Actor,@Amount,{clock});
             """, new { Source = source, Line = line, Tenant = tenant, Command = commandId,
                 Number = req.SourceNumber, Actor = actor, Trip = req.TripId,
                 Offer = req.OfferId, Evidence = req.CountEvidenceRef,

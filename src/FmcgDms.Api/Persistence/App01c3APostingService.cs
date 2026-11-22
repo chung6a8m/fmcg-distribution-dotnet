@@ -387,11 +387,11 @@ public sealed class App01c3APostingService(TenantConnections connections)
         SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid commandId,
         PostAPartialDeliveryCommand request, TripScope trip, FrozenRight right, FrozenOrderTotals frozen,
         decimal payable, DateTime due, CancellationToken ct, Guid? evidence = null, Guid? amendment = null,
-        DateTime? occurred = null, decimal? priorLineQuantity = null)
+        DateTime? occurred = null, decimal? priorLineQuantity = null, bool d3Runtime = false)
     {
         // Both B20 and A25 derive cost from exactly the same source-backed
         // vehicle on-hand, with four-decimal moving-average rounding.
-        var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql("""
+        var vehicle = await db.QuerySingleOrDefaultAsync<Balance>(Sql($"""
             SELECT b.OnHandBaseQuantity,b.OnHandCostAmount,
                 o.BaseQuantity + COALESCE(loaded.Qty,0) - COALESCE(issued.Qty,0)
                     - COALESCE(unloaded.Qty,0)
@@ -422,12 +422,16 @@ public sealed class App01c3APostingService(TenantConnections connections)
             -- Reused vehicles must subtract completed T6 unloads from the
             -- immutable opening + load - delivery source reconciliation.
             OUTER APPLY (
-                SELECT SUM(ul.BaseQuantity) AS Qty,SUM(ul.CostAmount) AS Cost
-                FROM dbo.TripUnloadLine ul WITH (HOLDLOCK)
-                JOIN dbo.TripUnload u WITH (HOLDLOCK)
-                    ON u.TenantId=ul.TenantId AND u.Id=ul.TripUnloadId
-                WHERE ul.TenantId=b.TenantId AND u.VehicleLocationId=b.StockLocationId
-                    AND ul.SkuId=b.SkuId
+                SELECT SUM(returnLine.BaseQuantity) AS Qty,SUM(returnLine.CostAmount) AS Cost
+                FROM (
+                    SELECT ul.BaseQuantity,ul.CostAmount
+                    FROM dbo.TripUnloadLine ul WITH (HOLDLOCK)
+                    JOIN dbo.TripUnload u WITH (HOLDLOCK)
+                        ON u.TenantId=ul.TenantId AND u.Id=ul.TripUnloadId
+                    WHERE ul.TenantId=b.TenantId AND u.VehicleLocationId=b.StockLocationId
+                        AND ul.SkuId=b.SkuId
+                    {App02d3Runtime.VehicleReturns(d3Runtime)}
+                ) returnLine
             ) unloaded
             WHERE b.TenantId=@Tenant AND b.StockLocationId=@Vehicle AND b.SkuId=@Sku
             """, new { Tenant = tenant, Vehicle = trip.VehicleLocationId,

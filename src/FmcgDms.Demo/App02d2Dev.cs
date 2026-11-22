@@ -80,11 +80,12 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
             var scene = await d1.SeedD2(tenant, "D2-UPGRADE", bindD2: false);
             long beforeVersion = await Version(tenant);
             string before = await d1.D2History(tenant);
-            ScratchMigrator.Migrate(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, true);
+            ScratchMigrator.MigrateBeforeD3(run.Connection(tenant), tenant, run.Id, LogLevel.Warning);
             await run.Verify(tenant);
             long afterVersion = await Version(tenant);
             string after = await d1.D2History(tenant);
             upgrades.Add(tenant, new(scene, beforeVersion, afterVersion, before, after));
+            ScratchMigrator.Migrate(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, true);
             await d1.BindD2(scene);
         }
         await restart("on");

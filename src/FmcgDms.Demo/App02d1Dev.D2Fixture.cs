@@ -10,9 +10,10 @@ internal sealed record D2Scene(string Tenant, Guid Trip, Guid Customer, Guid Shi
 internal sealed partial class App02d1Dev
 {
     internal async Task<D2Scene> SeedD2(string tenant, string code, bool withOutlet = false, decimal grantCap = 100,
-        bool bindD2 = true)
+        bool bindD2 = true, D3StockFixture? stock = null)
     {
-        var scene = await Seed(tenant, code, grantCap);
+        stock ??= new();
+        var scene = await Seed(tenant, code, grantCap, openingQuantity: stock.OpeningQuantity, openingValue: stock.OpeningValue);
         await using (var owner = await Write(tenant))
             await owner.ExecuteAsync("""
                 INSERT dbo.C4DeliveryWriter (TenantId,TripId,ActorId) VALUES(@Tenant,@Trip,@actor);
@@ -31,7 +32,7 @@ internal sealed partial class App02d1Dev
             new C1SelectionInput(Guid.NewGuid(), scene.Customer, outlet, null, null, address));
         Guid selection = selected.Body.GetProperty("id").GetGuid();
         Guid order = (await Post(scene, "sales", C2 + "/drafts",
-            new C2DraftInput(Guid.NewGuid(), scene.Customer, scene.Trip, selection, [new(scene.Sku, 40)]))).Source;
+            new C2DraftInput(Guid.NewGuid(), scene.Customer, scene.Trip, selection, [new(scene.Sku, stock.A)]))).Source;
         Guid confirmation = (await Post(scene, "sales", C2 + "/confirm", new C2ConfirmInput(Guid.NewGuid(), order))).Source;
         await using var read = await App02c6Dev.ReadOnly(run, tenant);
         var frozen = await read.QuerySingleAsync<D2FrozenOrder>("""
@@ -40,18 +41,26 @@ internal sealed partial class App02d1Dev
             WHERE a.TenantId=@tenant AND a.Id=@order;
             """, new { tenant, order });
         scene = scene with { ShipTo = frozen.ShipTo };
-        await Post(scene, "warehouse", C2 + "/reserve",
-            new C2ReserveInput(Guid.NewGuid(), order, frozen.OrderLine, scene.Main, 40, confirmation));
-        Guid aRight = await read.QuerySingleAsync<Guid>("""
+        if (!stock.DeferReservations)
+            await Post(scene, "warehouse", C2 + "/reserve",
+            new C2ReserveInput(Guid.NewGuid(), order, frozen.OrderLine, scene.Main, stock.A, confirmation));
+        Guid aRight = await read.QuerySingleOrDefaultAsync<Guid>("""
             SELECT StockRightId FROM dbo.AReservation WHERE TenantId=@tenant AND AOrderLineId=@orderLine;
             """, new { tenant, orderLine = frozen.OrderLine });
-        await Post(scene, "warehouse", D1 + "/quota", Quota(scene, 30));
-        Guid bRight = await Right(scene);
-        if (grantCap > 0)
-            await Post(scene, "finance", D1 + "/credit", Credit(scene, grantCap));
-        await Post(scene, "warehouse", D1 + "/load", Load(scene, bRight, 30, 10));
-        await Post(scene, "warehouse", D1 + "/load", Load(scene, bRight, 20, 20));
-        await Post(scene, "warehouse", C3 + "/load", Load(scene, aRight, 40, 40));
+        Guid bRight = Guid.Empty;
+        if (!stock.DeferReservations)
+        {
+            await Post(scene, "warehouse", D1 + "/quota", Quota(scene, stock.B));
+            bRight = await Right(scene);
+            if (grantCap > 0)
+                await Post(scene, "finance", D1 + "/credit", Credit(scene, grantCap));
+        }
+        if (stock.FirstB > 0)
+            await Post(scene, "warehouse", D1 + "/load", Load(scene, bRight, stock.B, stock.FirstB));
+        if (stock.SecondB > 0)
+            await Post(scene, "warehouse", D1 + "/load", Load(scene, bRight, stock.B - stock.FirstB, stock.SecondB));
+        if (stock.LoadA)
+            await Post(scene, "warehouse", C3 + "/load", Load(scene, aRight, stock.A, stock.A));
 
         var lines = (await read.QueryAsync<D2ManifestLine>("""
             SELECT Id,StockRightId AS RightId,LoadedBaseQuantity AS Quantity FROM dbo.TripManifestLine
@@ -63,9 +72,10 @@ internal sealed partial class App02d1Dev
         Guid? approval = await read.QuerySingleOrDefaultAsync<Guid?>("""
             SELECT Id FROM dbo.CreditPolicyApproval WHERE TenantId=@Tenant AND TripId=@Trip;
             """, scene);
+        var bLines = lines.Where(l => l.RightId == bRight).OrderBy(l => l.Quantity).ThenBy(l => l.Id).ToArray();
         var result = new D2Scene(tenant, scene.Trip, scene.Customer, scene.ShipTo, selection, outlet,
-            scene.Sku, scene.Main, scene.Truck, lines.Single(l => l.RightId == bRight && l.Quantity == 10).Id,
-            lines.Single(l => l.RightId == bRight && l.Quantity == 20).Id, lines.Single(l => l.RightId == aRight).Id,
+            scene.Sku, scene.Main, scene.Truck, bLines.ElementAtOrDefault(0)?.Id ?? Guid.Empty,
+            bLines.ElementAtOrDefault(1)?.Id ?? Guid.Empty, lines.SingleOrDefault(l => l.RightId == aRight)?.Id ?? Guid.Empty,
             bRight, aRight, order, grant, approval);
         if (bindD2) await BindD2(result);
         await GrantRole(tenant, D2OtherSales(tenant), "sales");

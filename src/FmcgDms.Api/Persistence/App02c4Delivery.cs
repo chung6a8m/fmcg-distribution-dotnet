@@ -60,7 +60,9 @@ public sealed partial class App01a2CommandService
         var receipt = await WithC4Authority(principal, input.TripId, async (db, tx, tenant, actor) =>
         {
             await LockCommand(db, tx, tenant, key, ct);
-            await FindTrip(db, tx, tenant, input.TripId, ct);
+            if (connections.UsesApp02d3)
+                await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + input.TripId.ToString("N"), ct);
+            var trip = await FindTrip(db, tx, tenant, input.TripId, ct);
             var args = new { Tenant = tenant, Actor = actor, input.CommandId, input.TripId,
                 input.ManifestLineId, input.ShipToVersion, input.Quantity };
             var previous = await db.QuerySingleOrDefaultAsync<C4Evidence>(Sql("""
@@ -75,6 +77,8 @@ public sealed partial class App01a2CommandService
                 WHERE TenantId=@Tenant AND ProducerId=@ProducerId AND CommandId=@CommandId
                 """, new { Tenant = tenant, key.ProducerId, key.CommandId }, tx, ct)) != 0)
                 return new C4Receipt(null, Conflict: true);
+            if (connections.UsesApp02d3 && trip is not { Status: "PREPARED" or "IN_PROGRESS" })
+                return new C4Receipt(null, "TRIP_NOT_ELIGIBLE");
             if (await db.ExecuteScalarAsync<int>(Sql("""
                 SELECT COUNT(*) FROM dbo.TripManifestLine l
                 JOIN dbo.PhysicalStockMovement m ON m.TenantId=l.TenantId AND m.TripManifestLineId=l.Id
@@ -113,12 +117,12 @@ public sealed partial class App01a2CommandService
         return await ExecuteAsync(principal, key, "C4_DELIVERY",
             [("Evidence", evidence.Id.ToString("N"))],
             (db, tx, tenant, actor, command, token) =>
-                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, token),
+                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3, token),
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, CancellationToken ct)
+        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, CancellationToken ct)
     {
         var trip = await FindTrip(db, tx, tenant, evidence.TripId, ct);
         if (trip is not { Status: "PREPARED" or "IN_PROGRESS", VehicleLocationId: Guid location,
@@ -198,7 +202,7 @@ public sealed partial class App01a2CommandService
             new FrozenRight { ManifestLineId = evidence.ManifestLineId, LoadSourceLineId = line.LoadSourceLineId,
                 StockRightId = line.StockRightId },
             new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
-            payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine);
+            payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime);
     }
 
     private static async Task<C2CommercialPolicy?> ValidateC4Policy(SqlConnection db, SqlTransaction tx,
