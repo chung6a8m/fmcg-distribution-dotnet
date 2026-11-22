@@ -126,7 +126,8 @@ public sealed partial class App01a2CommandService
             !CryptographicOperations.FixedTimeEquals(selected.PayloadHash, SHA256.HashData(Encoding.UTF8.GetBytes(selected.Payload))))
             return BusinessCommandOutcome.Rejected("C2_SHIP_TO_INVALID");
         if (await db.ExecuteScalarAsync<int>(Sql("""
-            SELECT COUNT(*) FROM dbo.C2Confirmation WHERE TenantId=@Tenant AND SelectionId=@SelectionId
+            SELECT (SELECT COUNT(*) FROM dbo.C2Confirmation WHERE TenantId=@Tenant AND SelectionId=@SelectionId)
+                + (SELECT COUNT(*) FROM dbo.C4ShipToAmendment WHERE TenantId=@Tenant AND SelectionId=@SelectionId)
             """, scope, tx, ct)) != 0)
             return BusinessCommandOutcome.Rejected("C2_SHIP_TO_ALREADY_BOUND");
         if (selected.RegisteredId is Guid registeredId &&

@@ -112,7 +112,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         ClaimsPrincipal principal, IApp01aCommand request, string kind,
         (string Key, string Value)[] fields,
         Func<SqlConnection, SqlTransaction, string, string, Guid, CancellationToken,
-            Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null, Guid? loadTrip = null)
+            Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null,
+        Guid? loadTrip = null, Guid? deliveryTrip = null, bool amendment = false, Guid? pendingCommand = null)
     {
         // Never persist a malformed producer/command identity: the scope cannot
         // be deduplicated reliably. All valid identities, including business
@@ -139,11 +140,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             kind, tenant, actor, request.SourceNumber, fields);
         // This opens only server-routed nonce-owned LocalDB with an exact
         // AppTenantBinding match. Real/non-scratch databases fail closed.
-        await using SqlConnection db = loadTrip.HasValue
-            ? await connections.OpenApp02c3Async(principal, ct)
-            : c2Role is not null
-                ? await connections.OpenApp02c2Async(principal, ct)
-                : await connections.OpenSyntheticScratchAsync(principal, ct);
+        await using SqlConnection db = (deliveryTrip.HasValue, loadTrip.HasValue, c2Role is not null) switch
+        {
+            (true, _, _) => await connections.OpenApp02c4Async(principal, ct),
+            (_, true, _) => await connections.OpenApp02c3Async(principal, ct),
+            (_, _, true) => await connections.OpenApp02c2Async(principal, ct),
+            _ => await connections.OpenSyntheticScratchAsync(principal, ct)
+        };
         await using SqlTransaction tx =
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
@@ -152,18 +155,9 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 await App02a3Sql.RequireRole(db, tx, tenant, actor, c2Role, ct);
             if (loadTrip is Guid trip)
                 await RequireC3Writer(db, tx, tenant, actor, trip, ct);
-            // Lock by command identity BEFORE the read. A second request for the
-            // same key blocks until the first commits, then sees its final row.
-            string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
-            int lockCode = await db.ExecuteScalarAsync<int>(Sql("""
-                DECLARE @result int;
-                EXEC @result = sys.sp_getapplock @Resource=@Key,
-                    @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=10000;
-                SELECT @result;
-                """, new { Key = key }, tx, ct));
-            if (lockCode < 0)
-                throw new TimeoutException("Could not serialize this command identity.");
+            if (deliveryTrip is Guid c4Trip)
+                await RequireC4Authority(principal, db, tx, tenant, actor, c4Trip, amendment, ct);
+            await LockCommand(db, tx, tenant, request, ct);
 
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
@@ -175,7 +169,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (c2Role is not null && await db.ExecuteScalarAsync<int>(Sql("""
                     SELECT COUNT(*) FROM dbo.C2CommandScope WHERE TenantId=@Tenant AND CommandRowId=@Id AND RoleCode=@Role
                         AND (LoadTripId=@LoadTrip OR (LoadTripId IS NULL AND @LoadTrip IS NULL))
-                    """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip }, tx, ct)) == 0)
+                        AND (DeliveryTripId=@DeliveryTrip OR (DeliveryTripId IS NULL AND @DeliveryTrip IS NULL))
+                    """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip }, tx, ct)) == 0)
                     return BusinessCommandOutcome.Conflict();
                 if (existing.PayloadHashVersion != CommandPayloadHash.Version
                     || !CryptographicOperations.FixedTimeEquals(existing.PayloadHash, hash))
@@ -183,31 +178,25 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     await tx.RollbackAsync(ct);
                     return BusinessCommandOutcome.Conflict();
                 }
-                if (existing.Status is not ("APPLIED" or "REJECTED"))
-                    throw new InvalidOperationException("Persisted command is incomplete.");
-                Guid? oldSource = await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
-                    SELECT Id FROM dbo.BusinessSource
-                    WHERE TenantId=@Tenant AND BusinessCommandId=@Command
-                    """, new { Tenant = tenant, Command = existing.Id }, tx, ct));
-                await tx.CommitAsync(ct);
-                return new BusinessCommandOutcome(existing.Status, existing.OutcomeCode,
-                    existing.ReasonCode, true, oldSource);
-            }
-
-            Guid commandRowId = Guid.NewGuid();
-            await db.ExecuteAsync(Sql("""
-                INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
-                    PayloadHashVersion,PayloadHash,ActorId,Status)
-                VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED')
-                """, new
+                if (existing.Status is "APPLIED" or "REJECTED")
                 {
-                    Id = commandRowId, Tenant = tenant, Producer = request.ProducerId,
-                    Command = request.CommandId, Version = CommandPayloadHash.Version, Hash = hash, Actor = actor
-                }, tx, ct));
-            if (c2Role is not null)
-                await db.ExecuteAsync(Sql("""
-                    INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId) VALUES(@Tenant,@Id,@Role,@LoadTrip)
-                    """, new { Tenant = tenant, Id = commandRowId, Role = c2Role, LoadTrip = loadTrip }, tx, ct));
+                    Guid? oldSource = await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
+                        SELECT Id FROM dbo.BusinessSource
+                        WHERE TenantId=@Tenant AND BusinessCommandId=@Command
+                        """, new { Tenant = tenant, Command = existing.Id }, tx, ct));
+                    await tx.CommitAsync(ct);
+                    return new BusinessCommandOutcome(existing.Status, existing.OutcomeCode,
+                        existing.ReasonCode, true, oldSource);
+                }
+                if (existing.Status != "RECEIVED" || existing.Id != pendingCommand)
+                    throw new InvalidOperationException("Persisted command is incomplete.");
+            }
+            else if (pendingCommand.HasValue)
+                throw new InvalidOperationException("Durable delivery command is missing.");
+
+            Guid commandRowId = existing?.Id ?? Guid.NewGuid();
+            if (existing is null)
+                await InsertReceivedCommand(db, tx, tenant, actor, request, commandRowId, hash, c2Role, loadTrip, deliveryTrip, ct);
 
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))
@@ -231,6 +220,37 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             catch (InvalidOperationException) { /* Already rolled back by SQL Server. */ }
             throw;
         }
+    }
+
+    private static async Task LockCommand(SqlConnection db, SqlTransaction tx, string tenant,
+        IApp01aCommand request, CancellationToken ct)
+    {
+        string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
+        int lockCode = await db.ExecuteScalarAsync<int>(Sql("""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock @Resource=@Key,
+                @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=10000;
+            SELECT @result;
+            """, new { Key = key }, tx, ct));
+        if (lockCode < 0)
+            throw new TimeoutException("Could not serialize this command identity.");
+    }
+
+    private static async Task InsertReceivedCommand(SqlConnection db, SqlTransaction tx, string tenant,
+        string actor, IApp01aCommand request, Guid id, byte[] hash, string? role, Guid? loadTrip, Guid? deliveryTrip, CancellationToken ct)
+    {
+        await db.ExecuteAsync(Sql("""
+            INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
+                PayloadHashVersion,PayloadHash,ActorId,Status)
+            VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED')
+            """, new { Id = id, Tenant = tenant, Producer = request.ProducerId, Command = request.CommandId,
+                Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
+        if (role is not null)
+            await db.ExecuteAsync(Sql("""
+                INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId,DeliveryTripId)
+                VALUES(@Tenant,@Id,@Role,@LoadTrip,@DeliveryTrip)
+                """, new { Tenant = tenant, Id = id, Role = role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip }, tx, ct));
     }
 
     private static async Task<bool> SourceUsed(SqlConnection db, SqlTransaction tx,
@@ -373,12 +393,17 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (await SourceUsed(db, tx, tenant, StockSourceKind, request.SourceNumber, token))
                     return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
 
+                Guid? draftTrip = expectedConfirmSource.HasValue ? await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
+                    SELECT TripId FROM dbo.C2OrderDraft WHERE TenantId=@Tenant AND Id=@OrderId
+                    """, new { Tenant = tenant, request.OrderId }, tx, token)) : null;
+                var preparedTrip = draftTrip is Guid c2Trip ? await FindTrip(db, tx, tenant, c2Trip, token) : null;
                 var order = await FindOrder(db, tx, tenant, request.OrderId, token);
                 if (order is null) return BusinessCommandOutcome.Rejected("ORDER_NOT_FOUND");
                 if (!order.CustomerActive) return BusinessCommandOutcome.Rejected("CUSTOMER_INACTIVE");
                 if (expectedConfirmSource is Guid expected)
                 {
-                    if (order.Status != "CONFIRMED") return BusinessCommandOutcome.Rejected("C2_ORDER_NOT_CONFIRMED");
+                    if (order.Status is not ("CONFIRMED" or "PARTIALLY_DELIVERED"))
+                        return BusinessCommandOutcome.Rejected("C2_ORDER_NOT_CONFIRMED");
                     Guid? actual = await db.QuerySingleOrDefaultAsync<Guid?>(Sql("""
                         SELECT ConfirmSourceId FROM dbo.C2Confirmation WHERE TenantId=@Tenant AND OrderId=@OrderId
                         """, new { Tenant = tenant, OrderId = order.Id }, tx, token));
@@ -386,7 +411,9 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 }
                 else if (order.Status != "DRAFT") return BusinessCommandOutcome.Rejected("ORDER_NOT_DRAFT");
                 if (!order.TripId.HasValue) return BusinessCommandOutcome.Rejected("ORDER_TRIP_REQUIRED");
-                var trip = await FindTrip(db, tx, tenant, order.TripId.Value, token);
+                var trip = expectedConfirmSource.HasValue
+                    ? order.TripId == draftTrip ? preparedTrip : null
+                    : await FindTrip(db, tx, tenant, order.TripId.Value, token);
                 if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
 
@@ -418,7 +445,11 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     {
                         Tenant = tenant, Line = line.Id, Trip = order.TripId.Value, Sku = line.SkuId
                     }, tx, token));
-                if (held + request.BaseQuantity > line.BaseQuantity)
+                decimal delivered = expectedConfirmSource.HasValue ? await db.ExecuteScalarAsync<decimal>(Sql("""
+                    SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery
+                    WHERE TenantId=@Tenant AND AOrderLineId=@Line AND RightKind='A'
+                    """, new { Tenant = tenant, Line = line.Id }, tx, token)) : 0m;
+                if (held + delivered + request.BaseQuantity > line.BaseQuantity)
                     return BusinessCommandOutcome.Rejected("A_LINE_OVER_RESERVED");
 
                 string? stockError = await AllocateStock(db, tx, tenant,

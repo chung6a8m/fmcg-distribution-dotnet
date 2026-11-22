@@ -15,6 +15,130 @@ public sealed class App02c2Tests(SqlScratchFixture fixture)
     private readonly CancellationToken ct = TestContext.Current.CancellationToken;
 
     [Fact]
+    public async Task C4_list_requires_current_sales_authority_and_a_delivery_writer()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true, c3Enabled: true, c4Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        const string root = "/api/synthetic/app02c4";
+        using var sales = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales"]);
+        using var warehouse = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["warehouse"]);
+        var rows = await sales.GetFromJsonAsync<JsonElement>(root + "/trips", ct);
+        Assert.Empty(rows.EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await sales.GetAsync(root + $"/trips/{seed.Trip}/lines", ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await warehouse.GetAsync(root + "/trips", ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task C4_uses_loaded_right_frozen_policy_and_versioned_shipto_and_recovers_late_rollback()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true, c3Enabled: true, c4Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        string checker = seed.Actor + "-checker";
+        await db.ExecuteAsync("""
+            INSERT dbo.C3TripWriter VALUES(N'tenant-a',@Trip,@Actor);
+            INSERT dbo.C4DeliveryWriter VALUES(N'tenant-a',@Trip,@Actor);
+            INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+            VALUES(N'tenant-a',@Checker,'sales',1,N'test'),(N'tenant-a',@Checker,'case_checker',1,N'test');
+            UPDATE dbo.Trip SET BusinessDate=CONVERT(date,'2026-01-01') WHERE Id=@Trip;
+            INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,SnapshotCode,BaseQuantity,CostAmount)
+            VALUES(N'tenant-a',@Warehouse,@Sku,N'C4',100,1000),(N'tenant-a',@Vehicle,@Sku,N'C4',0,0);
+            INSERT dbo.PhysicalStockBalance(TenantId,StockLocationId,SkuId,OnHandBaseQuantity,OnHandCostAmount)
+            VALUES(N'tenant-a',@Warehouse,@Sku,100,1000),(N'tenant-a',@Vehicle,@Sku,0,0);
+            """, new { seed.Trip, seed.Actor, seed.Warehouse, seed.Vehicle, seed.Sku, Checker = checker });
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        using var approval = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", checker, ["sales", "case_checker"]);
+        Guid order = await Draft(actor, seed, await Direct(actor, seed));
+        await AddPolicy(db, seed, 2, "APPROVED", discount: 2m, tax: 0.1m);
+        var confirmInput = new C2ConfirmInput(Guid.NewGuid(), order);
+        Guid confirm = Source(await Post(actor, Root + "/confirm", confirmInput));
+        Guid line = (await Order(actor, order)).GetProperty("lines")[0].GetProperty("lineId").GetGuid();
+        await Post(actor, Root + "/reserve", new C2ReserveInput(Guid.NewGuid(), order, line, seed.Warehouse, 25, confirm));
+        Guid right = await db.QuerySingleAsync<Guid>("SELECT Id FROM dbo.StockRight WHERE SkuId=@Sku", seed);
+        await Post(actor, "/api/synthetic/app02c3/load", new C3LoadInput(Guid.NewGuid(), seed.Trip, [new(right, 25, 25)]));
+        Guid manifest = await db.QuerySingleAsync<Guid>("SELECT Id FROM dbo.TripManifestLine WHERE SkuId=@Sku", seed);
+        await AddPolicy(db, seed, 3, "UNSET");
+
+        const string root = "/api/synthetic/app02c4";
+        var first = new C4DeliveryInput(Guid.NewGuid(), seed.Trip, manifest, 1, 25);
+        await Post(actor, root + "/deliver", first with { CommandId = confirmInput.CommandId }, HttpStatusCode.Conflict);
+        Assert.Equal(0, await db.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM dbo.C4DeliveryEvidence WHERE TripId=@Trip", seed));
+        var competing = await Task.WhenAll(Post(actor, root + "/deliver", first), Post(actor, root + "/deliver", first));
+        var applied = Assert.Single(competing, x => !x.GetProperty("replayed").GetBoolean());
+        Assert.Equal(Source(applied), Source(await Post(actor, root + "/deliver", first)));
+        await Post(actor, root + "/deliver", first with { Quantity = 26 }, HttpStatusCode.Conflict);
+        var ar = Assert.Single((await actor.GetFromJsonAsync<C4ArView[]>(root + $"/trips/{seed.Trip}/ar", ct))!);
+        Assert.Equal(357.5m, ar.Amount);
+        Assert.Equal(250m, ar.Cost);
+        Assert.NotEqual(new DateTime(2026, 1, 1), ar.BusinessDate.Date);
+        Assert.Equal(ar.BusinessDate.Date.AddDays(7), ar.DueBusinessDate.Date);
+        Assert.Equal(25m, await db.ExecuteScalarAsync<decimal>("SELECT ConsumedBaseQuantity FROM dbo.StockRight WHERE Id=@right", new { right }));
+        await Post(actor, Root + "/reserve", new C2ReserveInput(Guid.NewGuid(), order, line, seed.Warehouse, 16, confirm),
+            HttpStatusCode.UnprocessableEntity);
+        await Post(actor, Root + "/reserve", new C2ReserveInput(Guid.NewGuid(), order, line, seed.Warehouse, 15, confirm));
+        Guid remainderRight = await db.QuerySingleAsync<Guid>(
+            "SELECT Id FROM dbo.StockRight WHERE SkuId=@Sku AND GrantedBaseQuantity=15", seed);
+        await Post(actor, "/api/synthetic/app02c3/load",
+            new C3LoadInput(Guid.NewGuid(), seed.Trip, [new(remainderRight, 15, 15)]));
+        Guid remainderManifest = await db.QuerySingleAsync<Guid>(
+            "SELECT Id FROM dbo.TripManifestLine WHERE StockRightId=@remainderRight", new { remainderRight });
+        first = first with { ManifestLineId = remainderManifest };
+
+        Guid selection = (await Post(actor, "/api/synthetic/app02c1/ship-to-selections", new
+        {
+            commandId = Guid.NewGuid(), customerId = seed.Customer,
+            address = new { country = "VN", region = "HCM", locality = "Khu DEV", line = "C4 dia chi moi", recipient = "Nguoi nhan" }
+        })).GetProperty("id").GetGuid();
+        var amend = new C4AmendInput(Guid.NewGuid(), seed.Trip, order, selection, 1, "Địa chỉ mới cho phần chưa giao");
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.PostAsJsonAsync(root + "/amend-shipto", amend, ct)).StatusCode);
+        await Post(approval, root + "/amend-shipto", amend);
+        Assert.Equal("C4_STALE_SHIPTO", Reason(await Post(actor, root + "/deliver",
+            first with { CommandId = Guid.NewGuid(), Quantity = 15 }, HttpStatusCode.UnprocessableEntity)));
+        Assert.Equal("C4_QUANTITY_NOT_AVAILABLE", Reason(await Post(actor, root + "/deliver",
+            first with { CommandId = Guid.NewGuid(), ShipToVersion = 2, Quantity = 16 }, HttpStatusCode.UnprocessableEntity)));
+
+        var last = first with { CommandId = Guid.NewGuid(), ShipToVersion = 2, Quantity = 15 };
+        string trigger = "TR_C4Abort_" + remainderManifest.ToString("N");
+        await db.ExecuteAsync($"""
+            CREATE TRIGGER dbo.[{trigger}] ON dbo.LedgerEffect AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS(SELECT 1 FROM inserted i JOIN dbo.SaleDelivery d
+                    ON d.TenantId=i.TenantId AND d.BusinessSourceLineId=i.BusinessSourceLineId
+                    WHERE d.TripManifestLineId='{remainderManifest:D}' AND d.BaseQuantity=15 AND i.EffectKey='AR-GROSS')
+                    THROW 51609, 'C.4 late AR fault', 1;
+            END;
+            """);
+        try
+        {
+            var fault = await Assert.ThrowsAsync<SqlException>(() => actor.PostAsJsonAsync(root + "/deliver", last, ct));
+            Assert.Equal(51609, fault.Number);
+            var cases = await actor.GetFromJsonAsync<C4CaseView[]>(root + $"/trips/{seed.Trip}/cases", ct);
+            Assert.Contains(cases!, x => x.CommandId == last.CommandId && x.ReasonCode is null && x.CanRetry && x.ShipToVersion == 2);
+            await Post(actor, Root + "/reserve", new C2ReserveInput(last.CommandId, order, line, seed.Warehouse, 1, confirm),
+                HttpStatusCode.Conflict);
+            Assert.Equal("C4_EXISTING_DELIVERY_PENDING", Reason(await Post(actor, root + "/deliver",
+                last with { CommandId = Guid.NewGuid() }, HttpStatusCode.UnprocessableEntity)));
+            Assert.Equal("C4_UNRESOLVED_DELIVERY_EVIDENCE", Reason(await Post(approval, root + "/amend-shipto",
+                amend with { CommandId = Guid.NewGuid(), ExpectedVersion = 2 }, HttpStatusCode.UnprocessableEntity)));
+            Assert.Single((await actor.GetFromJsonAsync<C4ArView[]>(root + $"/trips/{seed.Trip}/ar", ct))!);
+            Assert.Equal(25m, await db.ExecuteScalarAsync<decimal>("SELECT ConsumedBaseQuantity FROM dbo.StockRight WHERE Id=@right", new { right }));
+        }
+        finally { await db.ExecuteAsync($"DROP TRIGGER dbo.[{trigger}];"); }
+
+        var retry = await Post(actor, root + "/deliver", last);
+        Assert.Equal(Source(retry), Source(await actor.GetFromJsonAsync<JsonElement>(root + $"/trips/{seed.Trip}/commands/{last.CommandId}", ct)));
+        var receipts = (await actor.GetFromJsonAsync<C4ArView[]>(root + $"/trips/{seed.Trip}/ar", ct))!;
+        Assert.Equal(2, receipts.Length);
+        Assert.Contains(receipts, x => x.Quantity == 25m && x.ShipTo == ar.ShipTo);
+        Assert.Contains(receipts, x => x.Quantity == 15m && x.ShipTo.StartsWith("C4 dia chi moi", StringComparison.Ordinal));
+        Assert.Equal(572m, receipts.Sum(x => x.Amount));
+        Assert.Equal("C4_NO_UNDELIVERED_SCOPE", Reason(await Post(approval, root + "/amend-shipto",
+            amend with { CommandId = Guid.NewGuid(), ExpectedVersion = 2 }, HttpStatusCode.UnprocessableEntity)));
+    }
+
+    [Fact]
     public async Task C3_load_workspace_requires_a_current_trip_writer()
     {
         using var factory = fixture.CreateFactory(c2Enabled: true, dedicatedC2: true, c3Enabled: true);

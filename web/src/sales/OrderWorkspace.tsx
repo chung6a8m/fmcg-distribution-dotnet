@@ -9,7 +9,7 @@ type Authority = Identity & { sales: boolean; warehouse: boolean }
 type Option = { id: string; label: string }
 type Catalog = { customers: Option[]; trips: Option[]; skus: Option[]; warehouses: Option[] }
 type Line = { lineId: string | null; sku: string; baseUom: string; ordered: number; reserved: number;
-  unitPrice: number | null; policyVersion: number | null; termsDays: number | null }
+  delivered: number; unitPrice: number | null; policyVersion: number | null; termsDays: number | null }
 type Order = { id: string; customer: string; trip: string; shipTo: string; businessDate: string | null;
   confirmSourceId: string | null; status: string; lines: Line[] }
 type Command = { path: '/drafts' | '/confirm' | '/reserve'; id: string; body: string }
@@ -20,6 +20,8 @@ const labels: Record<string, string> = {
   CONFIRMED_UNRESERVED: 'Đã Confirm · Chưa giữ hàng',
   CONFIRMED_PARTIALLY_RESERVED: 'Đã giữ một phần',
   CONFIRMED_FULLY_RESERVED: 'Đã giữ đủ',
+  PARTIALLY_DELIVERED: 'Đã giao một phần',
+  FULFILLED: 'Đã giao đủ',
 }
 const rejections: Record<string, string> = {
   C2_POLICY_REQUIRED: 'Thiếu chính sách thương mại được duyệt và còn hiệu lực.',
@@ -260,8 +262,9 @@ export function OrderWorkspace() {
             <Button disabled={disabled} variant="primary" onClick={() => save('/confirm', { orderId: order.id })}>Confirm đơn</Button>}
           {order.lines.map(line => <div className="panel panel-content" key={line.sku}>
             <p>{line.sku} · Đặt {line.ordered} {line.baseUom} · Đã giữ {line.reserved} {line.baseUom}</p>
+            {line.delivered > 0 && <p>Đã giao {line.delivered} {line.baseUom}</p>}
             {line.policyVersion !== null && <p>Chính sách v{line.policyVersion} · Giá {line.unitPrice} · Hạn {line.termsDays} ngày</p>}
-            {session.identity.warehouse && order.confirmSourceId && line.lineId && line.reserved < line.ordered &&
+            {session.identity.warehouse && order.confirmSourceId && line.lineId && line.reserved + line.delivered < line.ordered &&
               <form className="c1-fields" aria-label={`Giữ hàng ${line.sku}`} onSubmit={event => {
                 event.preventDefault()
                 const values = new FormData(event.currentTarget)
