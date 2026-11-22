@@ -112,7 +112,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         ClaimsPrincipal principal, IApp01aCommand request, string kind,
         (string Key, string Value)[] fields,
         Func<SqlConnection, SqlTransaction, string, string, Guid, CancellationToken,
-            Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null)
+            Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null, Guid? loadTrip = null)
     {
         // Never persist a malformed producer/command identity: the scope cannot
         // be deduplicated reliably. All valid identities, including business
@@ -139,15 +139,19 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             kind, tenant, actor, request.SourceNumber, fields);
         // This opens only server-routed nonce-owned LocalDB with an exact
         // AppTenantBinding match. Real/non-scratch databases fail closed.
-        await using SqlConnection db = c2Role is null
-            ? await connections.OpenSyntheticScratchAsync(principal, ct)
-            : await connections.OpenApp02c2Async(principal, ct);
+        await using SqlConnection db = loadTrip.HasValue
+            ? await connections.OpenApp02c3Async(principal, ct)
+            : c2Role is not null
+                ? await connections.OpenApp02c2Async(principal, ct)
+                : await connections.OpenSyntheticScratchAsync(principal, ct);
         await using SqlTransaction tx =
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
             if (c2Role is not null)
                 await App02a3Sql.RequireRole(db, tx, tenant, actor, c2Role, ct);
+            if (loadTrip is Guid trip)
+                await RequireC3Writer(db, tx, tenant, actor, trip, ct);
             // Lock by command identity BEFORE the read. A second request for the
             // same key blocks until the first commits, then sees its final row.
             string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
@@ -170,7 +174,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             {
                 if (c2Role is not null && await db.ExecuteScalarAsync<int>(Sql("""
                     SELECT COUNT(*) FROM dbo.C2CommandScope WHERE TenantId=@Tenant AND CommandRowId=@Id AND RoleCode=@Role
-                    """, new { Tenant = tenant, existing.Id, Role = c2Role }, tx, ct)) == 0)
+                        AND (LoadTripId=@LoadTrip OR (LoadTripId IS NULL AND @LoadTrip IS NULL))
+                    """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip }, tx, ct)) == 0)
                     return BusinessCommandOutcome.Conflict();
                 if (existing.PayloadHashVersion != CommandPayloadHash.Version
                     || !CryptographicOperations.FixedTimeEquals(existing.PayloadHash, hash))
@@ -201,8 +206,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 }, tx, ct));
             if (c2Role is not null)
                 await db.ExecuteAsync(Sql("""
-                    INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode) VALUES(@Tenant,@Id,@Role)
-                    """, new { Tenant = tenant, Id = commandRowId, Role = c2Role }, tx, ct));
+                    INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId) VALUES(@Tenant,@Id,@Role,@LoadTrip)
+                    """, new { Tenant = tenant, Id = commandRowId, Role = c2Role, LoadTrip = loadTrip }, tx, ct));
 
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))

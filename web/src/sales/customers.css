@@ -34,6 +34,7 @@
   }
   .c1-rows > li + li { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
   .c1-rows p { color: var(--fmcg-color-text-secondary); }
+  .c3-source { overflow-wrap: anywhere; }
   @media (max-width: 680px) {
     .c1-layout, .c1-fields .field-pair { grid-template-columns: minmax(0, 1fr); }
     .c1-page :is(.button, .page-link, input, select) { min-height: 48px; }

@@ -47,11 +47,14 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App02c1Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c2Routes.Map(app);
+    if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))
+        App02c3Routes.Map(app);
 }
 
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
-    && !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime"))
+    && !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime")
+    && !app.Configuration.GetValue<bool>("App02C3:Enabled"))
 {
     // Synthetic diagnostics ONLY. Not a production business API.
     var diag = app.MapGroup("/api/diagnostics").RequireAuthorization();

@@ -38,7 +38,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
         public string? ReasonCode { get; set; }
     }
 
-    private sealed class Manifest
+    internal sealed class Manifest
     {
         public Guid Id { get; set; }
         public Guid TripId { get; set; }
@@ -52,7 +52,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
         public bool VehicleActive { get; set; }
     }
 
-    private sealed class ManifestLine
+    internal sealed class ManifestLine
     {
         public Guid Id { get; set; }
         public int LineNumber { get; set; }
@@ -87,13 +87,13 @@ public sealed class App01b2CommandService(TenantConnections connections)
         public bool VehicleActive { get; set; }
     }
 
-    private sealed class PhysicalBalance
+    internal sealed class PhysicalBalance
     {
         public decimal OnHandBaseQuantity { get; set; }
         public decimal OnHandCostAmount { get; set; }
     }
 
-    private sealed record SkuTransfer(
+    internal sealed record SkuTransfer(
         Guid SkuId, decimal BaseQuantity, decimal CostAmount,
         IReadOnlyList<(ManifestLine Line, decimal Cost)> Lines);
 
@@ -238,7 +238,9 @@ public sealed class App01b2CommandService(TenantConnections connections)
                         ON w.TenantId=m.TenantId AND w.Id=m.WarehouseLocationId
                     JOIN dbo.StockLocation v WITH (HOLDLOCK)
                         ON v.TenantId=m.TenantId AND v.Id=m.VehicleLocationId
-                    WHERE m.TenantId=@Tenant AND m.Id=@Manifest
+                    WHERE m.TenantId=@Tenant AND m.Id=@Manifest AND m.IsC3=0
+                        AND NOT EXISTS(SELECT 1 FROM dbo.TripManifest c
+                            WHERE c.TenantId=m.TenantId AND c.TripId=m.TripId AND c.IsC3=1)
                     """, new { Tenant = tenant, Manifest = request.ManifestId }, tx, token));
                 if (manifest is null) return BusinessCommandOutcome.Rejected("MANIFEST_NOT_FOUND");
                 if (manifest.Status != "DRAFT") return BusinessCommandOutcome.Rejected("MANIFEST_ALREADY_LOADED");
@@ -356,28 +358,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     if (warehouse.OnHandBaseQuantity < quantity)
                         return BusinessCommandOutcome.Rejected("PHYSICAL_STOCK_INSUFFICIENT");
 
-                    // SQL decimal(19,4) custody cost. Move exact remaining cost
-                    // on a full depletion; distribute rounded partial cost and
-                    // assign the residual deterministically to the last line.
-                    decimal cost = quantity == warehouse.OnHandBaseQuantity
-                        ? warehouse.OnHandCostAmount
-                        : decimal.Round((warehouse.OnHandCostAmount / warehouse.OnHandBaseQuantity)
-                            * quantity, 4, MidpointRounding.AwayFromZero);
-                    if (cost > warehouse.OnHandCostAmount) cost = warehouse.OnHandCostAmount;
-                    var ordered = group.OrderBy(l => l.LineNumber).ToArray();
-                    var portions = new List<(ManifestLine Line, decimal Cost)>();
-                    decimal assigned = 0m;
-                    for (int i = 0; i < ordered.Length; i++)
-                    {
-                        decimal portion = i == ordered.Length - 1
-                            ? cost - assigned
-                            : decimal.Round((cost / quantity) * ordered[i].PlannedBaseQuantity,
-                                4, MidpointRounding.AwayFromZero);
-                        if (portion > cost - assigned) portion = cost - assigned;
-                        portions.Add((ordered[i], portion));
-                        assigned += portion;
-                    }
-                    transfers.Add(new SkuTransfer(sku, quantity, cost, portions));
+                    transfers.Add(PriceTransfer(sku, warehouse, quantity, group));
                 }
 
                 if (await LoadSourceUsed(db, tx, tenant, request.SourceNumber, token))
@@ -392,91 +373,124 @@ public sealed class App01b2CommandService(TenantConnections connections)
                     """, new { Id = sourceId, Tenant = tenant, Command = commandRowId,
                         Number = request.SourceNumber, Actor = actor, Trip = manifest.TripId }, tx, token));
 
-                // Header must transition before its lines: the composite FK
-                // requires each loaded line's source to belong to the header.
-                if (await db.ExecuteAsync(Sql("""
-                    UPDATE dbo.TripManifest SET Status=N'LOADED',
-                        LoadBusinessSourceId=@Source,LoadedAtUtc=SYSUTCDATETIME()
-                    WHERE TenantId=@Tenant AND Id=@Manifest AND Status=N'DRAFT'
-                    """, new { Tenant = tenant, Manifest = manifest.Id, Source = sourceId }, tx, token)) != 1)
-                    throw new InvalidOperationException("Manifest changed under transactional lock.");
-
-                foreach (var transfer in transfers)
-                {
-                    // Paired, guarded updates: a physical movement is a transfer,
-                    // never an additional entitlement allocation or a sale.
-                    if (await db.ExecuteAsync(Sql("""
-                        UPDATE dbo.PhysicalStockBalance SET
-                            OnHandBaseQuantity=OnHandBaseQuantity-@Quantity,
-                            OnHandCostAmount=OnHandCostAmount-@Cost
-                        WHERE TenantId=@Tenant AND StockLocationId=@Location AND SkuId=@Sku
-                            AND OnHandBaseQuantity>=@Quantity AND OnHandCostAmount>=@Cost
-                        """, new { Tenant = tenant, Location = manifest.WarehouseLocationId,
-                            Sku = transfer.SkuId, Quantity = transfer.BaseQuantity,
-                            Cost = transfer.CostAmount }, tx, token)) != 1)
-                        throw new InvalidOperationException("Warehouse balance changed under lock.");
-                    if (await db.ExecuteAsync(Sql("""
-                        UPDATE dbo.PhysicalStockBalance SET
-                            OnHandBaseQuantity=OnHandBaseQuantity+@Quantity,
-                            OnHandCostAmount=OnHandCostAmount+@Cost
-                        WHERE TenantId=@Tenant AND StockLocationId=@Location AND SkuId=@Sku
-                        """, new { Tenant = tenant, Location = manifest.VehicleLocationId,
-                            Sku = transfer.SkuId, Quantity = transfer.BaseQuantity,
-                            Cost = transfer.CostAmount }, tx, token)) != 1)
-                        throw new InvalidOperationException("Vehicle balance changed under lock.");
-
-                    foreach (var (line, lineCost) in transfer.Lines)
-                    {
-                        Guid sourceLine = Guid.NewGuid();
-                        await db.ExecuteAsync(Sql("""
-                            INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,
-                                LineNumber,SkuId,BaseQuantity,Amount)
-                            VALUES(@Id,@Tenant,@Source,@Number,@Sku,@Quantity,@Cost)
-                            """, new { Id = sourceLine, Tenant = tenant, Source = sourceId,
-                                Number = line.LineNumber, Sku = line.SkuId,
-                                Quantity = line.PlannedBaseQuantity, Cost = lineCost }, tx, token));
-
-                        if (await db.ExecuteAsync(Sql("""
-                            UPDATE dbo.TripManifestLine SET LoadBusinessSourceId=@Source,
-                                LoadSourceLineId=@SourceLine,
-                                LoadedBaseQuantity=@Quantity,LoadedCostAmount=@Cost
-                            WHERE TenantId=@Tenant AND Id=@Line AND LoadSourceLineId IS NULL
-                                AND LoadedBaseQuantity=0 AND PlannedBaseQuantity=@Quantity
-                            """, new { Tenant = tenant, Line = line.Id, Source = sourceId,
-                                SourceLine = sourceLine, Quantity = line.PlannedBaseQuantity,
-                                Cost = lineCost }, tx, token)) != 1)
-                            throw new InvalidOperationException("Manifest line changed under lock.");
-
-                        await db.ExecuteAsync(Sql("""
-                            INSERT dbo.PhysicalStockMovement(Id,TenantId,TripManifestLineId,
-                                LoadSourceLineId,BaseQuantity,CostAmount)
-                            VALUES(@Id,@Tenant,@Line,@SourceLine,@Quantity,@Cost)
-                            """, new { Id = Guid.NewGuid(), Tenant = tenant, Line = line.Id,
-                                SourceLine = sourceLine, Quantity = line.PlannedBaseQuantity,
-                                Cost = lineCost }, tx, token));
-
-                        // Two balanced custody ledger legs, same immutable source.
-                        // Not COGS, revenue, cash, AR or a receipt.
-                        foreach (var leg in new[]
-                        {
-                            (Key: "PHYSICAL-OUT", Location: manifest.WarehouseLocationId, Sign: -1m),
-                            (Key: "PHYSICAL-IN", Location: manifest.VehicleLocationId, Sign: 1m)
-                        })
-                            await db.ExecuteAsync(Sql("""
-                                INSERT dbo.LedgerEffect(Id,TenantId,BusinessSourceLineId,
-                                    EffectKey,LedgerKind,SkuId,StockLocationId,
-                                    QuantityDelta,AmountDelta)
-                                VALUES(@Id,@Tenant,@SourceLine,@Key,N'PHYSICAL_STOCK',
-                                    @Sku,@Location,@Quantity,@Cost)
-                                """, new { Id = Guid.NewGuid(), Tenant = tenant,
-                                    SourceLine = sourceLine, leg.Key, Sku = line.SkuId,
-                                    leg.Location, Quantity = leg.Sign * line.PlannedBaseQuantity,
-                                    Cost = leg.Sign * lineCost }, tx, token));
-                    }
-                }
+                await PostTransfers(db, tx, tenant, manifest, sourceId, transfers, token);
 
                 return BusinessCommandOutcome.Applied("MANIFEST_LOADED", sourceId);
             }, ct);
+
+    internal static SkuTransfer PriceTransfer(Guid sku, PhysicalBalance warehouse,
+        decimal quantity, IEnumerable<ManifestLine> lines)
+    {
+        // SQL decimal(19,4) custody cost. Move exact remaining cost
+        // on a full depletion; distribute rounded partial cost and
+        // assign the residual deterministically to the last line.
+        decimal cost = quantity == warehouse.OnHandBaseQuantity
+            ? warehouse.OnHandCostAmount
+            : decimal.Round((warehouse.OnHandCostAmount / warehouse.OnHandBaseQuantity)
+                * quantity, 4, MidpointRounding.AwayFromZero);
+        if (cost > warehouse.OnHandCostAmount) cost = warehouse.OnHandCostAmount;
+        var ordered = lines.OrderBy(l => l.LineNumber).ToArray();
+        var portions = new List<(ManifestLine Line, decimal Cost)>();
+        decimal assigned = 0m;
+        for (int i = 0; i < ordered.Length; i++)
+        {
+            decimal portion = i == ordered.Length - 1
+                ? cost - assigned
+                : decimal.Round((cost / quantity) * ordered[i].PlannedBaseQuantity,
+                    4, MidpointRounding.AwayFromZero);
+            if (portion > cost - assigned) portion = cost - assigned;
+            portions.Add((ordered[i], portion));
+            assigned += portion;
+        }
+        return new SkuTransfer(sku, quantity, cost, portions);
+    }
+
+    internal static async Task PostTransfers(SqlConnection db, SqlTransaction tx, string tenant,
+        Manifest manifest, Guid sourceId, IEnumerable<SkuTransfer> transfers, CancellationToken token)
+    {
+        // Header must transition before its lines: the composite FK
+        // requires each loaded line's source to belong to the header.
+        if (await db.ExecuteAsync(Sql("""
+            UPDATE dbo.TripManifest SET Status=N'LOADED',
+                LoadBusinessSourceId=@Source,LoadedAtUtc=SYSUTCDATETIME()
+            WHERE TenantId=@Tenant AND Id=@Manifest AND Status=N'DRAFT'
+            """, new { Tenant = tenant, Manifest = manifest.Id, Source = sourceId }, tx, token)) != 1)
+            throw new InvalidOperationException("Manifest changed under transactional lock.");
+
+        foreach (var transfer in transfers)
+        {
+            // Paired, guarded updates: a physical movement is a transfer,
+            // never an additional entitlement allocation or a sale.
+            if (await db.ExecuteAsync(Sql("""
+                UPDATE dbo.PhysicalStockBalance SET
+                    OnHandBaseQuantity=OnHandBaseQuantity-@Quantity,
+                    OnHandCostAmount=OnHandCostAmount-@Cost
+                WHERE TenantId=@Tenant AND StockLocationId=@Location AND SkuId=@Sku
+                    AND OnHandBaseQuantity>=@Quantity AND OnHandCostAmount>=@Cost
+                """, new { Tenant = tenant, Location = manifest.WarehouseLocationId,
+                    Sku = transfer.SkuId, Quantity = transfer.BaseQuantity,
+                    Cost = transfer.CostAmount }, tx, token)) != 1)
+                throw new InvalidOperationException("Warehouse balance changed under lock.");
+            if (await db.ExecuteAsync(Sql("""
+                UPDATE dbo.PhysicalStockBalance SET
+                    OnHandBaseQuantity=OnHandBaseQuantity+@Quantity,
+                    OnHandCostAmount=OnHandCostAmount+@Cost
+                WHERE TenantId=@Tenant AND StockLocationId=@Location AND SkuId=@Sku
+                """, new { Tenant = tenant, Location = manifest.VehicleLocationId,
+                    Sku = transfer.SkuId, Quantity = transfer.BaseQuantity,
+                    Cost = transfer.CostAmount }, tx, token)) != 1)
+                throw new InvalidOperationException("Vehicle balance changed under lock.");
+
+            foreach (var (line, lineCost) in transfer.Lines)
+            {
+                Guid sourceLine = Guid.NewGuid();
+                await db.ExecuteAsync(Sql("""
+                    INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,
+                        LineNumber,SkuId,BaseQuantity,Amount)
+                    VALUES(@Id,@Tenant,@Source,@Number,@Sku,@Quantity,@Cost)
+                    """, new { Id = sourceLine, Tenant = tenant, Source = sourceId,
+                        Number = line.LineNumber, Sku = line.SkuId,
+                        Quantity = line.PlannedBaseQuantity, Cost = lineCost }, tx, token));
+
+                if (await db.ExecuteAsync(Sql("""
+                    UPDATE dbo.TripManifestLine SET LoadBusinessSourceId=@Source,
+                        LoadSourceLineId=@SourceLine,
+                        LoadedBaseQuantity=@Quantity,LoadedCostAmount=@Cost
+                    WHERE TenantId=@Tenant AND Id=@Line AND LoadSourceLineId IS NULL
+                        AND LoadedBaseQuantity=0 AND PlannedBaseQuantity=@Quantity
+                    """, new { Tenant = tenant, Line = line.Id, Source = sourceId,
+                        SourceLine = sourceLine, Quantity = line.PlannedBaseQuantity,
+                        Cost = lineCost }, tx, token)) != 1)
+                    throw new InvalidOperationException("Manifest line changed under lock.");
+
+                await db.ExecuteAsync(Sql("""
+                    INSERT dbo.PhysicalStockMovement(Id,TenantId,TripManifestLineId,
+                        LoadSourceLineId,BaseQuantity,CostAmount)
+                    VALUES(@Id,@Tenant,@Line,@SourceLine,@Quantity,@Cost)
+                    """, new { Id = Guid.NewGuid(), Tenant = tenant, Line = line.Id,
+                        SourceLine = sourceLine, Quantity = line.PlannedBaseQuantity,
+                        Cost = lineCost }, tx, token));
+
+                // Two balanced custody ledger legs, same immutable source.
+                // Not COGS, revenue, cash, AR or a receipt.
+                foreach (var leg in new[]
+                {
+                    (Key: "PHYSICAL-OUT", Location: manifest.WarehouseLocationId, Sign: -1m),
+                    (Key: "PHYSICAL-IN", Location: manifest.VehicleLocationId, Sign: 1m)
+                })
+                    await db.ExecuteAsync(Sql("""
+                        INSERT dbo.LedgerEffect(Id,TenantId,BusinessSourceLineId,
+                            EffectKey,LedgerKind,SkuId,StockLocationId,
+                            QuantityDelta,AmountDelta)
+                        VALUES(@Id,@Tenant,@SourceLine,@Key,N'PHYSICAL_STOCK',
+                            @Sku,@Location,@Quantity,@Cost)
+                        """, new { Id = Guid.NewGuid(), Tenant = tenant,
+                            SourceLine = sourceLine, leg.Key, Sku = line.SkuId,
+                            leg.Location, Quantity = leg.Sign * line.PlannedBaseQuantity,
+                            Cost = leg.Sign * lineCost }, tx, token));
+            }
+        }
+    }
 
     /// <summary>
     /// APP-01B T2 preflight only. No sale/cash receipt is ever created here.
@@ -523,7 +537,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
                 bool loaded = await db.ExecuteScalarAsync<bool>(Sql("""
                     SELECT CAST(CASE WHEN EXISTS (
                         SELECT 1 FROM dbo.TripManifest WITH (UPDLOCK,HOLDLOCK)
-                        WHERE TenantId=@Tenant AND TripId=@Trip AND Status=N'LOADED'
+                        WHERE TenantId=@Tenant AND TripId=@Trip AND Status=N'LOADED' AND IsC3=0
                     ) THEN 1 ELSE 0 END AS bit)
                     """, new { Tenant = tenant, Trip = request.TripId }, tx, token));
                 if (!loaded) return BusinessCommandOutcome.Rejected("MANIFEST_NOT_LOADED");
@@ -535,7 +549,7 @@ public sealed class App01b2CommandService(TenantConnections connections)
                         ELSE CONVERT(decimal(18,3),0) END),0)
                     FROM dbo.TripManifestLine l WITH (UPDLOCK,HOLDLOCK)
                     JOIN dbo.TripManifest m ON m.TenantId=l.TenantId
-                        AND m.Id=l.TripManifestId AND m.Status=N'LOADED'
+                        AND m.Id=l.TripManifestId AND m.Status=N'LOADED' AND m.IsC3=0
                     JOIN dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
                         ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
                         AND r.RightKind='B' AND r.Status=N'HELD'

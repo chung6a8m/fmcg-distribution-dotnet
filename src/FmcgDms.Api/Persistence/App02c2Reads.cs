@@ -101,6 +101,7 @@ public sealed partial class App01a2CommandService
                 JOIN dbo.App02ActorRoleGrant g WITH (HOLDLOCK)
                     ON g.TenantId=c.TenantId AND g.ActorId=@Actor AND g.RoleCode=s.RoleCode AND g.IsActive=1
                 WHERE c.TenantId=@Tenant AND c.ProducerId=@Producer AND c.CommandId=@Command
+                    AND s.LoadTripId IS NULL
                     AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor AND c.Status IN ('APPLIED','REJECTED')
                     AND ((@Sales=1 AND s.RoleCode='sales') OR (@Warehouse=1 AND s.RoleCode='warehouse'))
                 """, new

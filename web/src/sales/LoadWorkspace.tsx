@@ -1,0 +1,224 @@
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { Button, Field, ThemeSelect } from '../ui/controls'
+import { HttpError, readError, requestSalesApi, type Identity } from './customer-api'
+import './customers.css'
+
+const api = '/api/synthetic/app02c3'
+const ordersApi = '/api/synthetic/app02c2'
+type Trip = { id: string; code: string }
+type Right = { id: string; orderId: string; warehouseId: string; warehouseCode: string; skuCode: string;
+  baseUom: string; granted: string; loaded: string; warehouseHeld: string }
+type LoadLine = { rightId: string; expectedWarehouseHeld: string; quantity: string }
+type Command = { commandId: string; tripId: string; lines: LoadLine[] }
+type Outcome = { status: string; reasonCode: string | null; sourceId: string | null }
+const rejections: Record<string, string> = {
+  C3_STALE_WAREHOUSE_HELD: 'Số lượng giữ tại kho đã thay đổi. Hãy kiểm tra dữ liệu mới trước khi nạp.',
+  C3_RESERVATION_NOT_ELIGIBLE: 'Có dòng giữ hàng không còn đủ điều kiện nạp.',
+  C3_WAREHOUSE_STOCK_INSUFFICIENT: 'Kho không đủ lượng hàng đã giữ để nạp.',
+  C3_WAREHOUSE_COUNTER_MISMATCH: 'Số dư giữ hàng và tồn vật lý của kho chưa khớp.',
+  PHYSICAL_OPENING_REQUIRED: 'Kho hoặc xe chưa có số dư mở đầu cho SKU này.',
+  TRIP_NOT_PREPARED: 'Chuyến không còn ở trạng thái chuẩn bị.',
+}
+
+function displayQuantity(quantity: string) {
+  return quantity.includes('.') ? quantity.replace(/0+$/, '').replace(/\.$/, '') : quantity
+}
+
+function stored(identity: Identity, value?: Command | null): Command | null {
+  const key = 'app02c3.pending.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
+  try {
+    if (value === undefined) {
+      const raw = sessionStorage.getItem(key)
+      if (!raw) return null
+      const command = JSON.parse(raw) as Command
+      const guid = /^[a-f0-9-]{36}$/
+      return guid.test(command.commandId) && guid.test(command.tripId) && Array.isArray(command.lines) ? command : null
+    }
+    if (value) sessionStorage.setItem(key, JSON.stringify(value))
+    else sessionStorage.removeItem(key)
+  } catch { /* The pending request is also held in memory for the open screen. */ }
+  return null
+}
+
+async function get<T>(token: string, path: string, service = api): Promise<T> {
+  const response = await requestSalesApi(service, token, path)
+  if (!response.ok) throw new HttpError(response.status)
+  return response.json() as Promise<T>
+}
+
+export function LoadWorkspace() {
+  const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [trip, setTrip] = useState('')
+  const [rights, setRights] = useState<Right[]>([])
+  const [warehouse, setWarehouse] = useState('')
+  const [pending, setPending] = useState<Command | null>(null)
+  const [notice, setNotice] = useState('')
+  const [source, setSource] = useState('')
+  const [formVersion, setFormVersion] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [offline, setOffline] = useState(!navigator.onLine)
+  const active = useRef(false)
+
+  useEffect(() => {
+    const sync = () => setOffline(!navigator.onLine)
+    window.addEventListener('online', sync)
+    window.addEventListener('offline', sync)
+    return () => {
+      window.removeEventListener('online', sync)
+      window.removeEventListener('offline', sync)
+    }
+  }, [])
+
+  async function work(run: () => Promise<void>) {
+    if (active.current || !navigator.onLine) return
+    active.current = true
+    setBusy(true)
+    setNotice('')
+    try { await run() }
+    catch (error) { setNotice(readError(error)) }
+    finally { active.current = false; setBusy(false) }
+  }
+
+  async function refresh(token: string, tripId: string, warehouseId = '') {
+    setRights([])
+    setTrip(tripId)
+    setWarehouse('')
+    if (!tripId) return
+    const rows = await get<Right[]>(token, '/trips/' + tripId + '/rights')
+    setRights(rows)
+    setWarehouse(rows.some(r => r.warehouseId === warehouseId) ? warehouseId : rows[0]?.warehouseId ?? '')
+    setFormVersion(version => version + 1)
+  }
+
+  function connect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const token = String(new FormData(event.currentTarget).get('token') ?? '').trim()
+    event.currentTarget.reset()
+    void work(async () => {
+      const [identity, available] = await Promise.all([get<Identity>(token, '/session', ordersApi), get<Trip[]>(token, '/trips')])
+      const saved = stored(identity)
+      setSession({ token, identity })
+      setTrips(available)
+      setPending(saved)
+      setSource('')
+      await refresh(token, available.find(t => t.id === saved?.tripId)?.id ?? available[0]?.id ?? '')
+    })
+  }
+
+  async function resolve(command: Command, lookup: boolean) {
+    if (!session) return
+    const { token, identity } = session
+    await work(async () => {
+      if (!lookup) {
+        stored(identity, command)
+        setPending(command)
+      }
+      let message: string
+      try {
+        setSource('')
+        const response = lookup
+          ? await requestSalesApi(api, token, `/trips/${command.tripId}/commands/${command.commandId}`)
+          : await requestSalesApi(api, token, '/load', JSON.stringify(command))
+        if (lookup && response.status === 404) {
+          setNotice('Chưa tìm thấy kết quả. Có thể gửi lại đúng đợt nạp này.')
+          return
+        }
+        if (![200, 400, 409, 422].includes(response.status)) throw new HttpError(response.status)
+        const outcome = await response.json() as Outcome
+        if (outcome.status === 'CONFLICT') {
+          setNotice('Mã yêu cầu đã được dùng cho nội dung khác. Hãy tra cứu kết quả nạp.')
+          return
+        }
+        if (outcome.status === 'APPLIED' && outcome.sourceId) setSource(outcome.sourceId)
+        message = outcome.status === 'APPLIED' && outcome.sourceId ? 'Đã nạp hàng lên xe.'
+          : outcome.status === 'REJECTED' ? rejections[outcome.reasonCode ?? ''] ?? 'Đợt nạp bị từ chối.'
+            : ''
+        if (!message) throw new Error('Missing command outcome')
+      } catch (error) {
+        setNotice(error instanceof HttpError && [401, 403].includes(error.status)
+          ? 'Phiên hoặc quyền hiện hành không cho phép kiểm tra đợt nạp.'
+          : 'Chưa rõ kết quả. Hãy tra cứu trước khi lập đợt nạp mới.')
+        return
+      }
+      setPending(null)
+      stored(identity, null)
+      try { await refresh(token, trip, warehouse) }
+      catch { message += ' Hãy tải lại số lượng trước khi nạp tiếp.' }
+      setNotice(message)
+    })
+  }
+
+  const warehouseOptions = [...new Map(rights.map(r => [r.warehouseId, r.warehouseCode]))]
+  const shown = rights.filter(r => r.warehouseId === warehouse)
+  const off = busy || offline
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (pending || off || !trip) return
+    const data = new FormData(event.currentTarget)
+    const lines = shown.map(r => ({
+      rightId: r.id, expectedWarehouseHeld: r.warehouseHeld, quantity: String(data.get(r.id) ?? '').trim(),
+    })).filter(l => l.quantity !== '')
+    if (!lines.length || lines.length > 100) {
+      setNotice('Nhập số lượng cho từ 1 đến 100 dòng trong đợt nạp.')
+      return
+    }
+    if (lines.some(l => !/^\d{1,15}(\.\d{1,3})?$/.test(l.quantity) || Number(l.quantity) <= 0)) {
+      setNotice('Nhập số lượng dương với tối đa ba chữ số thập phân.')
+      return
+    }
+    void resolve({ commandId: crypto.randomUUID(), tripId: trip, lines }, false)
+  }
+
+  return <main className="page c1-page">
+    <header className="page-heading">
+      <h1>Nạp hàng lên xe</h1>
+      <p>APP-02C.3 · DEV</p>
+      <ThemeSelect />
+      <a className="page-link" href="/sales/orders">Đơn A và giữ hàng</a>
+    </header>
+    {!session ? <form className="panel panel-content" onSubmit={connect}>
+      <Field name="token" type="password" label="Mã truy cập DEV" autoComplete="off" required />
+      <Button type="submit" variant="primary" disabled={off}>Kết nối</Button>
+    </form> : <section className="panel panel-content" aria-label="Lập đợt nạp">
+      <Button disabled={busy} onClick={() => { setSession(null); setRights([]); setPending(null); setNotice(''); setSource('') }}>
+        Đổi phiên DEV
+      </Button>
+      {trips.length === 0 ? <p>Chưa có chuyến được phân công.</p> : <>
+        <label className="field">Chuyến
+          <select value={trip} disabled={off || !!pending}
+            onChange={event => { const id = event.target.value; void work(() => refresh(session.token, id)) }}>
+            {trips.map(t => <option key={t.id} value={t.id}>{t.code}</option>)}
+          </select>
+        </label>
+        <Button disabled={off || !!pending} onClick={() => { void work(() => refresh(session.token, trip, warehouse)) }}>
+          Tải lại số lượng
+        </Button>
+        {warehouseOptions.length === 0 ? <p>Chưa có dòng giữ hàng đủ điều kiện.</p> : <label className="field">Kho nạp
+          <select value={warehouse} disabled={off || !!pending} onChange={event => setWarehouse(event.target.value)}>
+            {warehouseOptions.map(([id, code]) => <option key={id} value={id}>{code}</option>)}
+          </select>
+        </label>}
+        {shown.length > 0 && <form key={warehouse + formVersion} onSubmit={submit}>
+          {shown.map((r, i) => <fieldset key={r.id} className="c1-fields">
+            <legend>Dòng {i + 1} · {r.skuCode}</legend>
+            <p className="c3-source">Mã đơn {r.orderId}</p>
+            <p>Đã giữ {displayQuantity(r.granted)} {r.baseUom} · Đã nạp {displayQuantity(r.loaded)} {r.baseUom} · Còn giữ tại kho {displayQuantity(r.warehouseHeld)} {r.baseUom}</p>
+            {displayQuantity(r.warehouseHeld) !== '0' && <Field name={r.id} label={`Số lượng nạp dòng ${i + 1}`} type="number"
+              min="0.001" max={r.warehouseHeld} step="0.001" disabled={off || !!pending} />}
+          </fieldset>)}
+          <Button type="submit" variant="primary" disabled={off || !!pending || !shown.some(r => displayQuantity(r.warehouseHeld) !== '0')}>
+            Nạp hàng
+          </Button>
+        </form>}
+      </>}
+      {pending && <div className="button-row">
+        <Button disabled={off} onClick={() => { void resolve(pending, true) }}>Tra cứu kết quả nạp</Button>
+        <Button disabled={off} onClick={() => { void resolve(pending, false) }}>Gửi lại cùng yêu cầu</Button>
+      </div>}
+    </section>}
+    {offline && <p role="status">Cần kết nối để nạp hàng.</p>}
+    {notice && <p role="status">{notice}</p>}
+    {source && <p className="c3-source">Mã nguồn nạp {source}</p>}
+  </main>
+}

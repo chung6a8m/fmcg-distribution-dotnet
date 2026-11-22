@@ -263,7 +263,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
             FROM dbo.TripManifestLine l WITH (UPDLOCK,HOLDLOCK)
             JOIN dbo.TripManifest m WITH (HOLDLOCK)
                 ON m.TenantId=l.TenantId AND m.Id=l.TripManifestId
-                AND m.TripId=l.TripId AND m.Status=N'LOADED'
+                AND m.TripId=l.TripId AND m.Status=N'LOADED' AND m.IsC3=0
             JOIN dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
                 ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
                 AND r.TripId=l.TripId AND r.SkuId=l.SkuId AND r.RightKind='A'
