@@ -4,7 +4,7 @@
 
 ## Authority prerequisites
 
-- Obtain Owner approval for the specific PREPROD environment, incident/fault windows and test-only tenants; keep APP-02C/D/E, production, real posting, Pilot and Go-Live blocked.
+- Obtain Owner approval for the specific PREPROD environment, incident/fault windows and test-only tenants; this B.9 runbook does not admit C PREPROD/C.6, APP-02D/E, production, real posting, Pilot or Go-Live. C.1–C.5 dedicated synthetic DEV is separately authorized by the [22 November Owner decision](../../docs/decisions/owner-app02c-dev-first-2026-11-22.md); this operator checklist is not its entry gate.
 - Prove two genuinely distinct physical operator-controlled tenant databases TF-TEN-A/B (DB ID, instance/name, Registry binding, independent service principals), plus separate Control Plane and Vault trust boundaries. GitHub LocalDB / CI Vault do not qualify.
 - Resolve and independently re-evaluate #53 rollback-resistant revocation authority, #59 full-tree npm audit, #60 physical SQL permissions, #52/#54/#55 and #64/#65/#67/#68 with direct traces/permissions. Never close an issue or assume a prior PR source-only exception also authorizes physical PREPROD admission.
 - Security reviewer, DBA reviewer, fixture owner and observer possess externally pinned keys and independent custody; distinct Security and DBA reviewers must not be implementer or observer. The manifest must name **distinct nonempty observerId/implementerId**; out-of-band trust must pin a **nonempty approvedEnvironmentId and exactly A/B distinct tenantDatabaseIds**. Carry the exact source SHA, API/Worker image digests, versioned migrations and the **byte-identical checked-in** immutable expected-v1.json fixture hash.
@@ -22,4 +22,4 @@
 
 ## Status at B.9 source delivery
 
-There is **no** operator-executed 30-case physical bundle or PREPROD accepted RPO/RTO evidence associated with this work. The new GitHub workflow proves that **a missing bundle cannot PASS** and that signed mock evidence with eleven mutations fails as expected. It does not replace physical tests and cannot close #56. All G-B01..05 remain `NOT_RUN/NOT_VERIFIED`, `NO_GO`; APP-02C/D/E, production/pilot and real posting are `NOT_AUTHORIZED`. 
+There is **no** operator-executed 30-case physical bundle or PREPROD accepted RPO/RTO evidence associated with this work. The new GitHub workflow proves that **a missing bundle cannot PASS** and that signed mock evidence with eleven mutations fails as expected. It does not replace physical tests and cannot establish #56's physical obligations as complete. All G-B01..05 remain `NOT_RUN/NOT_VERIFIED`, `NO_GO`; C PREPROD/C.6, APP-02D/E, production/pilot and real posting are not authorized by this runbook. C.1–C.5 DEV authority comes from its separate Owner decision.

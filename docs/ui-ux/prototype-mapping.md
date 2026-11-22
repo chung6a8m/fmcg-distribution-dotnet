@@ -33,7 +33,7 @@ Các link artifact cần quyền truy cập của chủ file. Quy chuẩn trong 
 - Checkbox đã tích minh họa một thời điểm sau thao tác; xác nhận sự thật của tác vụ mới phải bắt đầu chưa tích.
 - JSON số mẫu là sổ đối chiếu, không phải API schema và chưa là đầu vào trực tiếp của các script vẽ.
 - PNG desktop 1800×1125 và mobile 860×1864 là tỷ lệ xuất; viewport thiết kế là 1440×900 và 430×932.
-- Tiến trình Confirm/Reserve, partial/repeated load và policy validity phải theo contract module; các blocker C0-R01…06 không được giải quyết bằng màn hình.
+- Tiến trình Confirm/Reserve, partial/repeated load và policy validity phải theo contract module; bản mẫu không tự chốt các mục C0-R01…06. Theo [quyết định DEV ngày 22/11](../decisions/owner-app02c-dev-first-2026-11-22.md), R01–R04 được xử lý trong increment có hành vi phụ thuộc, R05 thuộc nghiệm thu physical, R06 tách kiểm thử tính năng khỏi phần physical; không yêu cầu đóng cả sáu mục trước C.1.
 - Cảnh báo thiếu báo cáo không tự là case đã đăng ký. Gán người xử lý không tự đóng case/chuyến.
 - Duyệt hoàn AP-05 chưa thực chi; approved expense AP-07 có tác động giảm outstanding. Không tạo quy tắc mọi approval đều không đổi sổ.
 
