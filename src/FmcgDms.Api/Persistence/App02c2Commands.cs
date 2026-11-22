@@ -80,11 +80,14 @@ public sealed partial class App01a2CommandService
                     VALUES(@Tenant,@Id,@CustomerId,@TripId,@SelectionId,@Actor)
                     """, new { Tenant = tenant, Id = draft, input.CustomerId, input.TripId, input.SelectionId, Actor = actor }, tx, token));
                 for (int i = 0; i < lines.Length; i++)
+                {
+                    await AddLine(db, tx, tenant, draft, i + 1, lines[i].SkuId, lines[i].Quantity, null, token);
                     await db.ExecuteAsync(Sql("""
                         INSERT dbo.C2OrderDraftLine(TenantId,DraftId,LineNumber,SkuId,BaseQuantity,BaseUom)
                         VALUES(@Tenant,@Draft,@Line,@SkuId,@Quantity,@BaseUom)
                         """, new { Tenant = tenant, Draft = draft, Line = i + 1,
                             lines[i].SkuId, lines[i].Quantity, BaseUom = units[lines[i].SkuId] }, tx, token));
+                }
                 return BusinessCommandOutcome.Applied("C2_DRAFT_CREATED", draft);
             }, ct, "sales");
 

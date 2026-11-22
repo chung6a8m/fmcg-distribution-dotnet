@@ -43,6 +43,13 @@ public sealed class App02c2Tests(SqlScratchFixture fixture)
         using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
         var selection = await Direct(actor, seed);
         var draft = await Draft(actor, seed, selection);
+        Assert.Equal(40m, await db.QuerySingleAsync<decimal>("""
+            SELECT l.BaseQuantity FROM dbo.BusinessSourceLine l JOIN dbo.BusinessSource s
+                ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+            WHERE s.Id=@draft AND s.SourceKind='C2_A_DRAFT' AND l.LineNumber=1
+                AND NOT EXISTS(SELECT 1 FROM dbo.LedgerEffect e
+                    WHERE e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id)
+            """, new { draft }));
         var confirm = new { commandId = Guid.NewGuid(), orderId = draft };
         Guid source = Source(await Post(actor, Root + "/confirm", confirm));
         Assert.True((await Post(actor, Root + "/confirm", confirm)).GetProperty("replayed").GetBoolean());
