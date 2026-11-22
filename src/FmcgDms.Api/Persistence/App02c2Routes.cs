@@ -28,11 +28,11 @@ internal static class App02c2Routes
             Response(await service.ReserveC2(user, input, ct))).RequireAuthorization("SyntheticWarehouse");
     }
 
-    private static IResult Response(BusinessCommandOutcome outcome) => outcome.Status switch
+    internal static IResult Response(BusinessCommandOutcome outcome) => outcome.Status switch
     {
         "APPLIED" => Results.Ok(outcome),
         "CONFLICT" => Results.Conflict(outcome),
-        _ when outcome.ReasonCode == "INVALID_COMMAND_IDENTITY" => Results.BadRequest(outcome),
+        _ when outcome.ReasonCode is "INVALID_COMMAND_IDENTITY" or "INVALID_LOAD_SHAPE" => Results.BadRequest(outcome),
         _ => Results.UnprocessableEntity(outcome)
     };
 }

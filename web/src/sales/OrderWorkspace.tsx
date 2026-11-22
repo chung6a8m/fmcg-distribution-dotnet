@@ -223,6 +223,7 @@ export function OrderWorkspace() {
         <h1>Đơn A và giữ hàng</h1>
         <p className="section-detail">APP-02C.2 · DEV tổng hợp{session && ' · ' + session.identity.tenantId}</p>
         <a className="page-link" href="/sales/customers">Khách hàng và địa chỉ giao</a>
+        <a className="page-link" href="/sales/load">Nạp hàng lên xe</a>
       </div>
       <ThemeSelect />
     </header>

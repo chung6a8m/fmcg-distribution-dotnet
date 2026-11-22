@@ -41,6 +41,13 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
         return OpenApp02c1Async(principal, ct);
     }
 
+    internal Task<SqlConnection> OpenApp02c3Async(ClaimsPrincipal principal, CancellationToken ct)
+    {
+        if (!config.GetValue<bool>("App02C3:Enabled"))
+            throw new UnauthorizedAccessException("C.3 DEV commands are disabled.");
+        return OpenApp02c2Async(principal, ct);
+    }
+
     private async Task<SqlConnection> OpenScratchAsync(ClaimsPrincipal principal, CancellationToken ct, bool c1)
     {
         if ((!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest"))

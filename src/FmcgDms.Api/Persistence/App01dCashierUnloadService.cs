@@ -453,7 +453,9 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             JOIN dbo.StockLocation v WITH (HOLDLOCK)
                 ON v.TenantId=m.TenantId AND v.Id=m.VehicleLocationId
             WHERE m.TenantId=@Tenant AND m.Id=@Manifest
-                AND m.TripId=@Trip;
+                AND m.TripId=@Trip AND m.IsC3=0
+                AND NOT EXISTS(SELECT 1 FROM dbo.TripManifest c
+                    WHERE c.TenantId=m.TenantId AND c.TripId=m.TripId AND c.IsC3=1);
             """, new { Tenant = tenant, Manifest = req.ManifestId, Trip = req.TripId }, tx, ct));
         if (manifest is null || manifest.Status != "LOADED"
             || manifest.VehicleLocationId != trip.VehicleLocationId

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
+using FmcgDms.Api.Persistence;
 using Microsoft.Data.SqlClient;
 using Xunit;
 
@@ -12,6 +13,133 @@ public sealed class App02c2Tests(SqlScratchFixture fixture)
 {
     private const string Root = "/api/synthetic/app02c2";
     private readonly CancellationToken ct = TestContext.Current.CancellationToken;
+
+    [Fact]
+    public async Task C3_load_workspace_requires_a_current_trip_writer()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true, dedicatedC2: true, c3Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["warehouse"]);
+        const string root = "/api/synthetic/app02c3";
+        var rows = await actor.GetFromJsonAsync<JsonElement>(root + "/trips", ct);
+        Assert.Empty(rows.EnumerateArray());
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.PostAsJsonAsync(root + "/load",
+            new { commandId = Guid.NewGuid(), tripId = seed.Trip,
+                lines = new[] { new { rightId = Guid.NewGuid(), expectedWarehouseHeld = 1m, quantity = 1m } } }, ct)).StatusCode);
+        await db.ExecuteAsync("INSERT dbo.C3TripWriter VALUES(N'tenant-a',@Trip,@Actor);", seed);
+        await using var peerDb = new SqlConnection(fixture.TenantBConnectionString);
+        await peerDb.ExecuteAsync("""
+            INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+            VALUES(N'tenant-b',@Actor,N'warehouse',1,N'c3-test')
+            """, seed);
+        using var peer = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-b", seed.Actor, ["warehouse"]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await peer.GetAsync(root + $"/trips/{seed.Trip}/rights", ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await peer.PostAsJsonAsync(root + "/load",
+            new C3LoadInput(Guid.NewGuid(), seed.Trip, [new(Guid.NewGuid(), 1m, 1m)]), ct)).StatusCode);
+    }
+
+    [Fact]
+    public async Task C3_competing_batches_and_retry_after_multiline_rollback_preserve_reservation_and_custody()
+    {
+        using var factory = fixture.CreateFactory(c2Enabled: true, c3Enabled: true);
+        await using var db = new SqlConnection(fixture.TenantAConnectionString);
+        var seed = await Seed(db);
+        await db.ExecuteAsync("""
+            INSERT dbo.C3TripWriter VALUES(N'tenant-a',@Trip,@Actor);
+            INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,SnapshotCode,BaseQuantity,CostAmount)
+            VALUES(N'tenant-a',@Warehouse,@Sku,N'C3-test-v1',100,1000),(N'tenant-a',@Vehicle,@Sku,N'C3-test-v1',0,0);
+            INSERT dbo.PhysicalStockBalance(TenantId,StockLocationId,SkuId,OnHandBaseQuantity,OnHandCostAmount)
+            VALUES(N'tenant-a',@Warehouse,@Sku,100,1000),(N'tenant-a',@Vehicle,@Sku,0,0);
+            """, seed);
+        using var actor = SqlScratchFixture.WithTenant(factory.CreateClient(), "tenant-a", seed.Actor, ["sales", "warehouse"]);
+        Guid order = await Draft(actor, seed, await Direct(actor, seed));
+        Guid confirm = Source(await Post(actor, Root + "/confirm", new { commandId = Guid.NewGuid(), orderId = order }));
+        Guid line = (await Order(actor, order)).GetProperty("lines")[0].GetProperty("lineId").GetGuid();
+        foreach (int quantity in new[] { 20, 20 })
+            await Post(actor, Root + "/reserve", new C2ReserveInput(Guid.NewGuid(), order, line, seed.Warehouse, quantity, confirm));
+
+        const string root = "/api/synthetic/app02c3";
+        string trip = root + $"/trips/{seed.Trip}";
+        Guid[] rights = (await actor.GetFromJsonAsync<C3RightView[]>(trip + "/rights", ct))!.Select(x => x.Id).Order().ToArray();
+        Assert.Equal(2, rights.Length);
+        C3LoadInput attempt = new(Guid.NewGuid(), seed.Trip, [new(rights[0], 20m, 5m)]);
+        C3LoadInput rival = attempt with { CommandId = Guid.NewGuid() };
+        var replies = await Task.WhenAll(actor.PostAsJsonAsync(root + "/load", attempt, ct), actor.PostAsJsonAsync(root + "/load", rival, ct));
+        using var first = replies[0];
+        using var second = replies[1];
+        Assert.Single(replies, r => r.StatusCode == HttpStatusCode.OK);
+        var denied = Assert.Single(replies, r => r.StatusCode == HttpStatusCode.UnprocessableEntity);
+        Assert.Equal("C3_STALE_WAREHOUSE_HELD", Reason(await denied.Content.ReadFromJsonAsync<JsonElement>(ct)));
+        var winner = first.IsSuccessStatusCode ? attempt : rival;
+        Assert.True((await Post(actor, root + "/load", winner)).GetProperty("replayed").GetBoolean());
+        await Post(actor, root + "/load", winner with { Lines = [new(rights[0], 20m, 6m)] }, HttpStatusCode.Conflict);
+        Assert.Equal(HttpStatusCode.NotFound, (await actor.GetAsync(Root + $"/commands/{winner.CommandId}", ct)).StatusCode);
+
+        var batch = new C3LoadInput(Guid.NewGuid(), seed.Trip, [new(rights[1], 20m, 13m), new(rights[0], 15m, 2m)]);
+        string trigger = "TR_C3Abort_" + seed.Sku.ToString("N");
+        var before = await LoadState(db, seed);
+        // The failing right sorts after the first right, so a movement and both of its ledger legs have run.
+        await db.ExecuteAsync($"""
+            CREATE TRIGGER dbo.[{trigger}] ON dbo.PhysicalStockMovement AFTER INSERT AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted i JOIN dbo.TripManifestLine l
+                    ON l.TenantId=i.TenantId AND l.Id=i.TripManifestLineId
+                    WHERE l.SkuId='{seed.Sku:D}' AND i.BaseQuantity=13)
+                    THROW 51603, 'Synthetic late abort', 1;
+            END;
+            """);
+        try
+        {
+            var fault = await Assert.ThrowsAsync<SqlException>(() => actor.PostAsJsonAsync(root + "/load", batch, ct));
+            Assert.Equal(51603, fault.Number);
+            Assert.Equal(HttpStatusCode.NotFound, (await actor.GetAsync(trip + $"/commands/{batch.CommandId}", ct)).StatusCode);
+            Assert.Equal(before, await LoadState(db, seed));
+        }
+        finally { await db.ExecuteAsync($"DROP TRIGGER dbo.[{trigger}];"); }
+
+        var accepted = await Post(actor, root + "/load", batch);
+        Assert.False(accepted.GetProperty("replayed").GetBoolean());
+        var reordered = batch with { Lines = batch.Lines!.Reverse().ToArray() };
+        Assert.Equal(Source(accepted), Source(await Post(actor, root + "/load", reordered)));
+        Assert.Equal("80.000|20.000|800.0000|20.000|200.0000|40.000|0.000|3|6|2|3",
+            await LoadState(db, seed));
+
+        var empty = new C3LoadInput(Guid.NewGuid(), seed.Trip, [null]);
+        Assert.Equal("INVALID_LOAD_LINES", Reason(await Post(actor, root + "/load", empty, HttpStatusCode.UnprocessableEntity)));
+        await Post(actor, root + "/load", empty with { Lines = [new(rights[0], 13m, 1m)] }, HttpStatusCode.Conflict);
+
+        using var legacyFactory = fixture.CreateFactory();
+        using var legacy = SqlScratchFixture.WithTenant(legacyFactory.CreateClient(), "tenant-a", seed.Actor, ["warehouse"]);
+        Guid manifest = await db.QuerySingleAsync<Guid>("SELECT Id FROM dbo.TripManifest WHERE LoadBusinessSourceId=@Id", new { Id = Source(accepted) });
+        var unload = await Post(legacy, "/api/synthetic/app01d/commands/unload-trip-remainder", new
+        {
+            producerId = seed.Actor, commandId = Guid.NewGuid().ToString("N"), sourceNumber = Guid.NewGuid().ToString("N"),
+            tripId = seed.Trip, manifestId = manifest
+        });
+        Assert.Equal("LOADED_MANIFEST_NOT_ELIGIBLE", Reason(unload));
+
+        await db.ExecuteAsync("DELETE dbo.C3TripWriter WHERE TenantId='tenant-a' AND TripId=@Trip", seed);
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.GetAsync(trip + $"/commands/{batch.CommandId}", ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await actor.PostAsJsonAsync(root + "/load", batch, ct)).StatusCode);
+    }
+
+    private static Task<string> LoadState(SqlConnection db, Scene seed) => db.QuerySingleAsync<string>("""
+        SELECT CONCAT(p.OnHandBaseQuantity,'|',p.AllocatedBaseQuantity,'|',m.OnHandCostAmount,'|',
+            v.OnHandBaseQuantity,'|',v.OnHandCostAmount,'|',
+            (SELECT SUM(GrantedBaseQuantity) FROM dbo.StockRight WHERE SkuId=@Sku),'|',
+            (SELECT SUM(ConsumedBaseQuantity+ReleasedBaseQuantity) FROM dbo.StockRight WHERE SkuId=@Sku),'|',
+            (SELECT COUNT(*) FROM dbo.PhysicalStockMovement x JOIN dbo.TripManifestLine l
+                ON l.TenantId=x.TenantId AND l.Id=x.TripManifestLineId WHERE l.SkuId=@Sku),'|',
+            (SELECT COUNT(*) FROM dbo.LedgerEffect WHERE SkuId=@Sku AND LedgerKind='PHYSICAL_STOCK'),'|',
+            (SELECT COUNT(*) FROM dbo.TripManifest WHERE TripId=@Trip),'|',
+            (SELECT COUNT(*) FROM dbo.C2CommandScope WHERE LoadTripId=@Trip))
+        FROM dbo.StockPool p
+        JOIN dbo.PhysicalStockBalance m ON m.TenantId=p.TenantId AND m.StockLocationId=p.StockLocationId AND m.SkuId=p.SkuId
+        JOIN dbo.PhysicalStockBalance v ON v.TenantId=p.TenantId AND v.StockLocationId=@Vehicle AND v.SkuId=p.SkuId
+        WHERE p.StockLocationId=@Warehouse AND p.SkuId=@Sku
+        """, seed);
 
     [Fact]
     public async Task Catalog_and_commands_require_current_grants_and_owned_tenant()

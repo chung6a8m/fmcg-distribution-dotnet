@@ -14,9 +14,9 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The demo requires Windows LocalDB.");
-if (args is [var increment, var c1Mode, var c1Root, var c1Source] && increment is "App02C1" or "App02C2")
+if (args is [var increment, var c1Mode, var c1Root, var c1Source] && increment is "App02C1" or "App02C2" or "App02C3")
 {
-    await App02c1Dev.Run(c1Mode, c1Root, c1Source, increment == "App02C2");
+    await App02c1Dev.Run(c1Mode, c1Root, c1Source, increment);
     return;
 }
 if (args.Length != 3) throw new ArgumentException("Expected operation, RunId and source identity.");
