@@ -7,10 +7,10 @@ namespace FmcgDms.Demo;
 
 internal static class App02c2DevFixture
 {
-    internal static Task Seed(SqlConnection db, string tenant, string actor) => db.ExecuteAsync("""
+    internal static Task Seed(SqlConnection db, string tenant, string actor, DateTime? fixtureUtc = null) => db.ExecuteAsync("""
         DECLARE @customer uniqueidentifier=NEWID(), @sku uniqueidentifier=NEWID(),
             @warehouse uniqueidentifier=NEWID(), @vehicle uniqueidentifier=NEWID(), @trip uniqueidentifier=NEWID(),
-            @now datetime2(7)=SYSUTCDATETIME();
+            @now datetime2(7)=COALESCE(@fixtureUtc,SYSUTCDATETIME());
         INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
         VALUES(@tenant,@actor,N'warehouse',1,N'c2-dev-launcher');
         INSERT dbo.Customer(Id,TenantId,Code,Name) VALUES(@customer,@tenant,N'C2-FIXTURE',N'Khách hàng C.2 DEV');
@@ -29,7 +29,7 @@ internal static class App02c2DevFixture
             Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
         VALUES(@tenant,NEWID(),@customer,@sku,1,'APPROVED',DATEADD(day,-1,@now),DATEADD(day,1,@now),
             N'c2-fixture-maker',N'c2-fixture-checker',DATEADD(day,-1,@now),N'c2-fixture-v1',15,0,0,7,1000,'Asia/Ho_Chi_Minh');
-        """, new { tenant, actor });
+        """, new { tenant, actor, fixtureUtc });
 
     private const string EffectCounts = """
         SELECT CONCAT('POSTINGS|',(SELECT COUNT(*) FROM dbo.PhysicalStockMovement),'|',

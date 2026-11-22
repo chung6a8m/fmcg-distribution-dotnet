@@ -92,12 +92,13 @@ public sealed partial class App01a2CommandService
             byte[] hash = CommandPayloadHash.Compute("C4_DELIVERY", tenant, actor, key.SourceNumber,
                 ("Evidence", id.ToString("N")));
             await InsertReceivedCommand(db, tx, tenant, actor, key, id, hash, "sales", null, input.TripId, ct);
-            var captured = await db.QuerySingleAsync<C4Evidence>(Sql("""
-                INSERT dbo.C4DeliveryEvidence(TenantId,Id,ActorId,ClientCommandId,TripId,ManifestLineId,ShipToVersion,Quantity)
+            var captured = await db.QuerySingleAsync<C4Evidence>(Sql($"""
+                INSERT dbo.C4DeliveryEvidence(TenantId,Id,ActorId,ClientCommandId,TripId,ManifestLineId,
+                    ShipToVersion,Quantity,OccurredAtUtc)
                 OUTPUT inserted.Id,inserted.TripId,inserted.ManifestLineId,inserted.ShipToVersion,
                     inserted.Quantity,inserted.OccurredAtUtc,
                     CAST((inserted.OccurredAtUtc AT TIME ZONE 'UTC') AT TIME ZONE 'SE Asia Standard Time' AS date) AS BusinessDate
-                VALUES(@Tenant,@Id,@Actor,@CommandId,@TripId,@ManifestLineId,@ShipToVersion,@Quantity)
+                VALUES(@Tenant,@Id,@Actor,@CommandId,@TripId,@ManifestLineId,@ShipToVersion,@Quantity,{App02c6Clock.SqlUtcNow})
                 """, new { args.Tenant, Id = id, args.Actor, args.CommandId, args.TripId, args.ManifestLineId,
                     args.ShipToVersion, args.Quantity }, tx, ct));
             return new C4Receipt(captured);

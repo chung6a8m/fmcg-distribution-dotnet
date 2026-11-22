@@ -155,6 +155,15 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            if (connections.UsesApp02c6Clock)
+            {
+                await App02a3Sql.RequireRole(db, tx, tenant, actor, requiredRole, ct);
+                if (await db.ExecuteScalarAsync<int>(Sql("""
+                    SELECT COUNT(*) FROM dbo.C4DeliveryWriter
+                    WHERE TenantId=@Tenant AND TripId=@TripId AND ActorId=@Actor
+                    """, new { Tenant = tenant, TripId = tripId, Actor = actor }, tx, ct)) != 1)
+                    throw new UnauthorizedAccessException("Current C.4 trip assignment required.");
+            }
             string commandLock = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
             await LockAsync(db, tx, commandLock, ct);
@@ -184,10 +193,10 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             }
 
             Guid commandId = Guid.NewGuid();
-            await db.ExecuteAsync(Sql("""
+            await db.ExecuteAsync(Sql($"""
                 INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
-                    PayloadHashVersion,PayloadHash,ActorId,Status)
-                VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED');
+                    PayloadHashVersion,PayloadHash,ActorId,Status,SubmittedAtUtc)
+                VALUES(@Id,@Tenant,@Producer,@Command,@Version,@Hash,@Actor,N'RECEIVED',{App02c6Clock.SqlUtcNow});
                 """, new { Id = commandId, Tenant = tenant,
                     Producer = request.ProducerId, Command = request.CommandId,
                     Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
@@ -206,10 +215,10 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
 
             if (outcome.Status is not ("APPLIED" or "REJECTED"))
                 throw new InvalidOperationException("Cannot persist an incomplete command outcome.");
-            if (await db.ExecuteAsync(Sql("""
+            if (await db.ExecuteAsync(Sql($"""
                 UPDATE dbo.BusinessCommand SET Status=@Status,
                     OutcomeCode=@Outcome,ReasonCode=@Reason,
-                    CompletedAtUtc=SYSUTCDATETIME()
+                    CompletedAtUtc={App02c6Clock.SqlUtcNow}
                 WHERE TenantId=@Tenant AND Id=@Id AND Status=N'RECEIVED';
                 """, new { Tenant = tenant, Id = commandId, outcome.Status,
                     Outcome = outcome.OutcomeCode, Reason = outcome.ReasonCode }, tx, ct)) != 1)

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Dapper;
 using FmcgDms.Api.Authentication;
+using FmcgDms.Api.Persistence;
 using Microsoft.Data.SqlClient;
 
 namespace FmcgDms.Api.Tenancy;
@@ -12,6 +13,9 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
     private static readonly Regex ScratchDatabaseName = new(
         @"\AFmcg_App00_(?<nonce>[a-f0-9]{32})_(?<slot>[AB])\z",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private readonly string? clockPath = App02c6Clock.GetConfiguredPath(config, host);
+    internal bool UsesApp02c6Clock => clockPath is not null;
 
     private string Resolve(ClaimsPrincipal principal)
     {
@@ -75,13 +79,19 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
             throw new UnauthorizedAccessException("Synthetic diagnostics require a LocalDB scratch database.");
 
         string expectedNonce = name.Groups["nonce"].Value;
-        if (c1 && (!config.GetValue<bool>("App02C1:Enabled")
+        if ((c1 || UsesApp02c6Clock) && (!config.GetValue<bool>("App02C1:Enabled")
             || !string.Equals(target.DataSource, @"(localdb)\MSSQLLocalDB", StringComparison.OrdinalIgnoreCase)
             || !string.Equals(config["App02C1:Nonce"], expectedNonce, StringComparison.Ordinal)
             || !target.IntegratedSecurity || target.UserInstance
             || !string.IsNullOrEmpty(target.FailoverPartner)))
             throw new UnauthorizedAccessException("C.1 requires its explicitly owned DEV session.");
 
+        // A C.6 connection has one immutable test instant for its lifetime.
+        if (clockPath is not null)
+        {
+            target.Pooling = false;
+            target.MultipleActiveResultSets = false;
+        }
         var connection = new SqlConnection(target.ConnectionString);
         try
         {
@@ -99,6 +109,8 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
                     cancellationToken: ct));
             if (!string.Equals(boundTenant, tenantId, StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("Tenant is not bound to this database.");
+            if (clockPath is not null)
+                await App02c6Clock.SetSessionAsync(connection, clockPath, ct);
             return connection;
         }
         catch

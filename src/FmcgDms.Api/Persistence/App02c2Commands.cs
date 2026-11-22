@@ -151,7 +151,7 @@ public sealed partial class App01a2CommandService
             return BusinessCommandOutcome.Rejected("C2_BASE_UOM_CHANGED");
 
         var now = DateTime.SpecifyKind(await db.ExecuteScalarAsync<DateTime>(Sql(
-            "SELECT SYSUTCDATETIME()", null, tx, ct)), DateTimeKind.Utc);
+            $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)), DateTimeKind.Utc);
         var frozen = new List<C2FrozenLine>();
         foreach (var line in lines)
         {

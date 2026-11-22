@@ -59,15 +59,15 @@ public sealed partial class App01dCashierUnloadService
             return BusinessCommandOutcome.Rejected("RECEIVABLE_OUTSTANDING_INSUFFICIENT");
 
         Guid source = Guid.NewGuid(), line = Guid.NewGuid();
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,SourceNumber,ActorId,
-                CustomerId,TripId,OccurredAtUtc)
-            VALUES(@Source,@Tenant,@Command,@Kind,@Number,@Actor,@Customer,@TripId,SYSUTCDATETIME());
+                CustomerId,TripId,OccurredAtUtc,RecordedAtUtc)
+            VALUES(@Source,@Tenant,@Command,@Kind,@Number,@Actor,@Customer,@TripId,{App02c6Clock.SqlUtcNow},{App02c6Clock.SqlUtcNow});
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,Amount)
             VALUES(@Line,@Tenant,@Source,1,@Amount);
             INSERT dbo.ReceiptAllocation(Id,TenantId,CashReceiptId,ReceivableOpenItemId,
-                CustomerId,AppliedAmount,AllocationSourceLineId)
-            VALUES(NEWID(),@Tenant,@CashReceiptId,@ReceivableOpenItemId,@Customer,@Amount,@Line);
+                CustomerId,AppliedAmount,AllocationSourceLineId,RecordedAtUtc)
+            VALUES(NEWID(),@Tenant,@CashReceiptId,@ReceivableOpenItemId,@Customer,@Amount,@Line,{App02c6Clock.SqlUtcNow});
 
             UPDATE dbo.CashReceipt SET AppliedAmount=AppliedAmount+@Amount
             WHERE TenantId=@Tenant AND Id=@CashReceiptId AND ReceivedAmount-AppliedAmount>=@Amount;
@@ -77,8 +77,8 @@ public sealed partial class App01dCashierUnloadService
             IF @@ROWCOUNT <> 1 THROW 51091, 'Receivable allocation counter changed', 1;
 
             INSERT dbo.LedgerEffect(Id,TenantId,BusinessSourceLineId,EffectKey,LedgerKind,CustomerId,
-                QuantityDelta,AmountDelta)
-            VALUES(NEWID(),@Tenant,@Line,N'AR-CASH-ALLOC',N'AR',@Customer,0,-@Amount);
+                QuantityDelta,AmountDelta,RecordedAtUtc)
+            VALUES(NEWID(),@Tenant,@Line,N'AR-CASH-ALLOC',N'AR',@Customer,0,-@Amount,{App02c6Clock.SqlUtcNow});
             """, new { Source = source, Line = line, Tenant = tenant, Command = commandId,
                 Kind = AllocationKind, Number = request.SourceNumber, Actor = actor,
                 Customer = scope.CustomerId, request.TripId, request.CashReceiptId,

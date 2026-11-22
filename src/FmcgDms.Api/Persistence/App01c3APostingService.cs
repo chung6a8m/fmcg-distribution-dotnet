@@ -457,11 +457,11 @@ public sealed class App01c3APostingService(TenantConnections connections)
             Qty = request.BaseQuantity, Payable = payable
         });
         sourceParameters.Add("Occurred", occurred, DbType.DateTime2);
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
-                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc)
+                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc,RecordedAtUtc)
             VALUES(@Id,@Tenant,@Command,N'A_DELIVERY',@Number,@Actor,
-                @Customer,@Trip,COALESCE(@Occurred,SYSUTCDATETIME()));
+                @Customer,@Trip,COALESCE(@Occurred,{App02c6Clock.SqlUtcNow}),{App02c6Clock.SqlUtcNow});
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,
                 SkuId,BaseQuantity,Amount)
             VALUES(@Line,@Tenant,@Id,1,@Sku,@Qty,@Payable);
@@ -582,10 +582,10 @@ public sealed class App01c3APostingService(TenantConnections connections)
 
     private static Task<int> AddEffectAsync(SqlConnection db, SqlTransaction tx,
         string tenant, Guid sourceLine, PostingEffect effect, CancellationToken ct) =>
-        db.ExecuteAsync(Sql("""
+        db.ExecuteAsync(Sql($"""
             INSERT dbo.LedgerEffect(Id,TenantId,BusinessSourceLineId,EffectKey,
-                LedgerKind,CustomerId,SkuId,StockLocationId,QuantityDelta,AmountDelta)
-            VALUES(@Id,@Tenant,@Line,@Key,@Kind,@Customer,@Sku,@Location,@Qty,@Amount);
+                LedgerKind,CustomerId,SkuId,StockLocationId,QuantityDelta,AmountDelta,RecordedAtUtc)
+            VALUES(@Id,@Tenant,@Line,@Key,@Kind,@Customer,@Sku,@Location,@Qty,@Amount,{App02c6Clock.SqlUtcNow});
             """, new { Id = Guid.NewGuid(), Tenant = tenant, Line = sourceLine,
                 effect.Key, effect.Kind, effect.Customer, effect.Sku,
                 effect.Location, Qty = effect.Quantity, effect.Amount }, tx, ct));

@@ -34,7 +34,7 @@ public sealed partial class App01a2CommandService
         WithC4Authority<C5ArReport?>(principal, null, async (db, tx, tenant, actor) =>
         {
             var now = new DateTimeOffset(await db.QuerySingleAsync<DateTime>(Sql(
-                "SELECT SYSUTCDATETIME()", null, tx, ct)), TimeSpan.Zero);
+                $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)), TimeSpan.Zero);
             if (requestedCutoff > now) return null;
             var cutoff = requestedCutoff ?? now;
             var parameters = new DynamicParameters(new

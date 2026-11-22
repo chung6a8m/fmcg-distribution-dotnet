@@ -26,6 +26,7 @@ builder.Services.AddScoped<App02c1Service>();
 builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
+bool app02c6 = App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {
@@ -58,10 +59,23 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     }
 }
 
-if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
+bool legacySynthetic = (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
     && !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime")
-    && !app.Configuration.GetValue<bool>("App02C3:Enabled"))
+    && !app.Configuration.GetValue<bool>("App02C3:Enabled");
+if (legacySynthetic || app02c6)
+{
+    // The C.6 fixture exercises only the existing quota and allocation endpoints.
+    app.MapPost("/api/synthetic/app01a/commands/grant-b-quota", async (
+        GrantBQuotaCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        ToCommandHttp(await service.GrantBQuotaAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticWarehouse");
+    app.MapPost("/api/synthetic/app01d/commands/allocate-cash-receipt", async (
+        AllocateCashReceiptCommand input, ClaimsPrincipal user, App01dCashierUnloadService service, CancellationToken ct) =>
+        ToCommandHttp(await service.AllocateCashReceiptAsync(user, input, ct)))
+        .RequireAuthorization("SyntheticSales");
+}
+if (legacySynthetic)
 {
     // Synthetic diagnostics ONLY. Not a production business API.
     var diag = app.MapGroup("/api/diagnostics").RequireAuthorization();
@@ -107,10 +121,6 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         ConfirmAOrderCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
         ToCommandHttp(await service.ConfirmAOrderAsync(user, input, ct)))
         .RequireAuthorization("SyntheticSales");
-    commands.MapPost("/grant-b-quota", async (
-        GrantBQuotaCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-        ToCommandHttp(await service.GrantBQuotaAsync(user, input, ct)))
-        .RequireAuthorization("SyntheticWarehouse");
     commands.MapPost("/grant-b-credit", async (
         GrantBCreditCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
         ToCommandHttp(await service.GrantBCreditAsync(user, input, ct)))
@@ -153,11 +163,6 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     // separately seeded cashier count witness.
     var closeoutCommands = app.MapGroup("/api/synthetic/app01d/commands")
         .RequireAuthorization();
-    closeoutCommands.MapPost("/allocate-cash-receipt", async (
-        AllocateCashReceiptCommand input, ClaimsPrincipal user,
-        App01dCashierUnloadService service, CancellationToken ct) =>
-        ToCommandHttp(await service.AllocateCashReceiptAsync(user, input, ct)))
-        .RequireAuthorization("SyntheticSales");
     closeoutCommands.MapPost("/offer-cash-handover", async (
         OfferCashHandoverCommand input, ClaimsPrincipal user,
         App01dCashierUnloadService service, CancellationToken ct) =>
