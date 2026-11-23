@@ -105,7 +105,7 @@ The Owner fixed the C/P envelope, identity, state/ACK rules, retry/case/retentio
 | [DEV-F04](app-02-dev-f04.md) | AC-19 / EV-05/06 | Snapshot giá/discount/thuế và residual |
 | [DEV-F05](app-02-dev-f05.md) | AC-05/06 / EV-05/07 | Trả hàng có nguồn, QA/held, giá vốn gốc. Dùng snapshot F03–04 |
 | [DEV-F06](app-02-dev-f06.md) | AC-06 / EV-07 | Điều chỉnh có nguồn qua kỳ khóa. Dùng F05 |
-| DEV-F07 | AC-07 / EV-05 | Trả quà và waiver. Dùng nguồn giao/trả F05 |
+| DEV-F07 | AC-07 / EV-05 | [Trả quà và waiver](app-02-dev-f07.md). Dùng nguồn giao/trả F05 |
 | DEV-F08 | AC-19 / EV-05/06/10/11 | Credit/refund và residual. Dùng snapshot F04 và sự kiện F05–06 |
 | DEV-F09 | Các ca bổ sung và nền C/D/E | Hồi quy hai tenant trên source xác định |
 

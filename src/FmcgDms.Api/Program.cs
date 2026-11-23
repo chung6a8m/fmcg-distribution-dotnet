@@ -38,6 +38,8 @@ bool app02d4 = App02d4Runtime.Enabled(app.Configuration, app.Environment);
 bool devF03 = app.Services.GetRequiredService<TenantConnections>().UsesDevF03;
 bool devF04 = app.Services.GetRequiredService<TenantConnections>().UsesDevF04;
 bool devF05 = app.Services.GetRequiredService<TenantConnections>().UsesDevF05;
+bool devF07 = app.Services.GetRequiredService<TenantConnections>().UsesDevF07;
+if (devF07 && !devF05) throw new InvalidOperationException("DEV-F07 requires source returns.");
 bool devF06 = app.Services.GetRequiredService<TenantConnections>().UsesDevF06;
 if (devF06 && !devF05) throw new InvalidOperationException("DEV-F06 requires source returns.");
 if (devF05 && (!devF03 || !devF04)) throw new InvalidOperationException("DEV-F05 requires lot and price snapshots.");
@@ -75,6 +77,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App02c2Routes.Map(app, visits);
     if (devF05) App02DevF05Routes.Map(app);
     if (devF06) App02DevF06Routes.Map(app);
+    if (devF07) App02DevF07Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c3Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C4:Enabled") && app.Configuration.GetValue<bool>("App02C3:Enabled")
