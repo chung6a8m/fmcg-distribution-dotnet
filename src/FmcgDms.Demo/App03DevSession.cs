@@ -47,14 +47,9 @@ internal sealed class App03DevSession
         Func<App03DevHost, Task>? observe = null)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
-        if (operation is not ("Start" or "Resume" or "Stop" or "Remove") || (id is null && operation != "Start"))
-            throw new ArgumentException("Expected Start or a Resume, Stop or Remove with a RunId.");
+        if (operation is not ("Start" or "Resume" or "Remove") || (id is null && operation != "Start"))
+            throw new ArgumentException("Expected Start, Resume or Remove. Resume and Remove require a RunId.");
         var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume");
-        if (operation == "Stop")
-        {
-            await session.Stop();
-            return;
-        }
 
         using var sessionLock = session.Acquire();
         if (operation == "Remove")
@@ -139,31 +134,6 @@ internal sealed class App03DevSession
         string pending = manifestPath + ".pending";
         await File.WriteAllTextAsync(pending, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(pending, manifestPath, overwrite: true);
-    }
-
-    private async Task Stop()
-    {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The APP-03 session requires Windows.");
-        await Read();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        while (true)
-        {
-            FileStream? sessionLock = null;
-            try { sessionLock = OpenLock(); }
-            catch (IOException) { }
-            if (sessionLock is not null)
-            {
-                using (sessionLock) await Read();
-                Console.WriteLine($"APP-03 DEV stopped {RunId.Id}; databases retained.");
-                return;
-            }
-            if (EventWaitHandle.TryOpenExisting(signalName, out var stop))
-            {
-                using (stop) stop.Set();
-            }
-            try { await Task.Delay(100, deadline.Token); }
-            catch (OperationCanceledException) { throw new InvalidOperationException("APP-03 launcher did not stop within 30 seconds."); }
-        }
     }
 
     private FileStream Acquire()

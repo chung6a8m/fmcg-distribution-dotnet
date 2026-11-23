@@ -16,9 +16,9 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Resume -RunId $runId
 pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Remove -RunId $runId
 ```
 
-- **Stop** hoặc Ctrl+C dừng API và Vite, giữ hai database. Trong lúc chạy, `Remove` và `Resume` cùng run ID bị khóa. Windows Job Object thu hồi API và Vite đã được gắn vào job nếu tiến trình launcher bị kết thúc. Kiểm chứng kết thúc đột ngột chạy sau khi cả hai host báo sẵn sàng.
+- **Stop** hoặc Ctrl+C dừng API và Vite, giữ hai database. Lệnh `Stop` dùng manifest, khóa và tín hiệu Windows theo run ID, nên chạy được từ bản sao script khi checkout hoặc DLL Release vắng. Trong lúc chạy, `Remove` và `Resume` cùng run ID bị khóa. Windows Job Object thu hồi API và Vite đã được gắn vào job nếu tiến trình launcher bị kết thúc. Kiểm chứng kết thúc đột ngột chạy sau khi cả hai host báo sẵn sàng.
 - **Resume** dùng lại URL loopback và clock cũ. Nếu trình duyệt vẫn giữ tab có lệnh chờ, tải lại trang, kết nối bằng mã DEV mới rồi tra cứu lệnh trong workspace. Các mã ký trước khi dừng hết hiệu lực trên host mới. Quyền đọc, ghi và replay vẫn theo grant và phân công hiện hành trong DB.
-- **Remove** xóa cặp database và manifest của phiên đã dừng sau khi đối chiếu cả hai database tồn tại. Nếu lần khởi tạo dở dang đã ghi đủ dấu sở hữu, `Remove` có thể dọn phần thuộc phiên. Nếu LocalDB bị gián đoạn ngay sau CREATE DATABASE và chưa ghi xong dấu sở hữu, lệnh từ chối xóa database đó.
+- **Remove** đối chiếu đủ hai database và dấu sở hữu trước khi xóa phiên Ready đã dừng. Nếu phiên Ready thiếu một database, kể cả sau lần xóa dở dang, lệnh từ chối và giữ database còn lại cùng manifest để phục hồi. Với phiên khởi tạo dở dang, lệnh có thể dọn phần đã ghi đủ dấu sở hữu. Nếu LocalDB bị gián đoạn ngay sau CREATE DATABASE và chưa ghi xong dấu sở hữu, lệnh từ chối xóa database đó.
 
 Manifest nằm dưới `%LOCALAPPDATA%\FmcgDms\App03Dev\<RunId>\session.json`. Manifest giữ instance, tên và binding hai tenant, nonce, profile/schema v1, seed version, clock UTC, web port và source tạo phiên. File khóa theo run ID được giữ tại thư mục cha để các lần chạy cùng kiểm tra một khóa. Manifest và log không lưu signing key hoặc credential.
 
@@ -30,7 +30,7 @@ Mỗi máy dùng một host API trên cổng 5116; cổng web riêng được gi
 pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Verify
 ```
 
-Runner điều khiển API/Vite thật và hai LocalDB synthetic. Nó tạo và giao một đơn 2 EA lô `RET-ORIGIN` qua HTTP, bỏ ACK nghiệp vụ sau khi server commit, dừng rồi mở lại và tra/replay cùng command ID. Dự kiến AR giữ 20.000 VND, giá vốn 6.667 VND, đúng một delivery và một nguồn, row image của opening, policy, command, nguồn, ledger và số dư giữ nguyên sau resume/replay. Runner thử lỗi cổng API, mã cũ, quyền Sales bị thu hồi, kết thúc riêng tiến trình launcher, từ chối Remove khi phiên còn chạy hoặc sai dấu tenant B, và giữ database của một run khác.
+Runner điều khiển API/Vite thật và hai LocalDB synthetic. Nó tạo và giao một đơn 2 EA lô `RET-ORIGIN` qua HTTP, bỏ ACK nghiệp vụ sau khi server commit, dừng rồi mở lại và tra/replay cùng command ID. Dự kiến AR giữ 20.000 VND, giá vốn 6.667 VND, đúng một delivery và một nguồn, row image của opening, policy, command, nguồn, ledger và số dư giữ nguyên sau resume/replay. Runner thử lỗi cổng API, mã cũ, quyền Sales bị thu hồi, kết thúc riêng tiến trình launcher, Stop từ thư mục không có Git hoặc DLL, và Remove khi phiên còn chạy, thiếu tenant B hoặc sai dấu sở hữu. Database của một run khác giữ nguyên.
 
 SQL và kết quả đối chiếu được ghi vào `TestResults/app03-1b/<RunId>/session-review.json`. Verify diễn tập vòng đời qua HTTP và SQL; bằng chứng browser của tổ hợp nghiệp vụ A/F tiếp tục nằm ở runner .1a.
 

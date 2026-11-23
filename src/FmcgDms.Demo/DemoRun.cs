@@ -90,7 +90,13 @@ internal sealed class DemoRun(string id)
         foreach (string tenant in Tenants)
         {
             if (await master.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM sys.databases WHERE name=@name",
-                new { name = Name(tenant) }) == 0) continue;
+                new { name = Name(tenant) }) == 0)
+            {
+                if (app03Session && !allowUnbound)
+                    throw new InvalidOperationException(
+                        $"Ready APP-03 session is missing {tenant}; Remove requires both databases. Manifest retained.");
+                continue;
+            }
             await VerifyRemoval(tenant, app03Session, allowUnbound);
             existing.Add(tenant);
         }

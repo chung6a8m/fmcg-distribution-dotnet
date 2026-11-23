@@ -70,7 +70,26 @@ internal static class App03DevSessionEvidence
                 && before.Quantity == 2 && before.Lot == "RET-ORIGIN", "Unexpected original sale/AR/lot.");
             var originalToken = active.SourceToken;
             var snapshot = await DevF01Evidence.Capture(run, Tables);
-            await Stop();
+            using (var api = Process.GetProcessById(active.ApiPid))
+            using (var vite = Process.GetProcessById(active.VitePid))
+            {
+                var isolated = Directory.CreateTempSubdirectory("fmcg-app03-stop-");
+                string script = Path.Combine(isolated.FullName, "Run-App03Dev.ps1");
+                try
+                {
+                    File.Copy(Path.Combine(root, "scripts", "Run-App03Dev.ps1"), script);
+                    await StopUsingScript(script, run.Id, ct);
+                    await hostTask!.WaitAsync(ct);
+                    Ensure(api.HasExited && vite.HasExited, "Stop without build outputs left a host running.");
+                }
+                finally
+                {
+                    File.Delete(script);
+                    isolated.Delete(recursive: false);
+                }
+            }
+            var afterStop = await DevF01Evidence.Capture(run, Tables);
+            Ensure(snapshot.SequenceEqual(afterStop), "Stop without build outputs changed database rows.");
 
             // Simulate a recoverable startup failure without changing either database.
             using (var occupied = new TcpListener(IPAddress.Loopback, App02c1Dev.ApiPort))
@@ -134,6 +153,7 @@ internal static class App03DevSessionEvidence
                 foreach (string tenant in DemoRun.Tenants) await run.Verify(tenant);
             }
             finally { await peer.ExecuteAsync("UPDATE dbo.LocalApp03Session SET RunId=@Id", new { run.Id }); }
+            await VerifyMissingReadyTenant(run, () => RunOperation("Remove"));
             await RunOperation("Remove");
             removed = true;
             Ensure(!await run.Exists("tenant-a") && !await run.Exists("tenant-b") && !App03DevSession.HasManifest(run.Id),
@@ -150,7 +170,8 @@ internal static class App03DevSessionEvidence
                 preservedRows = snapshot, revokedRows = revokedSnapshot,
                 verified = new[] { "Stop and Resume at the same browser origin", "startup failure preserves rows", "old credential rejected",
                     "lost ACK lookup and replay", "revoked read/write/replay", "parent-only termination reaps both hosts",
-                    "active or mismatched removal rejected", "isolated removal" }
+                    "Stop from a standalone script without a checkout or build outputs",
+                    "active, missing, or mismatched removal rejected", "isolated removal" }
             }, new JsonSerializerOptions { WriteIndented = true }), ct);
             Console.WriteLine($"APP-03.1b PASS: {dir}");
 
@@ -163,6 +184,8 @@ internal static class App03DevSessionEvidence
             {
                 if (hostTask is { IsCompleted: false }) await Stop();
                 if (!removed && App03DevSession.HasManifest(run.Id)) await RunOperation("Remove");
+                else if (!removed && await run.Exists("tenant-b"))
+                    await run.Remove(app03Session: true, allowUnbound: true);
             }
             finally
             {
@@ -186,7 +209,7 @@ internal static class App03DevSessionEvidence
 
         async Task Stop()
         {
-            await RunOperation("Stop");
+            await StopUsingScript(Path.Combine(root, "scripts", "Run-App03Dev.ps1"), run.Id, ct);
             if (hostTask is not null) await hostTask;
         }
 
@@ -202,6 +225,68 @@ internal static class App03DevSessionEvidence
             using var response = await Send(host, path, input, ct, token);
             Ensure(response.StatusCode == status, $"{path} expected {(int)status}, actual {(int)response.StatusCode}.");
         }
+    }
+
+    private static async Task StopUsingScript(string script, string runId, CancellationToken ct)
+    {
+        var start = new ProcessStartInfo("pwsh")
+        {
+            WorkingDirectory = Path.GetDirectoryName(script)!, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (string arg in new[] { "-NoProfile", "-File", script, "-Action", "Stop", "-RunId", runId })
+            start.ArgumentList.Add(arg);
+        using var stop = Process.Start(start) ?? throw new InvalidOperationException("Could not start the Stop command.");
+        var output = stop.StandardOutput.ReadToEndAsync(ct);
+        var error = stop.StandardError.ReadToEndAsync(ct);
+        try
+        {
+            await stop.WaitForExitAsync(ct);
+            if (stop.ExitCode != 0)
+                throw new InvalidOperationException($"Stop exited {stop.ExitCode}: {await error}");
+            Console.Write(await output);
+        }
+        finally
+        {
+            if (!stop.HasExited)
+            {
+                stop.Kill(entireProcessTree: true);
+                await stop.WaitForExitAsync();
+            }
+        }
+    }
+
+    private static async Task VerifyMissingReadyTenant(DemoRun run, Func<Task> remove)
+    {
+        const string tenant = "tenant-b";
+        string original = run.Name(tenant);
+        string temporary = new DemoRun(Guid.NewGuid().ToString("N")).Name(tenant);
+        string manifest = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "FmcgDms", "App03Dev", run.Id, "session.json");
+        byte[] before = await File.ReadAllBytesAsync(manifest);
+        var beforeRows = (await DevF01Evidence.Capture(run, Tables)).Where(row => row.Tenant == Tenant).ToArray();
+        await run.Verify(tenant, app03Session: true);
+        await using var master = new SqlConnection(run.Connection());
+        int databaseId = await master.QuerySingleAsync<int>("SELECT DB_ID(@original)", new { original });
+        Ensure(await master.ExecuteScalarAsync<int?>("SELECT DB_ID(@temporary)", new { temporary }) is null,
+            "Temporary scratch name already exists.");
+        await master.ExecuteAsync($"ALTER DATABASE [{original}] MODIFY NAME = [{temporary}];");
+        try
+        {
+            await Reject(remove, "missing tenant-b");
+            await run.Verify(Tenant, app03Session: true);
+            byte[] after = await File.ReadAllBytesAsync(manifest);
+            Ensure(before.SequenceEqual(after), "Missing tenant changed the Ready manifest.");
+        }
+        finally
+        {
+            Ensure(await master.ExecuteScalarAsync<int?>("SELECT DB_ID(@temporary)", new { temporary }) == databaseId
+                && !await run.Exists(tenant), "Cannot restore the verified tenant-b scratch name.");
+            await master.ExecuteAsync($"ALTER DATABASE [{temporary}] MODIFY NAME = [{original}];");
+        }
+        await run.Verify(tenant, app03Session: true);
+        var afterRows = (await DevF01Evidence.Capture(run, Tables)).Where(row => row.Tenant == Tenant).ToArray();
+        Ensure(beforeRows.SequenceEqual(afterRows), "Missing tenant changed tenant-a business rows.");
     }
 
     private static async Task VerifyAbruptExit(string root, string source, string runId, CancellationToken ct)
