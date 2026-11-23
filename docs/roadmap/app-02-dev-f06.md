@@ -12,3 +12,17 @@ Fixture v1 kế thừa SKU R-05, 2 EA, lô RET-ORIGIN và cost 6667 VND. Clock f
 | F06-04 · regression | AR unchanged, lot/QA stages giữ đúng oracle F05. So sánh digest nguồn đã khóa trước/sau và thời điểm ghi từng effect kỳ mới. |
 
 Màn hình `/sales/cost-adjustments`. API và SQL dùng source và command hiện hành trong scratch. Kết quả phạm vi DEV.
+
+## Biên nhận DEV
+
+Ngày 23/11/2026, fixture v1 chạy Chromium và LocalDB synthetic, run `306ff8e6a71244faabbca989d132608a` tại source `16afe6635364cf1c84bed3813d5f7b601d66c7fa`, tree `10c82f39b882856bbed434ab88987c4ea302d750`. Chromium 1/1, .NET Release 351/351. SQL đối chiếu AC-06 khóa nguyên kỳ tháng 11 qua 12 nhóm digest. Giao hàng thử vào tháng 11 đã khóa bị từ chối. Điều chỉnh tháng 12 giữ một đề nghị, một quyết định, cộng 101 VND vào chi phí nguồn và phân bổ 50 VND cho lần hoàn trước. Kho nhận đủ giá vốn 3.334 + 50 + 3.384 = 6.768 VND, diff 0. MAIN 2 EA, quarantine 0, COGS 0 và AR 20.000 VND. Kiểm nhánh kỳ chưa mở, nguồn chéo tenant, maker tự duyệt, release khi đề nghị còn mở và recovery mất ACK.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Locked AC-06 oracle file | `225D7253645F239363CEC143CA607BF564AFD030CA7E7BFAEEBBEF2A9A63DB5F` |
+| Browser fixture | `723BDE5F4AB84027B0CA524434A74894A34939D62EB16D2D4C398C2150C6DC35` |
+| JUnit | `4C8F2218DE2BEE61B30CDEF3AE490CC66012D38A40C418C51F5BF1DFD638226C` |
+| SQL result | `C3EB491811151BADB155FCAF02FE356A35BDBBCC5EFE118C084AA4DC3596A236` |
+| API DLL | `285C7703CF5DBCB89558FC38A32FBF62213FC1D1AB764FDFF27C3F3BE63A33AA` |
+
+Tái chạy `./scripts/Run-App02C1.ps1 -Increment DevF06 -Verify`. SQL tại `TestResults/dev-f06/<run>/sql-result.json`; launcher tạo scratch do nonce sở hữu. Case hàng đã di chuyển sau release, nhiều lần release trước khi điều chỉnh và điều chỉnh kế toán thật chưa được chấp nhận trong lượt này.
