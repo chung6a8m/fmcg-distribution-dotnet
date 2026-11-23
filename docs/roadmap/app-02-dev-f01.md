@@ -10,3 +10,16 @@ Giữ UI Sales A tại `/sales`, dữ liệu ở `dbo.F01Visit`, C.1 GET/POST `/
 - F01-02 API/SQL: Customer không Outlet hoàn tất NOT_MET với lý do Closed, quan sát null. Cạnh tranh cùng ID/payload lưu một dòng. Thử sai lý do, sai outcome và Outlet không khớp. Tenant B đọc danh sách riêng rỗng và ghi vào Customer A bị từ chối. Actor warehouse và actor Sales bị thu hồi không được đọc hoặc ghi. Gỡ phân công với Sales grant vẫn còn thì danh sách rỗng, recovery/replay của lệnh đã hoàn tất bị từ chối.
 - F01-03 Browser offline: nút hoàn tất tắt, số POST không tăng, bật lại không tự gửi. Không phát sinh order/sale/AR/stock. So sánh row image SQL trước và sau trên AOrder, SaleDelivery, ReceivableOpenItem, PhysicalStockMovement, PhysicalStockBalance và LedgerEffect.
 - Fixture v1 được ghim bằng Playwright spec và ca tích hợp SQL. Dữ liệu visit không tiền, không lượng, mốc UTC trước/sau theo run ID. Bộ expected nằm ở đặc tả này và các assertion trong test. So sánh chênh lệch số dòng và row image trên scratch giữa hai mốc, lấy actor qua token do server xác thực.
+
+## Chạy tương tác và tái tạo
+
+Cài dependency bằng `npm --prefix web ci`. Chạy `./scripts/Run-App02C1.ps1 -Increment DevF01` rồi mở URL `/sales` được in, dán mã DEV từ clipboard và chọn **Viếng thăm**. Fixture tạo Customer C2-FIXTURE và phân công cho actor DEV. Có thể thêm Outlet thử ở mục Khách hàng hoặc để trống. Ctrl+C để thu hồi DB do lượt chạy sở hữu.
+
+Kiểm chứng với `./scripts/Run-App02C1.ps1 -Increment DevF01 -Verify` và `dotnet test --solution FmcgDms.slnx -c Release -- --filter-class '*App02DevF01Tests' --report-trx`. Browser plugin có skill riêng không có trong phiên này. Dùng Chromium Playwright đã ghim của repo.
+
+## Biên bản DEV
+
+- F01-01, F01-03 · AC-17 · PASS. Windows LocalDB và Chromium. Run `0eca9c10168d4a96ac0b830b0a05e8c8` từ commit `36411b18c073d1ea7d1c97c6921f30884a271af3`, tree `6b354a668f551bacaf428f8557faefee7cefe962`. V1 Playwright SHA-256 `FA932C327318EF028FF0C5F4059ABB76C1BD5F79E306F27A383E8DB3741F6C66`. Mất ACK sau POST 200, sau reload tra cứu bằng mã cũ và hiển thị lại cùng visit. Offline không có POST. Một lượt browser đạt gồm desktop và kiểm tra bố cục 390 px.
+- SQL trước/sau cùng run. Expected 1/0 visit ở A/B và 12 row image giữ nguyên. Actual 1/0, tenant-a / c1-dev-sales / C2-FIXTURE / Outlet Visit DEV, lý do và quan sát đúng. Diff 0 ở sáu bảng mỗi tenant. Biên nhận chứa VisitId, CommandId, UTC, số dòng và hash ở hai mốc.
+- Artifact tái tạo bằng lệnh Verify. SQL ở `TestResults/dev-f01/<run-id>/sql-result.json`, JUnit và hai ảnh ở `web/test-results-app02c5/<run-id>/`. SHA-256 SQL `C684F35552E5B4621070638400B15E33D63A0A9878AACEBE60A04D98560D8B0C`. DLL SHA-256 `D0CF1DA8E16549A5637F6A91842DF1CC63CACBD4E18930E6CA65E7064A88ACA7`. Workflow APP-00A giữ cả hai nhóm artifact.
+- Ca red ban đầu trả 404 vì thiếu API và browser thiếu nút Viếng thăm. Review phát hiện rủi ro mốc migration D.3/D.4 và phạm vi phân công. Bản triển khai dùng migration profile riêng, quyền Sales và liên kết phân công hiện hành. Hoàn tất visit là bất biến. Bằng chứng EV-13 thực tế và ca thiết bị vật lý vẫn chờ theo hồ sơ APP-02E.
