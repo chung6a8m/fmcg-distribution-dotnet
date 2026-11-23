@@ -100,7 +100,7 @@ The Owner fixed the C/P envelope, identity, state/ACK rules, retry/case/retentio
 | Increment | AC / EV | Đầu ra hoặc phụ thuộc |
 | --- | --- | --- |
 | [DEV-F01](app-02-dev-f01.md) | AC-17 / EV-13 | Visit online không đơn, nguồn và ghi nhận quan sát |
-| DEV-F02 | AC-20 / EV-06 | Tạm ứng và hoàn ứng qua phê duyệt, độc lập với nhóm kho/giá |
+| [DEV-F02](app-02-dev-f02.md) | AC-20 / EV-06 | Tạm ứng và hoàn ứng qua phê duyệt, độc lập với nhóm kho/giá |
 | [DEV-F03](app-02-dev-f03.md) | AC-05 / EV-04/05 | Đơn vị chuẩn, lô/hạn, FEFO, cách ly |
 | [DEV-F04](app-02-dev-f04.md) | AC-19 / EV-05/06 | Snapshot giá/discount/thuế và residual |
 | [DEV-F05](app-02-dev-f05.md) | AC-05/06 / EV-05/07 | Trả hàng có nguồn, QA/held, giá vốn gốc. Dùng snapshot F03–04 |

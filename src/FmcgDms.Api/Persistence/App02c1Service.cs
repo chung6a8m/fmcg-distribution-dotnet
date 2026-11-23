@@ -95,7 +95,7 @@ internal sealed partial class App02c1Service(TenantConnections connections)
 
     public Task<C1Outcome?> Outcome(ClaimsPrincipal principal, Guid commandId, CancellationToken ct) =>
         InSession(principal, async s => await s.Outcome(commandId) is { Kind: not VisitCommand } old
-            ? old.ToOutcome() : null, ct);
+            && !old.Kind.StartsWith(AdvancePrefix, StringComparison.Ordinal) ? old.ToOutcome() : null, ct);
 
     public Task<C1Identity> Identity(ClaimsPrincipal principal, CancellationToken ct) =>
         InSession(principal, async s => new C1Identity(s.Tenant, s.Actor, await s.Db.QuerySingleAsync<string>(
@@ -237,7 +237,8 @@ internal sealed partial class App02c1Service(TenantConnections connections)
         }, ct);
 
     private Task<C1Outcome> Run<T>(ClaimsPrincipal principal, T input, string kind, Func<Session, Task<Change>> decide,
-        CancellationToken ct, Func<Session, Task<bool>>? canReplay = null) where T : IC1Command =>
+        CancellationToken ct, Func<Session, Task<bool>>? canReplay = null,
+        string role = "sales") where T : IC1Command =>
         InSession(principal, async s =>
         {
             if (input.CommandId == Guid.Empty) return new C1Outcome(400, "COMMAND_ID_INVALID");
@@ -268,17 +269,26 @@ internal sealed partial class App02c1Service(TenantConnections connections)
             }));
             if (change.Apply is not null) await change.Apply();
             return result;
-        }, ct);
+        }, ct, role);
 
-    private async Task<T> InSession<T>(ClaimsPrincipal principal, Func<Session, Task<T>> work, CancellationToken ct)
+    private Task<T> InSession<T>(ClaimsPrincipal principal, Func<Session, Task<T>> work, CancellationToken ct,
+        string role = "sales")
     {
-        if (!principal.HasClaim("synthetic_role", "sales"))
-            throw new UnauthorizedAccessException("Sales role required.");
+        if (!principal.HasClaim("synthetic_role", role))
+            throw new UnauthorizedAccessException("Current synthetic role required.");
+        return InBoundSession(principal, async s =>
+        {
+            await App02a3Sql.RequireRole(s.Db, s.Tx, s.Tenant, s.Actor, role, ct);
+            return await work(s);
+        }, ct);
+    }
+
+    private async Task<T> InBoundSession<T>(ClaimsPrincipal principal, Func<Session, Task<T>> work, CancellationToken ct)
+    {
         string tenant = App02a3Sql.Tenant(principal);
         string actor = App02a3Sql.Actor(principal);
         await using var db = await connections.OpenApp02c1Async(principal, ct);
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        await App02a3Sql.RequireRole(db, tx, tenant, actor, "sales", ct);
         var result = await work(new Session(db, tx, tenant, actor, ct));
         await tx.CommitAsync(ct);
         return result;

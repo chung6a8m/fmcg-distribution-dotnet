@@ -819,6 +819,9 @@ jobs:
       - name: DEV-F01 AC-17 visit browser, API and SQL side-effect comparison
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment DevF01 -Verify
+      - name: DEV-F02 AC-20 employee advance and cashier recovery through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF02 -Verify
       - name: DEV-F03 AC-05 conversion, FEFO and stock issue through Chromium and SQL
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment DevF03 -Verify
@@ -862,6 +865,7 @@ jobs:
             web/test-results-app02c3/
             web/test-results-app02c4/
             web/test-results-app02c5/
+            web/test-results-dev-f02/
             web/test-results-app02c6/
             web/test-results-app02d1/
             web/test-results-app02d2/

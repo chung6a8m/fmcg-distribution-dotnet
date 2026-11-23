@@ -81,8 +81,8 @@ public sealed class SqlScratchFixture : IAsyncLifetime
 
     public TestApiFactory CreateFactory(string? tenantAOverride = null,
         bool syntheticEnabled = true, string environment = "IntegrationTest",
-        bool c1Enabled = true, string? c1Nonce = null, bool c2Enabled = false, bool dedicatedC2 = false, bool c3Enabled = false, bool c4Enabled = false, bool visits = false) =>
-        new(this, tenantAOverride, syntheticEnabled, environment, c1Enabled, c1Nonce, c2Enabled, dedicatedC2, c3Enabled, c4Enabled, visits);
+        bool c1Enabled = true, string? c1Nonce = null, bool c2Enabled = false, bool dedicatedC2 = false, bool c3Enabled = false, bool c4Enabled = false, bool visits = false, bool advances = false) =>
+        new(this, tenantAOverride, syntheticEnabled, environment, c1Enabled, c1Nonce, c2Enabled, dedicatedC2, c3Enabled, c4Enabled, visits, advances);
 
     public static string IssueSyntheticToken(string tenantId,
         string actor = "synthetic-actor", string[]? roles = null, string? subject = null, int expiresInSeconds = 900)
@@ -117,7 +117,7 @@ public sealed class SqlScratchFixture : IAsyncLifetime
 public sealed class TestApiFactory(
     SqlScratchFixture fixture, string? tenantAOverride = null,
     bool syntheticEnabled = true, string environment = "IntegrationTest",
-    bool c1Enabled = true, string? c1Nonce = null, bool c2Enabled = false, bool dedicatedC2 = false, bool c3Enabled = false, bool c4Enabled = false, bool visits = false) : WebApplicationFactory<Program>
+    bool c1Enabled = true, string? c1Nonce = null, bool c2Enabled = false, bool dedicatedC2 = false, bool c3Enabled = false, bool c4Enabled = false, bool visits = false, bool advances = false) : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -131,6 +131,7 @@ public sealed class TestApiFactory(
                 ["SyntheticAuth:Audience"] = "fmcg-synthetic-app00",
                 ["App02C1:Enabled"] = c1Enabled ? "true" : "false",
                 ["DevF01:Enabled"] = visits.ToString(),
+                ["DevF02:Enabled"] = advances.ToString(),
                 ["App02C1:Nonce"] = c1Nonce ?? fixture.Nonce,
                 ["App02C4:Enabled"] = c4Enabled ? "true" : "false",
                 ["App02C3:Enabled"] = c3Enabled ? "true" : "false",

@@ -38,6 +38,7 @@ internal static class App02c1Dev
         Console.CancelKeyPress += cancel;
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
         bool visit = increment == "DevF01";
+        bool advance = increment == "DevF02";
         bool fefo = increment == "DevF03";
         bool pricing = increment == "DevF04";
         bool returns = increment == "DevF05";
@@ -56,7 +57,7 @@ internal static class App02c1Dev
         bool c4 = c5 || fefo || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
-        string feature = refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = advance ? "DEV-F02" : refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -65,6 +66,8 @@ internal static class App02c1Dev
         d1Run?.VerifyDocuments();
         string tokenA = d1Run?.Credential("tenant-a", "sales") ?? Token(key, "tenant-a", roles);
         string tokenB = d1Run?.Credential("tenant-b", "sales") ?? Token(key, "tenant-b", roles);
+        string? financeToken = advance ? Token(key, "tenant-a", ["finance"], "f02-finance") : null;
+        string? cashierToken = advance ? Token(key, "tenant-a", ["cashier"], "f02-cashier") : null;
         Process? api = null;
         Process? viteProcess = null;
         Process? browser = null;
@@ -121,6 +124,16 @@ internal static class App02c1Dev
                         INSERT dbo.F01CustomerScope(TenantId,CustomerId,ActorId)
                         SELECT TenantId,Id,@Actor FROM dbo.Customer WHERE TenantId=@tenant AND Code=N'C2-FIXTURE'
                         """, new { tenant, Actor });
+                }
+                if (advance)
+                {
+                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF02(run.Connection(tenant), tenant, run.Id,
+                        Microsoft.Extensions.Logging.LogLevel.Warning);
+                    await db.ExecuteAsync("""
+                        INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                        VALUES(@tenant,N'f02-finance',N'finance',1,N'f02-dev-launcher'),
+                              (@tenant,N'f02-cashier',N'cashier',1,N'f02-dev-launcher')
+                        """, new { tenant });
                 }
                 if (fefo)
                 {
@@ -194,6 +207,7 @@ internal static class App02c1Dev
             apiStart.Environment["App02Worker__Enabled"] = "false";
             apiStart.Environment["App02C1__Enabled"] = "true";
             apiStart.Environment["DevF01__Enabled"] = visit ? "true" : "false";
+            apiStart.Environment["DevF02__Enabled"] = advance ? "true" : "false";
             apiStart.Environment["DevF03__Enabled"] = fefo || returnLane ? "true" : "false";
             apiStart.Environment["DevF04__Enabled"] = pricing || returnLane ? "true" : "false";
             apiStart.Environment["DevF05__Enabled"] = returnLane ? "true" : "false";
@@ -263,8 +277,27 @@ internal static class App02c1Dev
 
             if (mode == "Interactive")
             {
-                await CopyCredential(tokenA);
-                clipboardCredential = tokenA;
+                string initialCredential = advance ? financeToken! : tokenA;
+                await CopyCredential(initialCredential);
+                clipboardCredential = initialCredential;
+                if (advance)
+                {
+                    Console.WriteLine($"Open {webUrl}/sales/advances. Finance DEV credential is in the clipboard.");
+                    Console.WriteLine("Enter 1 for Finance, 2 for Employee or 3 for Cashier to replace the clipboard. Ctrl+C stops DEV.");
+                    while (!Console.IsInputRedirected && !lifetime.IsCancellationRequested)
+                    {
+                        string? slot = await Task.Run(Console.ReadLine).WaitAsync(lifetime.Token);
+                        string? credential = slot switch { "1" => financeToken, "2" => tokenA, "3" => cashierToken, _ => null };
+                        if (slot is null) return;
+                        if (credential is not null)
+                        {
+                            await CopyCredential(credential);
+                            clipboardCredential = credential;
+                            Console.WriteLine($"Copied DEV credential for role {slot}.");
+                        }
+                    }
+                    return;
+                }
                 Console.WriteLine($"Open {webUrl}/sales{(fefo || visit || c5 ? "" : c4 ? "/delivery" : c3 ? "/load" : c2 ? "/orders" : "/customers")}. Paste the short-lived tenant-a credential from the clipboard.");
                 Console.WriteLine("Press Ctrl+C to stop the session and remove its owned databases.");
                 if (returnCredentials is not null)
@@ -310,12 +343,17 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                refunds ? "playwright.dev-f08.config.ts" : gifts ? "playwright.dev-f07.config.ts" : adjustments ? "playwright.dev-f06.config.ts" : returns ? "playwright.dev-f05.config.ts" : pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                advance ? "playwright.dev-f02.config.ts" : refunds ? "playwright.dev-f08.config.ts" : gifts ? "playwright.dev-f07.config.ts" : adjustments ? "playwright.dev-f06.config.ts" : returns ? "playwright.dev-f05.config.ts" : pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_A"] = tokenA;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_B"] = tokenB;
+            if (advance)
+            {
+                browserStart.Environment["DEV_F02_FINANCE"] = financeToken!;
+                browserStart.Environment["DEV_F02_CASHIER"] = cashierToken!;
+            }
             if (fefoQuarantineId is Guid quarantine) browserStart.Environment["DEV_F03_QA"] = quarantine.ToString("D");
             if (pricing) browserStart.Environment["DEV_F04_CHECKPOINTS"] = DevF04Evidence.CheckpointDirectory(root, run);
             if (returnCredentials is not null && returnQuarantineId is Guid returnQuarantine)
@@ -417,6 +455,7 @@ internal static class App02c1Dev
                 return;
             }
             var visitBefore = visit ? await DevF01Evidence.Capture(run) : null;
+            var advanceBefore = advance ? await DevF02Evidence.Capture(run) : null;
             var fefoBefore = fefo ? await DevF03Evidence.CaptureStock(run, lifetime.Token) : null;
             d1Run?.ConfigureBrowser(browserStart);
             browser = Start(browserStart);
@@ -469,6 +508,11 @@ internal static class App02c1Dev
                 : null;
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"{feature} browser verification exited {browser.ExitCode}.");
+            if (advanceBefore is not null)
+            {
+                await DevF02Evidence.Verify(run, root, source, apiSha256, advanceBefore);
+                return;
+            }
             if (gifts)
             {
                 await DevF07Evidence.Verify(run, root, source, apiSha256, giftSnapshots, lifetime.Token);
