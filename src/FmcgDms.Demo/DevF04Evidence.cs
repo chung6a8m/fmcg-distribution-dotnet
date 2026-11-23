@@ -17,10 +17,10 @@ internal static class DevF04Evidence
     private sealed record PriceRow(string Sku, decimal Base, decimal Discount, decimal Net, decimal Tax, decimal Gross);
     private sealed record PriceLine(string Sku, Guid OrderLineId, Guid PlanId, Guid QuotePolicyId, Guid FrozenPolicyId,
         Guid ConfirmSourceId, string Mode, string ResidualProfile,
-        string Currency, int Version, int PolicyVersion, decimal Ordered, decimal Base, decimal Discount,
-        decimal Net, decimal Tax, decimal Gross, decimal GrossSnapshot, decimal QuoteUnitPrice, decimal TaxRate);
+        string Currency, int Version, int PolicyVersion, decimal Ordered, long Base, long Discount,
+        long Net, long Tax, long Gross, decimal GrossSnapshot, decimal QuoteUnitPrice, decimal TaxRate);
     private sealed record Delivery(Guid DeliveryId, Guid OrderLineId, string Sku, decimal Quantity, string Currency,
-        decimal Net, decimal Tax, decimal Gross, decimal Payable, decimal Outstanding, decimal Cost, bool InvoiceEligible);
+        long Net, long Tax, long Gross, decimal Payable, decimal Outstanding, decimal Cost, bool InvoiceEligible);
 
     internal static string CheckpointDirectory(string root, DemoRun run) =>
         Path.Combine(root, "TestResults", "dev-f04", run.Id, "checkpoints");
@@ -199,8 +199,8 @@ internal static class DevF04Evidence
                 """, cancellationToken: ct))).ToArray();
             PriceRow[] actualRows = rows.Select(row => new PriceRow(row.Sku, row.Base, row.Discount, row.Net, row.Tax, row.Gross))
                 .ToArray();
-            decimal[] actualTotals = [rows.Sum(r => r.Net), rows.Sum(r => r.Tax), rows.Sum(r => r.Gross)];
-            decimal actualDiscount = rows.Sum(row => row.Discount);
+            decimal[] actualTotals = [rows.Sum(r => (decimal)r.Net), rows.Sum(r => (decimal)r.Tax), rows.Sum(r => (decimal)r.Gross)];
+            decimal actualDiscount = rows.Sum(row => (decimal)row.Discount);
             decimal[] totalDiff = actualTotals.Zip(expectedTotals, (actual, expected) => actual - expected).ToArray();
             var rowDiff = expectedRows.Zip(actualRows, (e, a) => new
             {
