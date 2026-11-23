@@ -75,20 +75,18 @@ internal sealed class App02d4DevAccounting(
     {
         await clock(From.AddMinutes(40));
         await Transfer(B20, "post", "premature", status: HttpStatusCode.Conflict);
-        var allReceipts = await Task.WhenAll(deliveryIds.SelectMany((delivery, ordinal) => new[]
-        {
-            Transfer(delivery, "receive", $"recv-{ordinal}-a"),
-            Transfer(delivery, "receive", $"recv-{ordinal}-b")
-        }));
+        var allReceipts = await ConcurrentTransfers("receive");
         VerifyDuplicates(allReceipts, "RECEIVED");
         await Transfer(B20, "receive", "changed-receipt", hash: new string('0', 64), status: HttpStatusCode.Conflict);
         await clock(From.AddMinutes(45));
-        var allPostings = await Task.WhenAll(deliveryIds.SelectMany((delivery, ordinal) => new[]
-        {
-            Transfer(delivery, "post", $"post-{ordinal}-a"),
-            Transfer(delivery, "post", $"post-{ordinal}-b")
-        }));
+        var allPostings = await ConcurrentTransfers("post", loseFirstAcknowledgement: true);
         VerifyDuplicates(allPostings, "POSTED");
+        Expect(await Count("""
+            SELECT COUNT(*) FROM d4accounting.Journal lost
+            JOIN d4accounting.Journal replay ON replay.SourceLineId=lost.SourceLineId AND replay.TransportId=lost.TransportId
+                AND replay.Operation=lost.Operation AND replay.Outcome='REPLAY' AND replay.Id>lost.Id
+            WHERE lost.Operation='POST' AND lost.TransportId='post-0-a' AND lost.Outcome='COMMITTED_NO_ACK'
+            """) == 1, "D4-12 journals the lost acknowledgement followed by one replay on the original source and transport");
         await Transfer(B20, "post", "changed-post-hash", hash: new string('0', 64), status: HttpStatusCode.Conflict);
         await Transfer(B20, "post", "changed-post-profile", scenario: "wrong-mapping", status: HttpStatusCode.Conflict);
         Expect(await Count("SELECT COUNT(*) FROM d4accounting.Receipt") == 3, "Exactly 3 receipts after replays");
@@ -99,6 +97,17 @@ internal sealed class App02d4DevAccounting(
             WHERE p.Kind='BASE' AND p.Mapping='DELIVERY' AND p.Period=r.Period
                 AND p.Quantity=r.Quantity AND p.Gross=r.Gross AND p.Ar=r.Ar AND p.Cost=r.Cost
             """) == 3, "Posting is one to one with source receipt");
+        for (int index = 0; index < deliveryIds.Length; index++)
+        {
+            var durable = await oracle.QuerySingleAsync<(Guid ReceiptId, Guid PostingId)>(new CommandDefinition("""
+                SELECT r.Id AS ReceiptId,p.Id AS PostingId FROM d4accounting.Receipt r
+                JOIN d4accounting.Posting p ON p.ReceiptId=r.Id AND p.SourceLineId=r.SourceLineId AND p.Kind='BASE'
+                WHERE r.DeliveryId=@Id
+                """, new { Id = deliveryIds[index] }, cancellationToken: ct));
+            Expect(allReceipts[index * 2].GetProperty("id").GetGuid() == durable.ReceiptId &&
+                allPostings[index * 2].GetProperty("id").GetGuid() == durable.PostingId,
+                $"Both acknowledgements match the stored receipt and posting for delivery {index}");
+        }
         Expect(await Count("SELECT COUNT(*) FROM d4app.AccountingReport") == 0, "POSTED precedes reconciliation");
     }
 
@@ -275,16 +284,75 @@ internal sealed class App02d4DevAccounting(
         string? hash = null, HttpStatusCode status = HttpStatusCode.OK) =>
         Call("accountant", $"/accounting/{id}/{stage}", new { transportId = transport, fault, scenario, expectedHash = hash }, status);
 
-    private async Task<JsonElement> Call(string role, string path, object? body, HttpStatusCode expected = HttpStatusCode.OK)
+    private async Task<JsonElement[]> ConcurrentTransfers(string stage, bool loseFirstAcknowledgement = false)
+    {
+        var attempts = deliveryIds.SelectMany((id, index) => new[] { "a", "b" }
+            .Select(suffix => (Path: $"/accounting/{id}/{stage}", Transport: $"{stage}-{index}-{suffix}"))).ToArray();
+        var responses = await Task.WhenAll(attempts.Select((attempt, index) => Send("accountant", attempt.Path,
+            new { transportId = attempt.Transport, fault = loseFirstAcknowledgement && index == 0 ? "after-commit" : null })));
+        var acknowledgements = new JsonElement[responses.Length];
+        for (int index = 0; index < responses.Length; index++)
+        {
+            var attempt = attempts[index];
+            var response = responses[index];
+            bool unknown = response.Status == HttpStatusCode.ServiceUnavailable &&
+                Parse(response.Body) is { ValueKind: JsonValueKind.Object } error &&
+                error.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String &&
+                status.GetString() == "ACCOUNTING_ACK_UNKNOWN";
+            Guid? priorPosting = null;
+            if (loseFirstAcknowledgement && index == 0)
+            {
+                Expect(unknown, "D4-12 receives ACCOUNTING_ACK_UNKNOWN after the injected lost acknowledgement");
+                priorPosting = await oracle.ExecuteScalarAsync<Guid>(new CommandDefinition("""
+                    SELECT p.Id FROM d4accounting.Posting p JOIN d4accounting.Receipt r ON r.Id=p.ReceiptId
+                    JOIN d4accounting.Journal j ON j.SourceLineId=p.SourceLineId
+                    WHERE r.DeliveryId=@Id AND p.Kind='BASE' AND j.Operation='POST'
+                        AND j.TransportId=@Transport AND j.Outcome='COMMITTED_NO_ACK'
+                    """, new { Id = deliveryIds[0], attempt.Transport }, cancellationToken: ct));
+                Expect(priorPosting != Guid.Empty, "Injected loss leaves a durable posting before replay");
+            }
+
+            if (unknown)
+            {
+                // The first wave has settled. Replay the same command once without the DEV fault.
+                var replay = await Send("accountant", attempt.Path, new { transportId = attempt.Transport });
+                checks.Add(new { step = "accounting-ack-unknown", stage, transport = attempt.Transport,
+                    initialHttp = (int)response.Status, replayHttp = (int)replay.Status });
+                acknowledgements[index] = ReadResponse(attempt.Path, replay, HttpStatusCode.OK);
+                if (priorPosting.HasValue)
+                    Expect(acknowledgements[index].GetProperty("id").GetGuid() == priorPosting,
+                        "Replay returns the posting ID observed before replay");
+            }
+            else
+            {
+                acknowledgements[index] = ReadResponse(attempt.Path, response, HttpStatusCode.OK);
+            }
+        }
+        return acknowledgements;
+    }
+
+    private async Task<JsonElement> Call(string role, string path, object? body, HttpStatusCode expected = HttpStatusCode.OK) =>
+        ReadResponse(path, await Send(role, path, body), expected);
+
+    private async Task<(HttpStatusCode Status, string Body)> Send(string role, string path, object? body)
     {
         using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post,
             "/api/synthetic/app02d4" + path);
         if (body is not null) request.Content = JsonContent.Create(body);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens[role]);
         using var response = await client.SendAsync(request, ct);
-        string json = await response.Content.ReadAsStringAsync(ct);
-        if (response.StatusCode != expected)
-            throw new InvalidOperationException($"{path}: HTTP {(int)response.StatusCode} != {(int)expected} ({json})");
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(ct));
+    }
+
+    private static JsonElement ReadResponse(string path, (HttpStatusCode Status, string Body) response, HttpStatusCode expected)
+    {
+        if (response.Status != expected)
+            throw new InvalidOperationException($"{path}: HTTP {(int)response.Status} != {(int)expected} ({response.Body})");
+        return Parse(response.Body);
+    }
+
+    private static JsonElement Parse(string json)
+    {
         if (string.IsNullOrWhiteSpace(json)) return default;
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();

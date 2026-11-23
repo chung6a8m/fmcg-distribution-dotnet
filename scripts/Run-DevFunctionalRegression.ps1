@@ -21,8 +21,8 @@ $functional = @(
     @{ Name = 'DEV-F04'; Profile = 'DevF04'; Folder = 'dev-f04'; Cases = 'F04-01 through F04-04 within fixture'; AC = 'AC-19 pricing' }
     @{ Name = 'DEV-F05'; Profile = 'DevF05'; Folder = 'dev-f05'; Cases = 'F05-01 through F05-04'; AC = 'AC-05/06' }
     @{ Name = 'DEV-F06'; Profile = 'DevF06'; Folder = 'dev-f06'; Cases = 'F06-01 through F06-04'; AC = 'AC-06' }
-    @{ Name = 'DEV-F07'; Profile = 'DevF07'; Folder = 'dev-f07'; Cases = 'F07-01 through F07-04'; AC = 'AC-07' }
-    @{ Name = 'DEV-F08'; Profile = 'DevF08'; Folder = 'dev-f08'; Cases = 'F08-01 through F08-04'; AC = 'AC-19 returns' }
+    @{ Name = 'DEV-F07'; Profile = 'DevF07'; Folder = 'dev-f07'; Cases = 'F07-01 through F07-05'; AC = 'AC-07' }
+    @{ Name = 'DEV-F08'; Profile = 'DevF08'; Folder = 'dev-f08'; Cases = 'F08-01 through F08-05'; AC = 'AC-19 returns' }
 )
 $foundation = @(
     @{ Name = 'C.6'; Profile = 'App02C6'; Folder = 'app02c6'; File = 'sql-review.json'; Count = 15 }
