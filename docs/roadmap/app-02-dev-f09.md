@@ -22,3 +22,7 @@ Kết quả nằm ở `TestResults/dev-f09/<run>/run.json`; từng bước ghi l
 ## D4-12 · Phục hồi khi chưa biết kết quả ACK
 
 Giữ đợt gửi cạnh tranh trên cả receive và post. Khi tất cả phản hồi của đợt đầu đã về, bộ kiểm chứng chỉ phát lại một lần lệnh nhận HTTP 503 với mã `ACCOUNTING_ACK_UNKNOWN`, giữ đúng nguồn, nội dung nghiệp vụ và mã transport. Fixture chủ động bỏ ACK của một posting. SQL phải thấy ID bền vững trước replay, journal theo thứ tự mất ACK rồi phát lại, và cả hai ACK của từng nguồn phải trùng ID receipt/posting trong SQL. Oracle 3 receipt và 3 posting giữ nguyên.
+
+## Mốc ghi nhận của nguồn giao B trong fixture D.4
+
+Khi chạy sau giờ cutoff của fixture, ảnh đối soát tại `asOf` loại B20 vì `RecordedAtUtc` dùng đồng hồ máy, trong khi `OccurredAtUtc` dùng giờ nghiệp vụ của fixture. Ghi `RecordedAtUtc` bằng đồng hồ đã được bảo vệ của session SQL, cùng cơ chế nguồn giao A. Lượt D4-01 kiểm cả hai mốc của ba nguồn đồng bộ theo fixture. Ngoài session có clock được bảo vệ, biểu thức dùng giờ UTC của SQL Server. Hợp đồng cutoff và bộ expected-results D.4 giữ nguyên.

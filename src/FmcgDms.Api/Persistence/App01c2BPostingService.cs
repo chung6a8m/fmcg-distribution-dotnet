@@ -513,11 +513,11 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         // All writes below are covered by the SAME explicit Serializable tx.
         Guid sourceId = Guid.NewGuid(), sourceLine = Guid.NewGuid();
         Guid deliveryId = Guid.NewGuid(), itemId = Guid.NewGuid(), receiptId = Guid.NewGuid();
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
-                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc)
+                SourceNumber,ActorId,CustomerId,TripId,OccurredAtUtc,RecordedAtUtc)
             VALUES(@Id,@Tenant,@Command,N'B_SALE_DELIVERY',@Number,@Actor,
-                @Customer,@Trip,COALESCE(@Now,SYSUTCDATETIME()));
+                @Customer,@Trip,COALESCE(@Now,SYSUTCDATETIME()),{App02c6Clock.SqlUtcNow});
             INSERT dbo.BusinessSourceLine(Id,TenantId,BusinessSourceId,LineNumber,
                 SkuId,BaseQuantity,Amount)
             VALUES(@Line,@Tenant,@Id,1,@Sku,@Qty,@Payable);
