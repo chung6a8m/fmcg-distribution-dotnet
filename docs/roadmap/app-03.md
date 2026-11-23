@@ -50,11 +50,11 @@ Các mã APP-04 dưới đây là đề xuất trong trao đổi trước; nay c
 
 ## 4. Các increment và phụ thuộc
 
-Mỗi hàng là một PR triển khai độc lập có thay đổi thực chất và bằng chứng tương ứng. Tại lần ghi roadmap này, **toàn bộ implementation APP-03 đều `NOT_STARTED`**; bảng không xác nhận tính năng đã chạy.
+Mỗi hàng là một increment triển khai độc lập có thay đổi thực chất và bằng chứng tương ứng. Bảng ghi trạng thái theo bằng chứng ở từng increment.
 
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
-| APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [IMPLEMENTED](app-03-1a-runtime-schema.md) |
+| APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [DEV_VERIFIED_LOCAL](app-03-1a-runtime-schema.md#kết-quả-local-ngày-23112026) |
 | APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | NOT_STARTED |
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | NOT_STARTED |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | NOT_STARTED |
@@ -77,10 +77,10 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Hoàn tất:**
 
-- [ ] Chạy được visit không đơn, đơn A có giá/lô và hồ sơ trả gắn delivery tạo thật trên cùng tenant/database; visit giữ nguyên đơn, AR và tồn.
-- [ ] Migration tạo đủ schema của tổ hợp; đọc được nguồn đã tạo trước thay đổi schema trong phạm vi hỗ trợ. Cấu hình thiếu phụ thuộc hoặc tổ hợp chưa hỗ trợ bị từ chối rõ ràng.
-- [ ] Có kiểm chứng tenant đối chứng, quyền hiện hành và một tương tác mới giữa các nhóm chức năng. Ghi cấu hình/source thực chạy cùng kết quả.
-- [ ] Giữ các profile/runner nghiệm thu cũ chạy đúng phạm vi. Ghép A/B/Mixed và worker nằm ở increment cần chúng; không phải điều kiện hoàn tất .1a.
+- [x] Chạy được visit không đơn, đơn A có giá/lô và hồ sơ trả gắn delivery tạo thật trên cùng tenant/database; visit giữ nguyên đơn, AR và tồn.
+- [x] Migration tạo đủ schema của tổ hợp; đọc được nguồn đã tạo trước thay đổi schema trong phạm vi hỗ trợ. Cấu hình thiếu phụ thuộc hoặc tổ hợp chưa hỗ trợ bị từ chối rõ ràng.
+- [x] Có kiểm chứng tenant đối chứng, quyền hiện hành và một tương tác mới giữa các nhóm chức năng. Ghi cấu hình/source thực chạy cùng kết quả.
+- [x] Giữ các profile/runner nghiệm thu cũ chạy đúng phạm vi. Ghép A/B/Mixed và worker nằm ở increment cần chúng; không phải điều kiện hoàn tất .1a.
 
 ### APP-03.1b — Phiên DEV dùng lại được
 
@@ -215,7 +215,7 @@ pwsh -NoProfile -File ./scripts/Run-App02C1.ps1 -Increment DevF05 -Verify
 pwsh -NoProfile -File ./scripts/Run-DevFunctionalRegression.ps1 -Suite All
 ```
 
-Hai lệnh DevF05 là profile riêng hiện có; không phải launcher persistent APP-03. Runner/lệnh APP-03 phải được bổ sung và ghi cách dùng thực tế trong .1a/.1b. Không ghi một lệnh chưa tồn tại là đã chạy thành công.
+Hai lệnh DevF05 giữ profile riêng. [Launcher App03A1](app-03-1a-runtime-schema.md) chạy profile tích hợp trên scratch theo run ID. Vòng đời phiên giữ dữ liệu thuộc .1b.
 
 ## 7. Phần nghiệp vụ còn lại và điều kiện đưa vào phạm vi
 

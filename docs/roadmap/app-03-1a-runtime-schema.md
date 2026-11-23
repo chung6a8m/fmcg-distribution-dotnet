@@ -35,3 +35,19 @@ pwsh -NoProfile -File ./scripts/Run-App02C1.ps1 -Increment App03A1 -Verify
 - API phải từ chối khởi động khi thiếu schema v1, tắt F04 hoặc bật F02 trong profile v1.
 
 SQL đối chiếu nằm ở `TestResults/app03-1a/<run-id>/sql-review.json`. JUnit và ảnh Chromium nằm ở `web/test-results-app02c5/<run-id>/app03-1a/`. Phạm vi kiểm chứng là synthetic Windows LocalDB và Chromium.
+
+## Kết quả local ngày 23/11/2026
+
+Source thực chạy `c917e8a7a55be46f27056b9c24ec0ee65b76d5d2`, tree `5c11acab3e9e0ad84616e45748f9c2514146e2fe`. Môi trường Windows LocalDB, .NET 10.0.404, Node 26.13.1 và Playwright 1.65.1.
+
+- **APP-03.1a DEV_VERIFIED_LOCAL** · run `3762cb28cb9d47f4b213d246b9830000`. Chromium 1/1. Tenant A giữ nguyên ID, snapshot và row image khi upgrade; sau upgrade, 2 EA từ đơn cũ được giao từ lô `RET-ORIGIN`, AR 20.000 VND, giá vốn 6.667 VND. Một visit và một hồ sơ trả nối về đúng nguồn; bốn phép so sánh bảo toàn row image đều khớp. Ba ca từ chối startup, cách ly tenant và thu hồi Sales đều qua.
+- **DEV-F09 All PASS** · run `53a5f32d702d49a4b3ddaae412852f44`. .NET 352/352, đối chiếu nền A.4/C.6/D.1–D.4 175/175, Chromium 29/29, F01–F08 8/8 profile. Catalog LocalDB khớp trước/sau.
+- Build web, kiểm dependency, audit npm, kiểm theme/Tailwind/PWA và baseline business đều qua. Bộ browser web cơ sở có 50 pass và một ca desktop PWA bỏ qua theo điều kiện CI sẵn có. CI từ xa và physical PREPROD/Pilot có trạng thái riêng.
+
+| Artifact local | SHA-256 |
+| --- | --- |
+| `TestResults/app03-1a/3762cb28cb9d47f4b213d246b9830000/sql-review.json` | `EDCD959C625E98F465386E626F9BCAF76AFAD4A6612ABE248B0E227858C36D99` |
+| `web/test-results-app02c5/3762cb28cb9d47f4b213d246b9830000/app03-1a/junit.xml` | `2A6E601D2FAD1DEDD75B0369D666947C7D1C3BACE8BE53A31CCBAFE9800E44C4` |
+| `TestResults/app03-1a-final.log` | `E05E9ECEB34444CF5CD0F01CBE2588E92C43725F34A7ECD5D49AE6D1633F7D3D` |
+| `TestResults/dev-f09/53a5f32d702d49a4b3ddaae412852f44/run.json` | `53BCFC2ABC32AE11E52CE4229EAA07D09E62726BFDFC25B73613A2F547042D68` |
+| `TestResults/dev-f09-53a5f32d702d49a4b3ddaae412852f44.trx` | `CB5A3FE51FFE7DC55873845551AAF8D6469A7826C952E2D77F539AE4D1AE48C1` |
