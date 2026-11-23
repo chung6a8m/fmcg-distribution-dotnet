@@ -825,6 +825,9 @@ jobs:
       - name: DEV-F04 AC-19 pricing snapshot, tax and partial delivery through Chromium and SQL
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment DevF04 -Verify
+      - name: DEV-F05 AC-05/06 source returns through Chromium, QA and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF05 -Verify
       - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
         shell: pwsh
         run: ./scripts/Run-App02C6.ps1

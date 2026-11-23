@@ -28,6 +28,11 @@ public static class ScratchMigrator
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
             throughVersion: 202611230005, migrationTag: App02DevF04Schema.Profile);
 
+    public static void MigrateDevF05(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: 202611230006, migrationTag: App02DevF05Schema.Profile);
+
     // D.4 stays opt-in on its guarded LocalDB rehearsal path.
     public static void MigrateD4(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>

@@ -114,7 +114,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         Func<SqlConnection, SqlTransaction, string, string, Guid, CancellationToken,
             Task<BusinessCommandOutcome>> apply, CancellationToken ct, string? c2Role = null,
         Guid? loadTrip = null, Guid? deliveryTrip = null, bool amendment = false, Guid? pendingCommand = null,
-        Guid? d1GrantTrip = null, bool d1Load = false)
+        Guid? d1GrantTrip = null, bool d1Load = false, bool isF05Return = false)
     {
         // Never persist a malformed producer/command identity: the scope cannot
         // be deduplicated reliably. All valid identities, including business
@@ -180,12 +180,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 """, new { Tenant = tenant, Producer = request.ProducerId, Command = request.CommandId }, tx, ct));
             if (existing is not null)
             {
-                if (c2Role is not null && await db.ExecuteScalarAsync<int>(Sql("""
+                string returnScope = isF05Return ? " AND IsF05Return=1" : "";
+                if (c2Role is not null && await db.ExecuteScalarAsync<int>(Sql($"""
                     SELECT COUNT(*) FROM dbo.C2CommandScope WHERE TenantId=@Tenant AND CommandRowId=@Id AND RoleCode=@Role
                         AND (LoadTripId=@LoadTrip OR (LoadTripId IS NULL AND @LoadTrip IS NULL))
                         AND (DeliveryTripId=@DeliveryTrip OR (DeliveryTripId IS NULL AND @DeliveryTrip IS NULL))
                         AND (D1GrantTripId=@D1GrantTrip OR (D1GrantTripId IS NULL AND @D1GrantTrip IS NULL))
-                        AND IsD1Load=@IsD1Load
+                        AND IsD1Load=@IsD1Load{returnScope}
                     """, new { Tenant = tenant, existing.Id, Role = c2Role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip,
                         D1GrantTrip = d1GrantTrip, IsD1Load = d1Load }, tx, ct)) == 0)
                     return BusinessCommandOutcome.Conflict();
@@ -201,6 +202,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                         SELECT Id FROM dbo.BusinessSource
                         WHERE TenantId=@Tenant AND BusinessCommandId=@Command
                         """, new { Tenant = tenant, Command = existing.Id }, tx, ct));
+                    if (isF05Return && oldSource is Guid returnSource)
+                    {
+                        if (c2Role == "sales")
+                            await RequireReturnRequestAssignment(db, tx, tenant, actor, returnSource, ct);
+                        if (kind == "F05_RELEASE")
+                            await RequireReturnReleaseAssignment(db, tx, tenant, actor, returnSource, ct);
+                    }
                     await tx.CommitAsync(ct);
                     return new BusinessCommandOutcome(existing.Status, existing.OutcomeCode,
                         existing.ReasonCode, true, oldSource);
@@ -213,7 +221,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
 
             Guid commandRowId = existing?.Id ?? Guid.NewGuid();
             if (existing is null)
-                await InsertReceivedCommand(db, tx, tenant, actor, request, commandRowId, hash, c2Role, loadTrip, deliveryTrip, ct, d1GrantTrip, d1Load);
+                await InsertReceivedCommand(db, tx, tenant, actor, request, commandRowId, hash, c2Role, loadTrip, deliveryTrip, ct, d1GrantTrip, d1Load, isF05Return);
 
             BusinessCommandOutcome result = await apply(db, tx, tenant, actor, commandRowId, ct);
             if (result.Status is not ("APPLIED" or "REJECTED"))
@@ -256,7 +264,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
 
     private static async Task InsertReceivedCommand(SqlConnection db, SqlTransaction tx, string tenant,
         string actor, IApp01aCommand request, Guid id, byte[] hash, string? role, Guid? loadTrip, Guid? deliveryTrip,
-        CancellationToken ct, Guid? d1GrantTrip = null, bool d1Load = false)
+        CancellationToken ct, Guid? d1GrantTrip = null, bool d1Load = false, bool isF05Return = false)
     {
         await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessCommand(Id,TenantId,ProducerId,CommandId,
@@ -265,11 +273,15 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             """, new { Id = id, Tenant = tenant, Producer = request.ProducerId, Command = request.CommandId,
                 Version = CommandPayloadHash.Version, Hash = hash, Actor = actor }, tx, ct));
         if (role is not null)
-            await db.ExecuteAsync(Sql("""
-                INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId,DeliveryTripId,D1GrantTripId,IsD1Load)
-                VALUES(@Tenant,@Id,@Role,@LoadTrip,@DeliveryTrip,@D1GrantTrip,@IsD1Load)
+        {
+            string returnColumn = isF05Return ? ",IsF05Return" : "";
+            string returnValue = isF05Return ? ",1" : "";
+            await db.ExecuteAsync(Sql($"""
+                INSERT dbo.C2CommandScope(TenantId,CommandRowId,RoleCode,LoadTripId,DeliveryTripId,D1GrantTripId,IsD1Load{returnColumn})
+                VALUES(@Tenant,@Id,@Role,@LoadTrip,@DeliveryTrip,@D1GrantTrip,@IsD1Load{returnValue})
                 """, new { Tenant = tenant, Id = id, Role = role, LoadTrip = loadTrip, DeliveryTrip = deliveryTrip,
                     D1GrantTrip = d1GrantTrip, IsD1Load = d1Load }, tx, ct));
+        }
     }
 
     private static async Task<bool> SourceUsed(SqlConnection db, SqlTransaction tx,
@@ -475,7 +487,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (connections.UsesDevF03 && await IsLotTracked(db, tx, tenant, line.Id, byRight: false, token))
                 {
                     lotPicks = await PlanLotHold(db, tx, tenant, line.Id, line.SkuId,
-                        request.StockLocationId, request.BaseQuantity, token);
+                        request.StockLocationId, request.BaseQuantity, connections.UsesDevF05, token);
                     if (lotPicks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
                 }
                 string? stockError = await AllocateStock(db, tx, tenant,

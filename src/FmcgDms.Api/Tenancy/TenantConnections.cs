@@ -16,6 +16,8 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
 
     private readonly string? clockPath = App02c6Clock.GetConfiguredPath(config, host);
     internal bool UsesApp02c6Clock => clockPath is not null;
+    internal bool UsesDevF05 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF05:Enabled");
     internal bool UsesDevF04 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
         && config.GetValue<bool>("DevF04:Enabled");
     internal bool UsesDevF03 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
