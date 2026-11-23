@@ -154,6 +154,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
         {
             if (c2Role is not null)
                 await App02a3Sql.RequireRole(db, tx, tenant, actor, c2Role, ct);
+            if (kind.StartsWith("F08_", StringComparison.Ordinal))
+                await RequireRefundScope(db, tx, tenant, actor, requiredRole, ct);
             if (loadTrip is Guid trip)
                 await RequireC3Writer(db, tx, tenant, actor, trip, ct);
             if (d1GrantTrip is Guid grantTrip)
