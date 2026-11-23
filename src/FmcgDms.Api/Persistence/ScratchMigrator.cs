@@ -18,6 +18,11 @@ public static class ScratchMigrator
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
             throughVersion: 202611230002, migrationTag: App02DevF01Schema.Profile);
 
+    public static void MigrateDevF02(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: 202611230003, migrationTag: App02DevF02Schema.Profile);
+
     public static void MigrateDevF03(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,

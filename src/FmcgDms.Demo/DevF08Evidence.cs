@@ -14,9 +14,12 @@ internal static class DevF08Evidence
     internal const string Cashier = "f08-cashier";
     internal const string Witness = "f08-witness";
     private const long OpeningTreasury = 100000;
-    private static readonly string[] Phases = ["delivered", "quarantined", "settled", "credited", "proposed", "approved", "disbursed"];
+    private const long ContentionAmount = 60000;
+    private static readonly string[] Phases =
+        ["delivered", "quarantined", "settled", "credited", "proposed", "approved", "disbursed",
+            "golden-final", "treasury-approved", "treasury-reserved"];
     internal sealed record State(decimal Ar, long Treasury, decimal Qa, int Credits, long CreditAvailable,
-        int Proposals, int Approvals, int Payments, int Settlements, int PaymentWitnesses, int PayoutWitnesses);
+        int Proposals, int Approvals, int Payments, int Settlements, int PaymentWitnesses, int PayoutWitnesses, long TreasuryReserved);
     internal sealed record Observation(string Phase, State Actual, string SourceSha256);
     private sealed record Pricing(string Sku, long Base, long Discount, long Net, long Tax, long Gross);
     private sealed record Credit(Guid Id, Guid CaseId, Guid DeliveryId, decimal Quantity, long Net, long Tax, long Gross,
@@ -25,6 +28,10 @@ internal static class DevF08Evidence
     private sealed record Refund(Guid ProposalId, Guid CreditId, long Proposed, string Maker, string ProposalEvidence,
         Guid ApprovalId, string Checker, string ApprovalEvidence, Guid DisbursementId, string Cashier, long Disbursed,
         string PaymentEvidence);
+    private sealed record Contender(Guid RefundId, Guid CreditId, string CreditEvidence, long Amount, string Maker,
+        string Checker, string ProposalEvidence, string ApprovalEvidence, Guid? WitnessId, string? WitnessActor,
+        string? WitnessEvidence, Guid? PaymentId, long? PaidAmount, string? Cashier, string? PaidEvidence, long CreditAvailable);
+    private sealed record Rejection(string Reason, string Actor, int Sources, int Effects);
 
     internal static string CheckpointDirectory(string root, DemoRun run) =>
         Path.Combine(root, "TestResults", "dev-f08", run.Id, "checkpoints");
@@ -119,7 +126,10 @@ internal static class DevF08Evidence
                 (SELECT COUNT(*) FROM dbo.F08Disbursement) AS Payments,
                 (SELECT COUNT(*) FROM dbo.F08Settlement) AS Settlements,
                 (SELECT COUNT(*) FROM dbo.F08PaymentWitness) AS PaymentWitnesses,
-                (SELECT COUNT(*) FROM dbo.F08PayoutWitness) AS PayoutWitnesses;
+                (SELECT COUNT(*) FROM dbo.F08PayoutWitness) AS PayoutWitnesses,
+                (SELECT COALESCE(SUM(w.Amount),0) FROM dbo.F08PayoutWitness w
+                    LEFT JOIN dbo.F08Disbursement p ON p.TenantId=w.TenantId AND p.WitnessId=w.Id
+                    WHERE w.TenantId=@Tenant AND p.Id IS NULL) AS TreasuryReserved;
             SELECT (SELECT d.* FROM dbo.SaleDelivery d ORDER BY d.Id FOR JSON PATH,INCLUDE_NULL_VALUES) AS Delivery,
                 (SELECT p.* FROM dbo.F04DeliveryPricing p ORDER BY p.DeliveryId FOR JSON PATH,INCLUDE_NULL_VALUES) AS Price,
                 (SELECT p.* FROM dbo.F04PriceLine p ORDER BY p.OrderLineId FOR JSON PATH,INCLUDE_NULL_VALUES) AS Lines,
@@ -151,15 +161,18 @@ internal static class DevF08Evidence
         long payment = oracle.GetProperty("refundDisbursed").GetInt64();
         long remaining = oracle.GetProperty("creditAfterRefund").GetInt64();
         (string Phase, State Expected)[] expectations = [
-            ("delivered", new(gross, OpeningTreasury, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
-            ("quarantined", new(gross, OpeningTreasury, 1, 0, 0, 0, 0, 0, 0, 1, 0)),
-            ("settled", new(0, OpeningTreasury, 0, 0, 0, 0, 0, 0, 1, 1, 0)),
-            ("credited", new(0, OpeningTreasury, 0, 1, credit, 0, 0, 0, 1, 1, 0)),
-            ("proposed", new(0, OpeningTreasury, 0, 1, credit, 1, 0, 0, 1, 1, 0)),
-            ("approved", new(0, OpeningTreasury, 0, 1, credit, 1, 1, 0, 1, 1, 1)),
-            ("disbursed", new(0, OpeningTreasury-payment, 0, 1, remaining, 1, 1, 1, 1, 1, 1)),
-            ("final", new(0, OpeningTreasury-payment, 0, 3, gross-payment, 1, 1, 1, 1, 1, 1)),
-            ("peer", new(0, OpeningTreasury, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+            ("delivered", new(gross, OpeningTreasury, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)),
+            ("quarantined", new(gross, OpeningTreasury, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0)),
+            ("settled", new(0, OpeningTreasury, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0)),
+            ("credited", new(0, OpeningTreasury, 0, 1, credit, 0, 0, 0, 1, 1, 0, 0)),
+            ("proposed", new(0, OpeningTreasury, 0, 1, credit, 1, 0, 0, 1, 1, 0, 0)),
+            ("approved", new(0, OpeningTreasury, 0, 1, credit, 1, 1, 0, 1, 1, 1, payment)),
+            ("disbursed", new(0, OpeningTreasury-payment, 0, 1, remaining, 1, 1, 1, 1, 1, 1, 0)),
+            ("golden-final", new(0, OpeningTreasury-payment, 0, 3, gross-payment, 1, 1, 1, 1, 1, 1, 0)),
+            ("treasury-approved", new(0, OpeningTreasury-payment, 0, 3, gross-payment, 3, 3, 1, 1, 1, 1, 0)),
+            ("treasury-reserved", new(0, OpeningTreasury-payment, 0, 3, gross-payment, 3, 3, 1, 1, 1, 2, ContentionAmount)),
+            ("final", new(0, OpeningTreasury-payment-ContentionAmount, 0, 3, gross-payment-ContentionAmount, 3, 3, 2, 1, 1, 2, 0)),
+            ("peer", new(0, OpeningTreasury, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         ];
         var observed = (snapshots ?? []).ToDictionary(row => row.Phase, StringComparer.Ordinal);
         observed.Add("final", await Read(run, "tenant-a", "final", ct));
@@ -208,7 +221,7 @@ internal static class DevF08Evidence
                 p.Id AS DisbursementId,p.ActorId AS Cashier,p.Amount AS Disbursed,p.Evidence AS PaymentEvidence
             FROM dbo.F08Refund r JOIN dbo.F08RefundApproval a ON a.TenantId=r.TenantId AND a.RefundId=r.Id
             JOIN dbo.F08Disbursement p ON p.TenantId=r.TenantId AND p.RefundId=r.Id
-            WHERE LEN(r.Reason)>0 AND LEN(a.Reason)>0 AND LEN(p.Reason)>0;
+            WHERE r.Evidence='F08-refund-proposal' AND LEN(r.Reason)>0 AND LEN(a.Reason)>0 AND LEN(p.Reason)>0;
             """, cancellationToken: ct));
         var settlement = await a.QuerySingleAsync<(Guid Id, Guid Delivery, long Amount, string Actor, string Evidence)>(
             new CommandDefinition("SELECT Id,DeliveryId,Amount,ActorId,Evidence FROM dbo.F08Settlement WHERE LEN(Reason)>0;",
@@ -223,7 +236,45 @@ internal static class DevF08Evidence
                        JOIN dbo.F08RefundApproval a ON a.TenantId=w.TenantId AND a.RefundId=w.RefundId
                        WHERE w.ActorId=@Witness AND w.ActorId NOT IN (p.ActorId,r.ActorId,a.ActorId) AND LEN(w.Reason)>0);
             """, new { Witness }, cancellationToken: ct));
-        bool sourcesMatch = verifiedSources == 2 && settlement.Delivery == sale.Id && settlement.Amount == gross && settlement.Actor == Maker &&
+        Contender[] contenders = (await a.QueryAsync<Contender>(new CommandDefinition("""
+            SELECT r.Id AS RefundId,c.Id AS CreditId,c.Evidence AS CreditEvidence,r.Amount,r.ActorId AS Maker,
+                a.ActorId AS Checker,r.Evidence AS ProposalEvidence,a.Evidence AS ApprovalEvidence,w.Id AS WitnessId,
+                w.ActorId AS WitnessActor,w.Evidence AS WitnessEvidence,p.Id AS PaymentId,p.Amount AS PaidAmount,
+                p.ActorId AS Cashier,p.Evidence AS PaidEvidence,c.GrossAmount-COALESCE(p.Amount,0) AS CreditAvailable
+            FROM dbo.F08Refund r JOIN dbo.F08ReturnCredit c ON c.TenantId=r.TenantId AND c.Id=r.CreditId
+            JOIN dbo.F08RefundApproval a ON a.TenantId=r.TenantId AND a.RefundId=r.Id
+            LEFT JOIN dbo.F08PayoutWitness w ON w.TenantId=r.TenantId AND w.RefundId=r.Id
+            LEFT JOIN dbo.F08Disbursement p ON p.TenantId=r.TenantId AND p.RefundId=r.Id AND p.WitnessId=w.Id
+            WHERE r.Evidence IN ('F08-treasury-2-proposal','F08-treasury-3-proposal') ORDER BY r.Evidence;
+            """, cancellationToken: ct))).ToArray();
+        Contender? winner = contenders.FirstOrDefault(row => row.PaymentId.HasValue);
+        Contender? loser = contenders.FirstOrDefault(row => !row.PaymentId.HasValue);
+        bool contendersMatch = contenders.Length == 2 && contenders.Select((row, index) =>
+        {
+            string reference = $"F08-treasury-{index + 2}";
+            return row.CreditId == credits.ElementAtOrDefault(index + 1)?.Id && row.CreditEvidence == $"F08-credit-{index + 2}"
+                && row.Amount == ContentionAmount && row.Maker == Maker && row.Checker == Checker
+                && row.ProposalEvidence == reference + "-proposal" && row.ApprovalEvidence == reference + "-approval"
+                && (row.PaymentId.HasValue
+                    ? row.WitnessId.HasValue && row.WitnessActor == Witness && row.Cashier == Cashier
+                        && row.WitnessEvidence == reference + "-witness" && row.PaidEvidence == row.WitnessEvidence
+                        && row.PaidAmount == ContentionAmount && row.CreditAvailable == credit-ContentionAmount
+                    : row.WitnessId is null && row.PaidAmount is null && row.CreditAvailable == credit);
+        }).All(match => match) && winner is not null && loser is not null;
+        Rejection[] rejections = (await a.QueryAsync<Rejection>(new CommandDefinition("""
+            SELECT b.ReasonCode AS Reason,b.ActorId AS Actor,COUNT(DISTINCT s.Id) AS Sources,COUNT(e.Id) AS Effects
+            FROM dbo.BusinessCommand b
+            LEFT JOIN dbo.BusinessSource s ON s.TenantId=b.TenantId AND s.BusinessCommandId=b.Id
+            LEFT JOIN dbo.BusinessSourceLine l ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
+            LEFT JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
+            WHERE b.ProducerId LIKE 'F08-%' AND b.Status='REJECTED'
+                AND b.ReasonCode IN ('F08_TREASURY_UNAVAILABLE','F08_WITNESS_REQUIRED')
+            GROUP BY b.Id,b.ReasonCode,b.ActorId ORDER BY b.ReasonCode,b.ActorId;
+            """, cancellationToken: ct))).ToArray();
+        bool rejectionsMatch = rejections.Count(row => row is { Reason: "F08_TREASURY_UNAVAILABLE", Actor: Witness }) == 2
+            && rejections.Count(row => row is { Reason: "F08_WITNESS_REQUIRED", Actor: Cashier }) == 2
+            && rejections.All(row => row.Sources == 0 && row.Effects == 0);
+        bool sourcesMatch = verifiedSources == 3 && settlement.Delivery == sale.Id && settlement.Amount == gross && settlement.Actor == Maker &&
             settlement.Evidence == "F08-payment-verified" && refund.CreditId == credits.FirstOrDefault()?.Id &&
             refund.Proposed == payment && refund.Disbursed == payment && refund.Maker == Maker && refund.Checker == Checker &&
             refund.Cashier == Cashier && refund.ProposalEvidence == "F08-refund-proposal" &&
@@ -242,7 +293,9 @@ internal static class DevF08Evidence
             new(settlement.Id, "F08_SETTLE", "F08-VERIFIED-PAYMENT", "BANK_CUSTOMER_RECEIPT", 0, gross),
             .. credits.Select(row => new Ledger(row.Id, "F08_CREDIT", "F08-CREDIT-ISSUED", "CUSTOMER_CREDIT", 0, row.Gross)),
             new(refund.DisbursementId, "F08_DISBURSE", "F08-CREDIT-PAID", "CUSTOMER_CREDIT", 0, -payment),
-            new(refund.DisbursementId, "F08_DISBURSE", "F08-TREASURY-PAID", "REFUND_TREASURY", 0, -payment)
+            new(refund.DisbursementId, "F08_DISBURSE", "F08-TREASURY-PAID", "REFUND_TREASURY", 0, -payment),
+            new(winner?.PaymentId ?? Guid.Empty, "F08_DISBURSE", "F08-CREDIT-PAID", "CUSTOMER_CREDIT", 0, -ContentionAmount),
+            new(winner?.PaymentId ?? Guid.Empty, "F08_DISBURSE", "F08-TREASURY-PAID", "REFUND_TREASURY", 0, -ContentionAmount)
         ];
         bool ledgerMatches = ledger.Length == expectedLedger.Length && expectedLedger.All(ledger.Contains);
         int sourceCount = await a.QuerySingleAsync<int>(new CommandDefinition("""
@@ -255,7 +308,7 @@ internal static class DevF08Evidence
             """, cancellationToken: ct));
         bool matches = phases.All(row => row.Matches) && pricing.SequenceEqual(expectedPricing) && sale.Quantity == 3 &&
             sale.Cost == 3000 && sale.Gross == gross && !sale.InvoiceEligible && creditsMatch && sourcesMatch &&
-            ledgerMatches && sourceCount == 9 && peerEffects == 0;
+            ledgerMatches && contendersMatch && rejectionsMatch && sourceCount == 15 && peerEffects == 0;
         string path = Path.Combine(root, "TestResults", "dev-f08", run.Id, "sql-result.json");
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
         {
@@ -263,7 +316,7 @@ internal static class DevF08Evidence
             matches, phases, pricing, expectedPricing, delivery = new { sale.Id, sale.Quantity, sale.Cost, sale.Gross, sale.InvoiceEligible },
             credits, expectedParts, expectedDiscount, creditsMatch, settlement = new { settlement.Id, settlement.Delivery,
                 settlement.Amount, settlement.Actor, settlement.Evidence }, refund, sourcesMatch, ledger, expectedLedger,
-            ledgerMatches, sourceCount, verifiedSources, peerEffects
+            ledgerMatches, sourceCount, verifiedSources, peerEffects, contenders, contendersMatch, rejections, rejectionsMatch
         }, new JsonSerializerOptions { WriteIndented = true }), ct);
         if (!matches) throw new InvalidOperationException($"DEV-F08 AC-19 SQL reconciliation failed. See {path}.");
         Console.WriteLine($"DEV-F08 AC-19 SQL PASS {path}");

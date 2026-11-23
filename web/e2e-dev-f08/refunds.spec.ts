@@ -135,7 +135,7 @@ async function creditReturn(page: Page, request: APIRequestContext, maker: strin
   return credit
 }
 
-test('F08-01–04: settle witnessed payment, preserve price residuals and pay one independently approved refund', async ({ page, request }, info) => {
+test('F08-01–05: reconcile price residuals and guard independent refunds against treasury exhaustion', async ({ page, request }, info) => {
   const source = process.env.APP02C1_BROWSER_TOKEN_A
   const sales = process.env.DEV_F05_SALES
   const receiver = process.env.DEV_F05_RECEIVER
@@ -261,10 +261,11 @@ test('F08-01–04: settle witnessed payment, preserve price residuals and pay on
   await checkpoint('disbursed')
   expect((await get<Credit[]>(request, refundApi + '/credits', maker))[0].available).toBe(49600)
 
+  const additionalCredits: Credit[] = []
   for (const index of [2, 3]) {
     const caseId = await receiveReturn(request, sales, receiver, delivery, index)
     await releaseReturn(page, request, finance, qa, caseId, index)
-    await creditReturn(page, request, maker, caseId, index)
+    additionalCredits.push(await creditReturn(page, request, maker, caseId, index))
   }
   const credits = await get<Credit[]>(request, refundApi + '/credits', maker)
   expect(credits.map(row => [row.net, row.tax, row.gross, row.discount])).toEqual(expect.arrayContaining([
@@ -275,4 +276,59 @@ test('F08-01–04: settle witnessed payment, preserve price residuals and pay on
   expect(await get<Credit[]>(request, refundApi + '/credits', peer)).toEqual([])
   expect(await get<Refund[]>(request, refundApi + '/refunds', peer)).toEqual([])
   await info.attach('final-credit-reconciliation', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
+  await checkpoint('golden-final')
+
+  const amount = 60000
+  const contenders = []
+  for (const [index, credit] of additionalCredits.entries()) {
+    const reference = 'F08-treasury-' + (index + 2)
+    const proposal = await post(request, refundApi + '/commands', maker, { action: 'PROPOSE', creditId: credit.id, amount,
+      reason: 'Independent refund against a separate source credit', evidence: reference + '-proposal' })
+    await post(request, refundApi + '/commands', checker, { action: 'APPROVE', refundId: proposal.sourceId,
+      reason: 'Independent finance approves separate refund', evidence: reference + '-approval' })
+    contenders.push({ creditId: credit.id, refundId: proposal.sourceId, amount, evidence: reference + '-witness' })
+  }
+  expect(contenders[0].creditId).not.toBe(contenders[1].creditId)
+  expect(contenders[0].refundId).not.toBe(contenders[1].refundId)
+  const approvedRefunds = await get<Refund[]>(request, refundApi + '/refunds', checker)
+  for (const contender of contenders)
+    expect(approvedRefunds).toContainEqual(expect.objectContaining({ id: contender.refundId, amount, status: 'APPROVED' }))
+  await checkpoint('treasury-approved')
+
+  const attempts = await Promise.all(contenders.map(async contender => {
+    const response = await request.post(refundApi + '/commands', { headers: headers(witness), data: {
+      commandId: crypto.randomUUID(), action: 'WITNESS_PAYOUT', refundId: contender.refundId, amount,
+      reason: 'Verify separate payout against the common treasury', evidence: contender.evidence,
+    } })
+    return { ...contender, status: response.status(), result: await response.json() as CommandOutcome }
+  }))
+  expect(attempts.map(attempt => attempt.status).sort()).toEqual([200, 422])
+  const winner = attempts.find(attempt => attempt.status === 200)
+  const loser = attempts.find(attempt => attempt.status === 422)
+  if (!winner || !loser) throw new Error('Expected a single treasury reservation')
+  expect(winner.result).toMatchObject({ status: 'APPLIED' })
+  expect(winner.result.sourceId).toBeTruthy()
+  expect(loser.result).toMatchObject({ status: 'REJECTED', reasonCode: 'F08_TREASURY_UNAVAILABLE', sourceId: null })
+  await post(request, refundApi + '/commands', cashier, { action: 'DISBURSE', amount, refundId: loser.refundId,
+    reason: 'Unwitnessed payout must remain unposted', evidence: loser.evidence }, 422, 'F08_WITNESS_REQUIRED')
+  await checkpoint('treasury-reserved')
+
+  await login(page, refundWorkspace, cashier)
+  await page.getByRole('combobox', { name: 'Đề nghị đã duyệt', exact: true }).selectOption(winner.refundId)
+  await page.getByLabel('Số tiền thực chi (VND)', { exact: true }).fill(String(amount))
+  await details(page, winner.evidence, 'Record only the witnessed payout with reserved treasury', 'Chứng từ thực chi DEV')
+  await page.getByRole('button', { name: 'Ghi thực chi hoàn tiền', exact: true }).click()
+  await expect(page.getByText('Đã ghi thực chi hoàn tiền.')).toBeVisible()
+
+  await post(request, refundApi + '/commands', witness, { action: 'WITNESS_PAYOUT', amount, refundId: loser.refundId,
+    reason: 'Remaining treasury after the paid refund still cannot cover this payout', evidence: loser.evidence },
+    422, 'F08_TREASURY_UNAVAILABLE')
+  const paidRefunds = await get<Refund[]>(request, refundApi + '/refunds', cashier)
+  expect(paidRefunds).toContainEqual(expect.objectContaining({ id: winner.refundId, status: 'DISBURSED' }))
+  expect(paidRefunds).toContainEqual(expect.objectContaining({ id: loser.refundId, status: 'APPROVED' }))
+  const remainingCredits = await get<Credit[]>(request, refundApi + '/credits', maker)
+  expect(remainingCredits.find(credit => credit.id === winner.creditId)?.available).toBe(9600)
+  expect(remainingCredits.find(credit => credit.id === loser.creditId)?.available).toBe(69600)
+  expect(remainingCredits.reduce((sum, credit) => sum + credit.available, 0)).toBe(128800)
+  await info.attach('treasury-contention', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
 })
