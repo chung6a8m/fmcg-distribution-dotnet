@@ -278,6 +278,7 @@ internal static class App02c1Dev
             {
                 browserStart.Environment["DEV_F05_QA_LOCATION"] = returnQuarantine.ToString("D");
                 browserStart.Environment["DEV_F05_CHECKPOINTS"] = DevF05Evidence.CheckpointDirectory(root, run);
+                browserStart.Environment["DEV_F05_QA_UNASSIGNED"] = Sign("tenant-a", "case_checker", DevF05Evidence.UnassignedQa);
                 foreach (var (role, credential) in returnCredentials)
                     browserStart.Environment["DEV_F05_" + role.ToUpperInvariant()] = credential;
             }

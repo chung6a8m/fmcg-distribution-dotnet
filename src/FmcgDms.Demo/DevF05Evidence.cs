@@ -12,13 +12,14 @@ internal static class DevF05Evidence
     internal const string Receiver = "f05-receiver";
     internal const string Finance = "f05-finance";
     internal const string Qa = "f05-qa";
+    internal const string UnassignedQa = "f05-unassigned-qa";
     private const string Sales = "c1-dev-sales";
 
     internal sealed record Snapshot(decimal Main, decimal MainCost, decimal Truck, decimal TruckCost, decimal Quarantine,
         decimal QuarantineCost, decimal Ar, decimal Cogs, int ReturnCases, int Receipts, int Approvals, int Releases);
     internal sealed record Checkpoint(string Phase, Snapshot Actual);
     private sealed record StageRow(string Stage, Guid SourceId, string ActorId, string Evidence, string Reason,
-        decimal? AcceptedCost, string? Destination, string CommandStatus);
+        decimal? ReceivedQuantity, decimal? AcceptedCost, string? Destination, string CommandStatus);
     private sealed record ReturnCase(Guid Id, Guid DeliveryId, Guid LotId, string LotCode, decimal Quantity,
         string RequestedBy, string Reason, string CommandStatus);
     private sealed record Ledger(string Stage, string EffectKey, string LedgerKind, string? Location,
@@ -27,6 +28,7 @@ internal static class DevF05Evidence
     private static readonly (string Phase, Snapshot Expected)[] Phases = [
         ("delivered", new(0, 0, 0, 0, 0, 0, 20000, 6667, 0, 0, 0, 0)),
         ("requested", new(0, 0, 0, 0, 0, 0, 20000, 6667, 1, 0, 0, 0)),
+        ("count-mismatch", new(0, 0, 0, 0, 0, 0, 20000, 6667, 1, 0, 0, 0)),
         ("received", new(0, 0, 0, 0, 1, 0, 20000, 6667, 1, 1, 0, 0)),
         ("approved", new(0, 0, 0, 0, 1, 0, 20000, 6667, 1, 1, 1, 0)),
         ("released-first", new(1, 3334, 0, 0, 0, 0, 20000, 3333, 1, 1, 1, 1))
@@ -50,7 +52,9 @@ internal static class DevF05Evidence
             INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
             VALUES(@Tenant,@Receiver,N'warehouse',1,N'f05-dev-launcher'),
                   (@Tenant,@Finance,N'finance',1,N'f05-dev-launcher'),
-                  (@Tenant,@Qa,N'case_checker',1,N'f05-dev-launcher');
+                  (@Tenant,@Qa,N'case_checker',1,N'f05-dev-launcher'),
+                  (@Tenant,@UnassignedQa,N'case_checker',1,N'f05-dev-launcher');
+            INSERT dbo.F05QaScope(TenantId,ActorId,WarehouseId) VALUES(@Tenant,@Qa,@main);
             INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom)
             VALUES(@sku,@Tenant,N'R-05',N'F05 returned product',N'EA');
             INSERT dbo.StockLocation(Id,TenantId,Code,Kind)
@@ -76,7 +80,7 @@ internal static class DevF05Evidence
             VALUES(@Tenant,@plan,@customer,1,'EXCLUSIVE',0,@From,@Until,N'f05-maker',N'f05-checker',@From,N'F05-plan-v1');
             INSERT dbo.F04PlanQuote(TenantId,PlanId,PolicyId) VALUES(@Tenant,@plan,@quote);
             SELECT @quarantine;
-            """, new { Tenant = tenant, Receiver, Finance, Qa, From = FixtureUtc.AddHours(-1), Until = FixtureUtc.AddDays(1) },
+            """, new { Tenant = tenant, Receiver, Finance, Qa, UnassignedQa, From = FixtureUtc.AddHours(-1), Until = FixtureUtc.AddDays(1) },
             tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
         return quarantine;
@@ -151,7 +155,7 @@ internal static class DevF05Evidence
         foreach (var item in cases)
         {
             StageRow[] stages = (await a.QueryAsync<StageRow>(new CommandDefinition("""
-                SELECT r.Stage,r.SourceId,r.ActorId,r.Evidence,r.Reason,r.AcceptedCost,l.Code AS Destination,
+                SELECT r.Stage,r.SourceId,r.ActorId,r.Evidence,r.Reason,r.ReceivedQuantity,r.AcceptedCost,l.Code AS Destination,
                     c.Status AS CommandStatus
                 FROM dbo.F05ReturnStage r
                 JOIN dbo.BusinessSource s ON s.TenantId=r.TenantId AND s.Id=r.SourceId
@@ -163,10 +167,10 @@ internal static class DevF05Evidence
             decimal expectedCost = release?.Evidence switch { "F05-release-first" => 3334, "F05-release-second" => 3333, _ => -1 };
             bool stageMatches = stages.Length == 3
                 && stages.SingleOrDefault(stage => stage.Stage == "RECEIVE")
-                    is { ActorId: Receiver, Destination: "F05-QA", AcceptedCost: null }
+                    is { ActorId: Receiver, Destination: "F05-QA", ReceivedQuantity: 1, AcceptedCost: null }
                 && stages.SingleOrDefault(stage => stage.Stage == "APPROVE")
-                    is { ActorId: Finance, Destination: null, AcceptedCost: null }
-                && release is { ActorId: Qa, Destination: "C2-MAIN" }
+                    is { ActorId: Finance, Destination: null, ReceivedQuantity: null, AcceptedCost: null }
+                && release is { ActorId: Qa, Destination: "C2-MAIN", ReceivedQuantity: null }
                 && expectedCost >= 0 && release.AcceptedCost == expectedCost
                 && stages.All(stage => stage.CommandStatus == "APPLIED" && stage.SourceId != Guid.Empty
                     && stage.Evidence.Length > 0 && stage.Reason.Length > 0);

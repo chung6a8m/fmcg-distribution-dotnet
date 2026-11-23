@@ -202,8 +202,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                         SELECT Id FROM dbo.BusinessSource
                         WHERE TenantId=@Tenant AND BusinessCommandId=@Command
                         """, new { Tenant = tenant, Command = existing.Id }, tx, ct));
-                    if (isF05Return && c2Role == "sales" && oldSource is Guid caseId)
-                        await RequireReturnRequestAssignment(db, tx, tenant, actor, caseId, ct);
+                    if (isF05Return && oldSource is Guid returnSource)
+                    {
+                        if (c2Role == "sales")
+                            await RequireReturnRequestAssignment(db, tx, tenant, actor, returnSource, ct);
+                        if (kind == "F05_RELEASE")
+                            await RequireReturnReleaseAssignment(db, tx, tenant, actor, returnSource, ct);
+                    }
                     await tx.CommitAsync(ct);
                     return new BusinessCommandOutcome(existing.Status, existing.OutcomeCode,
                         existing.ReasonCode, true, oldSource);

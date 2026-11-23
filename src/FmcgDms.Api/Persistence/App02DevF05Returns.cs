@@ -64,6 +64,7 @@ public sealed partial class App01a2CommandService
             CROSS APPLY (SELECT COALESCE(SUM(x.Quantity),0) AS Used FROM dbo.F05ReturnCase x
                 WHERE x.TenantId=d.TenantId AND x.DeliveryId=d.Id AND x.LotId=i.LotId) r
             WHERE d.TenantId=@Tenant AND d.RightKind='A' AND p.Currency='VND'
+                AND d.CostAmount=ROUND(d.CostAmount,0)
                 AND (@Role<>'sales' OR EXISTS (
                     SELECT 1 FROM dbo.C4DeliveryWriter w WHERE w.TenantId=d.TenantId AND w.TripId=d.TripId AND w.ActorId=@Actor))
             ORDER BY d.PostedAtUtc DESC,d.Id,l.ExpiresOn,l.Code
@@ -104,8 +105,13 @@ public sealed partial class App01a2CommandService
             if (!principal.HasClaim("synthetic_role", result.RoleCode))
                 throw new UnauthorizedAccessException("Return command role no longer assigned.");
             await App02a3Sql.RequireRole(db, tx, tenant, actor, result.RoleCode, ct);
-            if (result.RoleCode == "sales" && result.SourceId is Guid caseId)
-                await RequireReturnRequestAssignment(db, tx, tenant, actor, caseId, ct);
+            if (result.SourceId is Guid sourceId)
+            {
+                if (result.RoleCode == "sales")
+                    await RequireReturnRequestAssignment(db, tx, tenant, actor, sourceId, ct);
+                if (result.RoleCode == "case_checker")
+                    await RequireReturnReleaseAssignment(db, tx, tenant, actor, sourceId, ct);
+            }
             return new BusinessCommandOutcome(result.Status, result.OutcomeCode, result.ReasonCode, true, result.SourceId);
         }, ct);
 
@@ -139,6 +145,24 @@ public sealed partial class App01a2CommandService
             throw new UnauthorizedAccessException("Current delivery assignment required.");
     }
 
+    private static async Task RequireQaScope(SqlConnection db, SqlTransaction tx, string tenant, string actor,
+        Guid warehouse, CancellationToken ct)
+    {
+        if (await db.ExecuteScalarAsync<int>(Sql("""
+            SELECT COUNT(*) FROM dbo.F05QaScope WHERE TenantId=@Tenant AND ActorId=@Actor AND WarehouseId=@Warehouse
+            """, new { Tenant = tenant, Actor = actor, Warehouse = warehouse }, tx, ct)) != 1)
+            throw new UnauthorizedAccessException("Current warehouse QA release assignment required.");
+    }
+
+    private static async Task RequireReturnReleaseAssignment(SqlConnection db, SqlTransaction tx, string tenant,
+        string actor, Guid sourceId, CancellationToken ct)
+    {
+        Guid warehouse = await db.QuerySingleAsync<Guid>(Sql("""
+            SELECT DestinationId FROM dbo.F05ReturnStage WHERE TenantId=@Tenant AND SourceId=@SourceId AND Stage='RELEASE'
+            """, new { Tenant = tenant, SourceId = sourceId }, tx, ct));
+        await RequireQaScope(db, tx, tenant, actor, warehouse, ct);
+    }
+
     private static Task<F05Source?> FindReturnSource(SqlConnection db, SqlTransaction tx, string tenant,
         Guid delivery, Guid lot, CancellationToken ct) => db.QuerySingleOrDefaultAsync<F05Source>(Sql("""
             SELECT d.Id AS DeliveryId,i.LotId,d.TripId,d.CustomerId,d.SkuId,d.StockRightId,
@@ -164,7 +188,7 @@ public sealed partial class App01a2CommandService
 
         string? evidence = C1Validation.Text(input.Evidence, 120);
         if (input.CaseId is not Guid caseId || caseId == Guid.Empty || input.DeliveryId.HasValue || input.LotId.HasValue
-            || input.Quantity.HasValue || evidence is null)
+            || (input.Action != "RECEIVE" && input.Quantity.HasValue) || evidence is null)
             return BusinessCommandOutcome.Rejected("F05_FIELDS_INVALID");
         string action = input.Action!;
         var item = await db.QuerySingleOrDefaultAsync<F05Case>(Sql("""
@@ -188,11 +212,14 @@ public sealed partial class App01a2CommandService
 
         Guid? destination = null;
         decimal? cost = null;
+        decimal? receivedQuantity = null;
         if (action == "RECEIVE")
         {
+            if (input.Quantity != item.Quantity) return BusinessCommandOutcome.Rejected("F05_COUNT_MISMATCH");
+            receivedQuantity = input.Quantity;
             destination = await FindReturnQuarantine(db, tx, tenant, source.SkuId, ct);
             if (destination is not Guid qa) return BusinessCommandOutcome.Rejected("F05_QUARANTINE_UNAVAILABLE");
-            await UpdateReturnBalance(db, tx, tenant, source.SkuId, qa, item.Quantity, 0, ct);
+            await UpdateReturnBalance(db, tx, tenant, source.SkuId, qa, receivedQuantity!.Value, 0, ct);
         }
         else
         {
@@ -200,6 +227,7 @@ public sealed partial class App01a2CommandService
                 return BusinessCommandOutcome.Rejected("F05_RECEIPT_REQUIRED");
             if (action == "RELEASE")
             {
+                await RequireQaScope(db, tx, tenant, actor, source.WarehouseId, ct);
                 if (!stages.ContainsKey("APPROVE")) return BusinessCommandOutcome.Rejected("F05_APPROVAL_REQUIRED");
                 DateTime date = await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {LotBusinessDate}", null, tx, ct));
                 if (date > source.ExpiresOn) return BusinessCommandOutcome.Rejected("F05_LOT_EXPIRED");
@@ -235,16 +263,16 @@ public sealed partial class App01a2CommandService
 
         Guid stageSource = await AddSource(db, tx, tenant, command, "F05_RETURN_" + action, sourceNumber,
             actor, source.CustomerId, source.TripId, ct);
-        Guid sourceLine = await AddLine(db, tx, tenant, stageSource, 1, source.SkuId, item.Quantity, cost, ct);
+        Guid sourceLine = await AddLine(db, tx, tenant, stageSource, 1, source.SkuId, receivedQuantity ?? item.Quantity, cost, ct);
         await db.ExecuteAsync(Sql("""
-            INSERT dbo.F05ReturnStage(TenantId,CaseId,Stage,SourceId,ActorId,Evidence,Reason,AcceptedCost,DestinationId)
-            VALUES(@Tenant,@CaseId,@Stage,@SourceId,@Actor,@Evidence,@Reason,@Cost,@Destination)
+            INSERT dbo.F05ReturnStage(TenantId,CaseId,Stage,SourceId,ActorId,Evidence,Reason,ReceivedQuantity,AcceptedCost,DestinationId)
+            VALUES(@Tenant,@CaseId,@Stage,@SourceId,@Actor,@Evidence,@Reason,@ReceivedQuantity,@Cost,@Destination)
             """, new { Tenant = tenant, CaseId = caseId, Stage = action, SourceId = stageSource, Actor = actor,
-                Evidence = evidence, Reason = reason, Cost = cost, Destination = destination }, tx, ct));
+                Evidence = evidence, Reason = reason, ReceivedQuantity = receivedQuantity, Cost = cost, Destination = destination }, tx, ct));
 
         if (action == "RECEIVE")
             await ReturnEffect(db, tx, tenant, sourceLine, "RETURN-QA-IN", "PHYSICAL_STOCK", source.SkuId,
-                destination, item.Quantity, 0, ct);
+                destination, receivedQuantity!.Value, 0, ct);
         if (cost is decimal acceptedCost)
         {
             await ReturnEffect(db, tx, tenant, sourceLine, "RETURN-QA-OUT", "PHYSICAL_STOCK", source.SkuId,

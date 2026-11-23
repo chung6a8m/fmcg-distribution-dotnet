@@ -99,9 +99,11 @@ export function ReturnWorkspace() {
 function ReturnPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
   const phase = phases[identity.role]
   const request = phase.action === 'REQUEST'
+  const receive = phase.action === 'RECEIVE'
   const key = 'dev-f05.return.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
   const [ledger, setLedger] = useState<Ledger | null>(null)
   const [selection, setSelection] = useState('')
+  const [receivedQuantity, setReceivedQuantity] = useState('')
   const [pending, setPending] = useState(() => restore(key))
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -164,7 +166,10 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
       if (outcome.status === 'APPLIED') {
         form.current?.reset()
         setSelection('')
+        setReceivedQuantity('')
         setMessage('Đã ghi hồ sơ trả hàng.')
+      } else if (outcome.reasonCode === 'F05_COUNT_MISMATCH') {
+        setMessage('Số lượng thực nhận phải khớp số lượng theo hồ sơ.')
       } else {
         setMessage(outcome.reasonCode
           ? `Yêu cầu trả hàng bị từ chối (${outcome.reasonCode}).` : 'Yêu cầu trả hàng bị từ chối.')
@@ -187,9 +192,14 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
       setMessage('Nhập lý do và chứng từ khi có yêu cầu.')
       return
     }
+    const quantity = Number(request ? values.get('quantity') : receivedQuantity)
+    if (receive && (receivedQuantity === '' || !Number.isFinite(quantity) || quantity < 0)) {
+      setMessage('Nhập số lượng thực nhận.')
+      return
+    }
     const details = delivery
-      ? { deliveryId: delivery.deliveryId, lotId: delivery.lotId, quantity: Number(values.get('quantity')) }
-      : { caseId: returnCase?.id, evidence }
+      ? { deliveryId: delivery.deliveryId, lotId: delivery.lotId, quantity }
+      : { caseId: returnCase?.id, evidence, ...(receive ? { quantity } : {}) }
     const commandId = crypto.randomUUID()
     const command = { commandId, body: JSON.stringify({ commandId, action: phase.action, reason, ...details }) }
     rememberPending(key, command)
@@ -208,7 +218,10 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
           <div className="field">
             <label htmlFor={id + '-selection'}>{request ? 'Nguồn giao và lô' : 'Hồ sơ trả hàng'}</label>
             <select id={id + '-selection'} required value={delivery || returnCase ? selection : ''}
-              onChange={event => setSelection(event.currentTarget.value)}>
+              onChange={event => {
+                setSelection(event.currentTarget.value)
+                setReceivedQuantity('')
+              }}>
               <option value="">{request ? 'Chọn nguồn giao' : 'Chọn hồ sơ'}</option>
               {request ? deliveries.map(row => <option key={sourceKey(row)} value={sourceKey(row)}>
                 {row.customer} · {row.sku} · {row.lotCode} · {row.deliveryId}
@@ -221,6 +234,9 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
             max={delivery?.available} step="0.001" required
             help={delivery && `Đã giao ${amounts.format(delivery.issued)} EA · Còn có thể trả ${amounts.format(delivery.available)} EA`} />}
           {returnCase && <p>Số lượng theo hồ sơ {amounts.format(returnCase.quantity)} EA</p>}
+          {receive && <Field label="Số lượng thực nhận" name="receivedQuantity" type="number" min="0"
+            step="0.001" value={receivedQuantity} onChange={event => setReceivedQuantity(event.currentTarget.value)}
+            disabled={!returnCase} required />}
           <Field label="Lý do" name="reason" maxLength={200} required />
           {!request && <Field label="Chứng từ DEV" name="evidence" maxLength={120} required />}
           <div className="button-row"><Button variant="primary" type="submit" disabled={!delivery && !returnCase}>

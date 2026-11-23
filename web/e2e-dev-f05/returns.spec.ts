@@ -16,6 +16,7 @@ const credentials = {
   receiver: process.env.DEV_F05_RECEIVER,
   finance: process.env.DEV_F05_FINANCE,
   qa: process.env.DEV_F05_QA,
+  unassignedQa: process.env.DEV_F05_QA_UNASSIGNED,
 }
 
 type Delivery = { deliveryId: string, lotId: string, lotCode: string, sku: string, available: number }
@@ -66,11 +67,13 @@ function caseRow(page: Page, caseId: string) {
     .filter({ hasText: 'Mã hồ sơ ' + caseId })
 }
 
-async function stage(page: Page, caseId: string, token: string, action: string, evidence: string, state: string) {
+async function stage(page: Page, caseId: string, token: string, action: string, evidence: string, state: string,
+  counted?: number) {
   await login(page, '/sales/returns', token)
   await page.getByRole('combobox', { name: 'Hồ sơ trả hàng', exact: true }).selectOption(caseId)
   await page.getByLabel('Lý do', { exact: true }).fill(evidence)
   await page.getByLabel('Chứng từ DEV').fill(evidence)
+  if (counted !== undefined) await page.getByLabel('Số lượng thực nhận', { exact: true }).fill(String(counted))
   const [post] = await Promise.all([
     page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith(returnApi + '/commands')),
     page.getByRole('button', { name: action, exact: true }).click(),
@@ -83,9 +86,9 @@ async function stage(page: Page, caseId: string, token: string, action: string, 
 }
 
 test('F05-01–04: sourced returns stay held until QA, prove residual and reject overlap', async ({ page, request }, info) => {
-  const { source, peer, sales, receiver, finance, qa } = credentials
+  const { source, peer, sales, receiver, finance, qa, unassignedQa } = credentials
   const quarantine = process.env.DEV_F05_QA_LOCATION
-  if (!source || !peer || !sales || !receiver || !finance || !qa || !quarantine)
+  if (!source || !peer || !sales || !receiver || !finance || !qa || !unassignedQa || !quarantine)
     throw new Error('Missing protected return fixture')
   const catalog = await get<Catalog>(request, salesApi + '/catalog', source)
   const customer = catalog.customers.find(option => option.label.startsWith('C2-FIXTURE'))
@@ -163,7 +166,12 @@ test('F05-01–04: sourced returns stay held until QA, prove residual and reject
   await expect(caseRow(page, first)).toContainText('Đã đề nghị')
   await checkpoint('requested')
 
-  await stage(page, first, receiver, 'Nhận vào cách ly', 'F05-receive-first', 'Đang cách ly')
+  const mismatch = await command(request, receiver, { action: 'RECEIVE', caseId: first, quantity: 2,
+    reason: 'Counted quantity differs from case', evidence: 'F05-bad-count' })
+  expect(mismatch.status()).toBe(422)
+  expect((await mismatch.json()).reasonCode).toBe('F05_COUNT_MISMATCH')
+  await checkpoint('count-mismatch')
+  await stage(page, first, receiver, 'Nhận vào cách ly', 'F05-receive-first', 'Đang cách ly', 1)
   await checkpoint('received')
   await page.screenshot({ path: info.outputPath('quarantine-held.png') })
   const unapproved = await command(request, qa, { action: 'RELEASE', caseId: first,
@@ -181,6 +189,9 @@ test('F05-01–04: sourced returns stay held until QA, prove residual and reject
   expect((await heldReserve.json()).reasonCode).toBe('F03_LOT_STOCK_INSUFFICIENT')
 
   await stage(page, first, finance, 'Duyệt trả hàng', 'F05-approve-first', 'Đã duyệt')
+  const outsideQaScope = await command(request, unassignedQa, { action: 'RELEASE', caseId: first,
+    reason: 'Active QA without MAIN assignment', evidence: 'F05-qa-unassigned' })
+  expect(outsideQaScope.status()).toBe(403)
   await checkpoint('approved')
   const firstRelease = await stage(page, first, qa, 'Giải phóng hàng', 'F05-release-first', 'Đã giải phóng')
   await expect(caseRow(page, first)).toContainText('3.334 VND')
@@ -202,7 +213,7 @@ test('F05-01–04: sourced returns stay held until QA, prove residual and reject
   expect((await rejected[0].json()).reasonCode).toBe('F05_RETURN_QUANTITY_EXCEEDED')
   const second = (await applied[0].json()).sourceId as string
   expect(second).not.toBe(first)
-  await stage(page, second, receiver, 'Nhận vào cách ly', 'F05-receive-second', 'Đang cách ly')
+  await stage(page, second, receiver, 'Nhận vào cách ly', 'F05-receive-second', 'Đang cách ly', 1)
   await stage(page, second, finance, 'Duyệt trả hàng', 'F05-approve-second', 'Đã duyệt')
   await stage(page, second, qa, 'Giải phóng hàng', 'F05-release-second', 'Đã giải phóng')
   await expect(caseRow(page, second)).toContainText('3.333 VND')

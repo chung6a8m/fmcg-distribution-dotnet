@@ -21,6 +21,14 @@ public sealed class App02DevF05Schema : Migration
                 OR (IsF05Return=1 AND D1GrantTripId IS NULL AND LoadTripId IS NULL AND DeliveryTripId IS NULL
                     AND IsD1Load=0 AND RoleCode IN (N'sales',N'warehouse',N'finance',N'case_checker')));
 
+            CREATE TABLE dbo.F05QaScope (
+                TenantId nvarchar(64) NOT NULL,
+                ActorId nvarchar(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+                WarehouseId uniqueidentifier NOT NULL,
+                CONSTRAINT PK_F05QaScope PRIMARY KEY (TenantId,ActorId,WarehouseId),
+                CONSTRAINT FK_F05QaScope_Location FOREIGN KEY (TenantId,WarehouseId)
+                    REFERENCES dbo.StockLocation(TenantId,Id)
+            );
             CREATE TABLE dbo.F05ReturnCase (
                 TenantId nvarchar(64) NOT NULL,
                 Id uniqueidentifier NOT NULL,
@@ -43,6 +51,7 @@ public sealed class App02DevF05Schema : Migration
                 ActorId nvarchar(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
                 Evidence nvarchar(120) NOT NULL CHECK (LEN(Evidence)>0),
                 Reason nvarchar(200) NOT NULL CHECK (LEN(Reason)>0),
+                ReceivedQuantity decimal(18,3) NULL CHECK (ReceivedQuantity>0),
                 AcceptedCost decimal(19,4) NULL CHECK (AcceptedCost>=0),
                 DestinationId uniqueidentifier NULL,
                 CONSTRAINT PK_F05ReturnStage PRIMARY KEY (TenantId,CaseId,Stage),
@@ -54,9 +63,9 @@ public sealed class App02DevF05Schema : Migration
                 CONSTRAINT FK_F05ReturnStage_Destination FOREIGN KEY (TenantId,DestinationId)
                     REFERENCES dbo.StockLocation(TenantId,Id),
                 CONSTRAINT CK_F05ReturnStage_State CHECK (
-                    (Stage='RECEIVE' AND AcceptedCost IS NULL AND DestinationId IS NOT NULL)
-                    OR (Stage='APPROVE' AND AcceptedCost IS NULL AND DestinationId IS NULL)
-                    OR (Stage='RELEASE' AND AcceptedCost IS NOT NULL AND DestinationId IS NOT NULL))
+                    (Stage='RECEIVE' AND ReceivedQuantity IS NOT NULL AND AcceptedCost IS NULL AND DestinationId IS NOT NULL)
+                    OR (Stage='APPROVE' AND ReceivedQuantity IS NULL AND AcceptedCost IS NULL AND DestinationId IS NULL)
+                    OR (Stage='RELEASE' AND ReceivedQuantity IS NULL AND AcceptedCost IS NOT NULL AND DestinationId IS NOT NULL))
             );
             """);
         foreach (var table in new[] { "F05ReturnCase", "F05ReturnStage" })
