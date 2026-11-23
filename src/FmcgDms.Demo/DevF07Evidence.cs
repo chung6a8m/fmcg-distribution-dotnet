@@ -11,12 +11,14 @@ internal static class DevF07Evidence
     private const string Sales = "c1-dev-sales";
     private const string Returned = "C2-FIXTURE";
     private const string Waived = "F07-WAIVER";
-    private static readonly string[] Phases = ["issued", "returned-waived", "repurchased"];
+    private const string AfterWaiverEvidence = "F07-after-waiver-actual-receipt";
+    private static readonly string[] Phases = ["issued", "returned-waived", "repurchased", "reissued"];
     internal sealed record Position(string Customer, decimal Purchased, decimal Accepted, int Issued, int GiftReturned,
         int ApprovedWaiver, int WaivedHeld);
     internal sealed record Stock(string Location, decimal Quantity, decimal Cost);
-    internal sealed record Checkpoint(string Phase, Position[] Positions, Stock[] Stock);
-    private sealed record GiftSource(Guid Id, string Kind, string Customer, string Actor, Guid? Related, int Quantity,
+    internal sealed record WaiverHistory(string ProposalsSha256, string DecisionsSha256);
+    internal sealed record Checkpoint(string Phase, Position[] Positions, Stock[] Stock, WaiverHistory? WaiverHistory = null);
+    private sealed record GiftSource(Guid Id, string Tenant, string Kind, string Customer, string Actor, Guid? Related, int Quantity,
         long Cost, string? Reason, string? Evidence, string CommandStatus);
     private sealed record Effect(Guid SourceId, string Key, string Ledger, string? Location, string? Sku,
         decimal Quantity, decimal Amount);
@@ -132,9 +134,12 @@ internal static class DevF07Evidence
                     JOIN dbo.F07WaiverDecision a ON a.TenantId=w.TenantId AND a.WaiverId=w.Id
                     JOIN dbo.F07Issue i ON i.TenantId=w.TenantId AND i.Id=w.IssueId
                     WHERE i.TenantId=c.TenantId AND i.CustomerId=c.Id),0) AS ApprovedWaiver,
-                COALESCE((SELECT SUM(CASE WHEN w.Quantity<i.Quantity-back.Returned THEN w.Quantity ELSE i.Quantity-back.Returned END)
-                    FROM dbo.F07Waiver w JOIN dbo.F07WaiverDecision a ON a.TenantId=w.TenantId AND a.WaiverId=w.Id
-                    JOIN dbo.F07Issue i ON i.TenantId=w.TenantId AND i.Id=w.IssueId
+                COALESCE((SELECT SUM(CASE WHEN approved.Quantity<i.Quantity-back.Returned
+                                            THEN approved.Quantity ELSE i.Quantity-back.Returned END)
+                    FROM dbo.F07Issue i
+                    CROSS APPLY (SELECT COALESCE(SUM(w.Quantity),0) AS Quantity
+                        FROM dbo.F07Waiver w JOIN dbo.F07WaiverDecision a ON a.TenantId=w.TenantId AND a.WaiverId=w.Id
+                        WHERE w.TenantId=i.TenantId AND w.IssueId=i.Id) approved
                     CROSS APPLY (SELECT COALESCE(SUM(r.Quantity),0) AS Returned FROM dbo.F07GiftReturn r
                         WHERE r.TenantId=i.TenantId AND r.IssueId=i.Id) back
                     WHERE i.TenantId=c.TenantId AND i.CustomerId=c.Id),0) AS WaivedHeld
@@ -146,8 +151,15 @@ internal static class DevF07Evidence
             JOIN dbo.StockLocation l ON l.TenantId=b.TenantId AND l.Id=b.StockLocationId
             JOIN dbo.F07Program p ON p.TenantId=b.TenantId AND b.SkuId IN(p.PurchaseSkuId,p.GiftSkuId)
             WHERE b.TenantId=@Tenant ORDER BY l.Code;
+            SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT w.TenantId,w.Id,w.IssueId,w.Quantity,w.ActorId,w.Evidence,w.Reason
+                FROM dbo.F07Waiver w WHERE w.TenantId=@Tenant ORDER BY w.Id FOR JSON PATH, INCLUDE_NULL_VALUES)),2) AS ProposalsSha256,
+                CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT w.TenantId,w.Id,w.WaiverId,w.ActorId,w.Evidence,w.Reason
+                FROM dbo.F07WaiverDecision w WHERE w.TenantId=@Tenant ORDER BY w.Id FOR JSON PATH, INCLUDE_NULL_VALUES)),2) AS DecisionsSha256;
             """, new { Tenant = tenant }, cancellationToken: ct));
-        return new(phase, (await rows.ReadAsync<Position>()).ToArray(), (await rows.ReadAsync<Stock>()).ToArray());
+        return new(phase, (await rows.ReadAsync<Position>()).ToArray(), (await rows.ReadAsync<Stock>()).ToArray(),
+            await rows.ReadSingleAsync<WaiverHistory>());
     }
 
     internal static async Task Verify(DemoRun run, string root, string source, string apiSha256,
@@ -176,9 +188,12 @@ internal static class DevF07Evidence
                 int returnedBuy = phase == "issued" ? 0 : branch.GetProperty("purchaseReturnAccepted").GetInt32();
                 int returnedGift = phase == "issued" ? 0 : branch.GetProperty("giftReturnAccepted").GetInt32();
                 int waiver = phase != "issued" && branch.TryGetProperty("giftWaiverApproved", out var value) ? value.GetInt32() : 0;
-                int boughtAgain = phase is "repurchased" or "final" ? branch.GetProperty("subsequentPurchase").GetInt32() : 0;
-                int issuedAgain = phase == "final" ? branch.GetProperty("expectedGiftToDeliver").GetInt32() : 0;
-                return new(customer, initialBuy + boughtAgain, returnedBuy, initialGift + issuedAgain, returnedGift, waiver, waiver);
+                int boughtAgain = phase is "repurchased" or "reissued" or "final"
+                    ? branch.GetProperty("subsequentPurchase").GetInt32() : 0;
+                int issuedAgain = phase is "reissued" or "final" ? branch.GetProperty("expectedGiftToDeliver").GetInt32() : 0;
+                if (phase == "final" && customer == Waived) returnedGift += 1;
+                int waivedHeld = Math.Min(waiver, initialGift + issuedAgain - returnedGift);
+                return new(customer, initialBuy + boughtAgain, returnedBuy, initialGift + issuedAgain, returnedGift, waiver, waivedHeld);
             }
             Position[] positions = [expectedPosition(Returned, "branchReturned"), expectedPosition(Waived, "branchWaived")];
             decimal main = 100 - positions.Sum(row => row.Purchased - row.Accepted);
@@ -208,6 +223,17 @@ internal static class DevF07Evidence
                 held == branch.GetProperty("expectedGiftHeld").GetInt32() &&
                 available == branch.GetProperty("expectedGiftToDeliver").GetInt32() };
         }).ToArray();
+        var afterReturn = final.Positions.SingleOrDefault(row => row.Customer == Waived);
+        decimal netAfterReturn = afterReturn is null ? -1 : afterReturn.Purchased - afterReturn.Accepted;
+        int entitlementAfterReturn = (int)Math.Floor(netAfterReturn / threshold) * giftsPerThreshold;
+        int heldAfterReturn = afterReturn is null ? -1 : afterReturn.Issued - afterReturn.GiftReturned;
+        int toDeliverAfterReturn = Math.Max(0, entitlementAfterReturn - heldAfterReturn);
+        var beforeHistory = observed.GetValueOrDefault("reissued")?.WaiverHistory;
+        var afterHistory = final.WaiverHistory;
+        bool waiverHistoryUnchanged = beforeHistory is not null && beforeHistory == afterHistory;
+        bool returnAfterWaiverMatches = afterReturn is { ApprovedWaiver: 2, WaivedHeld: 1 }
+            && netAfterReturn == 20 && entitlementAfterReturn == 2 && heldAfterReturn == 1 && toDeliverAfterReturn == 1
+            && waiverHistoryUnchanged;
 
         await using var a = new SqlConnection(run.Connection("tenant-a"));
         await using var b = new SqlConnection(run.Connection("tenant-b"));
@@ -222,7 +248,7 @@ internal static class DevF07Evidence
                 UNION ALL SELECT a.TenantId,a.Id,i.CustomerId,a.ActorId,a.WaiverId,w.Quantity,0,a.Reason,a.Evidence
                     FROM dbo.F07WaiverDecision a JOIN dbo.F07Waiver w ON w.TenantId=a.TenantId AND w.Id=a.WaiverId
                     JOIN dbo.F07Issue i ON i.TenantId=w.TenantId AND i.Id=w.IssueId)
-            SELECT r.Id,s.SourceKind AS Kind,c.Code AS Customer,r.ActorId AS Actor,r.Related,r.Quantity,r.CostAmount AS Cost,
+            SELECT r.Id,r.TenantId AS Tenant,s.SourceKind AS Kind,c.Code AS Customer,r.ActorId AS Actor,r.Related,r.Quantity,r.CostAmount AS Cost,
                 r.Reason,r.Evidence,b.Status AS CommandStatus
             FROM records r JOIN dbo.Customer c ON c.TenantId=r.TenantId AND c.Id=r.CustomerId
             JOIN dbo.BusinessSource s ON s.TenantId=r.TenantId AND s.Id=r.Id
@@ -238,16 +264,19 @@ internal static class DevF07Evidence
             LEFT JOIN dbo.Sku k ON k.TenantId=e.TenantId AND k.Id=e.SkuId
             WHERE s.SourceKind LIKE 'F07[_]%' ORDER BY s.Id,e.EffectKey;
             """, cancellationToken: ct))).ToArray();
-        int CheckRecords(string kind, string customer, string actor, long cost)
-            => records.Count(r => r.Kind == kind && r.Customer == customer && r.Actor == actor && r.Quantity == 2 && r.Cost == cost);
-        var giftReturn = records.SingleOrDefault(r => r.Kind == "F07_RETURN");
+        int CheckRecords(string kind, string customer, string actor, long cost, int quantity = 2)
+            => records.Count(r => r.Kind == kind && r.Customer == customer && r.Actor == actor && r.Quantity == quantity && r.Cost == cost);
+        var giftReturn = records.SingleOrDefault(r => r.Kind == "F07_RETURN" && r.Customer == Returned);
+        var afterWaiverReceipt = records.SingleOrDefault(r => r.Kind == "F07_RETURN" && r.Customer == Waived);
         var waiverProposal = records.SingleOrDefault(r => r.Kind == "F07_PROPOSE");
         var waiverDecision = records.SingleOrDefault(r => r.Kind == "F07_APPROVE");
-        bool recordsMatch = records.Length == 6 && records.All(r => r.CommandStatus == "APPLIED"
+        bool recordsMatch = records.Length == 7 && records.All(r => r.Tenant == "tenant-a" && r.CommandStatus == "APPLIED"
             && !string.IsNullOrWhiteSpace(r.Evidence) && !string.IsNullOrWhiteSpace(r.Reason))
             && CheckRecords("F07_ISSUE", Returned, Sales, 200) == 2
             && CheckRecords("F07_ISSUE", Waived, Sales, 200) == 1
             && CheckRecords("F07_RETURN", Returned, DevF05Evidence.Receiver, 200) == 1
+            && CheckRecords("F07_RETURN", Waived, DevF05Evidence.Receiver, 100, quantity: 1) == 1
+            && afterWaiverReceipt?.Evidence == AfterWaiverEvidence && afterWaiverReceipt.Related == waiverProposal?.Related
             && CheckRecords("F07_PROPOSE", Waived, Sales, 0) == 1
             && CheckRecords("F07_APPROVE", Waived, DevF05Evidence.Finance, 0) == 1
             && records.Any(r => r.Id == giftReturn?.Related && r.Kind == "F07_ISSUE" && r.Customer == Returned)
@@ -256,7 +285,9 @@ internal static class DevF07Evidence
         Effect[] expectedEffects = records.Where(r => r.Kind is "F07_ISSUE" or "F07_RETURN")
             .Select(r => r.Kind == "F07_ISSUE"
                 ? new Effect(r.Id, "GIFT-OUT", "PHYSICAL_STOCK", "F07-GIFT", "G-GIFT", -2, -200)
-                : new Effect(r.Id, "GIFT-QA-IN", "PHYSICAL_STOCK", "F07-GIFT-QA", "G-GIFT", 2, 200)).ToArray();
+                : r.Customer == Waived
+                    ? new Effect(r.Id, "GIFT-QA-IN", "PHYSICAL_STOCK", "F07-GIFT-QA", "G-GIFT", 1, 100)
+                    : new Effect(r.Id, "GIFT-QA-IN", "PHYSICAL_STOCK", "F07-GIFT-QA", "G-GIFT", 2, 200)).ToArray();
         bool effectsMatch = effects.Length == expectedEffects.Length && expectedEffects.All(effects.Contains);
         var sales = await a.QuerySingleAsync<(int Orders, int Deliveries, decimal Gross, int OpenItems, decimal Ar,
             int CashReceipts, int SourceCount, int ValidPurchases)>(new CommandDefinition("""
@@ -274,15 +305,21 @@ internal static class DevF07Evidence
         int peerEffects = await b.QuerySingleAsync<int>(new CommandDefinition("""
             SELECT (SELECT COUNT(*) FROM dbo.BusinessSource)+(SELECT COUNT(*) FROM dbo.LedgerEffect)
                 +(SELECT COUNT(*) FROM dbo.SaleDelivery)+(SELECT COUNT(*) FROM dbo.ReceivableOpenItem)
-                +(SELECT COUNT(*) FROM dbo.AOrder)+(SELECT COUNT(*) FROM dbo.CashReceipt);
+                +(SELECT COUNT(*) FROM dbo.AOrder)+(SELECT COUNT(*) FROM dbo.CashReceipt)
+                +(SELECT COUNT(*) FROM dbo.F07Issue)+(SELECT COUNT(*) FROM dbo.F07GiftReturn)
+                +(SELECT COUNT(*) FROM dbo.F07Waiver)+(SELECT COUNT(*) FROM dbo.F07WaiverDecision);
             """, cancellationToken: ct));
         bool matches = phaseDiff.All(row => row.Matches) && entitlements.All(row => row.Matches) && recordsMatch &&
-            effectsMatch && sales == (4, 4, 620000m, 4, 620000m, 0, 6, 4) && peerEffects == 0;
+            returnAfterWaiverMatches && effectsMatch && sales == (4, 4, 620000m, 4, 620000m, 0, 7, 4) && peerEffects == 0;
         string path = Path.Combine(root, "TestResults", "dev-f07", run.Id, "sql-result.json");
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
         {
             runId = run.Id, source, apiSha256, oracleSha256 = Convert.ToHexString(SHA256.HashData(oracleBytes)),
             matches, phaseDiff, entitlements, records, recordsMatch, effects, expectedEffects, effectsMatch,
+            afterApprovedWaiverReturn = new { Net = netAfterReturn, Entitlement = entitlementAfterReturn,
+                GiftHeld = heldAfterReturn, WaivedHeld = afterReturn?.WaivedHeld, ToDeliver = toDeliverAfterReturn,
+                ApprovedWaiver = afterReturn?.ApprovedWaiver, BeforeHistory = beforeHistory, AfterHistory = afterHistory,
+                WaiverHistoryUnchanged = waiverHistoryUnchanged, Matches = returnAfterWaiverMatches },
             sales = new { sales.Orders, sales.Deliveries, sales.Gross, sales.OpenItems, sales.Ar, sales.CashReceipts,
                 sales.SourceCount, sales.ValidPurchases }, peerEffects
         }, new JsonSerializerOptions { WriteIndented = true }), ct);
