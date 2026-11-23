@@ -10,11 +10,15 @@ Một candidate Git tích hợp DEV-F01–08 và E-SIM-01 để chạy lại ma 
 | Giá · AC-19 | [F04](app-02-dev-f04.md) | EXCLUSIVE/INCLUSIVE, discount 10001, snapshot và giao P theo tỷ lệ |
 | Trả và QA · AC-05/06 | [F05](app-02-dev-f05.md) | Nhận QA, giá vốn về 3334 + 3333; AR giữ nguyên |
 | Kỳ khóa · AC-06 | [F06](app-02-dev-f06.md) | 3334 + 50 + 3384 = 6768, kỳ khóa giữ nguyên |
-| Quà · AC-07 | [F07](app-02-dev-f07.md) | Nhánh trả quà được cấp 2, waiver được cấp 0 sau mua lại |
-| Credit và refund · AC-19 | [F08](app-02-dev-f08.md) | Ba phần net/tax/gross/discount; 69600 → 49600 sau ghi chi 20000 |
+| Quà · AC-07 | [F07](app-02-dev-f07.md) | Nhánh trả quà được cấp 2, waiver được cấp 0 sau mua lại, trả thực 1 quà sau waiver mở quyền giao thêm 1 |
+| Credit và refund · AC-19 | [F08](app-02-dev-f08.md) | Ba phần net/tax/gross/discount; 69600 → 49600 sau ghi chi 20000, hai khoản độc lập 60000 tranh quỹ 80000 và chỉ một khoản được chi |
 | Nền A.4, C.6, D.1–D.4 | Ma trận SQL và Playwright của từng suite | 24 + 15 + 28 + 36 + 36 + 36 = 175 lượt đối chiếu, tất cả PASS; D.2 chặn B thiếu kênh |
 | E-SIM-01 | [Biên nhận mô hình](app-02e-ev-p0/e-sim-01.md) | 31 ánh xạ, nội dung khóa không thay đổi, 10 đột biến bị từ chối |
 
 Chạy `./scripts/Run-DevFunctionalRegression.ps1` từ candidate checkout sạch trên Windows với LocalDB, Chromium, .NET/Node được pin, PowerShell 7 và sqlcmd. `-Suite Functional` chạy F01–08, `-Suite Foundation` chạy nền, `-ManifestOnly` chỉ kiểm mô hình. Candidate kiểm đủ commit của PR #124 và nhánh F02 theo SHA trước khi chạy. Runner chỉ đọc danh mục LocalDB trước/sau, và gọi các launcher đã xác minh quyền nonce. Mỗi launcher có run độc lập và trả về lỗi nếu evidence thiếu hoặc sai.
 
 Kết quả nằm ở `TestResults/dev-f09/<run>/run.json`; từng bước ghi lệnh, exit, đường dẫn và SHA-256 của báo cáo, log và JUnit/TRX theo phạm vi. Lỗi giữ trạng thái FAIL và phần cần kiểm lại; chạy ngoài phạm vi đã ghi là NOT_RUN. PREPROD, EV/P0, thiết bị thật, Pilot và Go-Live theo các gate đang có.
+
+## D4-12 · Phục hồi khi chưa biết kết quả ACK
+
+Giữ đợt gửi cạnh tranh trên cả receive và post. Khi tất cả phản hồi của đợt đầu đã về, bộ kiểm chứng chỉ phát lại một lần lệnh nhận HTTP 503 với mã `ACCOUNTING_ACK_UNKNOWN`, giữ đúng nguồn, nội dung nghiệp vụ và mã transport. Fixture chủ động bỏ ACK của một posting. SQL phải thấy ID bền vững trước replay, journal theo thứ tự mất ACK rồi phát lại, và cả hai ACK của từng nguồn phải trùng ID receipt/posting trong SQL. Oracle 3 receipt và 3 posting giữ nguyên.
