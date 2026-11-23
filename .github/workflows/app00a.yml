@@ -843,6 +843,9 @@ jobs:
       - name: APP-03.1a DEV-F05 upgrade and integrated A/F journey through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment App03A1 -Verify
+      - name: APP-03.1b persistent DEV restart, lost ACK and isolated removal
+        shell: pwsh
+        run: ./scripts/Run-App03Dev.ps1 -Action Verify
       - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
         shell: pwsh
         run: ./scripts/Run-App02C6.ps1
@@ -874,6 +877,7 @@ jobs:
             web/test-results-app02d2/
             web/test-results-app02d3/
             TestResults/app03-1a/
+            TestResults/app03-1b/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web
