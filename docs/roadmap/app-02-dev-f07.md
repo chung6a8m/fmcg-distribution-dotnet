@@ -10,6 +10,7 @@ Fixture v1 cho hai khách A tách biệt, có tenant B đối chứng. Chương 
 | F07-02 · AC-07 | Trả 11 EA hàng mua được release, trả hai quà; sau mua tiếp 11, net 20/held 0/toDeliver 2. Hai quà mới có nguồn khác. |
 | F07-03 · AC-07/AP-04 | Sau trả 11 hàng mua, giữ hai quà có waiver đã duyệt. Sau mua tiếp 11, net 20/held 2/toDeliver 0. |
 | F07-04 · BR-09 | Mất ACK, cạnh tranh, sai tenant, sai vai, tự duyệt, cấp vượt quyền. Chỉ quay lại quyền giao khi đã nhận quà thực. Kiểm SQL tồn và không có đơn 0 đồng hoặc AR từ nguồn quà. |
+| F07-05 · AC-07/AP-04 | Sau các mốc AC-07 gốc, kho thực nhận 1 trong 2 quà của nhánh đã được duyệt miễn thu hồi. Mua ròng và quyền nhận vẫn 20/2, khách còn giữ 1, miễn thu hồi đang giữ 1, còn có thể giao 1. Giữ nguyên hình ảnh SQL của đề nghị và quyết định miễn 2 quà. Ghi nguồn nhận đúng lần giao quà, vào QA 1 EA/100 VND một lần dù phát lại. Tồn kho quà còn 4 EA/400 VND tại kho và 3 EA/300 VND tại QA, giữ AR 620.000 VND và tenant B không phát sinh. |
 
 UI `/sales/gifts`, API DEV và nguồn ledger riêng trên LocalDB. Fixture đặt rule chương trình; quản trị master chương trình và vận hành vật lý nằm ngoài phạm vi.
 

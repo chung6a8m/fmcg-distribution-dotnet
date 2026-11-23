@@ -86,7 +86,7 @@ async function loadSource(request: APIRequestContext, source: string, sales: str
   const loaded = await get<{ id: string, orderId: string, shipToVersion: number, available: number | string }[]>(
     request, deliveryApi + '/trips/' + tripId + '/lines', sales)
   const line = loaded.find(item => item.orderId === orderId)
-  if (!line) throw new Error('Missing loaded line for ' + code)
+  if (!line) throw new Error('Missing loaded line for ' + customerCode)
   expect(Number(line.available)).toBe(quantity)
   return { tripId, manifestLineId: line.id, shipToVersion: line.shipToVersion, quantity }
 }
@@ -146,7 +146,7 @@ async function checkPositions(request: APIRequestContext, token: string, custome
   }
 }
 
-test('F07-01–04: recover issuance, distinguish actual returns from waivers, and reconcile gift rights', async ({ page, request }, info) => {
+test('F07-01–05: recover issuance, distinguish actual returns from waivers, and reconcile gift rights', async ({ page, request }, info) => {
   const source = process.env.APP02C1_BROWSER_TOKEN_A
   const peer = process.env.APP02C1_BROWSER_TOKEN_B
   const sales = process.env.DEV_F05_SALES
@@ -273,5 +273,40 @@ test('F07-01–04: recover issuance, distinguish actual returns from waivers, an
   expect(applied.sourceId).toBeTruthy()
   expect(issues.some(row => row.id === applied.sourceId)).toBe(false)
   await checkPositions(request, sales, customers, [[20, 2, 2, 0, 0], [20, 2, 2, 2, 0]])
+  await checkpoint('reissued')
+
+  const approvedBeforeReturn = await get<Waiver[]>(request, giftApi + '/waivers', finance)
+  expect(approvedBeforeReturn).toHaveLength(1)
+  expect(approvedBeforeReturn[0]).toMatchObject({ issueId: waivedIssue.id, quantity: 2, status: 'APPROVED' })
+  await login(page, giftWorkspace, receiver)
+  await page.getByLabel('Lần giao quà', { exact: true }).selectOption(waivedIssue.id)
+  await page.getByLabel('Số lượng quà thực nhận').fill('1')
+  await giftDetails(page, 'F07-after-waiver-actual-receipt', 'Count and quarantine one gift from the approved waiver')
+  const lateReceipt = page.waitForResponse(response => response.url().endsWith(giftApi + '/commands')
+    && response.request().method() === 'POST')
+  await page.getByRole('button', { name: 'Nhận quà trả', exact: true }).click()
+  const committed = await lateReceipt
+  expect(committed.status()).toBe(200)
+  const committedReceipt = await committed.json() as CommandOutcome
+  expect(committedReceipt.sourceId).toBeTruthy()
+  await expect(page.getByText(outcome)).toBeVisible()
+  const lateReplay = await post(request, giftApi + '/commands', receiver, committed.request().postDataJSON() as object)
+  expect(lateReplay).toMatchObject({ sourceId: committedReceipt.sourceId, replayed: true })
+
+  await checkPositions(request, sales, customers, [[20, 2, 2, 0, 0], [20, 2, 1, 1, 1]])
+  const issueAfterReturn = (await get<Issue[]>(request, giftApi + '/issues', sales)).find(row => row.id === waivedIssue.id)
+  expect(issueAfterReturn).toMatchObject({ quantity: 2, returned: 1, waivedHeld: 1 })
+  expect(await get<Waiver[]>(request, giftApi + '/waivers', finance)).toEqual(approvedBeforeReturn)
+  const waivedWallet = wallet(page, waivedName)
+  const expectedAfterReturn = [
+    ['Mua ròng', '20 EA'], ['Quyền nhận', '2 EA'], ['Khách còn giữ', '1 EA'],
+    ['Miễn thu hồi đang giữ', '1 EA'], ['Còn có thể giao', '1 EA'],
+  ]
+  for (const [label, expected] of expectedAfterReturn) {
+    await expect(waivedWallet.getByText(label, { exact: true }).locator('xpath=following-sibling::dd[1]')).toHaveText(expected)
+  }
+  await info.attach('actual-return-after-approved-waiver', {
+    body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+  })
   expect(await get<Position[]>(request, giftApi + '/positions', peerFinance)).toEqual([])
 })
