@@ -14,3 +14,26 @@ Fixture v1 dùng P của EXCLUSIVE, số lượng 3 EA, net 193333, tax 15467, g
 | F08-04 · regression | Retry/lost acknowledgement bảo toàn source rows; đồng thời không vượt credit hoặc quỹ thử. Snapshot của giao hàng, thuế, lượng và COGS đã ghi giữ nguyên. |
 
 UI `/sales/refunds`, endpoint synthetic DEV, LocalDB nonce-owned và ledger AR, customer credit, quỹ thử.
+
+## Biên nhận DEV
+
+Ngày 23/11/2026, Chromium 1/1 và SQL 9/9 checkpoint khớp trong run `c5d20c815cef4d92a9f7f3c4e0aba843` tại source `bf55edc427513d6bcb6f12cab27696867ec82d9d`, tree `a4cd22894aafb825b34e7a67230cf35b3cdcb56d`. .NET Release 351/351. Chứng từ được verifier ghi trước khi Finance tất toán AR 208.800 → 0. Lần trả đầu tiên chỉ ghi credit sau khi QA release và đã tất toán.
+
+| Lần trả | Net | Thuế | Gross | Discount |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 64.444 | 5.156 | 69.600 | 2.222 |
+| 2 | 64.445 | 5.155 | 69.600 | 2.223 |
+| 3 | 64.444 | 5.156 | 69.600 | 2.222 |
+| Tổng | 193.333 | 15.467 | 208.800 | 6.667 |
+
+Credit đầu giữ 69.600 VND qua đề nghị, duyệt và xác minh chứng từ thực chi. Hai lệnh cạnh tranh chỉ ghi một chi 20.000 VND. Credit đầu còn 49.600, quỹ còn 80.000, credit tổng sau ba case còn 188.800. Sai lệch oracle bằng 0. Snapshot của nguồn giao giữ nguyên; B có zero effect. Lượt đầu bị lỗi collation giữa role của chương trình và grant hiện hành; migration đã dùng cùng kiểu/collation. Lượt đạt ghi một GET bị hủy khi browser chuyển trang trong workspace F05; các bước ghi nghiệp vụ và SQL đều đạt. Cạn quỹ qua hai khoản chi đã duyệt khác nhau chưa chạy. Nguồn giao từng phần của dòng đơn, đơn có nghĩa vụ quà, áp credit cho hóa đơn mới, ngân hàng và thuế thật ngoài phạm vi fixture.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Locked AC-19 oracle file | `6850EA6F4C6AF4F4CDD65A4506BA7035D0A7771536FB54FD4F4809C918FB90E7` |
+| Browser fixture v1 | `B0FFF06AD0ADE4E364927ACD777447C87DCECF8637EA410462CB9905E17B8234` |
+| JUnit | `1E7B0940DF7AD32B7EADC8366C1173007955B609FDBF85B4F87F6E41E1B0C447` |
+| SQL result | `88502E695DEA86875AE7B5633B054F2C15675C8D216076948DA02A08D2590E20` |
+| API DLL | `8E8E3669FEE96BC098BE6C9493CE70947F6124D0B6F3815519B5FBAE0E72F7E8` |
+
+Tái chạy `./scripts/Run-App02C1.ps1 -Increment DevF08 -Verify` trên LocalDB scratch do nonce sở hữu. SQL tại `TestResults/dev-f08/<run>/sql-result.json`, browser tại `web/test-results-app02c5/<run>/junit.xml`.

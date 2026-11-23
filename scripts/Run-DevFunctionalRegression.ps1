@@ -96,7 +96,7 @@ function Receive-Scenario($Entry, [bool] $Baseline) {
         $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -Filter $filename |
             Where-Object FullName -notin $old)
         if ($files.Count -ne 1) { throw "Expected one new SQL result, observed $($files.Count)" }
-        $sql = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json -AsHashtable
+        $sql = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
         if ($sql.source -cne $source -or $sql.runId -cne $files[0].Directory.Name) {
             throw 'SQL report source or run ID does not match'
         }
@@ -108,6 +108,10 @@ function Receive-Scenario($Entry, [bool] $Baseline) {
             if ($run.actual -ne $run.expected -or @($sql.cases).Count -ne $run.expected) {
                 throw 'Baseline case count or status has changed'
             }
+        } elseif ($Entry.Name -in @('DEV-F01', 'DEV-F02')) {
+            if ($sql.Status -cne 'PASS') { throw 'SQL comparison did not pass' }
+        } elseif ($sql.matches -ne $true) {
+            throw 'SQL comparison did not pass'
         }
         $junit = @(Get-ChildItem -LiteralPath web -Directory -Filter 'test-results*' |
             ForEach-Object { Join-Path $_.FullName "$($sql.runId)/junit.xml" } |
@@ -119,7 +123,12 @@ function Receive-Scenario($Entry, [bool] $Baseline) {
         if ($run.browserPassed -le 0 -or [int] $totals.tests -ne $run.browserPassed) {
             throw 'Browser result has a failed, skipped or missing case'
         }
-        $run.receipts += Get-Receipt $junit[0]
+        $browserReceipt = Get-Receipt $junit[0]
+        $boundBrowserHash = $sql.PSObject.Properties['browserReportSha256']
+        if ($null -ne $boundBrowserHash -and $boundBrowserHash.Value -cne $browserReceipt.sha256) {
+            throw 'Browser JUnit hash differs from the SQL receipt'
+        }
+        $run.receipts += $browserReceipt
     } catch {
         $run.status = 'FAIL'
         $run.error = $_.Exception.Message
@@ -176,18 +185,46 @@ try {
             $null = Invoke-Run 'web-build' 'npm' @('--prefix', 'web', 'run', 'build')
             $null = Invoke-Run 'web-unit' 'npm' @('--prefix', 'web', 'test')
             $null = Invoke-Run 'web-pwa' 'npm' @('--prefix', 'web', 'run', 'test:pwa-build')
-            $net = Invoke-Run 'dotnet' 'dotnet' @('test', '--solution', 'FmcgDms.slnx', '-c', 'Release', '--', '--report-trx',
-                '--report-trx-filename', "dev-f09-$runId.trx")
+            $net = Invoke-Run 'dotnet' 'dotnet' @('test', '--solution', 'FmcgDms.slnx', '-c', 'Release',
+                '--minimum-expected-tests', '352', '--', '--report-trx', '--report-trx-filename', "dev-f09-$runId.trx")
             $trx = @(Get-ChildItem -LiteralPath TestResults -Recurse -File -Filter "dev-f09-$runId.trx")
-            if ($trx.Count -eq 1) { $net.receipts += Get-Receipt $trx[0].FullName }
-            else { $net.status = 'FAIL'; $net.error = 'Expected the source run TRX' }
+            if ($trx.Count -eq 1) {
+                $net.receipts += Get-Receipt $trx[0].FullName
+                [xml] $reportXml = Get-Content -LiteralPath $trx[0].FullName -Raw
+                $counters = $reportXml.TestRun.ResultSummary.Counters
+                $net.expected = [int] $counters.GetAttribute('total')
+                $net.actual = [int] $counters.GetAttribute('passed')
+                if ($net.actual -lt 352 -or $net.actual -ne $net.expected) {
+                    $net.status = 'FAIL'
+                    $net.error = '.NET test count or status differs from the candidate expectation'
+                }
+            } else {
+                $net.status = 'FAIL'
+                $net.error = 'Expected the source run TRX'
+            }
 
             if ($Suite -in @('All', 'Foundation')) {
                 $a4 = Invoke-Run 'A.4' 'pwsh' @('-NoProfile', '-File', './scripts/Verify-App02A4.ps1')
                 $a4.runId = $env:APP02A4_TEST_RUN_ID
                 $a4.expected = 24
                 $a4.actual = 0
-                if ($a4.status -eq 'PASS') { $a4.actual = 24 }
+                if ($a4.status -eq 'PASS') {
+                    $a4Root = New-Item -ItemType Directory -Path (Join-Path $output 'a4-oracles')
+                    $oracles = @(Get-ChildItem -LiteralPath tests -Recurse -File -Filter '*-oracle.json' |
+                        Where-Object { $_.Directory.Name -ceq 'APP-02A4' } | Sort-Object Name)
+                    foreach ($oracle in $oracles) {
+                        $artifact = Get-Content -LiteralPath $oracle.FullName -Raw | ConvertFrom-Json
+                        if ($artifact.TestRunId -cne $a4.runId -or $artifact.SourceHeadSha -cne $source) { continue }
+                        $path = Join-Path $a4Root $oracle.Name
+                        Copy-Item -LiteralPath $oracle.FullName -Destination $path
+                        $a4.receipts += Get-Receipt $path
+                    }
+                    $a4.actual = $a4.receipts.Count
+                    if ($a4.actual -ne $a4.expected) {
+                        $a4.status = 'FAIL'
+                        $a4.error = 'A.4 evidence did not retain all 24 exact-source SQL reports'
+                    }
+                }
                 foreach ($entry in $foundation) { Receive-Scenario $entry $true }
             }
             if ($Suite -in @('All', 'Functional')) {
