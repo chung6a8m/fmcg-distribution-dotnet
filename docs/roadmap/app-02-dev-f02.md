@@ -31,3 +31,7 @@ Cài dependency `npm --prefix web ci`. Chạy `./scripts/Run-App02C1.ps1 -Increm
 Browser/SQL run `9979b098631d41138909ff55287a46f6` trên source `f6b462503b75fbe693de4fcc8886157b2b46e19e`, tree `8049dec533d51d9ddcbddcad2c74ecbcb0a870c4`. Oracle golden SHA-256 LF `8273CE3114EBFF437A616B3E77022707CD3629EE743870AA745ACCE75E1562CF`. Fixture browser v1 SHA-256 bytes `DB8FE98BFB5A70D56E306B8344A270B9BBCB045DFCB35ED09846CD7B32C0227D`, API fixture `CAAB68498FD93E775C02E6233DB590DB8C2021238B4982E6E98E49D5F61DD96D`. SQL receipt SHA-256 `2A7377024B774A8EEDC2243D0295C1C9A8F64959FA1F9B826AF8A8C8E31F9840`. Lượt browser có một log SQL hủy GET khi điều hướng, case và oracle hoàn tất. Workflow APP-00A tái chạy và lưu artifact.
 
 Hồi quy `dotnet test --solution FmcgDms.slnx -c Release -- --report-trx` trên source đó đạt 347/347, 0 lỗi và 0 skip. Red case ban đầu nhận 404 trước khi có route. Review bổ sung lý do AP-06/07, kiểm same-tenant peer và xác thực vai đang hiệu lực khi phục hồi. Kết quả EV-06 thực vẫn theo hồ sơ đã ký.
+
+### Hồi quy form sau CI
+
+Runner GitHub run 45097743285 dừng tại bước F02-04. DOM ghi hai trường bị xóa khi GET khoản tạm ứng đầu tiên trả về và form đổi khóa. Lượt LocalDB `5a360dc14a684658b0568e50a5118d27` tái hiện với GET bị giữ. Sau khi vô hiệu hóa trường nhập đến khi dữ liệu nguồn sẵn sàng, lượt `cdb9b92c4d774869a9e89487e62817f9` đạt 1/1 Chromium, đủ năm mốc AC-20 và 8/8 ảnh dòng sổ khách hàng giữ nguyên. Bản cập nhật spec giữ hành vi chậm tải trong CI. [Run hosted](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45097743285)

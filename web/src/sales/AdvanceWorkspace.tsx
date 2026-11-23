@@ -99,6 +99,8 @@ function AdvancePanel({ session: { token, identity } }: { session: Session }) {
     const used = detail.entries.reduce((sum, child) => child.referenceId === entry.id ? sum + child.amount : sum, 0)
     return used < entry.amount
   }) : []
+  const entryReady = action === 'ISSUE'
+    ? employees.length > 0 : Boolean(advance) && (!needsReference || openSources.length > 0)
 
   useEffect(() => {
     function sync() { setOffline(!navigator.onLine) }
@@ -181,7 +183,7 @@ function AdvancePanel({ session: { token, identity } }: { session: Session }) {
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (pending || operation.current || !navigator.onLine) return
+    if (!entryReady || pending || operation.current || !navigator.onLine) return
     const values = new FormData(event.currentTarget)
     const commandId = crypto.randomUUID()
     const command = { commandId, body: JSON.stringify({ commandId, action,
@@ -220,8 +222,8 @@ function AdvancePanel({ session: { token, identity } }: { session: Session }) {
         {byRole[identity.role].map(kind => <option key={kind} value={kind}>{actions[kind]}</option>)}
       </select>
     </div>
-    <form key={action + advanceId} ref={form} onSubmit={save}>
-      <fieldset className="c1-fields" disabled={offline || busy || pending !== null}>
+    <form key={action === 'ISSUE' ? action : action + advanceId} ref={form} onSubmit={save}>
+      <fieldset className="c1-fields" disabled={!entryReady || offline || busy || pending !== null}>
         {action === 'ISSUE' && <div className="field">
           <label htmlFor={id + '-employee'}>Nhân viên</label>
           <select id={id + '-employee'} name="employee" required defaultValue="">
@@ -239,10 +241,7 @@ function AdvancePanel({ session: { token, identity } }: { session: Session }) {
         {needsReference && <Field label="Lý do xác nhận" name="decisionReason" maxLength={200} required />}
         <Field label="Số tiền (VND)" name="amount" type="number" min={1} max={1000000000} required />
         <Field label="Chứng từ DEV" name="evidence" maxLength={120} required />
-        <div className="button-row"><Button variant="primary" type="submit"
-          disabled={action === 'ISSUE' ? employees.length === 0 : !advance || (needsReference && openSources.length === 0)}>
-          {actions[action]}
-        </Button></div>
+        <div className="button-row"><Button variant="primary" type="submit">{actions[action]}</Button></div>
       </fieldset>
     </form>
     {message && <p role="status">{message}</p>}

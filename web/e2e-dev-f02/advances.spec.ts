@@ -34,7 +34,19 @@ test('F02-04: Finance, employee and cashier close the AC-20 advance with two rec
   await page.getByRole('button', { name: 'Phát ứng', exact: true }).click()
   await expect(balance).toHaveText('500.000 VND')
 
-  await connect(page, 'employee')
+  let releaseAdvances!: () => void
+  const holdAdvances = new Promise<void>(resolve => { releaseAdvances = resolve })
+  await page.route('**/dev-f02/advances', async route => {
+    await holdAdvances
+    await route.continue()
+  })
+  try {
+    await connect(page, 'employee')
+    await expect(page.getByLabel('Số tiền (VND)')).toBeDisabled({ timeout: 1000 })
+    await expect(page.getByLabel('Chứng từ DEV')).toBeDisabled({ timeout: 1000 })
+  } finally {
+    releaseAdvances()
+  }
   await fill(page, 300000, 'DEV-F02-EXPENSE')
   await page.getByRole('button', { name: 'Đề nghị quyết toán chi', exact: true }).click()
   await expect(page.getByText('Đã ghi sổ tạm ứng.')).toBeVisible()
