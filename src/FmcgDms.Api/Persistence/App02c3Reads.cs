@@ -35,7 +35,14 @@ public sealed partial class App01a2CommandService
         {
             if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
                 || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
-            return (await EligibleC3Rights(db, tx, tenant, trip, null, ct)).ToArray();
+            var rights = (await EligibleC3Rights(db, tx, tenant, trip, null, ct)).ToArray();
+            if (!connections.UsesDevF03 || rights.Length == 0) return rights;
+            var ids = rights.Select(right => right.Id).ToArray();
+            var lots = (await ReadHeldLots(db, tx, tenant, ids, ct)).ToLookup(lot => lot.SourceId, lot => lot.ToView());
+            var tracked = await GetTrackedSources(db, tx, tenant, ids, "F03LotHold", "StockRightId", ct);
+            return rights.Select(right => tracked.Contains(right.Id)
+                ? right with { Lots = lots[right.Id].ToArray(), EligibleWarehouseHeld = lots[right.Id].Sum(lot => lot.Quantity) }
+                : right).ToArray();
         }, ct);
 
     public Task<BusinessCommandOutcome?> OutcomeC3(ClaimsPrincipal principal, Guid trip, Guid id, CancellationToken ct) =>
