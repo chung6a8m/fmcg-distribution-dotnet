@@ -49,3 +49,17 @@ Source thực chạy `f7d0090816dd01508bb0736d72c94fe3b8dce50f`, tree `142b38f27
 | `TestResults/app03-1b-ac03.log` | `2D1027B555F9A624B9EE3860578FFA8534ED026013CD6E966F234AE90FF46CA2` |
 | `TestResults/dev-f09/1fdf23c09e3f4a6f80d7f05b2d4d8656/run.json` | `0DD93B4EEDC71E5A15228CF293390881F8B61C8F3BF4CF54D126047AED753517` |
 | `TestResults/dev-f09-1fdf23c09e3f4a6f80d7f05b2d4d8656.trx` | `F25C328EC10623CA087EDA7BFA8687891FA705E4700D4D4404BAC6D52198B87E` |
+
+### Kiểm chứng sau review PR #135
+
+Source thực chạy `4ec43025e060397a2b1cbcd1efd2ce592e8fae51`, tree `de52734de4bd43cc6769310ad16e2ffb82af7e8a`. Cả hai ca hồi quy tái hiện lỗi trước sửa và PASS sau sửa trên Windows LocalDB.
+
+- Run APP-03.1b `ea9b6252baa14653af7c90a8354749a3` xác nhận `Remove` từ chối khi tenant B tạm vắng, giữ nguyên từng byte của manifest và row image nghiệp vụ tenant A. `Stop` từ bản sao script trong thư mục không có Git hoặc DLL dừng đúng hai host và giữ nguyên row image.
+- APP-03.1a Chromium → API → SQL 1/1, smoke AC-03 và .NET 352/352 đều qua trên source sửa.
+
+| Artifact local | SHA-256 |
+| --- | --- |
+| `TestResults/app03-1b/ea9b6252baa14653af7c90a8354749a3/session-review.json` | `13E83C69BE8911BF8A38CA496CA3489670C487B7CEE00C2BD3C2CE285C744606` |
+| `TestResults/app03-1b-review-final.log` | `0274527B3B9F2103BEEF244BDA610254D7A3DC6B2986BCE45ADA0D461B0CBA7A` |
+| `TestResults/app03-1a/aa38a0eda100411fab084a4e78eac23b/sql-review.json` | `838BD7A7901BA39BA01CBF368A0693C4386956C5762FF8E4AD14D07F417280A1` |
+| `TestResults/app03-1b-review.trx` | `77B2102CA2B01A7E9E854A4ABE0AA98A63EC1E2864019236F759EFD7C15DBB6C` |
