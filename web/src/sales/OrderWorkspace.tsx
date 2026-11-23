@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { Fragment, useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Field, Notice, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, read, rememberPending, requestSalesApi, type Detail, type Identity } from './customer-api'
@@ -10,9 +10,11 @@ type Option = { id: string; label: string }
 type CatalogUnit = { skuId: string; uomCode: string; factor: number; step: number }
 type Catalog = { customers: Option[]; trips: Option[]; skus: Option[]; warehouses: Option[]
   units?: CatalogUnit[] }
+type Pricing = { mode: 'EXCLUSIVE' | 'INCLUSIVE'; currency: 'VND'; base: number; discount: number
+  net: number; tax: number; gross: number; version: number }
 type Line = { lineId: string | null; sku: string; baseUom: string; ordered: number; reserved: number;
   delivered: number; unitPrice: number | null; policyVersion: number | null; termsDays: number | null
-  loaded: number; heldOnTrip: number; policySourceHash: string | null }
+  loaded: number; heldOnTrip: number; policySourceHash: string | null; pricing?: Pricing | null }
 type Order = { id: string; customer: string; trip: string; shipTo: string; businessDate: string | null;
   confirmSourceId: string | null; status: string; lines: Line[]; shipToSnapshotId: string | null; shipToOrigin: string }
 type Command = { path: '/drafts' | '/confirm' | '/reserve'; id: string; body: string }
@@ -42,6 +44,33 @@ const rejections: Record<string, string> = {
   QUANTITY_INVALID: 'Số lượng phải dương, tối đa ba chữ số thập phân.',
   F03_UOM_INVALID: 'Đơn vị hoặc bước số lượng không hợp lệ.',
   F03_LOT_STOCK_INSUFFICIENT: 'Kho không đủ hàng từ các lô đủ điều kiện để giữ.',
+  F04_PRICE_PLAN_REQUIRED: 'Đơn chưa có phương án giá được duyệt và còn hiệu lực.',
+  F04_PRICE_INVALID: 'Giá, chiết khấu hoặc thuế trên đơn không hợp lệ.',
+}
+
+const vnd = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 })
+const vndUnit = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 4 })
+
+function PriceAmounts({ amounts }: { amounts: [string, number][] }) {
+  return <dl className="sales-facts">
+    {amounts.map(([label, value]) => <Fragment key={label}><dt>{label}</dt><dd>{vnd.format(value)} VND</dd></Fragment>)}
+  </dl>
+}
+
+function OrderPriceTotals({ lines }: { lines: Line[] }) {
+  const prices = lines.flatMap(line => line.pricing ? [line.pricing] : [])
+  if (prices.length === 0 || prices.length !== lines.length) return null
+
+  const totals = prices.reduce((sum, { net, tax, gross }) => ({
+    net: sum.net + net, tax: sum.tax + tax, gross: sum.gross + gross,
+  }), { net: 0, tax: 0, gross: 0 })
+
+  return <section aria-label="Tổng tiền đơn đã chốt">
+    <h4>Tổng tiền đơn đã chốt</h4>
+    <PriceAmounts amounts={[
+      ['Tiền chưa thuế', totals.net], ['Thuế', totals.tax], ['Tổng thanh toán', totals.gross],
+    ]} />
+  </section>
 }
 
 function key(identity: Authority) {
@@ -320,7 +349,20 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
             <p>{line.sku} · Đặt {line.ordered} {line.baseUom} · Đã giữ {line.reserved} {line.baseUom}</p>
             {line.delivered > 0 && <p>Đã giao {line.delivered} {line.baseUom}</p>}
             {workspaceToken && order.confirmSourceId && <p>Đã nạp {line.loaded} {line.baseUom} · Còn giữ trên xe {line.heldOnTrip} {line.baseUom}</p>}
-            {line.policyVersion !== null && <p>Chính sách v{line.policyVersion} · Giá {line.unitPrice} · Hạn {line.termsDays} ngày</p>}
+            {line.policyVersion !== null && <p>Chính sách v{line.policyVersion} · Giá {
+              line.pricing && line.unitPrice !== null ? `${vndUnit.format(line.unitPrice)} VND` : line.unitPrice
+            } · Hạn {line.termsDays} ngày</p>}
+            {line.pricing && <section aria-label={`Giá đã chốt ${line.sku}`}>
+              <h4>Giá đã chốt</h4>
+              <p>{line.pricing.mode === 'INCLUSIVE' ? 'Giá gồm VAT' : 'Giá chưa VAT'} · Phương án giá v{line.pricing.version}</p>
+              <PriceAmounts amounts={[
+                ['Giá dòng trước chiết khấu', line.pricing.base],
+                ['Chiết khấu', line.pricing.discount],
+                ['Tiền chưa thuế', line.pricing.net],
+                ['Thuế', line.pricing.tax],
+                ['Tổng thanh toán', line.pricing.gross],
+              ]} />
+            </section>}
             {workspaceToken && line.policySourceHash && <details>
               <summary>Nguồn chính sách</summary><p className="c3-source">{line.policySourceHash}</p>
             </details>}
@@ -341,6 +383,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
                 <Button variant="primary" type="submit" disabled={disabled}>Reserve hàng</Button>
               </form>}
           </div>)}
+          <OrderPriceTotals lines={order.lines} />
         </article>)}
       </section>
     </>}

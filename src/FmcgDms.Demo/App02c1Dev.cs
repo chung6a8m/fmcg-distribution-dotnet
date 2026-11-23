@@ -39,6 +39,7 @@ internal static class App02c1Dev
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
         bool visit = increment == "DevF01";
         bool fefo = increment == "DevF03";
+        bool pricing = increment == "DevF04";
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
         bool d4 = increment == "App02D4";
@@ -46,11 +47,11 @@ internal static class App02c1Dev
         bool d2 = increment == "App02D2";
         bool d1 = d3 || d2 || increment == "App02D1";
         if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
-        bool c5 = fefo || d1 || c6 || increment == "App02C5";
+        bool c5 = pricing || fefo || d1 || c6 || increment == "App02C5";
         bool c4 = c5 || fefo || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
-        string feature = fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -90,7 +91,7 @@ internal static class App02c1Dev
                     """, new { tenant, Actor });
                 if (await BusinessRows(db) != 0) throw new InvalidOperationException("C.1 DEV database was not empty.");
                 if (c2) await App02c2DevFixture.Seed(db, tenant, Actor,
-                    fefo ? DevF03Evidence.FixtureUtc : acceptance?.InitialTime.UtcDateTime);
+                    pricing ? DevF04Evidence.FixtureUtc : fefo ? DevF03Evidence.FixtureUtc : acceptance?.InitialTime.UtcDateTime);
                 if (visit)
                 {
                     FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF01(run.Connection(tenant), tenant, run.Id,
@@ -107,10 +108,16 @@ internal static class App02c1Dev
                     Guid quarantineId = await DevF03Evidence.Seed(db, tenant, lifetime.Token);
                     if (tenant == "tenant-a") fefoQuarantineId = quarantineId;
                 }
+                if (pricing)
+                {
+                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF04(run.Connection(tenant), tenant, run.Id,
+                        Microsoft.Extensions.Logging.LogLevel.Warning);
+                    await DevF04Evidence.Seed(db, tenant, lifetime.Token);
+                }
                 if (c3 && (c6 || tenant == "tenant-a"))
                     await App02c3DevFixture.Seed(db, tenant, Actor, c6 || (!c4 && mode == "Verify"));
                 if (c4 && (c6 || tenant == "tenant-a"))
-                    await App02c4DevFixture.Seed(db, tenant, Actor, !fefo && mode == "Verify");
+                    await App02c4DevFixture.Seed(db, tenant, Actor, !pricing && !fefo && mode == "Verify");
                 if (acceptance is not null) await acceptance.Prepare(db, tenant);
             }
             string apiUrl = $"http://127.0.0.1:{ApiPort}";
@@ -139,6 +146,7 @@ internal static class App02c1Dev
             apiStart.Environment["App02C1__Enabled"] = "true";
             apiStart.Environment["DevF01__Enabled"] = visit ? "true" : "false";
             apiStart.Environment["DevF03__Enabled"] = fefo ? "true" : "false";
+            apiStart.Environment["DevF04__Enabled"] = pricing ? "true" : "false";
             apiStart.Environment["App02C1__Nonce"] = run.Id;
             apiStart.Environment["App02C2__Enabled"] = c2 ? "true" : "false";
             apiStart.Environment["App02C2__DedicatedRuntime"] = c2 ? "true" : "false";
@@ -148,11 +156,13 @@ internal static class App02c1Dev
             apiStart.Environment["Logging__LogLevel__Default"] = "Warning";
             foreach (string tenant in DemoRun.Tenants)
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
-            if (fefo)
+            if (fefo || pricing)
             {
-                string clock = Path.Combine(root, "TestResults", "dev-f03", run.Id, "clock.utc");
+                string profile = pricing ? "dev-f04" : "dev-f03";
+                DateTime clockTime = pricing ? DevF04Evidence.FixtureUtc : DevF03Evidence.FixtureUtc;
+                string clock = Path.Combine(root, "TestResults", profile, run.Id, "clock.utc");
                 Directory.CreateDirectory(Path.GetDirectoryName(clock)!);
-                await File.WriteAllTextAsync(clock, DevF03Evidence.FixtureUtc.ToString("O"), lifetime.Token);
+                await File.WriteAllTextAsync(clock, clockTime.ToString("O"), lifetime.Token);
                 apiStart.Environment["App02C6__ClockFile"] = clock;
             }
             if (acceptance is not null)
@@ -211,13 +221,14 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_A"] = tokenA;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_B"] = tokenB;
             if (fefoQuarantineId is Guid quarantine) browserStart.Environment["DEV_F03_QA"] = quarantine.ToString("D");
+            if (pricing) browserStart.Environment["DEV_F04_CHECKPOINTS"] = DevF04Evidence.CheckpointDirectory(root, run);
             if (c3)
                 foreach (var (slot, tenant) in new[] { ("A", "tenant-a"), ("B", "tenant-b") })
                     browserStart.Environment["APP02C3_WAREHOUSE_TOKEN_" + slot] = Token(key, tenant, ["warehouse"]);
@@ -321,8 +332,16 @@ internal static class App02c1Dev
                     }, lifetime.Token);
                 return;
             }
+            var masterChange = pricing
+                ? await DevF04Evidence.ServeMasterChange(run, root, browser, client, webUrl, tokenA, tokenB, lifetime.Token)
+                : null;
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"{feature} browser verification exited {browser.ExitCode}.");
+            if (pricing)
+            {
+                await DevF04Evidence.Verify(run, root, source, apiSha256, masterChange, lifetime.Token);
+                return;
+            }
             if (fefoBefore is not null)
             {
                 await DevF03Evidence.Verify(run, root, source, apiSha256, fefoBefore, lifetime.Token);

@@ -21,7 +21,11 @@ public sealed record C4ArView(Guid SourceId, string Customer, string ShipTo, Dat
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Quantity,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Amount,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Outstanding,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Cost);
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Cost)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Currency { get; init; }
+}
 public sealed record C4CaseView(Guid CommandId, Guid ManifestLineId, int ShipToVersion, DateTime OccurredAtUtc,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Quantity,
     string? ReasonCode, bool CanRetry);
@@ -104,7 +108,9 @@ public sealed partial class App01a2CommandService
         }, ct);
 
     public Task<IEnumerable<C4ArView>> ReceivablesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
-        WithC4Authority(principal, trip, (db, tx, tenant, _) => db.QueryAsync<C4ArView>(Sql("""
+        WithC4Authority<IEnumerable<C4ArView>>(principal, trip, async (db, tx, tenant, _) =>
+        {
+            var amounts = (await db.QueryAsync<C4ArView>(Sql("""
             SELECT d.BusinessSourceId AS SourceId,c.Name AS Customer,s.Address AS ShipTo,d.BusinessDate,
                 ar.DueBusinessDate,d.BaseQuantity AS Quantity,ar.OriginalAmount AS Amount,
                 ar.OutstandingAmount AS Outstanding,d.CostAmount AS Cost
@@ -114,7 +120,12 @@ public sealed partial class App01a2CommandService
             JOIN dbo.ShipToSnapshot s ON s.TenantId=d.TenantId AND s.Id=d.ShipToSnapshotId
             WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND d.C4EvidenceId IS NOT NULL
             ORDER BY d.PostedAtUtc DESC,d.Id
-            """, new { Tenant = tenant, Trip = trip }, tx, ct)), ct);
+            """, new { Tenant = tenant, Trip = trip }, tx, ct))).AsList();
+            if (!connections.UsesDevF04 || amounts.Count == 0) return amounts;
+            var currencies = (await ReadDeliveryCurrencies(db, tx, tenant, trip, ct))
+                .ToDictionary(row => row.SourceId, row => row.Currency);
+            return amounts.Select(amount => amount with { Currency = currencies.GetValueOrDefault(amount.SourceId) }).ToArray();
+        }, ct);
 
     public Task<IEnumerable<C4CaseView>> DeliveryCasesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         WithC4Authority(principal, trip, (db, tx, tenant, actor) => db.QueryAsync<C4CaseView>(Sql("""

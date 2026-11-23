@@ -13,7 +13,11 @@ public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<F03UnitView>? Units = null);
 public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, decimal Ordered, decimal Reserved,
     decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered, decimal Loaded, decimal HeldOnTrip,
-    string? PolicySourceHash);
+    string? PolicySourceHash)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public F04PriceView? Pricing { get; init; }
+}
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
     Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin);
 
@@ -109,11 +113,19 @@ public sealed partial class App01a2CommandService
                 """, new { Tenant = tenant }, tx, ct));
             var headers = (await grid.ReadAsync<C2Header>()).AsList();
             var lines = (await grid.ReadAsync<C2LineRow>()).ToLookup(l => l.OrderId);
+            var confirmed = lines.SelectMany(group => group).Where(line => line.LineId.HasValue)
+                .Select(line => line.LineId!.Value).ToArray();
+            var pricing = connections.UsesDevF04 && confirmed.Length > 0
+                ? (await ReadPrices(db, tx, tenant, confirmed, ct)).ToDictionary(row => row.OrderLineId)
+                : null;
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
                     l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays,
-                    l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)).ToArray();
+                    l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)
+                {
+                    Pricing = l.LineId is Guid id ? pricing?.GetValueOrDefault(id)?.ToView() : null
+                }).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
                     orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
                     orderLines.Any(l => l.Delivered > 0) ? "PARTIALLY_DELIVERED" :
