@@ -1,0 +1,1090 @@
+{
+  "source": "e4bb20a659cc32ae1491740a33bb1abf259c5dd5",
+  "runId": "105b72e294984633ad1f3f966357d410",
+  "expected": 36,
+  "actual": 36,
+  "matrixSha256": "B3250DAD969D81ED73274B009C8E39D03B5A087C6033F63376F92138DCD687AE",
+  "cases": [
+    {
+      "caseId": "D4-12",
+      "tenant": "tenant-a",
+      "status": "PASS",
+      "checks": [
+        {
+          "step": "accounting-ack-unknown",
+          "stage": "post",
+          "transport": "post-0-a",
+          "initialHttp": 503,
+          "replayHttp": 200
+        },
+        {
+          "step": "final",
+          "sqlEffectivePrincipal": "d4oracle",
+          "receipts": [
+            {
+              "Id": "f45a37a4-fa67-4b46-acb4-bb1f92e687d0",
+              "DeliveryId": "ea5db18d-ae3a-4ac6-a23d-d9a001dafdd9",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "PayloadHash": "AE4BB2087D14F6199D750390541396218B48D2ADC3EF1379D8199AB72527B9BF",
+              "Period": "2026-11",
+              "Quantity": 10.0,
+              "Gross": 150.0,
+              "Ar": 150.0,
+              "Cost": 100.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-0-a"
+            },
+            {
+              "Id": "32555ec6-9d28-4a0c-9a90-0f52e137ee3c",
+              "DeliveryId": "29f74bf6-c5c7-4235-a326-42a5cca0315f",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "PayloadHash": "73232C47398CA4E19D575A708A1D643343BE9FA41751A7C05ECD397C7A8B049A",
+              "Period": "2026-11",
+              "Quantity": 15.0,
+              "Gross": 225.0,
+              "Ar": 225.0,
+              "Cost": 150.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-1-b"
+            },
+            {
+              "Id": "258d66a2-6cd2-422d-b79f-ac6575f25b86",
+              "DeliveryId": "347efd84-810f-483c-8344-17fbbc888b97",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "PayloadHash": "935F9175CBBAEB12960602F6A05FB023EBBEEBCBAFBE8A2D85895C7A28A94C76",
+              "Period": "2026-11",
+              "Quantity": 20.0,
+              "Gross": 300.0,
+              "Ar": 100.0,
+              "Cost": 200.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-2-a"
+            }
+          ],
+          "postings": [
+            {
+              "Id": "fb97ce2c-537d-4a53-b4aa-fa0f54b10812",
+              "ReceiptId": "f45a37a4-fa67-4b46-acb4-bb1f92e687d0",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 10.0,
+              "Gross": 150.0,
+              "Ar": 150.0,
+              "Cost": 100.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": "0380b1f1-3bcf-4781-8d86-62d10a061d6e",
+              "ReceiptId": "32555ec6-9d28-4a0c-9a90-0f52e137ee3c",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 15.0,
+              "Gross": 225.0,
+              "Ar": 225.0,
+              "Cost": 150.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": "2ee852ae-a097-47ef-a46b-ca406317fd8a",
+              "ReceiptId": "258d66a2-6cd2-422d-b79f-ac6575f25b86",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 20.0,
+              "Gross": 300.0,
+              "Ar": 100.0,
+              "Cost": 200.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            }
+          ],
+          "journal": [
+            {
+              "Id": 4,
+              "Operation": "POST",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "premature",
+              "Outcome": "RECEIPT_MISSING",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 5,
+              "Operation": "RECEIVE",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "TransportId": "receive-0-a",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 6,
+              "Operation": "RECEIVE",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "TransportId": "receive-1-b",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 7,
+              "Operation": "RECEIVE",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "receive-2-a",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 8,
+              "Operation": "RECEIVE",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "TransportId": "receive-1-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 9,
+              "Operation": "RECEIVE",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "TransportId": "receive-0-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 10,
+              "Operation": "RECEIVE",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "receive-2-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 11,
+              "Operation": "POST",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "TransportId": "post-0-a",
+              "Outcome": "COMMITTED_NO_ACK",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 12,
+              "Operation": "POST",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "post-2-b",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 13,
+              "Operation": "POST",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "TransportId": "post-1-b",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 14,
+              "Operation": "POST",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "TransportId": "post-0-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 15,
+              "Operation": "POST",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "post-2-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 16,
+              "Operation": "POST",
+              "SourceLineId": "36715597-7245-4631-922d-f7a98eadfd0a",
+              "TransportId": "post-1-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 17,
+              "Operation": "POST",
+              "SourceLineId": "c7907235-893f-471f-9d1f-d49eef1d6a26",
+              "TransportId": "post-0-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 18,
+              "Operation": "POST",
+              "SourceLineId": "5792735b-05ee-4b8b-8800-f8ef0fad0643",
+              "TransportId": "changed-post-profile",
+              "Outcome": "CONFLICT",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            }
+          ],
+          "reports": [],
+          "lines": [],
+          "cases": [],
+          "corrections": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "caseId": "D4-12",
+      "tenant": "tenant-b",
+      "status": "PASS",
+      "checks": [
+        {
+          "step": "accounting-ack-unknown",
+          "stage": "post",
+          "transport": "post-0-a",
+          "initialHttp": 503,
+          "replayHttp": 200
+        },
+        {
+          "step": "final",
+          "sqlEffectivePrincipal": "d4oracle",
+          "receipts": [
+            {
+              "Id": "6769f6c7-af78-41d2-8d38-aaba3da9f1e1",
+              "DeliveryId": "2995fd7e-dc4c-4970-9ec8-639f5d73a62f",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "PayloadHash": "EBA166A3E5F72A1E4AE5B56AD690AC50144F205E27266F34AA679DAEE80C23A1",
+              "Period": "2026-11",
+              "Quantity": 20.0,
+              "Gross": 300.0,
+              "Ar": 100.0,
+              "Cost": 200.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-2-a"
+            },
+            {
+              "Id": "f8fdd42a-5c95-4fe3-aac4-2a78a7798620",
+              "DeliveryId": "b4779106-3879-40a9-a200-cdafa1be54cc",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "PayloadHash": "318B9567BAD52C9DE2AB64217BA89EF854DC0F39BD7D0DCE4C54F7B8225C8664",
+              "Period": "2026-11",
+              "Quantity": 10.0,
+              "Gross": 150.0,
+              "Ar": 150.0,
+              "Cost": 100.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-0-a"
+            },
+            {
+              "Id": "9ca3f974-3857-4c20-aa43-6071d7238028",
+              "DeliveryId": "18517750-8fa0-4d91-89dc-0b5ebce98ef7",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "PayloadHash": "9714B2C84DF78474DE31FF4242164832EC08027ABE39FF2BADD49463F24552FD",
+              "Period": "2026-11",
+              "Quantity": 15.0,
+              "Gross": 225.0,
+              "Ar": 225.0,
+              "Cost": 150.0,
+              "ReceivedAt": "2026-11-23T10:50:00+07:00",
+              "TransportId": "receive-1-b"
+            }
+          ],
+          "postings": [
+            {
+              "Id": "1abe8151-378a-433d-bd32-e211ee0c3e98",
+              "ReceiptId": "6769f6c7-af78-41d2-8d38-aaba3da9f1e1",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 20.0,
+              "Gross": 300.0,
+              "Ar": 100.0,
+              "Cost": 200.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": "5a9251a4-f74d-4aae-80f6-35471ab799db",
+              "ReceiptId": "f8fdd42a-5c95-4fe3-aac4-2a78a7798620",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 10.0,
+              "Gross": 150.0,
+              "Ar": 150.0,
+              "Cost": 100.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": "e76957ed-c062-4539-b36d-5e3f000c0d66",
+              "ReceiptId": "9ca3f974-3857-4c20-aa43-6071d7238028",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "Kind": "BASE",
+              "OriginalId": null,
+              "CorrectionId": null,
+              "ReportId": null,
+              "ApprovalId": null,
+              "Period": "2026-11",
+              "Quantity": 15.0,
+              "Gross": 225.0,
+              "Ar": 225.0,
+              "Cost": 150.0,
+              "Mapping": "DELIVERY",
+              "Scenario": "normal",
+              "PostedAt": "2026-11-23T10:55:00+07:00"
+            }
+          ],
+          "journal": [
+            {
+              "Id": 4,
+              "Operation": "POST",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "premature",
+              "Outcome": "RECEIPT_MISSING",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 5,
+              "Operation": "RECEIVE",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "TransportId": "receive-0-a",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 6,
+              "Operation": "RECEIVE",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "TransportId": "receive-1-b",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 7,
+              "Operation": "RECEIVE",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "receive-2-a",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 8,
+              "Operation": "RECEIVE",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "TransportId": "receive-0-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 9,
+              "Operation": "RECEIVE",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "TransportId": "receive-1-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 10,
+              "Operation": "RECEIVE",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "receive-2-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:50:00+07:00"
+            },
+            {
+              "Id": 11,
+              "Operation": "POST",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "TransportId": "post-1-b",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 12,
+              "Operation": "POST",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "TransportId": "post-0-a",
+              "Outcome": "COMMITTED_NO_ACK",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 13,
+              "Operation": "POST",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "post-2-a",
+              "Outcome": "COMMITTED",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 14,
+              "Operation": "POST",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "post-2-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 15,
+              "Operation": "POST",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "TransportId": "post-0-b",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 16,
+              "Operation": "POST",
+              "SourceLineId": "9fe8e63e-80bf-4c26-b3b8-ecb70262d982",
+              "TransportId": "post-1-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 17,
+              "Operation": "POST",
+              "SourceLineId": "b59921d9-6ce2-4a81-8d02-cd6fd462a22e",
+              "TransportId": "post-0-a",
+              "Outcome": "REPLAY",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            },
+            {
+              "Id": 18,
+              "Operation": "POST",
+              "SourceLineId": "f64e2f07-63e4-4d8c-806b-2642f53a7057",
+              "TransportId": "changed-post-profile",
+              "Outcome": "CONFLICT",
+              "RecordedAt": "2026-11-23T10:55:00+07:00"
+            }
+          ],
+          "reports": [],
+          "lines": [],
+          "cases": [],
+          "corrections": []
+        }
+      ],
+      "error": null
+    }
+  ],
+  "explicitUnknownAndReplay": [
+    {
+      "tenant": "tenant-a",
+      "stage": "post",
+      "transport": "post-0-a",
+      "initialHttp": 503,
+      "replayHttp": 200
+    },
+    {
+      "tenant": "tenant-b",
+      "stage": "post",
+      "transport": "post-0-a",
+      "initialHttp": 503,
+      "replayHttp": 200
+    }
+  ],
+  "deterministicRed": {
+    "cases": [
+      {
+        "caseId": "D4-12",
+        "tenant": "tenant-a",
+        "status": "FAIL",
+        "error": "/accounting/78beb043-6d0d-4e81-875a-06032be26f4b/post: HTTP 503 != 200 ({\"status\":\"ACCOUNTING_ACK_UNKNOWN\"})"
+      },
+      {
+        "caseId": "D4-12",
+        "tenant": "tenant-b",
+        "status": "FAIL",
+        "error": "/accounting/df5d53b3-6e21-401d-9b05-a95695275eaa/post: HTTP 503 != 200 ({\"status\":\"ACCOUNTING_ACK_UNKNOWN\"})"
+      }
+    ],
+    "source": "072e4e9541ba1e4adfb743237e2340b2d026a457+working-tree",
+    "runId": "8a771d4fe15844a4b724b43529e301e5",
+    "sha256": "25F3F6417691F3B9E7EEB0F8DD501417BDDE782AAC9C93D78944DD9AE1D4D291"
+  },
+  "directGreen": {
+    "comparisonsPassed": 36,
+    "source": "072e4e9541ba1e4adfb743237e2340b2d026a457+working-tree",
+    "runId": "bc928b1f3e6b4efa8a5ff2054facf8ed",
+    "sha256": "F27F025339EF4819DD9682AF2A77700E5E4E3373304B085D4914506F295A1641"
+  },
+  "clockRegression": {
+    "intermediateSource": "56a80b4e8a368cd8103c1d6bf7af5d7f8a0a195d",
+    "intermediateSha256": "CCA88D90E9F7F74042B88C6CB8D812909299507B230E58100B29499C25A0879C",
+    "intermediateD4Sha256": "205C805142783311392D824D5288C548D25FC76D04F2F27B500474E79F93F0A1",
+    "intermediateD4RunId": "6f5885aa3e0941d9b67ecd020db30555",
+    "directGreen": {
+      "comparisonsPassed": 36,
+      "source": "ddba2fbf3fa22a6b0feec0e24d99a811795f74c5+working-tree",
+      "runId": "53df1ac49e41487fa09f7ab3b35ad0a3",
+      "sha256": "DC5C18A99A37882010167DE0A52C24279FBF51A504EEA48250914282B96CDECE"
+    },
+    "intermediateFailures": [
+      {
+        "tenant": "tenant-a",
+        "caseId": "D4-13",
+        "status": "FAIL",
+        "error": "Reconciliation PENDING 2/3, 0 DIFF, 1 pending"
+      },
+      {
+        "tenant": "tenant-a",
+        "caseId": "D4-14",
+        "status": "FAIL",
+        "error": "Reconciliation RECONCILED_DIFF 2/3, 1 DIFF, 0 pending"
+      },
+      {
+        "tenant": "tenant-a",
+        "caseId": "D4-15",
+        "status": "FAIL",
+        "error": "Reconciliation RECONCILED_DIFF 2/3, 1 DIFF, 0 pending"
+      },
+      {
+        "tenant": "tenant-a",
+        "caseId": "D4-17",
+        "status": "FAIL",
+        "error": "Sequence contains no elements"
+      },
+      {
+        "tenant": "tenant-a",
+        "caseId": "D4-18",
+        "status": "FAIL",
+        "error": "Playwright exit: observed 1, expected 0."
+      },
+      {
+        "tenant": "tenant-b",
+        "caseId": "D4-13",
+        "status": "FAIL",
+        "error": "Reconciliation PENDING 2/3, 0 DIFF, 1 pending"
+      },
+      {
+        "tenant": "tenant-b",
+        "caseId": "D4-14",
+        "status": "FAIL",
+        "error": "Reconciliation RECONCILED_DIFF 2/3, 1 DIFF, 0 pending"
+      },
+      {
+        "tenant": "tenant-b",
+        "caseId": "D4-15",
+        "status": "FAIL",
+        "error": "Reconciliation RECONCILED_DIFF 2/3, 1 DIFF, 0 pending"
+      },
+      {
+        "tenant": "tenant-b",
+        "caseId": "D4-17",
+        "status": "FAIL",
+        "error": "Sequence contains no elements"
+      },
+      {
+        "tenant": "tenant-b",
+        "caseId": "D4-18",
+        "status": "FAIL",
+        "error": "Playwright exit: observed 1, expected 0."
+      }
+    ],
+    "deterministicRed": {
+      "cases": [
+        {
+          "tenant": "tenant-a",
+          "caseId": "D4-01",
+          "status": "FAIL",
+          "error": "synchronous fixture recording time 20.000: observed 23/11/2026 4:13:47 AM +00:00, expected 23/11/2026 3:30:00 AM +00:00."
+        },
+        {
+          "tenant": "tenant-b",
+          "caseId": "D4-01",
+          "status": "FAIL",
+          "error": "synchronous fixture recording time 20.000: observed 23/11/2026 4:13:50 AM +00:00, expected 23/11/2026 3:30:00 AM +00:00."
+        }
+      ],
+      "source": "ddba2fbf3fa22a6b0feec0e24d99a811795f74c5+working-tree",
+      "runId": "9e975279b16c4df99ae5a7c21749290e",
+      "sha256": "56683DD978602623433F27A4AA996C8185187B9D5BF8DE59AF21E055C6296F94"
+    },
+    "finalPreflight": [
+      {
+        "caseId": "D4-01",
+        "tenant": "tenant-a",
+        "status": "PASS",
+        "checks": [
+          {
+            "field": "D.3 migration boundary",
+            "expected": 202611220010,
+            "actual": 202611220010,
+            "same": true
+          },
+          {
+            "field": "wrong instance refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong DB name refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong nonce refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong tenant refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong ownership marker refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "rejection left D.3 version untouched",
+            "expected": 202611220010,
+            "actual": 202611220010,
+            "same": true
+          },
+          {
+            "field": "D.4 migration boundary",
+            "expected": 202611230001,
+            "actual": 202611230001,
+            "same": true
+          },
+          {
+            "field": "D.3 source fingerprint across upgrade",
+            "expected": "0CFFAC13FCF87454CFD790B9825EE405C89736227A4077BBC34D9A00F90A2CDB",
+            "actual": "0CFFAC13FCF87454CFD790B9825EE405C89736227A4077BBC34D9A00F90A2CDB",
+            "same": true
+          },
+          {
+            "field": "tenant catalog",
+            "expected": "tenant-a",
+            "actual": "tenant-a",
+            "same": true
+          },
+          {
+            "field": "fresh scratch latest migration",
+            "expected": 202611230001,
+            "actual": 202611230001,
+            "same": true
+          },
+          {
+            "field": "fresh scratch source isolation",
+            "expected": 0,
+            "actual": 0,
+            "same": true
+          },
+          {
+            "field": "SQL oracle user",
+            "expected": "d4oracle",
+            "actual": "d4oracle",
+            "same": true
+          },
+          {
+            "field": "oracle cannot write",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "SQL effective partner",
+            "expected": "d4invoice",
+            "actual": "d4invoice",
+            "same": true
+          },
+          {
+            "field": "d4invoice app insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4invoice partner insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4invoice peer read denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "SQL effective partner",
+            "expected": "d4accounting",
+            "actual": "d4accounting",
+            "same": true
+          },
+          {
+            "field": "d4accounting app insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4accounting partner insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4accounting peer read denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "restricted application SQL user",
+            "expected": "d4app",
+            "actual": "d4app",
+            "same": true
+          },
+          {
+            "field": "app cannot change frozen invoice hash",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "app cannot change frozen correction delta",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "fixture delivery count",
+            "expected": 3,
+            "actual": 3,
+            "same": true
+          },
+          {
+            "field": "source time 10.000",
+            "expected": "2026-11-23T10:10:00+07:00",
+            "actual": "2026-11-23T10:10:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 10.000",
+            "expected": "2026-11-23T10:10:00+07:00",
+            "actual": "2026-11-23T10:10:00+07:00",
+            "same": true
+          },
+          {
+            "field": "A10",
+            "expected": "10/150/150/100",
+            "actual": "10/150/150/100",
+            "same": true
+          },
+          {
+            "field": "source time 15.000",
+            "expected": "2026-11-23T10:20:00+07:00",
+            "actual": "2026-11-23T10:20:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 15.000",
+            "expected": "2026-11-23T10:20:00+07:00",
+            "actual": "2026-11-23T10:20:00+07:00",
+            "same": true
+          },
+          {
+            "field": "A15",
+            "expected": "15/225/225/150",
+            "actual": "15/225/225/150",
+            "same": true
+          },
+          {
+            "field": "source time 20.000",
+            "expected": "2026-11-23T10:30:00+07:00",
+            "actual": "2026-11-23T10:30:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 20.000",
+            "expected": "2026-11-23T10:30:00+07:00",
+            "actual": "2026-11-23T10:30:00+07:00",
+            "same": true
+          },
+          {
+            "field": "B20",
+            "expected": "20/300/100/200",
+            "actual": "20/300/100/200",
+            "same": true
+          },
+          {
+            "field": "invoice eligibility count",
+            "expected": 0,
+            "actual": 0,
+            "same": true
+          },
+          {
+            "field": "A deliveries on one order",
+            "expected": 2,
+            "actual": 2,
+            "same": true
+          }
+        ],
+        "error": null
+      },
+      {
+        "caseId": "D4-01",
+        "tenant": "tenant-b",
+        "status": "PASS",
+        "checks": [
+          {
+            "field": "D.3 migration boundary",
+            "expected": 202611220010,
+            "actual": 202611220010,
+            "same": true
+          },
+          {
+            "field": "wrong instance refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong DB name refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong nonce refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong tenant refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "wrong ownership marker refused",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "rejection left D.3 version untouched",
+            "expected": 202611220010,
+            "actual": 202611220010,
+            "same": true
+          },
+          {
+            "field": "D.4 migration boundary",
+            "expected": 202611230001,
+            "actual": 202611230001,
+            "same": true
+          },
+          {
+            "field": "D.3 source fingerprint across upgrade",
+            "expected": "F0AA0187B670BEFD25040CF4AB17D475B4771BA6D87657A2795A201CF7D57FAA",
+            "actual": "F0AA0187B670BEFD25040CF4AB17D475B4771BA6D87657A2795A201CF7D57FAA",
+            "same": true
+          },
+          {
+            "field": "tenant catalog",
+            "expected": "tenant-b",
+            "actual": "tenant-b",
+            "same": true
+          },
+          {
+            "field": "fresh scratch latest migration",
+            "expected": 202611230001,
+            "actual": 202611230001,
+            "same": true
+          },
+          {
+            "field": "fresh scratch source isolation",
+            "expected": 0,
+            "actual": 0,
+            "same": true
+          },
+          {
+            "field": "SQL oracle user",
+            "expected": "d4oracle",
+            "actual": "d4oracle",
+            "same": true
+          },
+          {
+            "field": "oracle cannot write",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "SQL effective partner",
+            "expected": "d4invoice",
+            "actual": "d4invoice",
+            "same": true
+          },
+          {
+            "field": "d4invoice app insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4invoice partner insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4invoice peer read denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "SQL effective partner",
+            "expected": "d4accounting",
+            "actual": "d4accounting",
+            "same": true
+          },
+          {
+            "field": "d4accounting app insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4accounting partner insert denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "d4accounting peer read denied",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "restricted application SQL user",
+            "expected": "d4app",
+            "actual": "d4app",
+            "same": true
+          },
+          {
+            "field": "app cannot change frozen invoice hash",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "app cannot change frozen correction delta",
+            "expected": true,
+            "actual": true,
+            "same": true
+          },
+          {
+            "field": "fixture delivery count",
+            "expected": 3,
+            "actual": 3,
+            "same": true
+          },
+          {
+            "field": "source time 10.000",
+            "expected": "2026-11-23T10:10:00+07:00",
+            "actual": "2026-11-23T10:10:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 10.000",
+            "expected": "2026-11-23T10:10:00+07:00",
+            "actual": "2026-11-23T10:10:00+07:00",
+            "same": true
+          },
+          {
+            "field": "A10",
+            "expected": "10/150/150/100",
+            "actual": "10/150/150/100",
+            "same": true
+          },
+          {
+            "field": "source time 15.000",
+            "expected": "2026-11-23T10:20:00+07:00",
+            "actual": "2026-11-23T10:20:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 15.000",
+            "expected": "2026-11-23T10:20:00+07:00",
+            "actual": "2026-11-23T10:20:00+07:00",
+            "same": true
+          },
+          {
+            "field": "A15",
+            "expected": "15/225/225/150",
+            "actual": "15/225/225/150",
+            "same": true
+          },
+          {
+            "field": "source time 20.000",
+            "expected": "2026-11-23T10:30:00+07:00",
+            "actual": "2026-11-23T10:30:00+07:00",
+            "same": true
+          },
+          {
+            "field": "synchronous fixture recording time 20.000",
+            "expected": "2026-11-23T10:30:00+07:00",
+            "actual": "2026-11-23T10:30:00+07:00",
+            "same": true
+          },
+          {
+            "field": "B20",
+            "expected": "20/300/100/200",
+            "actual": "20/300/100/200",
+            "same": true
+          },
+          {
+            "field": "invoice eligibility count",
+            "expected": 0,
+            "actual": 0,
+            "same": true
+          },
+          {
+            "field": "A deliveries on one order",
+            "expected": 2,
+            "actual": 2,
+            "same": true
+          }
+        ],
+        "error": null
+      }
+    ],
+    "intermediateRunId": "ce64e906e4ec47ab8a4e72773d8ff857"
+  }
+}

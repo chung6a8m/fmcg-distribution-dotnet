@@ -1,0 +1,891 @@
+{
+  "runId": "890bb5b69b084fdd9ecbe4084b10c03e",
+  "source": "e4bb20a659cc32ae1491740a33bb1abf259c5dd5",
+  "apiSha256": "C82413F43054A81D92FE506F28F78AF7EF8862E0ECA45C4D092F68EDB587ADE0",
+  "oracleSha256": "225D7253645F239363CEC143CA607BF564AFD030CA7E7BFAEEBBEF2A9A63DB5F",
+  "matches": true,
+  "phaseDiff": [
+    {
+      "Expected": {
+        "Phase": "issued",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 20,
+            "Accepted": 0,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 20,
+            "Accepted": 0,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60,
+            "Cost": 60000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6,
+            "Cost": 600
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 0,
+            "Cost": 0
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "issued",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 20.000,
+            "Accepted": 0.000,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 20.000,
+            "Accepted": 0.000,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60.000,
+            "Cost": 60000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6.000,
+            "Cost": 600.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": null,
+          "DecisionsSha256": null
+        }
+      },
+      "Matches": true
+    },
+    {
+      "Expected": {
+        "Phase": "returned-waived",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 20,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 20,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 82,
+            "Cost": 82000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6,
+            "Cost": 600
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2,
+            "Cost": 200
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "returned-waived",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 20.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 20.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 82.000,
+            "Cost": 82000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6.000,
+            "Cost": 600.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2.000,
+            "Cost": 200.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+          "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+        }
+      },
+      "Matches": true
+    },
+    {
+      "Expected": {
+        "Phase": "repurchased",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60,
+            "Cost": 60000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6,
+            "Cost": 600
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2,
+            "Cost": 200
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "repurchased",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60.000,
+            "Cost": 60000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 6.000,
+            "Cost": 600.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2.000,
+            "Cost": 200.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+          "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+        }
+      },
+      "Matches": true
+    },
+    {
+      "Expected": {
+        "Phase": "reissued",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 4,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60,
+            "Cost": 60000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 4,
+            "Cost": 400
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2,
+            "Cost": 200
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "reissued",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 4,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 2
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60.000,
+            "Cost": 60000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 4.000,
+            "Cost": 400.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 2.000,
+            "Cost": 200.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+          "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+        }
+      },
+      "Matches": true
+    },
+    {
+      "Expected": {
+        "Phase": "final",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 4,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31,
+            "Accepted": 11,
+            "Issued": 2,
+            "GiftReturned": 1,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 1
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60,
+            "Cost": 60000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 4,
+            "Cost": 400
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 3,
+            "Cost": 300
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "final",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 4,
+            "GiftReturned": 2,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 31.000,
+            "Accepted": 11.000,
+            "Issued": 2,
+            "GiftReturned": 1,
+            "ApprovedWaiver": 2,
+            "WaivedHeld": 1
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 60.000,
+            "Cost": 60000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 4.000,
+            "Cost": 400.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 3.000,
+            "Cost": 300.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+          "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+        }
+      },
+      "Matches": true
+    },
+    {
+      "Expected": {
+        "Phase": "peer",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 0,
+            "Accepted": 0,
+            "Issued": 0,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 0,
+            "Accepted": 0,
+            "Issued": 0,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 100,
+            "Cost": 100000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0,
+            "Cost": 0
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 10,
+            "Cost": 1000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 0,
+            "Cost": 0
+          }
+        ],
+        "WaiverHistory": null
+      },
+      "Actual": {
+        "Phase": "peer",
+        "Positions": [
+          {
+            "Customer": "C2-FIXTURE",
+            "Purchased": 0.000,
+            "Accepted": 0.000,
+            "Issued": 0,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          },
+          {
+            "Customer": "F07-WAIVER",
+            "Purchased": 0.000,
+            "Accepted": 0.000,
+            "Issued": 0,
+            "GiftReturned": 0,
+            "ApprovedWaiver": 0,
+            "WaivedHeld": 0
+          }
+        ],
+        "Stock": [
+          {
+            "Location": "C2-MAIN",
+            "Quantity": 100.000,
+            "Cost": 100000.0000
+          },
+          {
+            "Location": "C2-TRUCK",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F05-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          },
+          {
+            "Location": "F07-GIFT",
+            "Quantity": 10.000,
+            "Cost": 1000.0000
+          },
+          {
+            "Location": "F07-GIFT-QA",
+            "Quantity": 0.000,
+            "Cost": 0.0000
+          }
+        ],
+        "WaiverHistory": {
+          "ProposalsSha256": null,
+          "DecisionsSha256": null
+        }
+      },
+      "Matches": true
+    }
+  ],
+  "entitlements": [
+    {
+      "Customer": "C2-FIXTURE",
+      "Net": 20.000,
+      "Held": 0,
+      "ToDeliver": 2,
+      "Matches": true
+    },
+    {
+      "Customer": "F07-WAIVER",
+      "Net": 20.000,
+      "Held": 2,
+      "ToDeliver": 0,
+      "Matches": true
+    }
+  ],
+  "records": [
+    {
+      "Id": "9ed1ff60-9eaa-449b-a2b9-4efa0920b9f1",
+      "Tenant": "tenant-a",
+      "Kind": "F07_APPROVE",
+      "Customer": "F07-WAIVER",
+      "Actor": "f05-finance",
+      "Related": "2ef32546-6176-4ebe-94a3-00e76c216fa1",
+      "Quantity": 2,
+      "Cost": 0,
+      "Reason": "Independent finance verifies supported waiver quantity",
+      "Evidence": "F07-waiver-checker-evidence",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "e2cf91b2-f3d6-47d9-aee0-39b4abfab220",
+      "Tenant": "tenant-a",
+      "Kind": "F07_ISSUE",
+      "Customer": "C2-FIXTURE",
+      "Actor": "c1-dev-sales",
+      "Related": null,
+      "Quantity": 2,
+      "Cost": 200,
+      "Reason": "Issue two gifts earned by delivered purchase",
+      "Evidence": "F07-return-branch-original-issue",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "ab31c44d-9a78-4344-a85b-8e3c9690805c",
+      "Tenant": "tenant-a",
+      "Kind": "F07_ISSUE",
+      "Customer": "F07-WAIVER",
+      "Actor": "c1-dev-sales",
+      "Related": null,
+      "Quantity": 2,
+      "Cost": 200,
+      "Reason": "Issue two gifts earned by delivered purchase",
+      "Evidence": "F07-waiver-branch-original-issue",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "33ed0f9f-9811-4249-8e9b-e5e3e92b43d5",
+      "Tenant": "tenant-a",
+      "Kind": "F07_ISSUE",
+      "Customer": "C2-FIXTURE",
+      "Actor": "c1-dev-sales",
+      "Related": null,
+      "Quantity": 2,
+      "Cost": 200,
+      "Reason": "Two earned gifts at the AC-07 follow-up",
+      "Evidence": "F07-race-first",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "2ef32546-6176-4ebe-94a3-00e76c216fa1",
+      "Tenant": "tenant-a",
+      "Kind": "F07_PROPOSE",
+      "Customer": "F07-WAIVER",
+      "Actor": "c1-dev-sales",
+      "Related": "ab31c44d-9a78-4344-a85b-8e3c9690805c",
+      "Quantity": 2,
+      "Cost": 0,
+      "Reason": "Request waiver for two gifts still with the customer",
+      "Evidence": "F07-waiver-maker-evidence",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "17c93caa-f2c6-4b23-afcd-c3a6f7a8b840",
+      "Tenant": "tenant-a",
+      "Kind": "F07_RETURN",
+      "Customer": "C2-FIXTURE",
+      "Actor": "f05-receiver",
+      "Related": "e2cf91b2-f3d6-47d9-aee0-39b4abfab220",
+      "Quantity": 2,
+      "Cost": 200,
+      "Reason": "Count and quarantine two returned gifts",
+      "Evidence": "F07-actual-gift-receipt",
+      "CommandStatus": "APPLIED"
+    },
+    {
+      "Id": "eddf1976-c9ce-49bd-b5bb-e9f7f19ea56b",
+      "Tenant": "tenant-a",
+      "Kind": "F07_RETURN",
+      "Customer": "F07-WAIVER",
+      "Actor": "f05-receiver",
+      "Related": "ab31c44d-9a78-4344-a85b-8e3c9690805c",
+      "Quantity": 1,
+      "Cost": 100,
+      "Reason": "Count and quarantine one gift from the approved waiver",
+      "Evidence": "F07-after-waiver-actual-receipt",
+      "CommandStatus": "APPLIED"
+    }
+  ],
+  "recordsMatch": true,
+  "effects": [
+    {
+      "SourceId": "e2cf91b2-f3d6-47d9-aee0-39b4abfab220",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2.000,
+      "Amount": -200.0000
+    },
+    {
+      "SourceId": "ab31c44d-9a78-4344-a85b-8e3c9690805c",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2.000,
+      "Amount": -200.0000
+    },
+    {
+      "SourceId": "17c93caa-f2c6-4b23-afcd-c3a6f7a8b840",
+      "Key": "GIFT-QA-IN",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT-QA",
+      "Sku": "G-GIFT",
+      "Quantity": 2.000,
+      "Amount": 200.0000
+    },
+    {
+      "SourceId": "33ed0f9f-9811-4249-8e9b-e5e3e92b43d5",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2.000,
+      "Amount": -200.0000
+    },
+    {
+      "SourceId": "eddf1976-c9ce-49bd-b5bb-e9f7f19ea56b",
+      "Key": "GIFT-QA-IN",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT-QA",
+      "Sku": "G-GIFT",
+      "Quantity": 1.000,
+      "Amount": 100.0000
+    }
+  ],
+  "expectedEffects": [
+    {
+      "SourceId": "e2cf91b2-f3d6-47d9-aee0-39b4abfab220",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2,
+      "Amount": -200
+    },
+    {
+      "SourceId": "ab31c44d-9a78-4344-a85b-8e3c9690805c",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2,
+      "Amount": -200
+    },
+    {
+      "SourceId": "33ed0f9f-9811-4249-8e9b-e5e3e92b43d5",
+      "Key": "GIFT-OUT",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT",
+      "Sku": "G-GIFT",
+      "Quantity": -2,
+      "Amount": -200
+    },
+    {
+      "SourceId": "17c93caa-f2c6-4b23-afcd-c3a6f7a8b840",
+      "Key": "GIFT-QA-IN",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT-QA",
+      "Sku": "G-GIFT",
+      "Quantity": 2,
+      "Amount": 200
+    },
+    {
+      "SourceId": "eddf1976-c9ce-49bd-b5bb-e9f7f19ea56b",
+      "Key": "GIFT-QA-IN",
+      "Ledger": "PHYSICAL_STOCK",
+      "Location": "F07-GIFT-QA",
+      "Sku": "G-GIFT",
+      "Quantity": 1,
+      "Amount": 100
+    }
+  ],
+  "effectsMatch": true,
+  "afterApprovedWaiverReturn": {
+    "Net": 20.000,
+    "Entitlement": 2,
+    "GiftHeld": 1,
+    "WaivedHeld": 1,
+    "ToDeliver": 1,
+    "ApprovedWaiver": 2,
+    "BeforeHistory": {
+      "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+      "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+    },
+    "AfterHistory": {
+      "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+      "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+    },
+    "WaiverHistoryUnchanged": true,
+    "Matches": true
+  },
+  "sales": {
+    "Orders": 4,
+    "Deliveries": 4,
+    "Gross": 620000.0000,
+    "OpenItems": 4,
+    "Ar": 620000.0000,
+    "CashReceipts": 0,
+    "SourceCount": 7,
+    "ValidPurchases": 4
+  },
+  "peerEffects": 0
+}

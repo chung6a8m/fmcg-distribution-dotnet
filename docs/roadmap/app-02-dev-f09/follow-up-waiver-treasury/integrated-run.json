@@ -1,0 +1,727 @@
+{
+  "increment": "DEV-F09",
+  "runId": "647e7f1d369f4b549598ab4a35c56f3a",
+  "source": "e4bb20a659cc32ae1491740a33bb1abf259c5dd5",
+  "tree": "22b1f85188538d2b02d8feb8c0f5ed921d25af46",
+  "environment": "SYNTHETIC_NONPRODUCTION Windows LocalDB",
+  "independentSources": {
+    "E-SIM-01": "b82a68d72940c8834341f50b484e063c386f8bb7",
+    "DEV-F02": "72dc78e51f63ad940e766e9d8912eb35c465f908"
+  },
+  "suite": "All",
+  "status": "PASS",
+  "steps": [
+    {
+      "suite": "E-SIM-01",
+      "command": [
+        "python",
+        "tools/validate_e_sim_01.py"
+      ],
+      "startedUtc": "2026-11-23T04:15:40.8010435+00:00",
+      "completedUtc": "2026-11-23T04:15:41.0768840+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "B08DE31AC0605F969BB8F92F75CDACA706F9F538667253EA56170C81C5402F3E",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/E-SIM-01.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "localdb-start",
+      "command": [
+        "sqllocaldb",
+        "start",
+        "MSSQLLocalDB"
+      ],
+      "startedUtc": "2026-11-23T04:15:41.1122068+00:00",
+      "completedUtc": "2026-11-23T04:15:41.1336061+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "979857C7EA896D530E0BC7D141EC2AC38A52990E77B7C70FF045388292E44E40",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/localdb-start.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "web-install",
+      "command": [
+        "npm",
+        "--prefix",
+        "web",
+        "ci"
+      ],
+      "startedUtc": "2026-11-23T04:15:41.1951624+00:00",
+      "completedUtc": "2026-11-23T04:15:55.1924272+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "B5E041BF52B8B738BAF2921C222009AEF76ABD83EA447B310B247864B59E2E9C",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/web-install.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "web-build",
+      "command": [
+        "npm",
+        "--prefix",
+        "web",
+        "run",
+        "build"
+      ],
+      "startedUtc": "2026-11-23T04:15:55.1946929+00:00",
+      "completedUtc": "2026-11-23T04:15:58.0875393+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "54C4C1BE2225BC37FAF40F412140A3C265D141E2F618F78FEF21753E176A51CA",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/web-build.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "web-unit",
+      "command": [
+        "npm",
+        "--prefix",
+        "web",
+        "test"
+      ],
+      "startedUtc": "2026-11-23T04:15:58.0901896+00:00",
+      "completedUtc": "2026-11-23T04:15:58.6747756+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "B36E125B67859F8B045C8FF65F34B2F8CF4D27DB8E201C20BA5A82A7F27F4B40",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/web-unit.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "web-pwa",
+      "command": [
+        "npm",
+        "--prefix",
+        "web",
+        "run",
+        "test:pwa-build"
+      ],
+      "startedUtc": "2026-11-23T04:15:58.6761020+00:00",
+      "completedUtc": "2026-11-23T04:15:59.1933966+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "FEE48E1297303442D857A6CC5E9B9E38544C21017D0FB5280ABA4E11439C6A2A",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/web-pwa.log"
+      },
+      "receipts": []
+    },
+    {
+      "suite": "dotnet",
+      "command": [
+        "dotnet",
+        "test",
+        "--solution",
+        "FmcgDms.slnx",
+        "-c",
+        "Release",
+        "--minimum-expected-tests",
+        "352",
+        "--",
+        "--report-trx",
+        "--report-trx-filename",
+        "dev-f09-647e7f1d369f4b549598ab4a35c56f3a.trx"
+      ],
+      "startedUtc": "2026-11-23T04:15:59.1957068+00:00",
+      "completedUtc": "2026-11-23T04:20:16.5455062+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": null,
+      "log": {
+        "sha256": "DE84AEB3A4B1DC0434CB10C64E159145B1A101820EE1C68968583AC52F58B4A2",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/dotnet.log"
+      },
+      "receipts": [
+        {
+          "sha256": "515C7B7899DC549CBDFB8DAC16ECD7BF5BAD1C9D19FCE40AEB5FA11F83BB2A9C",
+          "path": "TestResults/dev-f09-647e7f1d369f4b549598ab4a35c56f3a.trx"
+        }
+      ],
+      "expected": 352,
+      "actual": 352
+    },
+    {
+      "suite": "A.4",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Verify-App02A4.ps1"
+      ],
+      "startedUtc": "2026-11-23T04:20:16.5961028+00:00",
+      "completedUtc": "2026-11-23T04:20:17.1728241+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "app02a4-dev-f09-647e7f1d369f4b549598ab4a35c56f3a-1",
+      "log": {
+        "sha256": "AD918658A860A84360B0F694F6FC60BCD3D2D32AE57C7AECD33A9A0F699BB95E",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/A.4.log"
+      },
+      "receipts": [
+        {
+          "sha256": "8A60D681E986F520D13B35EEEB17F3B874BA6ADDA83FA08F2D3968B01943AD96",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-01-oracle.json"
+        },
+        {
+          "sha256": "33BC913C23F170EFAE691FE82A3855D409A1B25E5267BEF4806214579C6CD08E",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-02-oracle.json"
+        },
+        {
+          "sha256": "CB08710B735A235F2E5DB4F58EDE626B711E8805490654F9F63B605AEA435789",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-03-oracle.json"
+        },
+        {
+          "sha256": "6EE228F0CDB5063CCDCED0AE14B37E135B98177DC49C3932657BFB999976DB0D",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-04-oracle.json"
+        },
+        {
+          "sha256": "2DE8C8B0923E32E0B349F86C43EC9E9DDD375E6247C3474572B20DBC378A0AA4",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-05-oracle.json"
+        },
+        {
+          "sha256": "0564295969C28347380FC6A273124366F21CB1E88B20DDDD896D7EC256492B96",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-06-oracle.json"
+        },
+        {
+          "sha256": "D63974A57FB4E5A0BCA38174B9D4FA98427DD375C1E8B5907A8AA8FEB3AE8EB5",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-07-oracle.json"
+        },
+        {
+          "sha256": "4C0702A099A528EA83599D1F924666361FACBDCBD1610D343E8EBD62B11F1A48",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-08-oracle.json"
+        },
+        {
+          "sha256": "17C5743B814465FDFEE216517E21A8347FBBFCBDFF95B1571B569B7B2939413E",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-09-oracle.json"
+        },
+        {
+          "sha256": "7A634F22E7310F0BFB4364E16AE26B90559A40122503DDD86F1069863D82EAAC",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-10-oracle.json"
+        },
+        {
+          "sha256": "F6157ADEC9D8E96232A8828CE0241A32EC5EFE47A2056157CC3255DB47282C7C",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-11-oracle.json"
+        },
+        {
+          "sha256": "B61CBCECA5C7377FE25735F5524239D7CF99979D8CD42105F4D8BC0EFD354B5C",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-a-A11-12-oracle.json"
+        },
+        {
+          "sha256": "025B8F31939FFFEDFEA968FE4E2B01FA2239058C3FBEDD0F93BC2B7E25B8176A",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-01-oracle.json"
+        },
+        {
+          "sha256": "45A7C899DAE844164E39AD17787442AAE337C81F199C3413EF6CEE839D75EBD5",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-02-oracle.json"
+        },
+        {
+          "sha256": "AA11B37C43D9536D1F2D2789F94978CA473D9A9955E2D2CEBC774F1EF4395C0D",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-03-oracle.json"
+        },
+        {
+          "sha256": "5116EC9D9DEC0620C3099E17BAF724807186FFC80043D84BE2EF7F94A0F23D29",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-04-oracle.json"
+        },
+        {
+          "sha256": "0CB892404C0C5718CFF0DF6AFC30995741533A5C68AE788E92DED1D8EE62E3A1",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-05-oracle.json"
+        },
+        {
+          "sha256": "9E43608FF937251A031777C7F0BBB8E8C96C4FF64246FEE3526A012CECE3ECE5",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-06-oracle.json"
+        },
+        {
+          "sha256": "4A7D4363146EBF1E96C3049C1FFB96ED67696F104BBF43783ED12144DE519158",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-07-oracle.json"
+        },
+        {
+          "sha256": "356874F7CE0B22450E87DAF98E3C25642DB416385D28DB2A9C482647CF77E3E3",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-08-oracle.json"
+        },
+        {
+          "sha256": "04CFF54C7B9F4C8A324EF0805A885247D1AB454054BD5284C95566B986A1D91B",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-09-oracle.json"
+        },
+        {
+          "sha256": "95818EF9CDEF42AD309AAEF500257CD294C5971EDD6805A637D3112AE9F2ED35",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-10-oracle.json"
+        },
+        {
+          "sha256": "83C1CD4513110B0E805071DC096CC19D43359FAF57C37AD430DC7EF66AC1382B",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-11-oracle.json"
+        },
+        {
+          "sha256": "A269145A3B47151C1809475DF2FCCDE911501F9B15DFF5F75EA711B558898911",
+          "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/a4-oracles/tenant-b-A11-12-oracle.json"
+        }
+      ],
+      "expected": 24,
+      "actual": 24
+    },
+    {
+      "suite": "C.6",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "App02C6",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:20:17.2647582+00:00",
+      "completedUtc": "2026-11-23T04:21:05.7019134+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "a90a0324e5444a3ebe643d3bc49be024",
+      "log": {
+        "sha256": "B6CCC83B5C8FC31DB8B026EBDDA2C58627D4A991F671C935076054856747B1D1",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/C.6.log"
+      },
+      "receipts": [
+        {
+          "sha256": "25E475ED02D5B4FD2D3D4647E441ECC365800A537A8246E0A1902B8F56A223ED",
+          "path": "TestResults/app02c6/a90a0324e5444a3ebe643d3bc49be024/sql-review.json"
+        },
+        {
+          "sha256": "59477CB334E79886747E33749FCAC4084FF226F4C55F8F8D69DE9E05D367D5A3",
+          "path": "web/test-results-app02c6/a90a0324e5444a3ebe643d3bc49be024/junit.xml"
+        }
+      ],
+      "expected": 15,
+      "actual": 15,
+      "browserPassed": 3
+    },
+    {
+      "suite": "D.1",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "App02D1",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:21:05.7411209+00:00",
+      "completedUtc": "2026-11-23T04:22:03.2859535+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "794914f8f91e42c5a1b6001f7244a893",
+      "log": {
+        "sha256": "936C67D40D9CF0C7772CA8F258DECE6EE672AB2B80AC0C2BE91B0435873AEF39",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/D.1.log"
+      },
+      "receipts": [
+        {
+          "sha256": "D87BE0F370797A16A839FC32F5CAC8278534601CB36FDAEA03EDB78D1AAC3E3C",
+          "path": "TestResults/app02d1/794914f8f91e42c5a1b6001f7244a893/sql-review.json"
+        },
+        {
+          "sha256": "70107EB650DB156ACF2A926C6C768B9A8E7F4C5EDC0E40191F6B3EFE94BE86F9",
+          "path": "web/test-results-app02d1/794914f8f91e42c5a1b6001f7244a893/junit.xml"
+        }
+      ],
+      "expected": 28,
+      "actual": 28,
+      "browserPassed": 2
+    },
+    {
+      "suite": "D.2",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "App02D2",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:22:03.3413674+00:00",
+      "completedUtc": "2026-11-23T04:24:26.5690269+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "fbba6ba7cb4948d49c289f2b9a9716ff",
+      "log": {
+        "sha256": "279F0C43329D25586C66342A94C04918435E4723FEC281EE33BCA834419CBDAD",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/D.2.log"
+      },
+      "receipts": [
+        {
+          "sha256": "67B7A84500DC62B0775325829701B084F3795D2BED73A6248AFC154B020C6BDA",
+          "path": "TestResults/app02d2/fbba6ba7cb4948d49c289f2b9a9716ff/sql-review.json"
+        },
+        {
+          "sha256": "C0E7504CE53EA065ECA3B915DDEEE1ADC8A22DCE07955BDE2FC0E0061BFC2AEB",
+          "path": "web/test-results-app02d2/fbba6ba7cb4948d49c289f2b9a9716ff/junit.xml"
+        }
+      ],
+      "expected": 36,
+      "actual": 36,
+      "browserPassed": 12
+    },
+    {
+      "suite": "D.3",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "App02D3",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:24:26.6465743+00:00",
+      "completedUtc": "2026-11-23T04:27:36.8364086+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "4901ddfd2bdc4d3f9cd71df2ecb5cdef",
+      "log": {
+        "sha256": "0C4DA874F89587725378138392301C3C06D95D419820F401BB551F980B690F39",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/D.3.log"
+      },
+      "receipts": [
+        {
+          "sha256": "0F1BAF5497276296A6E40535BC8AC40E413A99A84F10AA37302B6CAEA1D507A9",
+          "path": "TestResults/app02d3/4901ddfd2bdc4d3f9cd71df2ecb5cdef/sql-review.json"
+        },
+        {
+          "sha256": "BEFA27D9B5A64AC9E8A8AC71BA3A0757676B1D391CF5C933697A0D1CFAE01756",
+          "path": "web/test-results-app02d3/4901ddfd2bdc4d3f9cd71df2ecb5cdef/junit.xml"
+        }
+      ],
+      "expected": 36,
+      "actual": 36,
+      "browserPassed": 2
+    },
+    {
+      "suite": "D.4",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "App02D4",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:27:36.9172664+00:00",
+      "completedUtc": "2026-11-23T04:28:39.7098958+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "105b72e294984633ad1f3f966357d410",
+      "log": {
+        "sha256": "0FBC1C6C7C8C09B5BE241CD751A6A2E22404DDA1B56CB64CC8C2A1B0F5A4AAB9",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/D.4.log"
+      },
+      "receipts": [
+        {
+          "sha256": "B3250DAD969D81ED73274B009C8E39D03B5A087C6033F63376F92138DCD687AE",
+          "path": "TestResults/app02d4/105b72e294984633ad1f3f966357d410/sql-matrix.json"
+        },
+        {
+          "sha256": "20D06F28D4A69D48D54AC89F40F27044D259BAD631375488B90C673D75F8FA25",
+          "path": "web/test-results-app02d4/105b72e294984633ad1f3f966357d410/junit.xml"
+        }
+      ],
+      "expected": 36,
+      "actual": 36,
+      "browserPassed": 2
+    },
+    {
+      "suite": "DEV-F01",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF01",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:28:39.7509328+00:00",
+      "completedUtc": "2026-11-23T04:28:52.1079544+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "1b957a534be246838f61ca1a42bdb4be",
+      "log": {
+        "sha256": "9861112B7C437E5E2B276C4E56082AA91A0A31B268106180AF3F196DC2A65E48",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F01.log"
+      },
+      "receipts": [
+        {
+          "sha256": "6A970BFE6867FD3701A47C7664440E7AC0B6BA844D14914B9893FCE977E20FD5",
+          "path": "TestResults/dev-f01/1b957a534be246838f61ca1a42bdb4be/sql-result.json"
+        },
+        {
+          "sha256": "3905B73B2EBC84337125059AB8F60CEA5488F91D7630470A6C1C2B0C16ED7406",
+          "path": "web/test-results-app02c5/1b957a534be246838f61ca1a42bdb4be/junit.xml"
+        }
+      ],
+      "ac": "AC-17",
+      "cases": "F01-01/F01-03 browser; F01-02 .NET",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F02",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF02",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:28:52.1508147+00:00",
+      "completedUtc": "2026-11-23T04:29:07.3846822+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "f0ed767ad1b04a559060dc2314bf43c8",
+      "log": {
+        "sha256": "FA4E3E3989E734C4A4C88672A525436A8377228B1CB395DD99CD4859F025414F",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F02.log"
+      },
+      "receipts": [
+        {
+          "sha256": "758FDC2B3995010AE6D21C32B1D747348EA9E83D49766FDB06F4A4B1FBF94B59",
+          "path": "TestResults/dev-f02/f0ed767ad1b04a559060dc2314bf43c8/sql-result.json"
+        },
+        {
+          "sha256": "5E97284DD040F602E731B62E7794B306AC08091AA35C0D35549E7CFF254DC632",
+          "path": "web/test-results-dev-f02/f0ed767ad1b04a559060dc2314bf43c8/junit.xml"
+        }
+      ],
+      "ac": "AC-20",
+      "cases": "F02-01 through F02-04",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F03",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF03",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:29:07.4111814+00:00",
+      "completedUtc": "2026-11-23T04:29:25.2483832+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "607c34411f1442d1ac12c93a07f2dad0",
+      "log": {
+        "sha256": "1866EE82A1927ACBCA6B2E543533D316244E5FB9AA03B43AD16AFA1AD9CC2E01",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F03.log"
+      },
+      "receipts": [
+        {
+          "sha256": "6B333266438E0948906A8626935E09E9D1BFB581B74079B24423AF23C086C68E",
+          "path": "TestResults/dev-f03/607c34411f1442d1ac12c93a07f2dad0/sql-result.json"
+        },
+        {
+          "sha256": "87E95C947EDDE59798CD33EE3C4FBC609998CB19F0DFFA960C6C3EE4905A6DF1",
+          "path": "web/test-results-app02c5/607c34411f1442d1ac12c93a07f2dad0/junit.xml"
+        }
+      ],
+      "ac": "AC-05",
+      "cases": "F03-01 through F03-04 within fixture",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F04",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF04",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:29:25.2960385+00:00",
+      "completedUtc": "2026-11-23T04:29:46.2953673+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "102eed0bec724ecb967842ef7ebee750",
+      "log": {
+        "sha256": "31D5C2BFF677EE3746073FAF49BDE35598DBD47839E8B6D306D95F3ADA7AC617",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F04.log"
+      },
+      "receipts": [
+        {
+          "sha256": "9573134AE6CD50D26C3BD3C223994CE24FA54CDCEF0FA43B918B57F97EE8C955",
+          "path": "TestResults/dev-f04/102eed0bec724ecb967842ef7ebee750/sql-result.json"
+        },
+        {
+          "sha256": "A52B750F9AAA6E387B04CEE76147A9B9683AD4E26EC311CE1D07DC47EEB40DCB",
+          "path": "web/test-results-app02c5/102eed0bec724ecb967842ef7ebee750/junit.xml"
+        }
+      ],
+      "ac": "AC-19 pricing",
+      "cases": "F04-01 through F04-04 within fixture",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F05",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF05",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:29:46.3294850+00:00",
+      "completedUtc": "2026-11-23T04:30:14.3786716+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "591ebd5e256a41009de12379da2dc386",
+      "log": {
+        "sha256": "60B1C690D2815FFF5E98893F26E71A445A13F4D63EA2C4C8CA8FAFD91F16BFE0",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F05.log"
+      },
+      "receipts": [
+        {
+          "sha256": "888A8EBFE65D67BCAFBEE61FF679BB24CA831ACB8CA670E295DF8D31FC3EACF4",
+          "path": "TestResults/dev-f05/591ebd5e256a41009de12379da2dc386/sql-result.json"
+        },
+        {
+          "sha256": "675D31FFB89F18B13D24447C2E6CA0FDCEB17CE5551A17448FF0503B43B5D634",
+          "path": "web/test-results-app02c5/591ebd5e256a41009de12379da2dc386/junit.xml"
+        }
+      ],
+      "ac": "AC-05/06",
+      "cases": "F05-01 through F05-04",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F06",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF06",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:30:14.3921798+00:00",
+      "completedUtc": "2026-11-23T04:30:34.6295923+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "4a97b3934f7a42b990e5bae671b9204e",
+      "log": {
+        "sha256": "E480D575F43C208B608B97316F8A1585696B6AC1E9694BB99612C894A52E3AC7",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F06.log"
+      },
+      "receipts": [
+        {
+          "sha256": "1E23978B9B749F6EDD9CFD476BE32226EB05FC6E22203529D14688ABD581D11F",
+          "path": "TestResults/dev-f06/4a97b3934f7a42b990e5bae671b9204e/sql-result.json"
+        },
+        {
+          "sha256": "045FC810164A15F177C51C30540A073907D45BF5952C3807E7B02F139950E908",
+          "path": "web/test-results-app02c5/4a97b3934f7a42b990e5bae671b9204e/junit.xml"
+        }
+      ],
+      "ac": "AC-06",
+      "cases": "F06-01 through F06-04",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F07",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF07",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:30:34.6464579+00:00",
+      "completedUtc": "2026-11-23T04:31:03.3878697+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "890bb5b69b084fdd9ecbe4084b10c03e",
+      "log": {
+        "sha256": "2989ADE2AAEEBCD9A31F12A14F703162C303BEA116891A034F4E35309962222D",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F07.log"
+      },
+      "receipts": [
+        {
+          "sha256": "7EB06E50DBF0FBD8669E765FA006138A7402A6E335D839DDB7BFB63F675C8C3B",
+          "path": "TestResults/dev-f07/890bb5b69b084fdd9ecbe4084b10c03e/sql-result.json"
+        },
+        {
+          "sha256": "5002CF6192A473036938B8A7EE9E0BE5F6AA175F44C838E609208153125D75E2",
+          "path": "web/test-results-app02c5/890bb5b69b084fdd9ecbe4084b10c03e/junit.xml"
+        }
+      ],
+      "ac": "AC-07",
+      "cases": "F07-01 through F07-05",
+      "browserPassed": 1
+    },
+    {
+      "suite": "DEV-F08",
+      "command": [
+        "pwsh",
+        "-NoProfile",
+        "-File",
+        "./scripts/Run-App02C1.ps1",
+        "-Increment",
+        "DevF08",
+        "-Verify"
+      ],
+      "startedUtc": "2026-11-23T04:31:03.4361652+00:00",
+      "completedUtc": "2026-11-23T04:31:36.2883556+00:00",
+      "status": "PASS",
+      "error": null,
+      "runId": "73c3e6740dc54af2b89e72fb886d39ad",
+      "log": {
+        "sha256": "B9DFA96D8CD72EBDA2505DE55DE96BB098B30BDAF9CB1C55599134BE4794E11C",
+        "path": "TestResults/dev-f09/647e7f1d369f4b549598ab4a35c56f3a/DEV-F08.log"
+      },
+      "receipts": [
+        {
+          "sha256": "68B5995F66BFBB865CF04E4AF69F34925D70358B95CD5DEFBEB5BFA20214BDAF",
+          "path": "TestResults/dev-f08/73c3e6740dc54af2b89e72fb886d39ad/sql-result.json"
+        },
+        {
+          "sha256": "B2F2ABD4B6499E1B990CD276FCCD0BF82612A2ABF91C0EF2E28271BCFFE8D633",
+          "path": "web/test-results-app02c5/73c3e6740dc54af2b89e72fb886d39ad/junit.xml"
+        }
+      ],
+      "ac": "AC-19 returns",
+      "cases": "F08-01 through F08-05",
+      "browserPassed": 1
+    }
+  ],
+  "catalog": {
+    "after": 36,
+    "before": 36,
+    "matches": true
+  }
+}

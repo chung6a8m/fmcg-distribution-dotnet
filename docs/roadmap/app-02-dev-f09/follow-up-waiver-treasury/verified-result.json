@@ -1,0 +1,314 @@
+{
+  "status": "PASS",
+  "source": "e4bb20a659cc32ae1491740a33bb1abf259c5dd5",
+  "tree": "22b1f85188538d2b02d8feb8c0f5ed921d25af46",
+  "runId": "647e7f1d369f4b549598ab4a35c56f3a",
+  "environment": "SYNTHETIC_NONPRODUCTION Windows LocalDB",
+  "foundation": {
+    "actual": 175,
+    "expected": 175
+  },
+  "chromium": {
+    "actual": 29,
+    "expected": 29
+  },
+  "dotnet": {
+    "actual": 352,
+    "expected": 352
+  },
+  "profiles": {
+    "actual": 8,
+    "expected": 8
+  },
+  "catalog": {
+    "after": 36,
+    "before": 36,
+    "matches": true
+  },
+  "reviewHeads": {
+    "F07": "d84983193b2b557fc6c5de5352f162e31cbe3bf7",
+    "F09": "c0a526d83a390499e8e11efbca3157e64054a094",
+    "F08": "55a135d886f7762a19378fd46e414ab3134e2ce5"
+  },
+  "f07": {
+    "case": "F07-05",
+    "peerEffects": 0,
+    "actual": {
+      "Net": 20.0,
+      "Entitlement": 2,
+      "GiftHeld": 1,
+      "WaivedHeld": 1,
+      "ToDeliver": 1,
+      "ApprovedWaiver": 2,
+      "BeforeHistory": {
+        "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+        "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+      },
+      "AfterHistory": {
+        "ProposalsSha256": "1E93E81976745A3C0D1064526091C8E64531AEEA03BB9AC978825F3D3E91BA33",
+        "DecisionsSha256": "C0C2729423A89A6F5677FD4937DCD1705010E2EF3366DC0C47C899676047FB53"
+      },
+      "WaiverHistoryUnchanged": true,
+      "Matches": true
+    },
+    "runId": "890bb5b69b084fdd9ecbe4084b10c03e"
+  },
+  "f08": {
+    "case": "F08-05",
+    "peerEffects": 0,
+    "runId": "73c3e6740dc54af2b89e72fb886d39ad",
+    "treasury": [
+      {
+        "Phase": "golden-final",
+        "Expected": {
+          "Ar": 0,
+          "Treasury": 80000,
+          "Qa": 0,
+          "Credits": 3,
+          "CreditAvailable": 188800,
+          "Proposals": 1,
+          "Approvals": 1,
+          "Payments": 1,
+          "Settlements": 1,
+          "PaymentWitnesses": 1,
+          "PayoutWitnesses": 1,
+          "TreasuryReserved": 0
+        },
+        "Actual": {
+          "Phase": "golden-final",
+          "Actual": {
+            "Ar": 0.0,
+            "Treasury": 80000,
+            "Qa": 0.0,
+            "Credits": 3,
+            "CreditAvailable": 188800,
+            "Proposals": 1,
+            "Approvals": 1,
+            "Payments": 1,
+            "Settlements": 1,
+            "PaymentWitnesses": 1,
+            "PayoutWitnesses": 1,
+            "TreasuryReserved": 0
+          },
+          "SourceSha256": "6961C594C0E3535CABE025BBBB1992BDD70B25FFC23F22E736E1680F36E3A01F"
+        },
+        "Matches": true
+      },
+      {
+        "Phase": "treasury-approved",
+        "Expected": {
+          "Ar": 0,
+          "Treasury": 80000,
+          "Qa": 0,
+          "Credits": 3,
+          "CreditAvailable": 188800,
+          "Proposals": 3,
+          "Approvals": 3,
+          "Payments": 1,
+          "Settlements": 1,
+          "PaymentWitnesses": 1,
+          "PayoutWitnesses": 1,
+          "TreasuryReserved": 0
+        },
+        "Actual": {
+          "Phase": "treasury-approved",
+          "Actual": {
+            "Ar": 0.0,
+            "Treasury": 80000,
+            "Qa": 0.0,
+            "Credits": 3,
+            "CreditAvailable": 188800,
+            "Proposals": 3,
+            "Approvals": 3,
+            "Payments": 1,
+            "Settlements": 1,
+            "PaymentWitnesses": 1,
+            "PayoutWitnesses": 1,
+            "TreasuryReserved": 0
+          },
+          "SourceSha256": "6961C594C0E3535CABE025BBBB1992BDD70B25FFC23F22E736E1680F36E3A01F"
+        },
+        "Matches": true
+      },
+      {
+        "Phase": "treasury-reserved",
+        "Expected": {
+          "Ar": 0,
+          "Treasury": 80000,
+          "Qa": 0,
+          "Credits": 3,
+          "CreditAvailable": 188800,
+          "Proposals": 3,
+          "Approvals": 3,
+          "Payments": 1,
+          "Settlements": 1,
+          "PaymentWitnesses": 1,
+          "PayoutWitnesses": 2,
+          "TreasuryReserved": 60000
+        },
+        "Actual": {
+          "Phase": "treasury-reserved",
+          "Actual": {
+            "Ar": 0.0,
+            "Treasury": 80000,
+            "Qa": 0.0,
+            "Credits": 3,
+            "CreditAvailable": 188800,
+            "Proposals": 3,
+            "Approvals": 3,
+            "Payments": 1,
+            "Settlements": 1,
+            "PaymentWitnesses": 1,
+            "PayoutWitnesses": 2,
+            "TreasuryReserved": 60000
+          },
+          "SourceSha256": "6961C594C0E3535CABE025BBBB1992BDD70B25FFC23F22E736E1680F36E3A01F"
+        },
+        "Matches": true
+      },
+      {
+        "Phase": "final",
+        "Expected": {
+          "Ar": 0,
+          "Treasury": 20000,
+          "Qa": 0,
+          "Credits": 3,
+          "CreditAvailable": 128800,
+          "Proposals": 3,
+          "Approvals": 3,
+          "Payments": 2,
+          "Settlements": 1,
+          "PaymentWitnesses": 1,
+          "PayoutWitnesses": 2,
+          "TreasuryReserved": 0
+        },
+        "Actual": {
+          "Phase": "final",
+          "Actual": {
+            "Ar": 0.0,
+            "Treasury": 20000,
+            "Qa": 0.0,
+            "Credits": 3,
+            "CreditAvailable": 128800,
+            "Proposals": 3,
+            "Approvals": 3,
+            "Payments": 2,
+            "Settlements": 1,
+            "PaymentWitnesses": 1,
+            "PayoutWitnesses": 2,
+            "TreasuryReserved": 0
+          },
+          "SourceSha256": "6961C594C0E3535CABE025BBBB1992BDD70B25FFC23F22E736E1680F36E3A01F"
+        },
+        "Matches": true
+      }
+    ],
+    "rejections": [
+      {
+        "Reason": "F08_TREASURY_UNAVAILABLE",
+        "Actor": "f08-witness",
+        "Sources": 0,
+        "Effects": 0
+      },
+      {
+        "Reason": "F08_TREASURY_UNAVAILABLE",
+        "Actor": "f08-witness",
+        "Sources": 0,
+        "Effects": 0
+      },
+      {
+        "Reason": "F08_WITNESS_REQUIRED",
+        "Actor": "f08-cashier",
+        "Sources": 0,
+        "Effects": 0
+      },
+      {
+        "Reason": "F08_WITNESS_REQUIRED",
+        "Actor": "f08-cashier",
+        "Sources": 0,
+        "Effects": 0
+      },
+      {
+        "Reason": "F08_WITNESS_REQUIRED",
+        "Actor": "f08-maker",
+        "Sources": 0,
+        "Effects": 0
+      }
+    ],
+    "contenders": [
+      {
+        "RefundId": "e72b109f-b2a0-4701-b66c-31661fc7ecc4",
+        "CreditId": "75525f81-adae-451a-b57e-f584a33f463d",
+        "CreditEvidence": "F08-credit-2",
+        "Amount": 60000,
+        "Maker": "f08-maker",
+        "Checker": "f08-checker",
+        "ProposalEvidence": "F08-treasury-2-proposal",
+        "ApprovalEvidence": "F08-treasury-2-approval",
+        "WitnessId": "9eeb63ef-e834-4187-82c3-d9cb2dd95294",
+        "WitnessActor": "f08-witness",
+        "WitnessEvidence": "F08-treasury-2-witness",
+        "PaymentId": "eae61273-6e6d-4b28-97e5-ec567ff0c507",
+        "PaidAmount": 60000,
+        "Cashier": "f08-cashier",
+        "PaidEvidence": "F08-treasury-2-witness",
+        "CreditAvailable": 9600
+      },
+      {
+        "RefundId": "adfde358-4b87-451d-a96e-8e71db0b168f",
+        "CreditId": "195e3b38-3d3e-41a8-acf5-805a66d7d3f0",
+        "CreditEvidence": "F08-credit-3",
+        "Amount": 60000,
+        "Maker": "f08-maker",
+        "Checker": "f08-checker",
+        "ProposalEvidence": "F08-treasury-3-proposal",
+        "ApprovalEvidence": "F08-treasury-3-approval",
+        "WitnessId": null,
+        "WitnessActor": null,
+        "WitnessEvidence": null,
+        "PaymentId": null,
+        "PaidAmount": null,
+        "Cashier": null,
+        "PaidEvidence": null,
+        "CreditAvailable": 69600
+      }
+    ]
+  },
+  "d4": {
+    "cases": [
+      {
+        "tenant": "tenant-a",
+        "stage": "post",
+        "transport": "post-0-a",
+        "initialHttp": 503,
+        "replayHttp": 200
+      },
+      {
+        "tenant": "tenant-b",
+        "stage": "post",
+        "transport": "post-0-a",
+        "initialHttp": 503,
+        "replayHttp": 200
+      }
+    ],
+    "runId": "105b72e294984633ad1f3f966357d410"
+  },
+  "archive": [
+    {
+      "sha256": "7AEFDA1EA8C7370C23BCDECC94AFACE2C534F0AF31E3181C40402494427DA38D",
+      "file": "d4-12.json"
+    },
+    {
+      "sha256": "7EB06E50DBF0FBD8669E765FA006138A7402A6E335D839DDB7BFB63F675C8C3B",
+      "file": "f07-sql-result.json"
+    },
+    {
+      "sha256": "68B5995F66BFBB865CF04E4AF69F34925D70358B95CD5DEFBEB5BFA20214BDAF",
+      "file": "f08-sql-result.json"
+    },
+    {
+      "sha256": "91A7D8A69064C0FDC4858208350F8E0AE4AC0BC1B2D1E44D2C9AFC8EB26F66C8",
+      "file": "integrated-run.json"
+    }
+  ]
+}
