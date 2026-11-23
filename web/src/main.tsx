@@ -16,6 +16,8 @@ const LoadWorkspace = lazy(() => import('./sales/LoadWorkspace')
   .then(module => ({ default: module.LoadWorkspace })))
 const DeliveryWorkspace = lazy(() => import('./sales/DeliveryWorkspace')
   .then(module => ({ default: module.DeliveryWorkspace })))
+const ReturnWorkspace = lazy(() => import('./sales/ReturnWorkspace')
+  .then(module => ({ default: module.ReturnWorkspace })))
 const SalesWorkspace = lazy(() => import('./sales/SalesWorkspace')
   .then(module => ({ default: module.SalesWorkspace })))
 
@@ -70,6 +72,7 @@ function HealthShell() {
       <a className="page-link" href="/sales/b-sale">Bán và giao hàng B · DEV</a>
       <a className="page-link" href="/sales/b-stock">Quota, hạn mức và nạp hàng B · DEV</a>
       <a className="page-link" href="/sales/delivery">Giao hàng và công nợ A · DEV</a>
+      <a className="page-link" href="/sales/returns">Trả hàng · DEV</a>
     </section>
     <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
@@ -100,6 +103,8 @@ function App() {
         : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo />
           : location.pathname === '/sales'
             ? <Suspense fallback={<p className="page" role="status">Đang tải Sales A…</p>}><SalesWorkspace /></Suspense>
+          : location.pathname === '/sales/returns'
+            ? <Suspense fallback={<p className="page" role="status">Đang tải trả hàng…</p>}><ReturnWorkspace /></Suspense>
           : location.pathname === '/sales/partner-rehearsal'
             ? <Suspense fallback={<p className="page" role="status">Đang tải mô phỏng…</p>}><PartnerRehearsalWorkspace /></Suspense>
           : location.pathname === '/sales/mixed-trip'

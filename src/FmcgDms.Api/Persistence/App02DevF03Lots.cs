@@ -60,7 +60,7 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Id = id }, tx, ct));
 
     private static async Task<IReadOnlyList<F03Pick>> PlanLotHold(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid orderLine, Guid sku, Guid location, decimal quantity, CancellationToken ct)
+        string tenant, Guid orderLine, Guid sku, Guid location, decimal quantity, bool returns, CancellationToken ct)
     {
         await App02a3Sql.Lock(db, tx, $"DEVF03:RESERVE:{sku:N}:{location:N}", ct);
         decimal? step = await db.QuerySingleOrDefaultAsync<decimal?>(Sql("""
@@ -69,8 +69,13 @@ public sealed partial class App01a2CommandService
             WHERE a.TenantId=@Tenant AND a.Id=@OrderLine
             """, new { Tenant = tenant, OrderLine = orderLine }, tx, ct));
         if (step is null || quantity % step.Value != 0) return [];
+        string releases = returns ? """
+            SELECT COALESCE(SUM(r.Quantity),0) AS Quantity FROM dbo.F05ReturnCase r
+            JOIN dbo.F05ReturnStage s ON s.TenantId=r.TenantId AND s.CaseId=r.Id AND s.Stage='RELEASE'
+            WHERE r.TenantId=o.TenantId AND r.LotId=o.LotId AND s.DestinationId=o.LocationId
+            """ : "SELECT 0 AS Quantity";
         var eligible = await db.QueryAsync<F03Pick>(Sql($"""
-            SELECT o.LotId,o.Quantity-used.Quantity AS Quantity
+            SELECT o.LotId,o.Quantity+released.Quantity-used.Quantity AS Quantity
             FROM dbo.F03LotOpening o
             JOIN dbo.F03Lot l ON l.TenantId=o.TenantId AND l.Id=o.LotId
             JOIN dbo.StockLocation loc ON loc.TenantId=o.TenantId AND loc.Id=o.LocationId
@@ -79,9 +84,10 @@ public sealed partial class App01a2CommandService
                 JOIN dbo.StockRight r ON r.TenantId=h.TenantId AND r.Id=h.StockRightId
                 WHERE h.TenantId=o.TenantId AND h.LotId=o.LotId AND r.StockLocationId=o.LocationId
             ) used
+            CROSS APPLY ({releases}) released
             WHERE o.TenantId=@Tenant AND o.LocationId=@Location AND l.SkuId=@Sku
                 AND loc.Kind='WAREHOUSE' AND loc.IsActive=1 AND l.ExpiresOn>={LotBusinessDate}
-                AND o.Quantity>used.Quantity
+                AND o.Quantity+released.Quantity>used.Quantity
             ORDER BY l.ExpiresOn,l.Code COLLATE Latin1_General_100_BIN2,l.Id
             """, new { Tenant = tenant, Location = location, Sku = sku }, tx, ct));
         return PickLots(eligible, quantity);
