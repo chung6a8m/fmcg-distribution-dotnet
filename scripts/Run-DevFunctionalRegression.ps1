@@ -208,7 +208,23 @@ try {
                 $a4.runId = $env:APP02A4_TEST_RUN_ID
                 $a4.expected = 24
                 $a4.actual = 0
-                if ($a4.status -eq 'PASS') { $a4.actual = 24 }
+                if ($a4.status -eq 'PASS') {
+                    $a4Root = New-Item -ItemType Directory -Path (Join-Path $output 'a4-oracles')
+                    $oracles = @(Get-ChildItem -LiteralPath tests -Recurse -File -Filter '*-oracle.json' |
+                        Where-Object { $_.Directory.Name -ceq 'APP-02A4' } | Sort-Object Name)
+                    foreach ($oracle in $oracles) {
+                        $artifact = Get-Content -LiteralPath $oracle.FullName -Raw | ConvertFrom-Json
+                        if ($artifact.TestRunId -cne $a4.runId -or $artifact.SourceHeadSha -cne $source) { continue }
+                        $path = Join-Path $a4Root $oracle.Name
+                        Copy-Item -LiteralPath $oracle.FullName -Destination $path
+                        $a4.receipts += Get-Receipt $path
+                    }
+                    $a4.actual = $a4.receipts.Count
+                    if ($a4.actual -ne $a4.expected) {
+                        $a4.status = 'FAIL'
+                        $a4.error = 'A.4 evidence did not retain all 24 exact-source SQL reports'
+                    }
+                }
                 foreach ($entry in $foundation) { Receive-Scenario $entry $true }
             }
             if ($Suite -in @('All', 'Functional')) {
