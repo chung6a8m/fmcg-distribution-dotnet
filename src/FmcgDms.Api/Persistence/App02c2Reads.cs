@@ -1,5 +1,6 @@
 using System.Data;
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Dapper;
 using Microsoft.Data.SqlClient;
 
@@ -8,10 +9,15 @@ namespace FmcgDms.Api.Persistence;
 public sealed record C2Option(Guid Id, string Label);
 public sealed record C2Identity(string TenantId, string ActorId, string SessionId, bool Sales, bool Warehouse, bool Visits = false);
 public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<C2Option> Trips,
-    IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses);
+    IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<F03UnitView>? Units = null);
 public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, decimal Ordered, decimal Reserved,
     decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered, decimal Loaded, decimal HeldOnTrip,
-    string? PolicySourceHash);
+    string? PolicySourceHash)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public F04PriceView? Pricing { get; init; }
+}
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
     Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin);
 
@@ -37,8 +43,19 @@ public sealed partial class App01a2CommandService
                 SELECT Id,Code AS Label FROM dbo.StockLocation
                 WHERE TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1 ORDER BY Code;
                 """, new { Tenant = tenant }, tx, ct));
-            return new C2Catalog((await grid.ReadAsync<C2Option>()).AsList(), (await grid.ReadAsync<C2Option>()).AsList(),
-                (await grid.ReadAsync<C2Option>()).AsList(), (await grid.ReadAsync<C2Option>()).AsList());
+            var customers = (await grid.ReadAsync<C2Option>()).AsList();
+            var trips = (await grid.ReadAsync<C2Option>()).AsList();
+            var skus = (await grid.ReadAsync<C2Option>()).AsList();
+            var warehouses = (await grid.ReadAsync<C2Option>()).AsList();
+            var units = connections.UsesDevF03
+                ? (await db.QueryAsync<F03UnitView>(Sql("""
+                    SELECT u.SkuId,u.UomCode,u.Factor,u.Step FROM dbo.F03Unit u
+                    JOIN dbo.Sku s ON s.TenantId=u.TenantId AND s.Id=u.SkuId AND s.IsActive=1
+                    WHERE u.TenantId=@Tenant
+                    ORDER BY u.SkuId, CASE WHEN u.UomCode COLLATE DATABASE_DEFAULT=s.BaseUom THEN 0 ELSE 1 END,u.UomCode
+                    """, new { Tenant = tenant }, tx, ct))).AsList()
+                : null;
+            return new C2Catalog(customers, trips, skus, warehouses, units);
         }, ct);
 
     public Task<C2Identity> IdentityC2(ClaimsPrincipal principal, CancellationToken ct) =>
@@ -96,11 +113,19 @@ public sealed partial class App01a2CommandService
                 """, new { Tenant = tenant }, tx, ct));
             var headers = (await grid.ReadAsync<C2Header>()).AsList();
             var lines = (await grid.ReadAsync<C2LineRow>()).ToLookup(l => l.OrderId);
+            var confirmed = lines.SelectMany(group => group).Where(line => line.LineId.HasValue)
+                .Select(line => line.LineId!.Value).ToArray();
+            var pricing = connections.UsesDevF04 && confirmed.Length > 0
+                ? (await ReadPrices(db, tx, tenant, confirmed, ct)).ToDictionary(row => row.OrderLineId)
+                : null;
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
                     l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays,
-                    l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)).ToArray();
+                    l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)
+                {
+                    Pricing = l.LineId is Guid id ? pricing?.GetValueOrDefault(id)?.ToView() : null
+                }).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
                     orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
                     orderLines.Any(l => l.Delivered > 0) ? "PARTIALLY_DELIVERED" :

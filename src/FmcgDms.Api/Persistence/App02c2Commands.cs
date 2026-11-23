@@ -8,7 +8,7 @@ using Microsoft.Data.SqlClient;
 
 namespace FmcgDms.Api.Persistence;
 
-public sealed record C2DraftLine(Guid SkuId, decimal Quantity);
+public sealed record C2DraftLine(Guid SkuId, decimal Quantity, string? UomCode = null);
 public sealed record C2DraftInput(Guid CommandId, Guid CustomerId, Guid TripId, Guid SelectionId, C2DraftLine[]? Lines);
 public sealed record C2ConfirmInput(Guid CommandId, Guid OrderId);
 public sealed record C2ReserveInput(Guid CommandId, Guid OrderId, Guid LineId, Guid LocationId,
@@ -23,7 +23,7 @@ public sealed partial class App01a2CommandService
         Guid? RegisteredId, int? RegisteredRevision);
     private sealed record C2SkuUnit(Guid Id, string BaseUom);
     private sealed record C2PreparedLine(int LineNumber, Guid SkuId, decimal BaseQuantity, string BaseUom,
-        string CurrentBaseUom, bool IsActive);
+        string CurrentBaseUom, bool IsActive, string SkuCode);
     private sealed record C2CommercialPolicy(Guid Id, int Version, string Decision, DateTime EffectiveFromUtc,
         DateTime EffectiveUntilUtc, string Maker, string? Checker, DateTime? ApprovedAtUtc, string EvidenceRef,
         decimal? UnitPrice, decimal? DiscountPerUnit, decimal? TaxRate, int? TermsDays, decimal? CreditCap, string? SellerTimeZone);
@@ -49,7 +49,10 @@ public sealed partial class App01a2CommandService
                 ("Lines", JsonSerializer.Serialize(input.Lines?.Select(l => l is null ? null : new
                 {
                     l.SkuId, Quantity = CommandPayloadHash.Decimal(l.Quantity)
-                }), C1Validation.Json))
+                }), C1Validation.Json)),
+                ..(input.Lines?.Any(l => l?.UomCode is not null) == true
+                    ? new[] { ("Units", JsonSerializer.Serialize(input.Lines.Select(l => l?.UomCode), C1Validation.Json)) }
+                    : [])
             ],
             async (db, tx, tenant, actor, command, token) =>
             {
@@ -73,6 +76,21 @@ public sealed partial class App01a2CommandService
                 if (units.Count != lines.Length || units.Values.Any(string.IsNullOrWhiteSpace))
                     return BusinessCommandOutcome.Rejected("C2_SKU_INVALID");
 
+                bool lots = connections.UsesDevF03;
+                if (!lots && lines.Any(line => line.UomCode is not null))
+                    return BusinessCommandOutcome.Rejected("F03_UOM_INVALID");
+                var quantities = new List<F03Quantity>();
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    string baseUom = units[line.SkuId];
+                    var quantity = lots
+                        ? await DraftQuantity(db, tx, tenant, line, i + 1, baseUom, token)
+                        : new F03Quantity(i + 1, baseUom, line.Quantity, 1, 0.001m, 0.001m, false);
+                    if (quantity is null) return BusinessCommandOutcome.Rejected("F03_UOM_INVALID");
+                    quantities.Add(quantity);
+                }
+
                 Guid draft = await AddSource(db, tx, tenant, command, "C2_A_DRAFT",
                     C2Key(principal, input.CommandId).SourceNumber, actor, input.CustomerId, input.TripId, token);
                 await db.ExecuteAsync(Sql("""
@@ -81,12 +99,21 @@ public sealed partial class App01a2CommandService
                     """, new { Tenant = tenant, Id = draft, input.CustomerId, input.TripId, input.SelectionId, Actor = actor }, tx, token));
                 for (int i = 0; i < lines.Length; i++)
                 {
-                    await AddLine(db, tx, tenant, draft, i + 1, lines[i].SkuId, lines[i].Quantity, null, token);
+                    var quantity = quantities[i];
+                    await AddLine(db, tx, tenant, draft, i + 1, lines[i].SkuId, quantity.BaseQuantity, null, token);
                     await db.ExecuteAsync(Sql("""
                         INSERT dbo.C2OrderDraftLine(TenantId,DraftId,LineNumber,SkuId,BaseQuantity,BaseUom)
                         VALUES(@Tenant,@Draft,@Line,@SkuId,@Quantity,@BaseUom)
                         """, new { Tenant = tenant, Draft = draft, Line = i + 1,
-                            lines[i].SkuId, lines[i].Quantity, BaseUom = units[lines[i].SkuId] }, tx, token));
+                            lines[i].SkuId, Quantity = quantity.BaseQuantity, BaseUom = units[lines[i].SkuId] }, tx, token));
+                    if (lots)
+                        await db.ExecuteAsync(Sql("""
+                            INSERT dbo.F03DraftQuantity(TenantId,DraftId,LineNumber,UomCode,EnteredQuantity,Factor,
+                                Step,BaseStep,LotTracked)
+                            VALUES(@Tenant,@Draft,@LineNumber,@UomCode,@EnteredQuantity,@Factor,@Step,@BaseStep,@LotTracked)
+                            """, new { Tenant = tenant, Draft = draft, quantity.LineNumber, quantity.UomCode,
+                                quantity.EnteredQuantity, quantity.Factor, quantity.Step, quantity.BaseStep, quantity.LotTracked },
+                            tx, token));
                 }
                 return BusinessCommandOutcome.Applied("C2_DRAFT_CREATED", draft);
             }, ct, "sales");
@@ -95,7 +122,8 @@ public sealed partial class App01a2CommandService
         ExecuteAsync(principal, C2Key(principal, input.CommandId), "C2_CONFIRM",
             [("OrderId", input.OrderId.ToString("N"))],
             (db, tx, tenant, actor, command, token) => ConfirmC2Core(
-                db, tx, tenant, actor, command, input.OrderId, C2Key(principal, input.CommandId).SourceNumber, token), ct, "sales");
+                db, tx, tenant, actor, command, input.OrderId, C2Key(principal, input.CommandId).SourceNumber, connections.UsesDevF03,
+                connections.UsesDevF04, token), ct, "sales");
 
     public Task<BusinessCommandOutcome> ReserveC2(ClaimsPrincipal principal, C2ReserveInput input, CancellationToken ct)
     {
@@ -106,7 +134,8 @@ public sealed partial class App01a2CommandService
     }
 
     private static async Task<BusinessCommandOutcome> ConfirmC2Core(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, Guid orderId, string sourceNumber, CancellationToken ct)
+        string tenant, string actor, Guid command, Guid orderId, string sourceNumber, bool lots, bool pricing,
+        CancellationToken ct)
     {
         var draft = await db.QuerySingleOrDefaultAsync<C2Draft>(Sql("""
             SELECT d.CustomerId,d.TripId,d.SelectionId FROM dbo.C2OrderDraft d WITH (UPDLOCK,HOLDLOCK)
@@ -141,7 +170,7 @@ public sealed partial class App01a2CommandService
             return BusinessCommandOutcome.Rejected("C2_SHIP_TO_INVALID");
 
         var lines = (await db.QueryAsync<C2PreparedLine>(Sql("""
-            SELECT l.LineNumber,l.SkuId,l.BaseQuantity,l.BaseUom,s.BaseUom AS CurrentBaseUom,s.IsActive
+            SELECT l.LineNumber,l.SkuId,l.BaseQuantity,l.BaseUom,s.BaseUom AS CurrentBaseUom,s.IsActive,s.Code AS SkuCode
             FROM dbo.C2OrderDraftLine l JOIN dbo.Sku s ON s.TenantId=l.TenantId AND s.Id=l.SkuId
             WHERE l.TenantId=@Tenant AND l.DraftId=@OrderId ORDER BY l.LineNumber
             """, scope, tx, ct))).AsList();
@@ -150,8 +179,19 @@ public sealed partial class App01a2CommandService
         if (lines.Any(l => !string.Equals(l.BaseUom, l.CurrentBaseUom, StringComparison.Ordinal)))
             return BusinessCommandOutcome.Rejected("C2_BASE_UOM_CHANGED");
 
+        var quantities = lots ? (await db.QueryAsync<F03Quantity>(Sql("""
+            SELECT LineNumber,UomCode,EnteredQuantity,Factor,Step,BaseStep,LotTracked
+            FROM dbo.F03DraftQuantity WHERE TenantId=@Tenant AND DraftId=@OrderId
+            """, scope, tx, ct))).ToDictionary(row => row.LineNumber) : null;
+        if (quantities is not null && lines.Any(line =>
+            !quantities.TryGetValue(line.LineNumber, out var quantity) || quantity.BaseQuantity != line.BaseQuantity))
+            return BusinessCommandOutcome.Rejected("F03_DRAFT_QUANTITY_INVALID");
+
         var now = DateTime.SpecifyKind(await db.ExecuteScalarAsync<DateTime>(Sql(
             $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)), DateTimeKind.Utc);
+        var pricePlan = pricing ? await ApprovedPricePlan(db, tx, tenant, actor, draft.CustomerId, now, ct) : null;
+        if (pricing && pricePlan is null) return BusinessCommandOutcome.Rejected("F04_PRICE_PLAN_REQUIRED");
+        var allowedQuotes = pricePlan is null ? null : await ApprovedPlanQuotes(db, tx, tenant, pricePlan.Id, ct);
         var frozen = new List<C2FrozenLine>();
         foreach (var line in lines)
         {
@@ -171,22 +211,41 @@ public sealed partial class App01a2CommandService
                 EffectiveUntilUtc = DateTime.SpecifyKind(policy.EffectiveUntilUtc, DateTimeKind.Utc),
                 ApprovedAtUtc = DateTime.SpecifyKind(policy.ApprovedAtUtc!.Value, DateTimeKind.Utc)
             };
-            decimal taxableUnit = (approved.UnitPrice!.Value - approved.DiscountPerUnit!.Value)
-                * (1 + approved.TaxRate!.Value);
-            if (taxableUnit > 0 && line.BaseQuantity > 999999999999999.9999m / taxableUnit)
-                return BusinessCommandOutcome.Rejected("C2_CREDIT_CAP_EXCEEDED");
-            decimal gross = decimal.Round(taxableUnit * line.BaseQuantity, 4, MidpointRounding.AwayFromZero);
+            decimal gross = 0;
+            if (pricePlan is null)
+            {
+                decimal taxableUnit = (approved.UnitPrice!.Value - approved.DiscountPerUnit!.Value)
+                    * (1 + approved.TaxRate!.Value);
+                if (taxableUnit > 0 && line.BaseQuantity > 999999999999999.9999m / taxableUnit)
+                    return BusinessCommandOutcome.Rejected("C2_CREDIT_CAP_EXCEEDED");
+                gross = decimal.Round(taxableUnit * line.BaseQuantity, 4, MidpointRounding.AwayFromZero);
+            }
+            else if (approved.DiscountPerUnit != 0 || allowedQuotes?.Contains(approved.Id) != true)
+                return BusinessCommandOutcome.Rejected("F04_PRICE_INVALID");
             string payload = JsonSerializer.Serialize(new
             {
-                Seller = tenant, draft.CustomerId, line.SkuId, line.BaseUom, Factor = 1, Currency = "SYNTHETIC_UNITLESS",
+                Seller = tenant, draft.CustomerId, line.SkuId, line.BaseUom, Factor = 1,
+                Currency = pricePlan is null ? "SYNTHETIC_UNITLESS" : SyntheticVnd,
                 InvoiceEligible = false, Policy = approved
             }, C1Validation.Json);
             frozen.Add(new(line, approved, payload, gross));
         }
+        Dictionary<string, F04PricedLine>? prices = null;
+        if (pricePlan is not null)
+        {
+            try
+            {
+                prices = F04Pricing.Calculate(frozen.Select(line => new F04PriceInput(line.Line.SkuCode,
+                    line.Line.BaseQuantity, line.Policy.UnitPrice!.Value, line.Policy.TaxRate!.Value)).ToArray(),
+                    pricePlan.OrderDiscount, pricePlan.TaxMode == "INCLUSIVE")
+                    .ToDictionary(line => line.Sku, StringComparer.Ordinal);
+            }
+            catch (ArgumentException) { return BusinessCommandOutcome.Rejected("F04_PRICE_INVALID"); }
+        }
         var first = frozen[0].Policy;
         if (frozen.Any(l => l.Policy.TermsDays != first.TermsDays || l.Policy.CreditCap != first.CreditCap))
             return BusinessCommandOutcome.Rejected("C2_POLICY_SCOPE_CONFLICT");
-        if (frozen.Sum(l => l.Gross) > first.CreditCap!.Value)
+        if (frozen.Sum(l => prices?.GetValueOrDefault(l.Line.SkuCode)?.Gross ?? l.Gross) > first.CreditCap!.Value)
             return BusinessCommandOutcome.Rejected("C2_CREDIT_CAP_EXCEEDED");
 
         Guid shipTo = Guid.NewGuid();
@@ -211,11 +270,13 @@ public sealed partial class App01a2CommandService
         {
             var line = entry.Line;
             var approved = entry.Policy;
+            var quantity = quantities?.GetValueOrDefault(line.LineNumber);
+            var price = prices?.GetValueOrDefault(line.SkuCode);
             Guid lineId = Guid.NewGuid();
             Guid sourceLine = await AddLine(db, tx, tenant, confirm, line.LineNumber, line.SkuId, line.BaseQuantity, null, ct);
             await db.ExecuteAsync(Sql("""
                 INSERT dbo.AOrderLine(Id,TenantId,AOrderId,LineNumber,SkuId,BaseQuantity,UomCode,UomToBaseFactor,UnitPrice)
-                VALUES(@LineId,@Tenant,@OrderId,@LineNumber,@SkuId,@BaseQuantity,@BaseUom,1,@UnitPrice);
+                VALUES(@LineId,@Tenant,@OrderId,@LineNumber,@SkuId,@BaseQuantity,@OrderUom,@OrderFactor,@UnitPrice);
                 INSERT dbo.AConfirmedLineSnapshot(TenantId,AOrderLineId,AOrderId,TripId,CustomerId,
                     SkuId,ConfirmBusinessSourceId,ConfirmSourceLineId,ConfirmedBaseQuantity,UnitPriceSnapshot,TermsDaysSnapshot,ConfirmedAtUtc)
                 VALUES(@Tenant,@LineId,@OrderId,@TripId,@CustomerId,@SkuId,@Confirm,@SourceLine,@BaseQuantity,@UnitPrice,@TermsDays,@Now);
@@ -224,10 +285,13 @@ public sealed partial class App01a2CommandService
                 """, C2ClockParameters(new
             {
                 LineId = lineId, Tenant = tenant, OrderId = orderId, line.LineNumber, line.SkuId, line.BaseQuantity, line.BaseUom,
+                OrderUom = quantity?.UomCode ?? line.BaseUom, OrderFactor = quantity?.Factor ?? 1m,
                 approved.UnitPrice, draft.TripId, draft.CustomerId, Confirm = confirm, SourceLine = sourceLine,
                 approved.TermsDays, PolicyId = approved.Id, approved.Version,
-                Hash = SHA256.HashData(Encoding.UTF8.GetBytes(entry.Payload)), entry.Payload, entry.Gross
+                Hash = SHA256.HashData(Encoding.UTF8.GetBytes(entry.Payload)), entry.Payload, Gross = price?.Gross ?? entry.Gross
             }, now), tx, ct));
+            if (pricePlan is not null && price is not null)
+                await RecordPriceLine(db, tx, tenant, lineId, pricePlan, price, approved, ct);
         }
         return BusinessCommandOutcome.Applied("C2_ORDER_CONFIRMED", confirm);
     }

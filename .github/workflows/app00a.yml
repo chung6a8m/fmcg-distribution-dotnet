@@ -36,6 +36,7 @@ jobs:
         run: |
           ./scripts/Verify-Business.ps1
           python tools/validate_business.py
+          python tools/validate_e_sim_01.py
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
@@ -821,6 +822,24 @@ jobs:
       - name: DEV-F02 AC-20 employee advance and cashier recovery through Chromium and SQL
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment DevF02 -Verify
+      - name: DEV-F03 AC-05 conversion, FEFO and stock issue through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF03 -Verify
+      - name: DEV-F04 AC-19 pricing snapshot, tax and partial delivery through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF04 -Verify
+      - name: DEV-F05 AC-05/06 source returns through Chromium, QA and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF05 -Verify
+      - name: DEV-F06 AC-06 forward-only cost corrections through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF06 -Verify
+      - name: DEV-F07 AC-07 returned gifts and waivers through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF07 -Verify
+      - name: DEV-F08 AC-19 source credit and witnessed disbursement through Chromium and SQL
+        shell: pwsh
+        run: ./scripts/Run-App02C1.ps1 -Increment DevF08 -Verify
       - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
         shell: pwsh
         run: ./scripts/Run-App02C6.ps1

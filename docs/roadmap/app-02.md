@@ -101,12 +101,12 @@ The Owner fixed the C/P envelope, identity, state/ACK rules, retry/case/retentio
 | --- | --- | --- |
 | [DEV-F01](app-02-dev-f01.md) | AC-17 / EV-13 | Visit online không đơn, nguồn và ghi nhận quan sát |
 | [DEV-F02](app-02-dev-f02.md) | AC-20 / EV-06 | Tạm ứng và hoàn ứng qua phê duyệt, độc lập với nhóm kho/giá |
-| DEV-F03 | AC-05 / EV-04/05 | Đơn vị chuẩn, lô/hạn, FEFO, cách ly |
-| DEV-F04 | AC-19 / EV-05/06 | Snapshot giá/discount/thuế và residual |
-| DEV-F05 | AC-05/06 / EV-05/07 | Trả hàng có nguồn, QA/held, giá vốn gốc. Dùng snapshot F03–04 |
-| DEV-F06 | AC-06 / EV-07 | Điều chỉnh có nguồn qua kỳ khóa. Dùng F05 |
-| DEV-F07 | AC-07 / EV-05 | Trả quà và waiver. Dùng nguồn giao/trả F05 |
-| DEV-F08 | AC-19 / EV-05/06/10/11 | Credit/refund và residual. Dùng snapshot F04 và sự kiện F05–06 |
+| [DEV-F03](app-02-dev-f03.md) | AC-05 / EV-04/05 | Đơn vị chuẩn, lô/hạn, FEFO, cách ly |
+| [DEV-F04](app-02-dev-f04.md) | AC-19 / EV-05/06 | Snapshot giá/discount/thuế và residual |
+| [DEV-F05](app-02-dev-f05.md) | AC-05/06 / EV-05/07 | Trả hàng có nguồn, QA/held, giá vốn gốc. Dùng snapshot F03–04 |
+| [DEV-F06](app-02-dev-f06.md) | AC-06 / EV-07 | Điều chỉnh có nguồn qua kỳ khóa. Dùng F05 |
+| DEV-F07 | AC-07 / EV-05 | [Trả quà và waiver](app-02-dev-f07.md). Dùng nguồn giao/trả F05 |
+| DEV-F08 | AC-19 / EV-05/06/10/11 | [Credit/refund và residual](app-02-dev-f08.md). Dùng snapshot F04 và sự kiện F05–06 |
 | DEV-F09 | Các ca bổ sung và nền C/D/E | Hồi quy hai tenant trên source xác định |
 
 **A.4 verification gate CLOSED for synthetic/nonproduction only:** the independently reviewed A11-01..12 SQL oracle on two nonce-owned LocalDB tenants passed source/ledger/outbox/consumer, dependent/late-P/CASE, negative actor/peer-tenant, ACK-loss, rollback, restart and concurrency checks. `TestRunId=app02a4-44057185625-1`, final source HEAD `1fbeb8ee1ab78a89ce73dd62d68a86bd28eb80a7`, squash merge `aa55a691ee3812e02df12e105611e118cf89deee`, [CI #44057185625](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44057185625) and [A.4 evidence closeout](../closeout/2026-11-17-app-02a4.md). **APP-02B.1 docs-only architecture/security contract is independently reviewed and CONTRACT_APPROVED** ([PR #49](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/49), [closeout](../closeout/2026-11-17-app-02b1.md)) after PR #48 merged the 10/10 Owner decision record; exact final-HEAD CI and review are recorded in PR #49. B.2 later merged in PR #50 within its CI-only scope. Actual PREPROD remains NOT_VERIFIED. Actual EV-08, all five production P0 and real-environment AC-11 remain **NOT_VERIFIED**; APP-02B PREPROD gates are **NOT_RUN**. At that A.4/B.1 checkpoint APP-02C–E and production/pilot were **NOT_AUTHORIZED**; current C.1–C.5 DEV authority is recorded above.

@@ -1,0 +1,288 @@
+{
+  "writers": [
+    {
+      "id": "W-01",
+      "path": "warehouse-ui",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-1",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-02",
+      "path": "dispatch-ui",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-2",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-03",
+      "path": "legacy-connector",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-3",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-04",
+      "path": "nightly-queue",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-4",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-05",
+      "path": "sql-job",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-5",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-06",
+      "path": "scanner-01",
+      "tenant": "tenant-a",
+      "location": "MAIN",
+      "principal": "sim-writer-6",
+      "wave": "in",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-07",
+      "path": "cashier-ui",
+      "tenant": "tenant-a",
+      "location": "OUTSIDE",
+      "principal": "sim-writer-7",
+      "wave": "outside",
+      "cutoff": "2026-11-23T00:00:00Z"
+    },
+    {
+      "id": "W-08",
+      "path": "restore-job",
+      "tenant": "tenant-a",
+      "location": "OUTSIDE",
+      "principal": "sim-writer-8",
+      "wave": "outside",
+      "cutoff": "2026-11-23T00:00:00Z"
+    }
+  ],
+  "rows": [
+    {
+      "id": "opening-1",
+      "source": "legacy-snapshot-v1:1",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "stock",
+      "quantity": 55,
+      "amount": 550,
+      "unit": "EA",
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": "SKU-SIM",
+      "lot": "LOT-SIM",
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-2",
+      "source": "legacy-snapshot-v1:2",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "TRIP-01",
+      "account": "stock",
+      "quantity": 20,
+      "amount": 200,
+      "unit": "EA",
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": "SKU-SIM",
+      "lot": "LOT-SIM",
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-3",
+      "source": "legacy-snapshot-v1:3",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "TRANSIT",
+      "account": "stock",
+      "quantity": 5,
+      "amount": 50,
+      "unit": "EA",
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": "SKU-SIM",
+      "lot": "LOT-SIM",
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-4",
+      "source": "legacy-snapshot-v1:4",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "QA",
+      "account": "stock",
+      "quantity": 3,
+      "amount": 30,
+      "unit": "EA",
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": "SKU-SIM",
+      "lot": "LOT-SIM",
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-5",
+      "source": "legacy-snapshot-v1:5",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "OUTSIDE",
+      "account": "stock",
+      "quantity": 17,
+      "amount": 170,
+      "unit": "EA",
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": "SKU-SIM",
+      "lot": "LOT-SIM",
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-6",
+      "source": "legacy-snapshot-v1:6",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "ar",
+      "quantity": null,
+      "amount": 375,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-7",
+      "source": "legacy-snapshot-v1:7",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "credit",
+      "quantity": null,
+      "amount": 0,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "ASSUMED_ZERO"
+    },
+    {
+      "id": "opening-8",
+      "source": "legacy-snapshot-v1:8",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "TRIP-01",
+      "account": "custody",
+      "quantity": null,
+      "amount": 200,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-9",
+      "source": "legacy-snapshot-v1:9",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "fund",
+      "quantity": null,
+      "amount": 600,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-10",
+      "source": "legacy-snapshot-v1:10",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "advance",
+      "quantity": null,
+      "amount": 500000,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "ASSUMED"
+    },
+    {
+      "id": "opening-11",
+      "source": "legacy-snapshot-v1:11",
+      "tenant": "tenant-a",
+      "cutoff": "2026-11-23T00:00:00Z",
+      "location": "MAIN",
+      "account": "bank_pending",
+      "quantity": null,
+      "amount": null,
+      "unit": null,
+      "currency": "SYNTHETIC_UNITLESS",
+      "sku": null,
+      "lot": null,
+      "status": "UNKNOWN"
+    }
+  ],
+  "delivery": {
+    "id": "delivery-a1",
+    "tenant": "tenant-a",
+    "seller": "sim-seller-a",
+    "invoiceEligible": false,
+    "occurredAt": "2026-11-22T23:00:00Z",
+    "quantity": 5,
+    "ar": 75,
+    "cost": 50
+  },
+  "invoiceProbe": {
+    "delivery": "delivery-a1",
+    "identity": "intent-a1",
+    "provider": "sim-loopback-a",
+    "initial": "UNKNOWN",
+    "lookup": "SIMULATED_FOUND"
+  },
+  "receipt": {
+    "id": "receipt-a1",
+    "delivery": "delivery-a1",
+    "mapping": "mapping-v1",
+    "receivedAt": "2026-11-22T23:10:00Z"
+  },
+  "posting": {
+    "id": "posting-a1",
+    "receipt": "receipt-a1",
+    "ledger": "sim-ledger-a",
+    "period": "2026-11",
+    "postedAt": "2026-11-22T23:11:00Z",
+    "lines": [
+      {
+        "account": "AR",
+        "amount": 75
+      },
+      {
+        "account": "COGS",
+        "amount": 50
+      }
+    ]
+  },
+  "reconciliation": {
+    "posting": "posting-a1",
+    "asOf": "2026-11-23T00:05:00Z",
+    "status": "RECONCILED_OK"
+  }
+}

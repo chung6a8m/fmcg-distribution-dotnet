@@ -35,9 +35,25 @@ bool app02d3 = App02d3Runtime.Enabled(app.Configuration, app.Environment);
 if (app02d3)
     await App02d3Runtime.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(), CancellationToken.None);
 bool app02d4 = App02d4Runtime.Enabled(app.Configuration, app.Environment);
+bool devF03 = app.Services.GetRequiredService<TenantConnections>().UsesDevF03;
+bool devF04 = app.Services.GetRequiredService<TenantConnections>().UsesDevF04;
+bool devF05 = app.Services.GetRequiredService<TenantConnections>().UsesDevF05;
+bool devF07 = app.Services.GetRequiredService<TenantConnections>().UsesDevF07;
+if (devF07 && !devF05) throw new InvalidOperationException("DEV-F07 requires source returns.");
+bool devF08 = app.Services.GetRequiredService<TenantConnections>().UsesDevF08;
+if (devF08 && !devF05) throw new InvalidOperationException("DEV-F08 requires source returns.");
+bool devF06 = app.Services.GetRequiredService<TenantConnections>().UsesDevF06;
+if (devF06 && !devF05) throw new InvalidOperationException("DEV-F06 requires source returns.");
+if (devF05 && (!devF03 || !devF04)) throw new InvalidOperationException("DEV-F05 requires lot and price snapshots.");
+if ((devF03 || devF04) && (app02d1 || app02d2 || app02d3 || app02d4
+    || !app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
+    || !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime")
+    || app.Configuration.GetValue<bool>("App02Worker:Enabled")
+    || Enumerable.Range(1, 4).Any(i => !app.Configuration.GetValue<bool>($"App02C{i}:Enabled"))))
+    throw new InvalidOperationException("This feature requires its dedicated A-runtime profile.");
 if (app02d4)
     await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
-bool app02c6 = !app02d1 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
+bool app02c6 = !app02d1 && !devF03 && !devF04 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {
@@ -63,6 +79,10 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
         App02DevF02Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c2Routes.Map(app, visits);
+    if (devF05) App02DevF05Routes.Map(app);
+    if (devF06) App02DevF06Routes.Map(app);
+    if (devF07) App02DevF07Routes.Map(app);
+    if (devF08) App02DevF08Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c3Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C4:Enabled") && app.Configuration.GetValue<bool>("App02C3:Enabled")

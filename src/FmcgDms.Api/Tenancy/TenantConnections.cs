@@ -16,6 +16,18 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
 
     private readonly string? clockPath = App02c6Clock.GetConfiguredPath(config, host);
     internal bool UsesApp02c6Clock => clockPath is not null;
+    internal bool UsesDevF07 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF07:Enabled");
+    internal bool UsesDevF08 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF08:Enabled");
+    internal bool UsesDevF06 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF06:Enabled");
+    internal bool UsesDevF05 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF05:Enabled");
+    internal bool UsesDevF04 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF04:Enabled");
+    internal bool UsesDevF03 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
+        && config.GetValue<bool>("DevF03:Enabled");
     internal bool UsesApp02d1 { get; } = App02d1Runtime.Enabled(config, host);
 
     internal bool UsesApp02d2 { get; } = App02d2Runtime.Enabled(config, host);

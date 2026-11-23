@@ -117,13 +117,23 @@ public sealed partial class App01a2CommandService
         return await ExecuteAsync(principal, key, "C4_DELIVERY",
             [("Evidence", evidence.Id.ToString("N"))],
             (db, tx, tenant, actor, command, token) =>
-                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3, token),
+                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3,
+                    connections.UsesDevF03, connections.UsesDevF04, connections.UsesDevF06, token),
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, CancellationToken ct)
+        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, bool lots,
+        bool pricing, bool periodGuard, CancellationToken ct)
     {
+        if (periodGuard)
+        {
+            DateTime today = await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {LotBusinessDate}", null, tx, ct));
+            DateTime month = MonthStart(today);
+            if (MonthStart(evidence.BusinessDate) != month || await PeriodState(db, tx, tenant, month, ct) != "OPEN")
+                return BusinessCommandOutcome.Rejected("F06_OPEN_PERIOD_REQUIRED");
+        }
+        if (lots) await App02a3Sql.Lock(db, tx, $"DEVF03:ISSUE:{evidence.TripId:N}", ct);
         var trip = await FindTrip(db, tx, tenant, evidence.TripId, ct);
         if (trip is not { Status: "PREPARED" or "IN_PROGRESS", VehicleLocationId: Guid location,
             VehicleKind: "VEHICLE", VehicleActive: true })
@@ -170,7 +180,9 @@ public sealed partial class App01a2CommandService
         if (address.Version != evidence.ShipToVersion)
             return BusinessCommandOutcome.Rejected("C4_STALE_SHIPTO");
 
-        var policy = await ValidateC4Policy(db, tx, tenant, line, ct);
+        var price = pricing ? (await ReadPrices(db, tx, tenant, [line.OrderLineId], ct)).SingleOrDefault() : null;
+        if (pricing && price is null) return BusinessCommandOutcome.Rejected("F04_PRICE_INVALID");
+        var policy = await ValidateC4Policy(db, tx, tenant, line, price, ct);
         if (policy is null) return BusinessCommandOutcome.Rejected("C4_FROZEN_POLICY_INVALID");
         var totals = await db.QuerySingleAsync<C4Totals>(Sql("""
             SELECT
@@ -188,31 +200,69 @@ public sealed partial class App01a2CommandService
             || qty > line.Confirmed - totals.OnLine || qty > totals.ConfirmedOrder - totals.OnOrder)
             return BusinessCommandOutcome.Rejected("C4_QUANTITY_NOT_AVAILABLE");
 
-        decimal unit = (policy.UnitPrice!.Value - policy.DiscountPerUnit!.Value) * (1 + policy.TaxRate!.Value);
-        decimal Gross(decimal quantity) => decimal.Round(unit * quantity, 4, MidpointRounding.AwayFromZero);
-        if (totals.LinePayable != Gross(totals.OnLine))
+        F04PriceAmount? deliveryPrice = null;
+        decimal priorGross;
+        decimal payable;
+        if (price is null)
+        {
+            decimal unit = (policy.UnitPrice!.Value - policy.DiscountPerUnit!.Value) * (1 + policy.TaxRate!.Value);
+            decimal Gross(decimal quantity) => decimal.Round(unit * quantity, 4, MidpointRounding.AwayFromZero);
+            priorGross = Gross(totals.OnLine);
+            payable = Gross(totals.OnLine + qty) - priorGross;
+        }
+        else
+        {
+            priorGross = totals.OnLine == 0 ? 0
+                : F04Pricing.Portion(price.Net, price.Gross, line.Confirmed, 0, totals.OnLine).Gross;
+            deliveryPrice = F04Pricing.Portion(price.Net, price.Gross, line.Confirmed, totals.OnLine, qty);
+            payable = deliveryPrice.Gross;
+        }
+        if (price is not null && payable <= 0)
+            return BusinessCommandOutcome.Rejected("F04_ZERO_VALUE_PORTION");
+        if (totals.LinePayable != priorGross)
             return BusinessCommandOutcome.Rejected("C4_AR_SOURCE_DRIFT");
-        decimal payable = Gross(totals.OnLine + qty) - totals.LinePayable;
         DateTime due = evidence.BusinessDate.AddDays(policy.TermsDays!.Value);
         var request = new PostAPartialDeliveryCommand(key.ProducerId, key.CommandId, key.SourceNumber,
             evidence.TripId, line.CustomerId, address.SnapshotId, line.OrderId, line.OrderLineId,
             evidence.ManifestLineId, line.SkuId, qty);
-        return await PostValidatedDelivery(db, tx, tenant, actor, command, request,
+        IReadOnlyList<F03Pick>? lotPicks = null;
+        if (lots && await IsLotTracked(db, tx, tenant, line.StockRightId, byRight: true, ct))
+        {
+            lotPicks = await PlanLotIssue(db, tx, tenant, line.StockRightId, evidence.TripId, line.OrderLineId,
+                evidence.ManifestLineId, qty, evidence.BusinessDate, ct);
+            if (lotPicks is null) return BusinessCommandOutcome.Rejected("F03_FEFO_EARLIER_LOT");
+            if (lotPicks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
+        }
+        var result = await PostValidatedDelivery(db, tx, tenant, actor, command, request,
             new TripScope { VehicleLocationId = location, BusinessDate = evidence.BusinessDate },
             new FrozenRight { ManifestLineId = evidence.ManifestLineId, LoadSourceLineId = line.LoadSourceLineId,
                 StockRightId = line.StockRightId },
             new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
             payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime);
+        if (lotPicks is not null && result.Status == "APPLIED")
+        {
+            Guid delivery = await db.QuerySingleAsync<Guid>(Sql("""
+                SELECT Id FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND BusinessSourceId=@SourceId
+                """, new { Tenant = tenant, result.SourceId }, tx, ct));
+            await RecordLotPicks(db, tx, tenant, delivery, lotPicks, "F03LotIssue", "DeliveryId", ct);
+        }
+        if (deliveryPrice is not null && result.Status == "APPLIED")
+        {
+            if (result.SourceId is not Guid sourceId ||
+                await RecordDeliveryPrice(db, tx, tenant, sourceId, line.OrderLineId, deliveryPrice, ct) != 1)
+                throw new InvalidOperationException("Delivery price lacked a unique posted source.");
+        }
+        return result;
     }
 
     private static async Task<C2CommercialPolicy?> ValidateC4Policy(SqlConnection db, SqlTransaction tx,
-        string tenant, C4PostingLine line, CancellationToken ct)
+        string tenant, C4PostingLine line, F04Snapshot? price, CancellationToken ct)
     {
         if (!CryptographicOperations.FixedTimeEquals(line.SourceHash, SHA256.HashData(Encoding.UTF8.GetBytes(line.PolicyPayload))))
             return null;
         var recorded = JsonSerializer.Deserialize<C4FrozenPolicy>(line.PolicyPayload, C1Validation.Json);
         if (recorded is null || recorded.Seller != tenant || recorded.CustomerId != line.CustomerId || recorded.SkuId != line.SkuId
-            || recorded.BaseUom != line.BaseUom || recorded.Factor != 1 || recorded.Currency != "SYNTHETIC_UNITLESS"
+            || recorded.BaseUom != line.BaseUom || recorded.Factor != 1 || recorded.Currency != (price?.Currency ?? "SYNTHETIC_UNITLESS")
             || recorded.InvoiceEligible)
             return null;
         var policy = await db.QuerySingleOrDefaultAsync<C2CommercialPolicy>(Sql("""
@@ -224,6 +274,9 @@ public sealed partial class App01a2CommandService
             || policy.UnitPrice != line.UnitPriceSnapshot || policy.TermsDays != line.TermsDaysSnapshot
             || policy.EffectiveFromUtc > line.ConfirmedAtUtc || !ValidC2Policy(policy, line.ConfirmActor, line.ConfirmedAtUtc))
             return null;
+        if (price is not null)
+            return price.Gross == line.GrossAmount && price.QuotePolicyId == policy.Id && price.QuoteUnitPrice == policy.UnitPrice
+                && price.TaxRate == policy.TaxRate && policy.DiscountPerUnit == 0 ? policy : null;
         decimal unit = (policy.UnitPrice!.Value - policy.DiscountPerUnit!.Value) * (1 + policy.TaxRate!.Value);
         if (unit > 0 && line.Confirmed > 999999999999999.9999m / unit) return null;
         return decimal.Round(unit * line.Confirmed, 4, MidpointRounding.AwayFromZero) == line.GrossAmount ? policy : null;

@@ -6,19 +6,31 @@ import './customers.css'
 const api = '/api/synthetic/app02c4'
 type Trip = { id: string; code: string }
 type Line = { id: string; sku: string; customer: string; shipTo: string; shipToVersion: number; baseUom: string;
-  loaded: string; delivered: string; available: string; held: string }
+  loaded: string; delivered: string; available: string; held: string
+  lots?: { code: string; expiresOn: string; quantity: string }[] }
 type Ar = { sourceId: string; customer: string; shipTo: string; businessDate: string; dueBusinessDate: string;
-  quantity: string; amount: string; outstanding: string; cost: string }
+  quantity: string; amount: string; outstanding: string; cost: string; currency?: 'VND' }
 type DeliveryCase = { commandId: string; manifestLineId: string; shipToVersion: number; quantity: string;
   reasonCode: string | null; canRetry: boolean }
 type Pending = { commandId: string; tripId: string; manifestLineId: string; shipToVersion: number; quantity: string }
 type Outcome = { status: string; reasonCode: string | null; sourceId: string | null }
 const labels: Record<string, string> = {
+  F06_OPEN_PERIOD_REQUIRED: 'Lần giao cần kỳ ghi sổ đang mở.',
+  F04_ZERO_VALUE_PORTION: 'Phần giao này bằng 0 VND. Kiểm tra lại số lượng giao và giá đã chốt.',
+  F04_PRICE_INVALID: 'Không tìm thấy giá VND đã chốt cho nguồn giao.',
+  F03_LOT_STOCK_INSUFFICIENT: 'Lô khả dụng không đủ lượng giao.',
+  F03_FEFO_EARLIER_LOT: 'Giao lô có hạn dùng sớm hơn của dòng đơn này trước.',
   C4_QUANTITY_NOT_AVAILABLE: 'Số lượng vượt phần còn được giao.',
   C4_STALE_SHIPTO: 'Phiên bản địa chỉ đã đổi. Kiểm tra lại hồ sơ giao hàng.',
   C4_LOADED_LINE_NOT_DELIVERABLE: 'Dòng nạp không còn đủ điều kiện giao.',
   C4_FROZEN_POLICY_INVALID: 'Không xác minh được điều khoản đã đóng băng khi Confirm.',
   C4_EXISTING_DELIVERY_PENDING: 'Dòng này đã có lần giao chờ ghi sổ. Hãy dùng lại yêu cầu trong mục đối soát.',
+}
+
+const vnd = new Intl.NumberFormat('vi-VN')
+
+function displayAmount(value: string, currency?: Ar['currency']) {
+  return currency ? vnd.format(Number(value)) + ' ' + currency : displayQuantity(value)
 }
 
 function displayQuantity(value: string) {
@@ -200,6 +212,20 @@ export function DeliveryWorkspace({ workspaceToken }: { workspaceToken?: string 
             <h3>{line.sku} · {line.customer}</h3>
             <p>ShipTo v{line.shipToVersion} · {line.shipTo}</p>
             <p>Đã nạp {displayQuantity(line.loaded)} {line.baseUom} · Đã giao {displayQuantity(line.delivered)} {line.baseUom} · Còn giữ {displayQuantity(line.held)} {line.baseUom}</p>
+            {line.lots && line.lots.length > 0 && <div>
+              <p id={'c4-available-lots-' + line.id}>Lô khả dụng trên xe</p>
+              <ul className="c1-rows" aria-labelledby={'c4-available-lots-' + line.id}>
+                {line.lots.map(lot => <li key={lot.code}>
+                  <strong>{lot.code}</strong>
+                  <span>Hạn dùng <time dateTime={lot.expiresOn.slice(0, 10)}>
+                    {lot.expiresOn.slice(0, 10).split('-').reverse().join('/')}
+                  </time></span>
+                  <span>{displayQuantity(lot.quantity)} {line.baseUom}</span>
+                </li>)}
+              </ul>
+            </div>}
+            {line.lots?.length === 0 && Number(line.loaded) > Number(line.delivered)
+              && <p>Không có lô đủ điều kiện giao.</p>}
             {displayQuantity(line.available) !== '0' && !data.cases.some(item => item.manifestLineId === line.id && !item.reasonCode) && <>
               <Field name="quantity" label={`Số lượng đã giao dòng ${index + 1}`} type="number"
                 min="0.001" max={line.available} step="0.001" required disabled={disabled} />
@@ -211,10 +237,10 @@ export function DeliveryWorkspace({ workspaceToken }: { workspaceToken?: string 
           <h2>Công nợ theo lần giao</h2>
           {data.ar.length === 0 && <p>Chưa phát sinh công nợ.</p>}
           {data.ar.map(item => <article className="panel panel-content" key={item.sourceId}>
-            <h3>{item.customer} · {displayQuantity(item.amount)}</h3>
+            <h3>{item.customer} · {displayAmount(item.amount, item.currency)}</h3>
             <p>{item.shipTo}</p>
             <p>Ngày giao {item.businessDate.slice(0, 10)} · Hạn AR {item.dueBusinessDate.slice(0, 10)}</p>
-            <p>Còn nợ {displayQuantity(item.outstanding)} · Giá vốn {displayQuantity(item.cost)}</p>
+            <p>Còn nợ {displayAmount(item.outstanding, item.currency)} · Giá vốn {displayQuantity(item.cost)}</p>
             <p className="c3-source">Nguồn {item.sourceId}</p>
           </article>)}
         </section>

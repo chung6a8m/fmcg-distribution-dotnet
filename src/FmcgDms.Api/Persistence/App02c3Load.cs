@@ -17,7 +17,14 @@ public sealed record C3RightView(Guid Id, Guid? OrderId, Guid WarehouseId, strin
     string SkuCode, string BaseUom,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Granted,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Loaded,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal WarehouseHeld);
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal WarehouseHeld)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<F03LotView>? Lots { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonNumberHandling(JsonNumberHandling.WriteAsString)]
+    public decimal? EligibleWarehouseHeld { get; init; }
+}
 
 public sealed partial class App01a2CommandService
 {
@@ -52,13 +59,14 @@ public sealed partial class App01a2CommandService
             })],
             (db, tx, tenant, actor, command, token) =>
                 validShape
-                    ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load, token)
+                    ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load,
+                        connections.UsesDevF03, token)
                     : Task.FromResult(BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES")),
             ct, "warehouse", input.TripId, d1Load: d1Load);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyPartialLoad(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load,
+        string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load, bool lots,
         CancellationToken ct)
     {
         if (lines.Select(l => l.RightId).Distinct().Count() != lines.Length
@@ -117,6 +125,17 @@ public sealed partial class App01a2CommandService
             transfers.Add(transfer);
         }
 
+        var lotPicks = new Dictionary<Guid, IReadOnlyList<F03Pick>>();
+        if (lots)
+        {
+            foreach (var line in manifestLines)
+            {
+                if (!await IsLotTracked(db, tx, tenant, line.StockRightId, byRight: true, ct)) continue;
+                var picks = await PlanLotLoad(db, tx, tenant, line.StockRightId, line.PlannedBaseQuantity, ct);
+                if (picks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
+                lotPicks.Add(line.Id, picks);
+            }
+        }
         Guid source = await AddSource(db, tx, tenant, command, ManifestLoadSource, number, actor, null, tripId, ct);
         await db.ExecuteAsync(Sql("""
             INSERT dbo.TripManifest(Id,TenantId,ManifestNumber,TripId,WarehouseLocationId,VehicleLocationId,IsC3)
@@ -143,6 +162,8 @@ public sealed partial class App01a2CommandService
             if (changed != 1) throw new InvalidOperationException("Warehouse pool changed under lock.");
         }
         await PostTransfers(db, tx, tenant, manifest, source, transfers, ct);
+        foreach (var (lineId, picks) in lotPicks)
+            await RecordLotPicks(db, tx, tenant, lineId, picks, "F03LotLoad", "ManifestLineId", ct);
         return BusinessCommandOutcome.Applied("MANIFEST_LOADED", source);
     }
 
