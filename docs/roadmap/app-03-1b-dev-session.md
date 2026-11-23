@@ -33,3 +33,19 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Verify
 Runner điều khiển API/Vite thật và hai LocalDB synthetic. Nó tạo và giao một đơn 2 EA lô `RET-ORIGIN` qua HTTP, bỏ ACK nghiệp vụ sau khi server commit, dừng rồi mở lại và tra/replay cùng command ID. Dự kiến AR giữ 20.000 VND, giá vốn 6.667 VND, đúng một delivery và một nguồn, row image của opening, policy, command, nguồn, ledger và số dư giữ nguyên sau resume/replay. Runner thử lỗi cổng API, mã cũ, quyền Sales bị thu hồi, kết thúc riêng tiến trình launcher, từ chối Remove khi phiên còn chạy hoặc sai dấu tenant B, và giữ database của một run khác.
 
 SQL và kết quả đối chiếu được ghi vào `TestResults/app03-1b/<RunId>/session-review.json`. Verify diễn tập vòng đời qua HTTP và SQL; bằng chứng browser của tổ hợp nghiệp vụ A/F tiếp tục nằm ở runner .1a.
+
+## Kết quả local ngày 23/11/2026
+
+Source thực chạy `f7d0090816dd01508bb0736d72c94fe3b8dce50f`, tree `142b38f27cad19271cc3cd85265f46d63fb2aa87`. Môi trường Windows LocalDB, .NET 10.0.404 và Node 26.13.1.
+
+- **APP-03.1b DEV_VERIFIED_LOCAL** · run `04f834ec276649019f698f7ddc81bb11`. Giữ ID đơn, delivery, nguồn và cùng URL qua Resume. Lookup và replay lệnh đã commit trả cùng nguồn, AR 20.000 VND và giá vốn 6.667 VND. Row image của 17 bảng trên mỗi tenant khớp qua Resume, replay và lỗi khởi động. Mã cũ và thao tác bằng Sales sau thu hồi bị từ chối. Kết thúc riêng launcher sau khi sẵn sàng thu hồi hai host. Remove từ chối khi đang chạy hoặc khi marker tenant B sai, sau đó xóa đúng phiên và giữ database đối chứng.
+- **APP-03.1a Chromium → API → SQL** · run `2f671ed4ebf74cfcb5ba985f85b0b1f5` · 1/1. Smoke demo AC-03 qua Fresh, AC03Start, AC03Complete, Resume, replay và cách ly tenant.
+- **DEV-F09 Functional PASS** · run `1fdf23c09e3f4a6f80d7f05b2d4d8656` · .NET 352/352 và Chromium 8/8 trên F01–F08. Catalog LocalDB khớp trước/sau. CI từ xa và PREPROD vật lý có trạng thái riêng.
+
+| Artifact local | SHA-256 |
+| --- | --- |
+| `TestResults/app03-1b/04f834ec276649019f698f7ddc81bb11/session-review.json` | `597DED3772BFF9B4E9D3EFF8E7C350009EBCDCF5CE096422B97F4F0505D6F56C` |
+| `TestResults/app03-1b-final.log` | `10F75206086926B54A187CBEE6CA8478B00C2054BD29DB906C0F1999DE9B0E94` |
+| `TestResults/app03-1b-ac03.log` | `2D1027B555F9A624B9EE3860578FFA8534ED026013CD6E966F234AE90FF46CA2` |
+| `TestResults/dev-f09/1fdf23c09e3f4a6f80d7f05b2d4d8656/run.json` | `0DD93B4EEDC71E5A15228CF293390881F8B61C8F3BF4CF54D126047AED753517` |
+| `TestResults/dev-f09-1fdf23c09e3f4a6f80d7f05b2d4d8656.trx` | `F25C328EC10623CA087EDA7BFA8687891FA705E4700D4D4404BAC6D52198B87E` |

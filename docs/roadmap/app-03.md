@@ -55,7 +55,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
 | APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [DEV_VERIFIED_LOCAL](app-03-1a-runtime-schema.md#kết-quả-local-ngày-23112026) |
-| APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | [IMPLEMENTED](app-03-1b-dev-session.md) |
+| APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | [DEV_VERIFIED_LOCAL](app-03-1b-dev-session.md#kết-quả-local-ngày-23112026) |
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | NOT_STARTED |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | NOT_STARTED |
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | NOT_STARTED |
@@ -90,10 +90,10 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Hoàn tất:**
 
-- [ ] Tạo chứng từ, dừng host/process, mở lại cùng phiên và đọc/tiếp tục đúng ID, trạng thái, số dư.
-- [ ] Một lệnh đã commit nhưng chưa nhận ACK được nhận diện sau restart, tra/replay cùng ID chỉ có một hiệu ứng.
-- [ ] Không nhân opening, policy hoặc command/source; grant đã thu hồi vẫn chặn đọc/ghi/replay theo hợp đồng.
-- [ ] Remove xác minh instance/name/tenant/ownership/nonce; phiên hoặc database không thuộc run giữ nguyên. Ghi hướng dẫn một lệnh khởi chạy và các thao tác lifecycle thực sự đã triển khai.
+- [x] Tạo chứng từ, dừng host/process, mở lại cùng phiên và đọc/tiếp tục đúng ID, trạng thái, số dư.
+- [x] Một lệnh đã commit nhưng chưa nhận ACK được nhận diện sau restart, tra/replay cùng ID chỉ có một hiệu ứng.
+- [x] Không nhân opening, policy hoặc command/source; grant đã thu hồi vẫn chặn đọc/ghi/replay theo hợp đồng.
+- [x] Remove xác minh instance/name/tenant/ownership/nonce; phiên hoặc database không thuộc run giữ nguyên. Ghi hướng dẫn một lệnh khởi chạy và các thao tác lifecycle thực sự đã triển khai.
 
 ### APP-03.2 — Dữ liệu đầu ngày và chuẩn bị chuyến ngày sau
 
