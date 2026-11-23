@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "basis": [
+    "kho-01-writer-opening-v0.2.md",
+    "b1-b9-readiness-v0.2.md",
+    "seller-provider-accounting-evidence-v0.2.md"
+  ],
+  "scope": "SYNTHETIC_MODEL",
+  "environment": "e-sim-01-local",
+  "warehouse": "Kho-01",
+  "cutoff": "2026-11-23T00:00:00Z",
+  "asOf": "2026-11-23T00:05:00Z",
+  "quantityUnit": "EA",
+  "currency": "SYNTHETIC_UNITLESS",
+  "quantityScale": 0,
+  "moneyScale": 0,
+  "tenants": [
+    {
+      "id": "tenant-a",
+      "db": "sim-db-a",
+      "actor": "sales-a",
+      "role": "sales",
+      "seller": "sim-seller-a",
+      "mode": "A",
+      "provider": "sim-loopback-a",
+      "accounting": "sim-ledger-a"
+    },
+    {
+      "id": "tenant-b",
+      "db": "sim-db-b",
+      "actor": "sales-b",
+      "role": "sales",
+      "seller": "sim-seller-b",
+      "mode": "B_NO_CHANNEL",
+      "provider": null,
+      "accounting": "sim-ledger-b"
+    }
+  ],
+  "locations": [
+    "MAIN",
+    "TRIP-01",
+    "TRANSIT",
+    "QA",
+    "OUTSIDE"
+  ],
+  "sku": "SKU-SIM",
+  "lot": "LOT-SIM",
+  "expiry": "2027-03-31",
+  "costVersion": "sim-cost-1",
+  "unitCost": 10,
+  "invoiceEligible": false
+}

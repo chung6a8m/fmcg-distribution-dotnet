@@ -1,0 +1,66 @@
+{
+  "openingKeys": [
+    [
+      "MAIN",
+      "stock"
+    ],
+    [
+      "TRIP-01",
+      "stock"
+    ],
+    [
+      "TRANSIT",
+      "stock"
+    ],
+    [
+      "QA",
+      "stock"
+    ],
+    [
+      "OUTSIDE",
+      "stock"
+    ],
+    [
+      "MAIN",
+      "ar"
+    ],
+    [
+      "MAIN",
+      "credit"
+    ],
+    [
+      "TRIP-01",
+      "custody"
+    ],
+    [
+      "MAIN",
+      "fund"
+    ],
+    [
+      "MAIN",
+      "advance"
+    ],
+    [
+      "MAIN",
+      "bank_pending"
+    ]
+  ],
+  "stockQuantity": 100,
+  "stockValue": 1000,
+  "balances": {
+    "ar": 375,
+    "credit": 0,
+    "custody": 200,
+    "fund": 600,
+    "advance": 500000,
+    "bank_pending": null
+  },
+  "posting": {
+    "AR": 75,
+    "COGS": 50
+  },
+  "deltas": {
+    "AR": 0,
+    "COGS": 0
+  }
+}
