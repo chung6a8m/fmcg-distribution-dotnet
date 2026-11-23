@@ -15,6 +15,7 @@ type DeliveryCase = { commandId: string; manifestLineId: string; shipToVersion: 
 type Pending = { commandId: string; tripId: string; manifestLineId: string; shipToVersion: number; quantity: string }
 type Outcome = { status: string; reasonCode: string | null; sourceId: string | null }
 const labels: Record<string, string> = {
+  F04_ZERO_VALUE_PORTION: 'Phần giao này bằng 0 VND. Kiểm tra lại số lượng giao và giá đã chốt.',
   F04_PRICE_INVALID: 'Không tìm thấy giá VND đã chốt cho nguồn giao.',
   F03_LOT_STOCK_INSUFFICIENT: 'Lô khả dụng không đủ lượng giao.',
   F03_FEFO_EARLIER_LOT: 'Giao lô có hạn dùng sớm hơn của dòng đơn này trước.',

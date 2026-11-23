@@ -210,6 +210,8 @@ public sealed partial class App01a2CommandService
             deliveryPrice = F04Pricing.Portion(price.Net, price.Gross, line.Confirmed, totals.OnLine, qty);
             payable = deliveryPrice.Gross;
         }
+        if (price is not null && payable <= 0)
+            return BusinessCommandOutcome.Rejected("F04_ZERO_VALUE_PORTION");
         if (totals.LinePayable != priorGross)
             return BusinessCommandOutcome.Rejected("C4_AR_SOURCE_DRIFT");
         DateTime due = evidence.BusinessDate.AddDays(policy.TermsDays!.Value);
