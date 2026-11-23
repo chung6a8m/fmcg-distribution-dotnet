@@ -67,8 +67,11 @@ public sealed partial class App01a2CommandService
                     WHERE s.TenantId=@Tenant AND s.CustomerId=@CustomerId AND s.Id=@SelectionId
                     """, scope, tx, token)) != 1)
                     return BusinessCommandOutcome.Rejected("C2_SHIP_TO_INVALID");
-                if (!IsPreparedTrip(await FindTrip(db, tx, tenant, input.TripId, token)))
+                var trip = await FindTrip(db, tx, tenant, input.TripId, token);
+                if (!IsPreparedTrip(trip))
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
+                if (!await IsCurrentC2Trip(db, tx, trip!, token))
+                    return BusinessCommandOutcome.Rejected("TRIP_BUSINESS_DATE_MISMATCH");
                 var units = (await db.QueryAsync<C2SkuUnit>(Sql("""
                     SELECT Id,BaseUom FROM dbo.Sku WHERE TenantId=@Tenant AND IsActive=1 AND Id IN @Skus
                     """, new { Tenant = tenant, Skus = lines.Select(l => l.SkuId).ToArray() }, tx, token)))
@@ -118,6 +121,10 @@ public sealed partial class App01a2CommandService
                 return BusinessCommandOutcome.Applied("C2_DRAFT_CREATED", draft);
             }, ct, "sales");
 
+    private async Task<bool> IsCurrentC2Trip(SqlConnection db, SqlTransaction tx, Trip trip, CancellationToken ct) =>
+        !connections.UsesApp03BusinessDay || trip.BusinessDate == await db.ExecuteScalarAsync<DateTime>(
+            Sql($"SELECT {LotBusinessDate}", null, tx, ct));
+
     public Task<BusinessCommandOutcome> ConfirmC2(ClaimsPrincipal principal, C2ConfirmInput input, CancellationToken ct) =>
         ExecuteAsync(principal, C2Key(principal, input.CommandId), "C2_CONFIRM",
             [("OrderId", input.OrderId.ToString("N"))],
@@ -133,7 +140,7 @@ public sealed partial class App01a2CommandService
         return ReserveAStockCore(principal, request, input.ConfirmSourceId, ct);
     }
 
-    private static async Task<BusinessCommandOutcome> ConfirmC2Core(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> ConfirmC2Core(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, Guid orderId, string sourceNumber, bool lots, bool pricing,
         CancellationToken ct)
     {
@@ -143,8 +150,11 @@ public sealed partial class App01a2CommandService
             WHERE d.TenantId=@Tenant AND d.Id=@OrderId
             """, new { Tenant = tenant, OrderId = orderId }, tx, ct));
         if (draft is null) return BusinessCommandOutcome.Rejected("C2_DRAFT_UNAVAILABLE");
-        if (!IsPreparedTrip(await FindTrip(db, tx, tenant, draft.TripId, ct)))
+        var trip = await FindTrip(db, tx, tenant, draft.TripId, ct);
+        if (!IsPreparedTrip(trip))
             return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
+        if (!await IsCurrentC2Trip(db, tx, trip!, ct))
+            return BusinessCommandOutcome.Rejected("TRIP_BUSINESS_DATE_MISMATCH");
         var scope = new { Tenant = tenant, OrderId = orderId, draft.CustomerId, draft.SelectionId, draft.TripId };
         var selected = await db.QuerySingleOrDefaultAsync<C2AddressSource>(Sql("""
             SELECT Payload,PayloadHash,ValidatorVersion,RegisteredId,RegisteredRevision

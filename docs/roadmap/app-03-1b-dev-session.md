@@ -22,7 +22,7 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Remove -RunId $runId
 
 Manifest nằm dưới `%LOCALAPPDATA%\FmcgDms\App03Dev\<RunId>\session.json`. Manifest giữ instance, tên và binding hai tenant, nonce, profile/schema v1, seed version, clock UTC, web port và source tạo phiên. File khóa theo run ID được giữ tại thư mục cha để các lần chạy cùng kiểm tra một khóa. Manifest và log không lưu signing key hoặc credential.
 
-Mỗi máy dùng một host API trên cổng 5116; cổng web riêng được giữ theo phiên. Nếu một trong hai cổng đang bận, xử lý cổng đó rồi chạy lại `Resume`. Profile vẫn là tổ hợp A với F01/F03/F04/F05. Fixture hiện hành tái sử dụng cùng opening và policy C.2/F05, clock cố định 09:00 ICT ngày 23/11/2026. Seed đầu ngày có phiên bản nghiệp vụ và chuyển ngày thuộc APP-03.2.
+Mỗi máy dùng một host API trên cổng 5116; cổng web riêng được giữ theo phiên. Nếu một trong hai cổng đang bận, xử lý cổng đó rồi chạy lại `Resume`. Profile vẫn là tổ hợp A với F01/F03/F04/F05. Phiên .1b giữ fixture C.2/F05 và clock cố định 09:00 ICT ngày 23/11/2026. Từ APP-03.2, phiên Start mới dùng [bootstrap VND và lệnh NextDay](app-03-2-day-bootstrap.md).
 
 ## Kiểm chứng
 
@@ -32,7 +32,7 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Verify
 
 Runner điều khiển API/Vite thật và hai LocalDB synthetic. Nó tạo và giao một đơn 2 EA lô `RET-ORIGIN` qua HTTP, bỏ ACK nghiệp vụ sau khi server commit, dừng rồi mở lại và tra/replay cùng command ID. Dự kiến AR giữ 20.000 VND, giá vốn 6.667 VND, đúng một delivery và một nguồn, row image của opening, policy, command, nguồn, ledger và số dư giữ nguyên sau resume/replay. Runner thử lỗi cổng API, mã cũ, quyền Sales bị thu hồi, kết thúc riêng tiến trình launcher, Stop từ thư mục không có Git hoặc DLL, và Remove khi phiên còn chạy, thiếu tenant B hoặc sai dấu sở hữu. Database của một run khác giữ nguyên.
 
-SQL và kết quả đối chiếu được ghi vào `TestResults/app03-1b/<RunId>/session-review.json`. Verify diễn tập vòng đời qua HTTP và SQL; bằng chứng browser của tổ hợp nghiệp vụ A/F tiếp tục nằm ở runner .1a.
+SQL và kết quả .1b lịch sử nằm tại `TestResults/app03-1b/<RunId>/session-review.json`. Từ APP-03.2, Verify chạy lại các ca lifecycle trên bootstrap mới và ghi vào `TestResults/app03-2/<RunId>/session-review.json`. Verify diễn tập vòng đời qua HTTP và SQL; bằng chứng browser của tổ hợp nghiệp vụ A/F tiếp tục nằm ở runner .1a.
 
 ## Kết quả local ngày 23/11/2026
 

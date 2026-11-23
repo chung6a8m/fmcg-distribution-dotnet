@@ -13,7 +13,7 @@ namespace FmcgDms.Demo;
 
 internal static class App02c1Dev
 {
-    private const string Actor = "c1-dev-sales";
+    private const string Actor = App03DayBootstrap.Actor;
     private const string BrowserTest = "web/e2e-app02c1/customers.spec.ts";
     internal const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
@@ -108,6 +108,13 @@ internal static class App02c1Dev
                 lifetime.Token.ThrowIfCancellationRequested();
                 await run.Create(tenant, bindBeforeFeatureMigrations: true, beforeD1: d1, app03Session: persistent is not null);
                 await run.Verify(tenant, app03Session: persistent is not null);
+                if (persistent is not null)
+                {
+                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning);
+                    await App03DayBootstrap.Seed(run, tenant, lifetime.Token);
+                    await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
+                    continue;
+                }
                 if (d1Run is not null)
                 {
                     await d1Run.PrepareUpgrade(tenant, leaveAtD1: d2, leaveAtD2: d3 && !d4);
@@ -235,7 +242,12 @@ internal static class App02c1Dev
             apiStart.Environment["Logging__LogLevel__Default"] = "Warning";
             foreach (string tenant in DemoRun.Tenants)
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
-            if (persistent is not null) apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
+            if (persistent is not null)
+            {
+                apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
+                if (persistent.UsesBusinessDay)
+                    apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
+            }
             else if (fefo || pricing || returnLane)
             {
                 string profile = integrated ? "app03-1a" : refunds ? "dev-f08" : gifts ? "dev-f07" : adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";

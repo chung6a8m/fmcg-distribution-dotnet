@@ -99,6 +99,8 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** seed tối thiểu có phiên bản cho hai tenant: customer/outlet/ship-to, SKU/UoM/lô, kho/xe, nhân sự/actor/phân công, opening và policy giả lập. Tái sử dụng giá trị/oracle phù hợp từ C/F; bổ sung đường tạo/chuẩn bị chuyến mới. Không gọi lại mọi `Evidence.Seed()` để dựng một ngày đã hoàn tất.
 
+[Hợp đồng dữ liệu, lệnh NextDay và kịch bản kiểm chứng](app-03-2-day-bootstrap.md).
+
 **Hoàn tất:**
 
 - [ ] Seed/chạy lại cùng phiên không tạo thêm opening, tồn, ledger hoặc bản policy trùng.

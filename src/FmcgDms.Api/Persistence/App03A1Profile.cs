@@ -7,6 +7,8 @@ namespace FmcgDms.Api.Persistence;
 public static class App03A1Profile
 {
     public const string Name = "APP-03.1a-v1";
+    public const string DayBootstrapVersion = "APP-03.2-VND-v1";
+    internal const string DayBootstrapKey = "App03:DayBootstrap";
     private const string ConfigurationKey = "App03:Profile";
     internal const long BaseVersion = 202611220010;
     // F01 is independent of the F03 -> F04 -> F05 dependency chain and is additive on DEV-F05.
@@ -21,6 +23,10 @@ public static class App03A1Profile
     internal static bool Enabled(IConfiguration config, IHostEnvironment host)
     {
         var profile = config[ConfigurationKey];
+        var bootstrap = config[DayBootstrapKey];
+        if (bootstrap is not null && (bootstrap != DayBootstrapVersion || profile != Name
+            || App02c6Clock.GetConfiguredPath(config, host) is null))
+            throw new InvalidOperationException("APP-03.2 requires its supported bootstrap version and a dedicated APP-03 clock.");
         bool visit = config.GetValue<bool>("DevF01:Enabled");
         if (string.IsNullOrEmpty(profile))
         {
@@ -51,6 +57,12 @@ public static class App03A1Profile
             await using var db = await connections.OpenApp02c4Async(App02a3Sql.WorkerPrincipal(tenant), ct);
             var state = await ReadSchema(db, nonce, ct);
             RequireSchema(state, complete: true);
+            if (connections.UsesApp03BusinessDay && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                IF OBJECT_ID(N'dbo.LocalApp03Bootstrap',N'U') IS NULL SELECT CAST(0 AS bit);
+                ELSE SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM dbo.LocalApp03Bootstrap WHERE Slot=1 AND Version=@Version)
+                    THEN 1 ELSE 0 END AS bit);
+                """, new { Version = DayBootstrapVersion }, cancellationToken: ct)))
+                throw new InvalidOperationException("APP-03.2 requires its installed bootstrap in both tenant databases.");
         }
     }
 
