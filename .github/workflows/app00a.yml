@@ -36,6 +36,7 @@ jobs:
         run: |
           ./scripts/Verify-Business.ps1
           python tools/validate_business.py
+          python tools/validate_e_sim_01.py
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
