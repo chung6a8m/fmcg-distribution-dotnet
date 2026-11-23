@@ -12,3 +12,20 @@ Giả định fixture v1, SKU C2-SKU có EA và BOX, 1 BOX = 24 EA, bước nh�
 | F03-04 | Tenant B chỉ có opening riêng và 0 giao. Cạnh tranh dùng khóa của stock/right đang có. B ngoài lane DEV-F03 và hàng trả/QA release thuộc phạm vi khác. |
 
 UI tại `/sales` dùng form đơn A và chọn UoM theo SKU. Test dùng API, SQL và Chromium trong LocalDB nonce. Có snapshot và đối chiếu theo nguồn C2, C3, C4.
+
+## Chạy và biên bản DEV
+
+`npm --prefix web ci` rồi `./scripts/Run-App02C1.ps1 -Increment DevF03`. Mở `/sales` từ launcher, nhập mã DEV và dùng Đơn A, Nạp hàng, Giao hàng. Chọn BOX hoặc EA cho C2-SKU. Hai màn hình thao tác kho hiển thị lô đủ điều kiện và hạn dùng. Kiểm bằng cùng lệnh với `-Verify`.
+
+Windows LocalDB + Chromium run `cc032f81efc742c5ae6b32f8e74cc9ea` trên source `a8f42da06439ba87c85bf79983e8131459fdfd91`, tree `81a2e64a1dfbd7eb1f81aa8f84569f34efdfdfe1`. Chromium 1/1. SQL 24/24 giá trị số khớp, 6/6 dòng trail giữ nguồn, 8 opening và 6 dòng tồn trước/sau khớp. V1 file browser SHA-256 `83D332B9D090D300CB8071A97EF9B6C89D2949B46969981BD42356611DC726A6`; SQL receipt SHA-256 `717D0E1B902762C993A4D9FA0F97384D542B07D0412854CDF64ECB013EA95303`.
+
+| Ca | Kết quả quan sát trên Windows LocalDB | Trạng thái |
+| --- | --- | --- |
+| F03-01 · AC-05 | 0.5 BOX bị từ chối. Draft, AOrderLine và nguồn Confirm giữ 2 BOX × 24 = 48 EA. Diff 0. | PASS |
+| F03-02 · AC-05 | Giữ EARLY30/LATE18. QA bị từ chối. EXPIRED/QA-HELD có 0 dòng giữ, nạp và giao. Diff 0. | PASS |
+| F03-03 · AC-05 | Hai lần nạp 30/18. Từ chối giao LATE trước EARLY. Hai lần giao 30/5. Replay không thêm hàng. MAIN52, TRUCK13, QA40; AR525, COGS350, invoiceEligible=false. Diff 0. | PASS |
+| F03-04 · AC-05 | Tenant B có stock opening riêng, 0 effect. Race cùng SKU chưa chạy riêng. Hồi quy Release 346/346. | PASS cho tenant B; NOT_RUN cho race mới |
+
+`TestResults/dev-f03/<run-id>/sql-result.json` chứa expected/actual/diff và nguồn, JUnit tại `web/test-results-app02c5/<run-id>/junit.xml`. Workflow APP-00A lưu cả hai. Hồi quy dùng `dotnet test --solution FmcgDms.slnx -c Release -- --report-trx`. Lượt browser đầu dừng do locator label dù combobox đã render. Ca sau dùng role và tên từ giao diện. Review bổ sung ca giao lô muộn giữa hai manifest và tách lượng khả dụng khỏi lượng còn giữ.
+
+Phạm vi A online synthetic, không có thay đổi EV thực tế. Chưa thực thi luồng nhận trả, release QA hoặc mode B lotted trong profile này.
