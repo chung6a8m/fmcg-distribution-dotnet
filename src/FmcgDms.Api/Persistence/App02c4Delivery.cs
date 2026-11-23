@@ -117,13 +117,16 @@ public sealed partial class App01a2CommandService
         return await ExecuteAsync(principal, key, "C4_DELIVERY",
             [("Evidence", evidence.Id.ToString("N"))],
             (db, tx, tenant, actor, command, token) =>
-                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3, token),
+                ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3,
+                    connections.UsesDevF03, token),
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, CancellationToken ct)
+        string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, bool lots,
+        CancellationToken ct)
     {
+        if (lots) await App02a3Sql.Lock(db, tx, $"DEVF03:ISSUE:{evidence.TripId:N}", ct);
         var trip = await FindTrip(db, tx, tenant, evidence.TripId, ct);
         if (trip is not { Status: "PREPARED" or "IN_PROGRESS", VehicleLocationId: Guid location,
             VehicleKind: "VEHICLE", VehicleActive: true })
@@ -197,12 +200,28 @@ public sealed partial class App01a2CommandService
         var request = new PostAPartialDeliveryCommand(key.ProducerId, key.CommandId, key.SourceNumber,
             evidence.TripId, line.CustomerId, address.SnapshotId, line.OrderId, line.OrderLineId,
             evidence.ManifestLineId, line.SkuId, qty);
-        return await PostValidatedDelivery(db, tx, tenant, actor, command, request,
+        IReadOnlyList<F03Pick>? lotPicks = null;
+        if (lots && await IsLotTracked(db, tx, tenant, line.StockRightId, byRight: true, ct))
+        {
+            lotPicks = await PlanLotIssue(db, tx, tenant, line.StockRightId, evidence.TripId, line.OrderLineId,
+                evidence.ManifestLineId, qty, evidence.BusinessDate, ct);
+            if (lotPicks is null) return BusinessCommandOutcome.Rejected("F03_FEFO_EARLIER_LOT");
+            if (lotPicks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
+        }
+        var result = await PostValidatedDelivery(db, tx, tenant, actor, command, request,
             new TripScope { VehicleLocationId = location, BusinessDate = evidence.BusinessDate },
             new FrozenRight { ManifestLineId = evidence.ManifestLineId, LoadSourceLineId = line.LoadSourceLineId,
                 StockRightId = line.StockRightId },
             new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
             payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime);
+        if (lotPicks is not null && result.Status == "APPLIED")
+        {
+            Guid delivery = await db.QuerySingleAsync<Guid>(Sql("""
+                SELECT Id FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND BusinessSourceId=@SourceId
+                """, new { Tenant = tenant, result.SourceId }, tx, ct));
+            await RecordLotPicks(db, tx, tenant, delivery, lotPicks, "F03LotIssue", "DeliveryId", ct);
+        }
+        return result;
     }
 
     private static async Task<C2CommercialPolicy?> ValidateC4Policy(SqlConnection db, SqlTransaction tx,

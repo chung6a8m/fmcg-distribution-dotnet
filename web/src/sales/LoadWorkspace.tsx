@@ -7,11 +7,13 @@ const api = '/api/synthetic/app02c3'
 const ordersApi = '/api/synthetic/app02c2'
 type Trip = { id: string; code: string }
 type Right = { id: string; orderId: string; warehouseId: string; warehouseCode: string; skuCode: string;
-  baseUom: string; granted: string; loaded: string; warehouseHeld: string }
+  baseUom: string; granted: string; loaded: string; warehouseHeld: string
+  lots?: { code: string; expiresOn: string; quantity: string }[]; eligibleWarehouseHeld?: string }
 type LoadLine = { rightId: string; expectedWarehouseHeld: string; quantity: string }
 type Command = { commandId: string; tripId: string; lines: LoadLine[] }
 type Outcome = { status: string; reasonCode: string | null; sourceId: string | null }
 const rejections: Record<string, string> = {
+  F03_LOT_STOCK_INSUFFICIENT: 'Số lượng lô đủ điều kiện không đủ. Tải lại chuyến trước khi nạp.',
   C3_STALE_WAREHOUSE_HELD: 'Số lượng giữ tại kho đã thay đổi. Hãy kiểm tra dữ liệu mới trước khi nạp.',
   C3_RESERVATION_NOT_ELIGIBLE: 'Có dòng giữ hàng không còn đủ điều kiện nạp.',
   C3_WAREHOUSE_STOCK_INSUFFICIENT: 'Kho không đủ lượng hàng đã giữ để nạp.',
@@ -216,10 +218,23 @@ export function LoadWorkspace({ workspaceToken }: { workspaceToken?: string }) {
             <legend>Dòng {i + 1} · {r.skuCode}</legend>
             <p className="c3-source">Mã đơn {r.orderId}</p>
             <p>Đã giữ {displayQuantity(r.granted)} {r.baseUom} · Đã nạp {displayQuantity(r.loaded)} {r.baseUom} · Còn giữ tại kho {displayQuantity(r.warehouseHeld)} {r.baseUom}</p>
-            {displayQuantity(r.warehouseHeld) !== '0' && <Field name={r.id} label={`Số lượng nạp dòng ${i + 1}`} type="number"
-              min="0.001" max={r.warehouseHeld} step="0.001" disabled={off || !!pending} />}
+            {r.lots && r.lots.length > 0 && <div>
+              <p id={'c3-held-lots-' + r.id}>Lô giữ tại kho</p>
+              <ul className="c1-rows" aria-labelledby={'c3-held-lots-' + r.id}>
+                {r.lots.map(lot => <li key={lot.code}>
+                  <strong>{lot.code}</strong>
+                  <span>Hạn dùng <time dateTime={lot.expiresOn.slice(0, 10)}>
+                    {lot.expiresOn.slice(0, 10).split('-').reverse().join('/')}
+                  </time></span>
+                  <span>{displayQuantity(lot.quantity)} {r.baseUom}</span>
+                </li>)}
+              </ul>
+            </div>}
+            {r.lots?.length === 0 && displayQuantity(r.warehouseHeld) !== '0' && <p>Không có lô đủ điều kiện nạp.</p>}
+            {displayQuantity(r.eligibleWarehouseHeld ?? r.warehouseHeld) !== '0' && <Field name={r.id} label={`Số lượng nạp dòng ${i + 1}`} type="number"
+              min="0.001" max={r.eligibleWarehouseHeld ?? r.warehouseHeld} step="0.001" disabled={off || !!pending} />}
           </fieldset>)}
-          <Button type="submit" variant="primary" disabled={off || !!pending || !shown.some(r => displayQuantity(r.warehouseHeld) !== '0')}>
+          <Button type="submit" variant="primary" disabled={off || !!pending || !shown.some(r => displayQuantity(r.eligibleWarehouseHeld ?? r.warehouseHeld) !== '0')}>
             Nạp hàng
           </Button>
         </form>}

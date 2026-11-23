@@ -471,6 +471,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (held + delivered + request.BaseQuantity > line.BaseQuantity)
                     return BusinessCommandOutcome.Rejected("A_LINE_OVER_RESERVED");
 
+                IReadOnlyList<F03Pick>? lotPicks = null;
+                if (connections.UsesDevF03 && await IsLotTracked(db, tx, tenant, line.Id, byRight: false, token))
+                {
+                    lotPicks = await PlanLotHold(db, tx, tenant, line.Id, line.SkuId,
+                        request.StockLocationId, request.BaseQuantity, token);
+                    if (lotPicks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
+                }
                 string? stockError = await AllocateStock(db, tx, tenant,
                     request.StockLocationId, line.SkuId, request.BaseQuantity, token);
                 if (stockError is not null) return BusinessCommandOutcome.Rejected(stockError);
@@ -497,6 +504,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     {
                         Id = Guid.NewGuid(), Tenant = tenant, Right = rightId, Line = line.Id
                     }, tx, token));
+                if (lotPicks is not null)
+                    await RecordLotPicks(db, tx, tenant, rightId, lotPicks, "F03LotHold", "StockRightId", token);
                 await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_A",
                     order.CustomerId, line.SkuId, request.StockLocationId, request.BaseQuantity, 0, token);
                 return BusinessCommandOutcome.Applied("A_STOCK_RESERVED", source);

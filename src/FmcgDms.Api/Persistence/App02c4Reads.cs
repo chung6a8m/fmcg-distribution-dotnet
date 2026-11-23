@@ -11,7 +11,11 @@ public sealed record C4WorkspaceLine(Guid Id, Guid OrderId, string Sku, string B
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Loaded,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Delivered,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Available,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Held);
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Held)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<F03LotView>? Lots { get; init; }
+}
 public sealed record C4ArView(Guid SourceId, string Customer, string ShipTo, DateTime BusinessDate,
     DateTime DueBusinessDate,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Quantity,
@@ -65,7 +69,9 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Actor = actor }, tx, ct)), ct);
 
     public Task<IEnumerable<C4WorkspaceLine>> DeliveryLinesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
-        WithC4Authority(principal, trip, (db, tx, tenant, _) => db.QueryAsync<C4WorkspaceLine>(Sql("""
+        WithC4Authority<IEnumerable<C4WorkspaceLine>>(principal, trip, async (db, tx, tenant, _) =>
+        {
+            var lines = (await db.QueryAsync<C4WorkspaceLine>(Sql("""
             SELECT l.Id,o.Id AS OrderId,k.Code AS Sku,p.BaseUom,c.Name AS Customer,adr.Address AS ShipTo,
                 COALESCE(am.Version,1) AS ShipToVersion,l.LoadedBaseQuantity AS Loaded,d.Delivered,
                 l.LoadedBaseQuantity-d.Delivered AS Available,
@@ -87,7 +93,15 @@ public sealed partial class App01a2CommandService
                 WHERE TenantId=l.TenantId AND TripManifestLineId=l.Id) d
             WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.IsC3=1
             ORDER BY c.Name,k.Code,l.Id
-            """, new { Tenant = tenant, Trip = trip }, tx, ct)), ct);
+            """, new { Tenant = tenant, Trip = trip }, tx, ct))).AsList();
+            if (!connections.UsesDevF03 || lines.Count == 0) return lines;
+            var ids = lines.Select(line => line.Id).ToArray();
+            var lots = (await ReadLoadedLots(db, tx, tenant, ids, null, ct)).ToLookup(lot => lot.SourceId, lot => lot.ToView());
+            var tracked = await GetTrackedSources(db, tx, tenant, ids, "F03LotLoad", "ManifestLineId", ct);
+            return lines.Select(line => tracked.Contains(line.Id)
+                ? line with { Lots = lots[line.Id].ToArray(), Available = Math.Min(line.Available, lots[line.Id].Sum(lot => lot.Quantity)) }
+                : line).ToArray();
+        }, ct);
 
     public Task<IEnumerable<C4ArView>> ReceivablesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         WithC4Authority(principal, trip, (db, tx, tenant, _) => db.QueryAsync<C4ArView>(Sql("""

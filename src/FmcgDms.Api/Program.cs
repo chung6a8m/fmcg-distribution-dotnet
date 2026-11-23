@@ -35,9 +35,16 @@ bool app02d3 = App02d3Runtime.Enabled(app.Configuration, app.Environment);
 if (app02d3)
     await App02d3Runtime.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(), CancellationToken.None);
 bool app02d4 = App02d4Runtime.Enabled(app.Configuration, app.Environment);
+bool devF03 = app.Services.GetRequiredService<TenantConnections>().UsesDevF03;
+if (devF03 && (app02d1 || app02d2 || app02d3 || app02d4
+    || !app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
+    || !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime")
+    || app.Configuration.GetValue<bool>("App02Worker:Enabled")
+    || Enumerable.Range(1, 4).Any(i => !app.Configuration.GetValue<bool>($"App02C{i}:Enabled"))))
+    throw new InvalidOperationException("DEV-F03 uses its dedicated A-runtime profile.");
 if (app02d4)
     await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
-bool app02c6 = !app02d1 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
+bool app02c6 = !app02d1 && !devF03 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {
