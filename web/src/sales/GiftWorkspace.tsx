@@ -9,7 +9,7 @@ type Session = { token: string; identity: Identity & { role: Role } }
 type Position = { customerId: string; customer: string; netPurchases: number; entitlement: number
   giftHeld: number; waivedHeld: number; toDeliver: number }
 type Issue = { id: string; customerId: string; customer: string; quantity: number; returned: number; waivedHeld: number }
-type Waiver = { id: string; issueId: string; customer: string; quantity: number; status: 'PROPOSED' | 'APPROVED'
+type Waiver = { id: string; issueId: string; customer: string; quantity: number; status: 'PROPOSED' | 'APPROVED' | 'EXPIRED'
   reason: string; evidence: string }
 type Ledger = { positions: Position[]; issues: Issue[]; waivers: Waiver[]; refresh: number }
 type Pending = { commandId: string; body: string; conflict?: boolean }
@@ -286,7 +286,7 @@ function GiftHistory({ ledger }: { ledger: Ledger }) {
       <h2>Danh sách miễn thu hồi</h2>
       {ledger.waivers.length === 0 ? <p>Chưa có đề nghị miễn thu hồi.</p> : <ul className="c1-rows">
         {ledger.waivers.map(row => <li key={row.id}><div className="c3-source">
-          <strong>{row.customer} · {row.status === 'APPROVED' ? 'Đã duyệt' : 'Chờ duyệt'}</strong>
+          <strong>{row.customer} · {{ PROPOSED: 'Chờ duyệt', APPROVED: 'Đã duyệt', EXPIRED: 'Hết hiệu lực' }[row.status]}</strong>
           <p>{quantities.format(row.quantity)} EA · {row.reason} · Chứng từ {row.evidence}</p>
           <p>Mã lần giao quà {row.issueId}</p>
           <p>Mã đề nghị {row.id}</p>
