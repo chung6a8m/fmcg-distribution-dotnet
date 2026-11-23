@@ -13,6 +13,8 @@ Fixture v1 dùng P của EXCLUSIVE, số lượng 3 EA, net 193333, tax 15467, g
 | F08-03 · AP-05 | Credit 69600 qua đề nghị và duyệt. Chi 20000 với chứng từ hợp lệ thì phần credit còn 49600, quỹ 80000. Thiếu bằng chứng tiền thực chi, tự duyệt, chéo vai và cùng chứng từ chi hai lần bị từ chối. |
 | F08-04 · regression | Retry/lost acknowledgement bảo toàn source rows; đồng thời không vượt credit hoặc quỹ thử. Snapshot của giao hàng, thuế, lượng và COGS đã ghi giữ nguyên. |
 
+| F08-05 · quỹ hoàn chi | Từ quỹ 80.000 VND, duyệt hai khoản độc lập 60.000 VND từ hai credit. Chỉ một khoản giữ quỹ và được ghi thực chi. Khoản kia thiếu quỹ khi cạnh tranh và sau khi quỹ còn 20.000 VND. Các lệnh bị từ chối có 0 nguồn và 0 hiệu ứng ledger. Tổng credit còn 128.800 VND. |
+
 UI `/sales/refunds`, endpoint synthetic DEV, LocalDB nonce-owned và ledger AR, customer credit, quỹ thử.
 
 ## Biên nhận DEV
