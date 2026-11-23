@@ -1,5 +1,6 @@
 using Dapper;
 using FluentMigrator.Runner;
+using FluentMigrator.Runner.Initialization;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -11,6 +12,11 @@ public static class ScratchMigrator
     public static void Migrate(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information, bool bindBeforeFeatureMigrations = false) =>
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations, throughVersion: 202611220010);
+
+    public static void MigrateDevF01(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: 202611230002, migrationTag: App02DevF01Schema.Profile);
 
     // D.4 stays opt-in on its guarded LocalDB rehearsal path.
     public static void MigrateD4(string connectionString, string tenantId, string expectedNonce,
@@ -33,7 +39,7 @@ public static class ScratchMigrator
             throughVersion: 202611220008);
 
     private static void MigrateCore(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion)
+        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion, string? migrationTag = null)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -68,12 +74,21 @@ public static class ScratchMigrator
         if (bound is not null && bound != tenantId)
             throw new InvalidOperationException("DB is already bound to a different tenant.");
 
-        using var provider = new ServiceCollection()
+        if (migrationTag is not null && bound != tenantId)
+            throw new InvalidOperationException("A scoped feature upgrade requires an existing tenant binding.");
+
+        var services = new ServiceCollection()
             .AddLogging(x => x.SetMinimumLevel(minimumLogLevel).AddConsole())
             .AddFluentMigratorCore()
             .ConfigureRunner(rb => rb.AddSqlServer().WithGlobalConnectionString(connectionString)
-                .ScanIn(typeof(AppSchema).Assembly).For.Migrations())
-            .BuildServiceProvider();
+                .ScanIn(typeof(AppSchema).Assembly).For.Migrations());
+        if (migrationTag is not null)
+            services.Configure<RunnerOptions>(options =>
+            {
+                options.Tags = [migrationTag];
+                options.IncludeUntaggedMigrations = false;
+            });
+        using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
         var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
 

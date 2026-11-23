@@ -55,10 +55,12 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live", scope = "APP-
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled"))
 {
-    if (app.Configuration.GetValue<bool>("App02C1:Enabled"))
-        App02c1Routes.Map(app);
+    bool c1 = app.Configuration.GetValue<bool>("App02C1:Enabled");
+    bool visits = c1 && app.Configuration.GetValue<bool>("DevF01:Enabled");
+    if (c1)
+        App02c1Routes.Map(app, visits);
     if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
-        App02c2Routes.Map(app);
+        App02c2Routes.Map(app, visits);
     if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c3Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C4:Enabled") && app.Configuration.GetValue<bool>("App02C3:Enabled")

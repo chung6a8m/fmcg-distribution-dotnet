@@ -6,7 +6,7 @@ using Microsoft.Data.SqlClient;
 namespace FmcgDms.Api.Persistence;
 
 public sealed record C2Option(Guid Id, string Label);
-public sealed record C2Identity(string TenantId, string ActorId, string SessionId, bool Sales, bool Warehouse);
+public sealed record C2Identity(string TenantId, string ActorId, string SessionId, bool Sales, bool Warehouse, bool Visits = false);
 public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<C2Option> Trips,
     IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses);
 public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, decimal Ordered, decimal Reserved,
