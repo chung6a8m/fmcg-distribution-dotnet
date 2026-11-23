@@ -93,6 +93,22 @@ The Owner fixed the C/P envelope, identity, state/ACK rules, retry/case/retentio
 | EV-01..15, G-STOCK/G-CUT/G-IDEMP/G-LEDGER/G-INV | **EVIDENCE_PENDING / NOT_VERIFIED** | Actual environment/build/source, measured outcomes and reviewers. [Outstanding EV/P0 evidence](../closeout/2026-11-23-app-02e-localdb.md#bằng-chứng-ev-còn-thiếu) · [AC–EV–P0 traceability](app-02e-ac-ev-p0-traceability.md) |
 | Pilot / Tenant Go-Live | **NOT_AUTHORIZED** | Signed cutover/opening, P0, pilot thresholds, mode-specific Owner/Tenant decision |
 
+### Chức năng DEV bổ sung sau APP-02E
+
+[Biên bản đã ký](../closeout/2026-11-23-app-02e-localdb.md) và [truy vết v0.1 đã đóng băng](app-02e-ac-ev-p0-traceability.md) giữ phạm vi sáu suite. [PR #124](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/124) quản lý E-SIM-01 và hồ sơ mô hình. Phạm vi chức năng sau đây có biên bản DEV riêng theo ca.
+
+| Increment | AC / EV | Đầu ra hoặc phụ thuộc |
+| --- | --- | --- |
+| [DEV-F01](app-02-dev-f01.md) | AC-17 / EV-13 | Visit online không đơn, nguồn và ghi nhận quan sát |
+| DEV-F02 | AC-20 / EV-06 | Tạm ứng và hoàn ứng qua phê duyệt, độc lập với nhóm kho/giá |
+| DEV-F03 | AC-05 / EV-04/05 | Đơn vị chuẩn, lô/hạn, FEFO, cách ly |
+| DEV-F04 | AC-19 / EV-05/06 | Snapshot giá/discount/thuế và residual |
+| DEV-F05 | AC-05/06 / EV-05/07 | Trả hàng có nguồn, QA/held, giá vốn gốc. Dùng snapshot F03–04 |
+| DEV-F06 | AC-06 / EV-07 | Điều chỉnh có nguồn qua kỳ khóa. Dùng F05 |
+| DEV-F07 | AC-07 / EV-05 | Trả quà và waiver. Dùng nguồn giao/trả F05 |
+| DEV-F08 | AC-19 / EV-05/06/10/11 | Credit/refund và residual. Dùng snapshot F04 và sự kiện F05–06 |
+| DEV-F09 | Các ca bổ sung và nền C/D/E | Hồi quy hai tenant trên source xác định |
+
 **A.4 verification gate CLOSED for synthetic/nonproduction only:** the independently reviewed A11-01..12 SQL oracle on two nonce-owned LocalDB tenants passed source/ledger/outbox/consumer, dependent/late-P/CASE, negative actor/peer-tenant, ACK-loss, rollback, restart and concurrency checks. `TestRunId=app02a4-44057185625-1`, final source HEAD `1fbeb8ee1ab78a89ce73dd62d68a86bd28eb80a7`, squash merge `aa55a691ee3812e02df12e105611e118cf89deee`, [CI #44057185625](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/44057185625) and [A.4 evidence closeout](../closeout/2026-11-17-app-02a4.md). **APP-02B.1 docs-only architecture/security contract is independently reviewed and CONTRACT_APPROVED** ([PR #49](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/49), [closeout](../closeout/2026-11-17-app-02b1.md)) after PR #48 merged the 10/10 Owner decision record; exact final-HEAD CI and review are recorded in PR #49. B.2 later merged in PR #50 within its CI-only scope. Actual PREPROD remains NOT_VERIFIED. Actual EV-08, all five production P0 and real-environment AC-11 remain **NOT_VERIFIED**; APP-02B PREPROD gates are **NOT_RUN**. At that A.4/B.1 checkpoint APP-02C–E and production/pilot were **NOT_AUTHORIZED**; current C.1–C.5 DEV authority is recorded above.
 
 **APP-02B.3 closeout (2026-11-17):** [merged PR #51](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/51), source `fa20b95fc7c7fba7776273038c4f406b8d2e3154`, squash `aa1659738da657960fdad84c6742896a2599cae5`, is **MERGED / B3_GITHUB_HOSTED_CI_TESTED** under [OWN-APP02B3-CI-01](../decisions/owner-app02b3-code-only-2026-11-17.md); 4/4 same-source CI jobs SUCCESS, including Windows SQL Server LocalDB migration/race and Linux HTTP JWT. [Evidence closeout](../closeout/2026-11-17-app-02b3-ci-only.md). Actual operator PREPROD Identity, G-B01..05/30, real EV-08/P0 remain NOT_VERIFIED; infra debts [#52–#56](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/52). B.2 #50 remains EPHEMERAL_CI_RUNTIME_TESTED, not physical PREPROD verified.

@@ -5,12 +5,14 @@ import { CustomerWorkspace } from './CustomerWorkspace'
 import { DeliveryWorkspace } from './DeliveryWorkspace'
 import { LoadWorkspace } from './LoadWorkspace'
 import { OrderWorkspace } from './OrderWorkspace'
+import { VisitWorkspace } from './VisitWorkspace'
 import { HttpError, readError, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
-type Session = { token: string; identity: Identity & { sales: boolean; warehouse: boolean } }
+type Session = { token: string; identity: Identity & { sales: boolean; warehouse: boolean; visits: boolean } }
 const sections = [
   { id: 'customers', label: 'Khách hàng và địa chỉ giao', authority: 'sales' },
+  { id: 'visits', label: 'Viếng thăm', authority: 'sales' },
   { id: 'orders', label: 'Đơn A và giữ hàng', authority: null },
   { id: 'load', label: 'Nạp hàng', authority: 'warehouse' },
   { id: 'delivery', label: 'Giao hàng', authority: 'sales' },
@@ -59,11 +61,12 @@ export function SalesWorkspace() {
       <Button type="submit" variant="primary" disabled={busy}>Kết nối</Button>
     </form> : <div className="sales-layout">
       <nav aria-label="Sales A" className="panel panel-content sales-nav">
-        {sections.map(item => <Button key={item.id} disabled={item.authority !== null && !session.identity[item.authority]}
+        {sections.filter(item => item.id !== 'visits' || session.identity.visits).map(item => <Button key={item.id} disabled={item.authority !== null && !session.identity[item.authority]}
           aria-current={section === item.id ? 'page' : undefined}
           onClick={() => { setOrderFilter(''); setSection(item.id) }}>{item.label}</Button>)}
       </nav>
       {section === 'customers' && <CustomerWorkspace workspaceToken={session.token} />}
+      {section === 'visits' && <VisitWorkspace token={session.token} identity={session.identity} />}
       {section === 'orders' && <OrderWorkspace workspaceToken={session.token}
         onOpenAr={orderId => { setOrderFilter(orderId); setSection('ar') }} />}
       {section === 'load' && <LoadWorkspace workspaceToken={session.token} />}

@@ -10,17 +10,17 @@ using static FmcgDms.Api.Persistence.C1Validation;
 
 namespace FmcgDms.Api.Persistence;
 
-internal sealed class App02c1Service(TenantConnections connections)
+internal sealed partial class App02c1Service(TenantConnections connections)
 {
     private const string VersionSql = "CONVERT(varchar(16),CONVERT(binary(8),RowVersion),2)";
     private const string CustomerColumns = "Id,Code,Name,IsActive," + VersionSql + " AS Version";
     private const string OutcomeSql = """
         SELECT CAST(HttpStatus AS int) AS HttpStatus,Code,ResultId AS Id,Revision,
-               CAST(1 AS bit) AS Replayed,HashVersion,RequestHash
+               CAST(1 AS bit) AS Replayed,HashVersion,RequestHash,Kind
         FROM dbo.C1Command WHERE TenantId=@Tenant AND ActorId=@Actor AND CommandId=@CommandId
         """;
     private sealed record StoredOutcome(int HttpStatus, string Code, Guid? Id, int? Revision,
-        bool Replayed, byte HashVersion, byte[] RequestHash)
+        bool Replayed, byte HashVersion, byte[] RequestHash, string Kind)
     {
         public C1Outcome ToOutcome() => new(HttpStatus, Code, Id, Revision, Replayed);
     }
@@ -94,7 +94,8 @@ internal sealed class App02c1Service(TenantConnections connections)
         }, ct);
 
     public Task<C1Outcome?> Outcome(ClaimsPrincipal principal, Guid commandId, CancellationToken ct) =>
-        InSession(principal, async s => (await s.Outcome(commandId))?.ToOutcome(), ct);
+        InSession(principal, async s => await s.Outcome(commandId) is { Kind: not VisitCommand } old
+            ? old.ToOutcome() : null, ct);
 
     public Task<C1Identity> Identity(ClaimsPrincipal principal, CancellationToken ct) =>
         InSession(principal, async s => new C1Identity(s.Tenant, s.Actor, await s.Db.QuerySingleAsync<string>(
@@ -236,7 +237,7 @@ internal sealed class App02c1Service(TenantConnections connections)
         }, ct);
 
     private Task<C1Outcome> Run<T>(ClaimsPrincipal principal, T input, string kind, Func<Session, Task<Change>> decide,
-        CancellationToken ct) where T : IC1Command =>
+        CancellationToken ct, Func<Session, Task<bool>>? canReplay = null) where T : IC1Command =>
         InSession(principal, async s =>
         {
             if (input.CommandId == Guid.Empty) return new C1Outcome(400, "COMMAND_ID_INVALID");
@@ -247,8 +248,13 @@ internal sealed class App02c1Service(TenantConnections connections)
             await App02a3Sql.Lock(s.Db, s.Tx, "APP02C1:WRITE", ct);
             var old = await s.Outcome(input.CommandId);
             if (old is not null)
-                return old.HashVersion == 1 && CryptographicOperations.FixedTimeEquals(old.RequestHash, hash)
-                    ? old.ToOutcome() : new C1Outcome(409, "COMMAND_PAYLOAD_CONFLICT");
+            {
+                if (old.HashVersion != 1 || !CryptographicOperations.FixedTimeEquals(old.RequestHash, hash))
+                    return new C1Outcome(409, "COMMAND_PAYLOAD_CONFLICT");
+                if (old.HttpStatus == 200 && canReplay is not null && !await canReplay(s))
+                    throw new UnauthorizedAccessException("Customer assignment required.");
+                return old.ToOutcome();
+            }
 
             var change = await decide(s);
             var result = change.Outcome;

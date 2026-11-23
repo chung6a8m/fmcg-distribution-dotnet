@@ -4,7 +4,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App02c1Routes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, bool visits)
     {
         var routes = app.MapGroup("/api/synthetic/app02c1").RequireAuthorization("SyntheticSales");
         routes.AddEndpointFilter(async (context, next) =>
@@ -20,6 +20,17 @@ internal static class App02c1Routes
             await service.Detail(actor, id, ct) is { } detail ? Results.Ok(detail) : Results.NotFound());
         routes.MapGet("/commands/{id:guid}", async (Guid id, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
             await service.Outcome(actor, id, ct) is { } result ? Results.Ok(result) : Results.NotFound());
+        if (visits)
+        {
+            routes.MapGet("/visits/customers", async (ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
+                Results.Ok(await service.VisitCustomers(actor, ct)));
+            routes.MapGet("/visits", async (Guid customerId, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
+                Results.Ok(await service.Visits(actor, customerId, ct)));
+            routes.MapGet("/visits/commands/{id:guid}", async (Guid id, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
+                await service.VisitOutcome(actor, id, ct) is { } result ? Results.Ok(result) : Results.NotFound());
+            routes.MapPost("/visits", async (F01VisitInput input, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
+                ToHttp(await service.CompleteVisit(actor, input, ct)));
+        }
         routes.MapPost("/customers/save", async (C1CustomerInput input, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
             ToHttp(await service.SaveCustomer(actor, input, ct)));
         routes.MapPost("/outlets/save", async (C1OutletInput input, ClaimsPrincipal actor, App02c1Service service, CancellationToken ct) =>
