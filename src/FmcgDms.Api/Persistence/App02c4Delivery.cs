@@ -118,14 +118,21 @@ public sealed partial class App01a2CommandService
             [("Evidence", evidence.Id.ToString("N"))],
             (db, tx, tenant, actor, command, token) =>
                 ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3,
-                    connections.UsesDevF03, connections.UsesDevF04, token),
+                    connections.UsesDevF03, connections.UsesDevF04, connections.UsesDevF06, token),
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, bool lots,
-        bool pricing, CancellationToken ct)
+        bool pricing, bool periodGuard, CancellationToken ct)
     {
+        if (periodGuard)
+        {
+            DateTime today = await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {LotBusinessDate}", null, tx, ct));
+            DateTime month = MonthStart(today);
+            if (MonthStart(evidence.BusinessDate) != month || await PeriodState(db, tx, tenant, month, ct) != "OPEN")
+                return BusinessCommandOutcome.Rejected("F06_OPEN_PERIOD_REQUIRED");
+        }
         if (lots) await App02a3Sql.Lock(db, tx, $"DEVF03:ISSUE:{evidence.TripId:N}", ct);
         var trip = await FindTrip(db, tx, tenant, evidence.TripId, ct);
         if (trip is not { Status: "PREPARED" or "IN_PROGRESS", VehicleLocationId: Guid location,

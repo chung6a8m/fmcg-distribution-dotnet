@@ -208,6 +208,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                             await RequireReturnRequestAssignment(db, tx, tenant, actor, returnSource, ct);
                         if (kind == "F05_RELEASE")
                             await RequireReturnReleaseAssignment(db, tx, tenant, actor, returnSource, ct);
+                        if (kind == "F06_APPROVE")
+                            await RequireAdjustmentWarehouseScope(db, tx, tenant, actor, returnSource, ct);
                     }
                     await tx.CommitAsync(ct);
                     return new BusinessCommandOutcome(existing.Status, existing.OutcomeCode,
