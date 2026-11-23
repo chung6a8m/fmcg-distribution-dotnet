@@ -204,8 +204,10 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                         """, new { Tenant = tenant, Command = existing.Id }, tx, ct));
                     if (isF05Return && oldSource is Guid returnSource)
                     {
-                        if (c2Role == "sales")
+                        if (kind == "F05_REQUEST")
                             await RequireReturnRequestAssignment(db, tx, tenant, actor, returnSource, ct);
+                        if (kind is "F07_ISSUE" or "F07_PROPOSE" or "F07_RETURN" or "F07_APPROVE")
+                            await RequireGiftRecoveryScope(db, tx, tenant, actor, c2Role!, returnSource, ct);
                         if (kind == "F05_RELEASE")
                             await RequireReturnReleaseAssignment(db, tx, tenant, actor, returnSource, ct);
                         if (kind == "F06_APPROVE")

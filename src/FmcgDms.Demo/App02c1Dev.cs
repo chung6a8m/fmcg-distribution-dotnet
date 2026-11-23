@@ -42,7 +42,8 @@ internal static class App02c1Dev
         bool pricing = increment == "DevF04";
         bool returns = increment == "DevF05";
         bool adjustments = increment == "DevF06";
-        bool returnLane = returns || adjustments;
+        bool gifts = increment == "DevF07";
+        bool returnLane = returns || adjustments || gifts;
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
         bool d4 = increment == "App02D4";
@@ -54,7 +55,7 @@ internal static class App02c1Dev
         bool c4 = c5 || fefo || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
-        string feature = adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -142,6 +143,11 @@ internal static class App02c1Dev
                             Microsoft.Extensions.Logging.LogLevel.Warning);
                         await DevF06Evidence.Seed(connection, tenant, lifetime.Token);
                     }
+                    if (gifts)
+                    {
+                        FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF07(connection, tenant, run.Id);
+                        await DevF07Evidence.Seed(connection, tenant, Actor, lifetime.Token);
+                    }
                     if (tenant == "tenant-a") returnQuarantineId = quarantineId;
                 }
                 if (c3 && (c6 || tenant == "tenant-a"))
@@ -179,6 +185,7 @@ internal static class App02c1Dev
             apiStart.Environment["DevF04__Enabled"] = pricing || returnLane ? "true" : "false";
             apiStart.Environment["DevF05__Enabled"] = returnLane ? "true" : "false";
             apiStart.Environment["DevF06__Enabled"] = adjustments ? "true" : "false";
+            apiStart.Environment["DevF07__Enabled"] = gifts ? "true" : "false";
             apiStart.Environment["App02C1__Nonce"] = run.Id;
             apiStart.Environment["App02C2__Enabled"] = c2 ? "true" : "false";
             apiStart.Environment["App02C2__DedicatedRuntime"] = c2 ? "true" : "false";
@@ -190,7 +197,7 @@ internal static class App02c1Dev
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
             if (fefo || pricing || returnLane)
             {
-                string profile = adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";
+                string profile = gifts ? "dev-f07" : adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";
                 DateTime clockTime = returnLane ? DevF05Evidence.FixtureUtc : pricing ? DevF04Evidence.FixtureUtc : DevF03Evidence.FixtureUtc;
                 string clock = Path.Combine(root, "TestResults", profile, run.Id, "clock.utc");
                 Directory.CreateDirectory(Path.GetDirectoryName(clock)!);
@@ -249,6 +256,8 @@ internal static class App02c1Dev
                 if (returnCredentials is not null)
                 {
                     Console.WriteLine($"After opening a delivery in Sales A, open {webUrl}/sales/returns.");
+                    if (gifts)
+                        Console.WriteLine($"Use {webUrl}/sales/gifts for gift issue, return and waiver.");
                     if (adjustments)
                         Console.WriteLine($"After releasing one return in November, enter close, then open {webUrl}/sales/cost-adjustments.");
                     Console.WriteLine("Enter sales, receiver, finance, or qa to copy that DEV credential. Enter source to restore the Sales A credential.");
@@ -285,7 +294,7 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                adjustments ? "playwright.dev-f06.config.ts" : returns ? "playwright.dev-f05.config.ts" : pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                gifts ? "playwright.dev-f07.config.ts" : adjustments ? "playwright.dev-f06.config.ts" : returns ? "playwright.dev-f05.config.ts" : pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
@@ -307,6 +316,13 @@ internal static class App02c1Dev
                 browserStart.Environment["DEV_F06_PEER_FINANCE"] = Sign("tenant-b", "finance", DevF05Evidence.Finance);
                 browserStart.Environment["DEV_F06_SELF_CHECK"] =
                     Token(key, "tenant-a", ["finance", "case_checker"], DevF05Evidence.Finance, uniqueSession: true);
+            }
+            if (gifts)
+            {
+                browserStart.Environment["DEV_F07_CHECKPOINTS"] = DevF07Evidence.CheckpointDirectory(root, run);
+                browserStart.Environment["DEV_F07_PEER_FINANCE"] = Sign("tenant-b", "finance", DevF05Evidence.Finance);
+                browserStart.Environment["DEV_F07_SELF_CHECK"] =
+                    Token(key, "tenant-a", ["sales", "finance"], Actor, uniqueSession: true);
             }
             if (c3)
                 foreach (var (slot, tenant) in new[] { ("A", "tenant-a"), ("B", "tenant-b") })
@@ -420,8 +436,16 @@ internal static class App02c1Dev
             var adjustmentSnapshots = adjustments
                 ? await DevF06Evidence.ServeCheckpoints(run, root, browser, lifetime.Token)
                 : null;
+            var giftSnapshots = gifts
+                ? await DevF07Evidence.ServeCheckpoints(run, root, browser, lifetime.Token)
+                : null;
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"{feature} browser verification exited {browser.ExitCode}.");
+            if (gifts)
+            {
+                await DevF07Evidence.Verify(run, root, source, apiSha256, giftSnapshots, lifetime.Token);
+                return;
+            }
             if (adjustments)
             {
                 await DevF06Evidence.Verify(run, root, source, apiSha256, adjustmentSnapshots, lifetime.Token);
