@@ -59,6 +59,8 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     bool visits = c1 && app.Configuration.GetValue<bool>("DevF01:Enabled");
     if (c1)
         App02c1Routes.Map(app, visits);
+    if (c1 && app.Configuration.GetValue<bool>("DevF02:Enabled"))
+        App02DevF02Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
         App02c2Routes.Map(app, visits);
     if (app.Configuration.GetValue<bool>("App02C3:Enabled") && app.Configuration.GetValue<bool>("App02C2:Enabled"))

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $Verify, [ValidateSet('App02C1', 'App02C2', 'App02C3', 'App02C4', 'App02C5', 'App02C6', 'App02D1', 'App02D2', 'App02D3', 'App02D4', 'DevF01')] [string] $Increment = 'App02C1')
+param([switch] $Verify, [ValidateSet('App02C1', 'App02C2', 'App02C3', 'App02C4', 'App02C5', 'App02C6', 'App02D1', 'App02D2', 'App02D3', 'App02D4', 'DevF01', 'DevF02')] [string] $Increment = 'App02C1')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot

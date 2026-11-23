@@ -19,6 +19,9 @@ const DeliveryWorkspace = lazy(() => import('./sales/DeliveryWorkspace')
 const SalesWorkspace = lazy(() => import('./sales/SalesWorkspace')
   .then(module => ({ default: module.SalesWorkspace })))
 
+const AdvanceWorkspace = lazy(() => import('./sales/AdvanceWorkspace')
+  .then(module => ({ default: module.AdvanceWorkspace })))
+
 const BStockWorkspace = lazy(() => import('./sales/BStockWorkspace')
   .then(module => ({ default: module.BStockWorkspace })))
 const BSaleWorkspace = lazy(() => import('./sales/BSaleWorkspace')
@@ -62,6 +65,7 @@ function HealthShell() {
       <a className="page-link" href="/ui/data-entry">UI-02 · Form & Grid Lab</a>
       <a className="page-link" href="/ui/command-recovery">UI-03 · Source & Recovery Lab</a>
       <a className="page-link" href="/sales">Workspace Sales A · DEV</a>
+      <a className="page-link" href="/sales/advances">Tạm ứng nhân viên · DEV</a>
       <a className="page-link" href="/sales/customers">Khách hàng và địa chỉ giao · DEV</a>
       <a className="page-link" href="/sales/orders">Đơn A và giữ hàng · DEV</a>
       <a className="page-link" href="/sales/load">Nạp hàng lên xe · DEV</a>
@@ -100,6 +104,8 @@ function App() {
         : location.pathname === '/ui/command-recovery' ? <SourceCommandDemo />
           : location.pathname === '/sales'
             ? <Suspense fallback={<p className="page" role="status">Đang tải Sales A…</p>}><SalesWorkspace /></Suspense>
+          : location.pathname === '/sales/advances'
+            ? <Suspense fallback={<p className="page" role="status">Đang tải tạm ứng…</p>}><AdvanceWorkspace /></Suspense>
           : location.pathname === '/sales/partner-rehearsal'
             ? <Suspense fallback={<p className="page" role="status">Đang tải mô phỏng…</p>}><PartnerRehearsalWorkspace /></Suspense>
           : location.pathname === '/sales/mixed-trip'

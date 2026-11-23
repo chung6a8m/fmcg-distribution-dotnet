@@ -38,6 +38,7 @@ internal static class App02c1Dev
         Console.CancelKeyPress += cancel;
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
         bool visit = increment == "DevF01";
+        bool advance = increment == "DevF02";
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
         bool d4 = increment == "App02D4";
@@ -49,7 +50,7 @@ internal static class App02c1Dev
         bool c4 = c5 || increment == "App02C4";
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
-        string feature = visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        string feature = advance ? "DEV-F02" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -58,6 +59,9 @@ internal static class App02c1Dev
         d1Run?.VerifyDocuments();
         string tokenA = d1Run?.Credential("tenant-a", "sales") ?? Token(key, "tenant-a", roles);
         string tokenB = d1Run?.Credential("tenant-b", "sales") ?? Token(key, "tenant-b", roles);
+        string clipboardValue = tokenA;
+        string? financeToken = advance ? Token(key, "tenant-a", ["finance"], "f02-finance") : null;
+        string? cashierToken = advance ? Token(key, "tenant-a", ["cashier"], "f02-cashier") : null;
         Process? api = null;
         Process? viteProcess = null;
         Process? browser = null;
@@ -97,6 +101,16 @@ internal static class App02c1Dev
                         SELECT TenantId,Id,@Actor FROM dbo.Customer WHERE TenantId=@tenant AND Code=N'C2-FIXTURE'
                         """, new { tenant, Actor });
                 }
+                if (advance)
+                {
+                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF02(run.Connection(tenant), tenant, run.Id,
+                        Microsoft.Extensions.Logging.LogLevel.Warning);
+                    await db.ExecuteAsync("""
+                        INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                        VALUES(@tenant,N'f02-finance',N'finance',1,N'f02-dev-launcher'),
+                              (@tenant,N'f02-cashier',N'cashier',1,N'f02-dev-launcher')
+                        """, new { tenant });
+                }
                 if (c3 && (c6 || tenant == "tenant-a"))
                     await App02c3DevFixture.Seed(db, tenant, Actor, c6 || (!c4 && mode == "Verify"));
                 if (c4 && (c6 || tenant == "tenant-a"))
@@ -128,6 +142,7 @@ internal static class App02c1Dev
             apiStart.Environment["App02Worker__Enabled"] = "false";
             apiStart.Environment["App02C1__Enabled"] = "true";
             apiStart.Environment["DevF01__Enabled"] = visit ? "true" : "false";
+            apiStart.Environment["DevF02__Enabled"] = advance ? "true" : "false";
             apiStart.Environment["App02C1__Nonce"] = run.Id;
             apiStart.Environment["App02C2__Enabled"] = c2 ? "true" : "false";
             apiStart.Environment["App02C2__DedicatedRuntime"] = c2 ? "true" : "false";
@@ -182,8 +197,27 @@ internal static class App02c1Dev
 
             if (mode == "Interactive")
             {
-                await CopyCredential(tokenA);
+                if (advance) clipboardValue = financeToken!;
+                await CopyCredential(clipboardValue);
                 clipboardIssued = true;
+                if (advance)
+                {
+                    Console.WriteLine($"Open {webUrl}/sales/advances. Finance DEV credential is in the clipboard.");
+                    Console.WriteLine("Enter 1 for Finance, 2 for Employee or 3 for Cashier to replace the clipboard. Ctrl+C stops DEV.");
+                    while (!lifetime.IsCancellationRequested)
+                    {
+                        string? slot = await Task.Run(Console.ReadLine).WaitAsync(lifetime.Token);
+                        string? credential = slot switch { "1" => financeToken, "2" => tokenA, "3" => cashierToken, _ => null };
+                        if (slot is null) return;
+                        if (credential is not null)
+                        {
+                            await CopyCredential(credential);
+                            clipboardValue = credential;
+                            Console.WriteLine($"Copied DEV credential for role {slot}.");
+                        }
+                    }
+                    return;
+                }
                 Console.WriteLine($"Open {webUrl}/sales{(visit || c5 ? "" : c4 ? "/delivery" : c3 ? "/load" : c2 ? "/orders" : "/customers")}. Paste the short-lived tenant-a credential from the clipboard.");
                 Console.WriteLine("Press Ctrl+C to stop the session and remove its owned databases.");
                 await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
@@ -193,12 +227,17 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
-                visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
+                advance ? "playwright.dev-f02.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
             browserStart.Environment["APP02C1_RUN_ID"] = run.Id;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_A"] = tokenA;
             browserStart.Environment["APP02C1_BROWSER_TOKEN_B"] = tokenB;
+            if (advance)
+            {
+                browserStart.Environment["DEV_F02_FINANCE"] = financeToken!;
+                browserStart.Environment["DEV_F02_CASHIER"] = cashierToken!;
+            }
             if (c3)
                 foreach (var (slot, tenant) in new[] { ("A", "tenant-a"), ("B", "tenant-b") })
                     browserStart.Environment["APP02C3_WAREHOUSE_TOKEN_" + slot] = Token(key, tenant, ["warehouse"]);
@@ -267,6 +306,7 @@ internal static class App02c1Dev
                 return;
             }
             var visitBefore = visit ? await DevF01Evidence.Capture(run) : null;
+            var advanceBefore = advance ? await DevF02Evidence.Capture(run) : null;
             d1Run?.ConfigureBrowser(browserStart);
             browser = Start(browserStart);
             if (d1Run is not null)
@@ -303,6 +343,11 @@ internal static class App02c1Dev
             }
             await browser.WaitForExitAsync(lifetime.Token);
             if (browser.ExitCode != 0) throw new InvalidOperationException($"{feature} browser verification exited {browser.ExitCode}.");
+            if (advanceBefore is not null)
+            {
+                await DevF02Evidence.Verify(run, root, source, apiSha256, advanceBefore);
+                return;
+            }
             if (visitBefore is not null)
             {
                 await DevF01Evidence.Verify(run, root, source, apiSha256, visitBefore);
@@ -324,7 +369,7 @@ internal static class App02c1Dev
             await Cleanup(() => Stop(browser));
             await Cleanup(() => Stop(viteProcess));
             await Cleanup(() => Stop(api));
-            if (clipboardIssued) await Cleanup(() => CopyCredential(tokenA, clear: true));
+            if (clipboardIssued) await Cleanup(() => CopyCredential(clipboardValue, clear: true));
             foreach (string tenant in DemoRun.Tenants)
                 await Cleanup(() => run.RemoveDevSlot(tenant));
             if (cleanupErrors.Count > 0 && failure is null)

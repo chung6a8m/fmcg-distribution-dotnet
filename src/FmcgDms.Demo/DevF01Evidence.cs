@@ -15,13 +15,13 @@ internal static class DevF01Evidence
     private sealed record VisitRow(Guid Id, Guid CommandId, string TenantId, string ActorId, string CustomerCode,
         string Outlet, string Outcome, string Reason, string Observation, DateTime CompletedAtUtc, string CommandKind);
 
-    internal static async Task<TableState[]> Capture(DemoRun run)
+    internal static async Task<TableState[]> Capture(DemoRun run, IReadOnlyList<string>? scopedTables = null)
     {
         var all = new List<TableState>();
         foreach (string tenant in DemoRun.Tenants)
         {
             await using var db = new SqlConnection(run.Connection(tenant));
-            foreach (string table in Tables)
+            foreach (string table in scopedTables ?? Tables)
             {
                 string[] images = await ReadImages(db, table);
                 string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
