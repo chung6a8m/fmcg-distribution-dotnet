@@ -15,9 +15,10 @@ internal static class App02c1Dev
 {
     private const string Actor = "c1-dev-sales";
     private const string BrowserTest = "web/e2e-app02c1/customers.spec.ts";
-    private const int ApiPort = 5116; // Existing Vite API/health proxy target.
+    internal const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
-    internal static async Task Run(string mode, string root, string source, string increment)
+    internal static async Task Run(string mode, string root, string source, string increment,
+        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null)
     {
         if (mode is not ("Verify" or "Interactive")) throw new ArgumentException("Invalid C.1 DEV mode.");
         string web = Path.Combine(root, "web");
@@ -34,10 +35,11 @@ internal static class App02c1Dev
         string apiSha256 = HashFile(apiPath);
         CheckApiPort();
 
-        using var lifetime = new CancellationTokenSource();
+        using var childJob = persistent is null ? null : new App03ChildJob();
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(persistent?.StopToken ?? CancellationToken.None);
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
-        var run = new DemoRun(Guid.NewGuid().ToString("N"));
+        var run = persistent?.RunId ?? new DemoRun(Guid.NewGuid().ToString("N"));
         bool integrated = increment == "App03A1";
         bool verifyUpgrade = integrated && mode == "Verify";
         bool visit = integrated || increment == "DevF01";
@@ -75,6 +77,7 @@ internal static class App02c1Dev
         Process? api = null;
         Process? viteProcess = null;
         Process? browser = null;
+        Task? monitor = null;
         Exception? failure = null;
         string? clipboardCredential = null;
         var returnCredentials = returnLane ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -100,11 +103,11 @@ internal static class App02c1Dev
         var acceptance = c6 ? new App02c6Dev(root, run, source, apiSha256) : null;
         try
         {
-            foreach (string tenant in DemoRun.Tenants)
+            foreach (string tenant in persistent?.Resume == true ? [] : DemoRun.Tenants)
             {
                 lifetime.Token.ThrowIfCancellationRequested();
-                await run.Create(tenant, bindBeforeFeatureMigrations: true, beforeD1: d1);
-                await run.Verify(tenant);
+                await run.Create(tenant, bindBeforeFeatureMigrations: true, beforeD1: d1, app03Session: persistent is not null);
+                await run.Verify(tenant, app03Session: persistent is not null);
                 if (d1Run is not null)
                 {
                     await d1Run.PrepareUpgrade(tenant, leaveAtD1: d2, leaveAtD2: d3 && !d4);
@@ -188,6 +191,7 @@ internal static class App02c1Dev
                     await App02c4DevFixture.Seed(db, tenant, Actor, !returnLane && !pricing && !fefo && mode == "Verify");
                 if (acceptance is not null) await acceptance.Prepare(db, tenant);
             }
+            if (persistent is { Resume: false }) await persistent.MarkReady();
             string apiUrl = $"http://127.0.0.1:{ApiPort}";
             var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath,
                 "--urls", d4 ? apiUrl : $"http://localhost:{ApiPort}");
@@ -231,7 +235,8 @@ internal static class App02c1Dev
             apiStart.Environment["Logging__LogLevel__Default"] = "Warning";
             foreach (string tenant in DemoRun.Tenants)
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
-            if (fefo || pricing || returnLane)
+            if (persistent is not null) apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
+            else if (fefo || pricing || returnLane)
             {
                 string profile = integrated ? "app03-1a" : refunds ? "dev-f08" : gifts ? "dev-f07" : adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";
                 DateTime clockTime = returnLane ? DevF05Evidence.FixtureUtc : pricing ? DevF04Evidence.FixtureUtc : DevF03Evidence.FixtureUtc;
@@ -260,16 +265,16 @@ internal static class App02c1Dev
                 apiStart.Environment["App02D4__Nonce"] = run.Id;
                 apiStart.Environment["App02D4__PartnerKey"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             }
-            api = Start(apiStart);
+            api = Start(apiStart, childJob);
 
             using var client = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
             await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
-            int webPort = FreePort();
+            int webPort = persistent?.WebPort ?? FreePort();
             string webUrl = $"http://127.0.0.1:{webPort}";
             var viteStart = StartInfo("node", web, vite, "--host", "127.0.0.1", "--port",
                 webPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "--strictPort");
             if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
-            viteProcess = Start(viteStart);
+            viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
             foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
@@ -277,10 +282,22 @@ internal static class App02c1Dev
                 using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 using var response = await client.SendAsync(request, lifetime.Token);
+                // API startup already checked the database bindings. A valid, newly signed token may
+                // be forbidden here if the business role was revoked while the host was stopped.
+                if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;
                 response.EnsureSuccessStatusCode();
                 using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
-                if (payload.RootElement.GetProperty("tenantId").GetString() != tenant)
+                if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
+                    payload.RootElement.GetProperty("sessionId").GetString() != run.Id)
                     throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
+            }
+
+            if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);
+            if (observe is not null)
+            {
+                await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id));
+                await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
+                return;
             }
 
             if (mode == "Interactive")
@@ -307,7 +324,9 @@ internal static class App02c1Dev
                     return;
                 }
                 Console.WriteLine($"Open {webUrl}/sales{(fefo || visit || c5 ? "" : c4 ? "/delivery" : c3 ? "/load" : c2 ? "/orders" : "/customers")}. Paste the short-lived tenant-a credential from the clipboard.");
-                Console.WriteLine("Press Ctrl+C to stop the session and remove its owned databases.");
+                Console.WriteLine(persistent is null
+                    ? "Press Ctrl+C to stop the session and remove its owned databases."
+                    : $"Press Ctrl+C or use Stop with -RunId {run.Id}. Stop retains both databases.");
                 if (returnCredentials is not null)
                 {
                     Console.WriteLine($"After opening a delivery in Sales A, open {webUrl}/sales/returns.");
@@ -588,18 +607,24 @@ internal static class App02c1Dev
             else if (c2) await App02c2DevFixture.Verify(run, root, source, apiVersion, apiSha256);
             else await VerifySql(run, root, source, apiVersion, apiSha256);
         }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested && mode == "Interactive") { }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested && mode == "Interactive")
+        {
+            if (failure is not null) throw failure;
+        }
         catch (Exception ex) { failure = ex; throw; }
         finally
         {
             Console.CancelKeyPress -= cancel;
+            await lifetime.CancelAsync();
+            if (monitor is not null) await monitor;
             var cleanupErrors = new List<Exception>();
             await Cleanup(() => Stop(browser));
             await Cleanup(() => Stop(viteProcess));
             await Cleanup(() => Stop(api));
             if (clipboardCredential is not null) await Cleanup(() => CopyCredential(clipboardCredential, clear: true));
-            foreach (string tenant in DemoRun.Tenants)
-                await Cleanup(() => run.RemoveDevSlot(tenant));
+            if (persistent is null)
+                foreach (string tenant in DemoRun.Tenants)
+                    await Cleanup(() => run.RemoveDevSlot(tenant));
             if (cleanupErrors.Count > 0 && failure is null)
                 throw new AggregateException($"C.1 cleanup failed for session {run.Id}.", cleanupErrors);
 
@@ -612,6 +637,21 @@ internal static class App02c1Dev
                     Console.Error.WriteLine($"C.1 cleanup failed for {run.Id}: {ex.Message}");
                 }
             }
+        }
+
+        async Task MonitorPersistentHosts(Process apiHost, Process webHost)
+        {
+            try
+            {
+                var exited = await Task.WhenAny(apiHost.WaitForExitAsync(lifetime.Token), webHost.WaitForExitAsync(lifetime.Token));
+                await exited;
+                if (!lifetime.IsCancellationRequested)
+                {
+                    failure = new InvalidOperationException("The APP-03 API or web host exited unexpectedly.");
+                    await lifetime.CancelAsync();
+                }
+            }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         }
     }
 
@@ -713,7 +753,7 @@ internal static class App02c1Dev
         }
     }
 
-    private static int FreePort()
+    internal static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -731,9 +771,18 @@ internal static class App02c1Dev
         return start;
     }
 
-    private static Process Start(ProcessStartInfo start)
+    private static Process Start(ProcessStartInfo start) => Start(start, null);
+
+    private static Process Start(ProcessStartInfo start, App03ChildJob? job)
     {
         var process = Process.Start(start) ?? throw new InvalidOperationException("C.1 DEV process did not start.");
+        try { job?.Attach(process); }
+        catch
+        {
+            using (process)
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw;
+        }
         process.OutputDataReceived += (_, line) => { if (line.Data is not null) Console.WriteLine(line.Data); };
         process.ErrorDataReceived += (_, line) => { if (line.Data is not null) Console.Error.WriteLine(line.Data); };
         process.BeginOutputReadLine();
