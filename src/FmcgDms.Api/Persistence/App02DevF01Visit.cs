@@ -63,9 +63,9 @@ internal sealed partial class App02c1Service
             if (!await s.OutletMatches(input.CustomerId, input.OutletId)) return Reject(404, "OUTLET_NOT_FOUND");
 
             Guid id = Guid.NewGuid();
-            return Applied(id, () => s.Db.ExecuteAsync(s.Sql("""
-                INSERT dbo.F01Visit(Id,TenantId,ActorId,CommandId,CustomerId,OutletId,Outcome,Reason,Observation)
-                VALUES(@Id,@Tenant,@Actor,@CommandId,@CustomerId,@OutletId,@Outcome,@Reason,@Observation)
+            return Applied(id, () => s.Db.ExecuteAsync(s.Sql($"""
+                INSERT dbo.F01Visit(Id,TenantId,ActorId,CommandId,CustomerId,OutletId,Outcome,Reason,Observation,CompletedAtUtc)
+                VALUES(@Id,@Tenant,@Actor,@CommandId,@CustomerId,@OutletId,@Outcome,@Reason,@Observation,{App02c6Clock.SqlUtcNow})
                 """, new
             {
                 Id = id, s.Tenant, s.Actor, input.CommandId, input.CustomerId, input.OutletId,

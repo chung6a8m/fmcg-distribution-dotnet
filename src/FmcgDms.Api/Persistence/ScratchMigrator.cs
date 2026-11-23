@@ -38,6 +38,11 @@ public static class ScratchMigrator
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
             throughVersion: 202611230006, migrationTag: App02DevF05Schema.Profile);
 
+    public static void MigrateApp03A1(string connectionString, string tenantId, string expectedNonce,
+        LogLevel minimumLogLevel = LogLevel.Information) =>
+        MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
+            throughVersion: App03A1Profile.BaseVersion, app03A1: true);
+
     public static void MigrateDevF07(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
@@ -74,7 +79,8 @@ public static class ScratchMigrator
             throughVersion: 202611220008);
 
     private static void MigrateCore(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion, string? migrationTag = null)
+        LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion, string? migrationTag = null,
+        bool app03A1 = false)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -109,36 +115,63 @@ public static class ScratchMigrator
         if (bound is not null && bound != tenantId)
             throw new InvalidOperationException("DB is already bound to a different tenant.");
 
-        if (migrationTag is not null && bound != tenantId)
+        if ((migrationTag is not null || app03A1) && bound != tenantId)
             throw new InvalidOperationException("A scoped feature upgrade requires an existing tenant binding.");
 
-        var services = new ServiceCollection()
-            .AddLogging(x => x.SetMinimumLevel(minimumLogLevel).AddConsole())
-            .AddFluentMigratorCore()
-            .ConfigureRunner(rb => rb.AddSqlServer().WithGlobalConnectionString(connectionString)
-                .ScanIn(typeof(AppSchema).Assembly).For.Migrations());
-        if (migrationTag is not null)
-            services.Configure<RunnerOptions>(options =>
-            {
-                options.Tags = [migrationTag];
-                options.IncludeUntaggedMigrations = false;
-            });
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
-
-        // The disposable C.1 launcher must be able to prove the tenant binding
-        // before cleanup even if a later feature migration fails.
-        if (bindBeforeFeatureMigrations && bound is null)
+        if (app03A1)
         {
-            runner.MigrateUp(202611150001);
-            BindTenant();
+            // Keep the lock across tag-specific migration transactions on this owned database.
+            conn.Execute("""
+                DECLARE @result int;
+                EXEC @result=sys.sp_getapplock @Resource=N'APP-03.1a migration',
+                    @LockMode='Exclusive', @LockOwner='Session', @LockTimeout=30000;
+                IF @result < 0 THROW 51000, 'Could not lock APP-03.1a migration.', 1;
+                """, commandTimeout: 35);
+            try
+            {
+                App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(), complete: false);
+                foreach (var (tag, version) in App03A1Profile.Features)
+                    Apply(tag, version);
+                App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(), complete: true);
+            }
+            finally
+            {
+                conn.Execute("EXEC sys.sp_releaseapplock @Resource=N'APP-03.1a migration', @LockOwner='Session';");
+            }
+            return;
         }
-        if (throughVersion is long version)
-            runner.MigrateUp(version);
-        else
-            runner.MigrateUp();
+
+        Apply(migrationTag, throughVersion);
         BindTenant();
+
+        void Apply(string? tag, long? version)
+        {
+            var services = new ServiceCollection()
+                .AddLogging(x => x.SetMinimumLevel(minimumLogLevel).AddConsole())
+                .AddFluentMigratorCore()
+                .ConfigureRunner(rb => rb.AddSqlServer().WithGlobalConnectionString(connectionString)
+                    .ScanIn(typeof(AppSchema).Assembly).For.Migrations());
+            if (tag is not null)
+                services.Configure<RunnerOptions>(options =>
+                {
+                    options.Tags = [tag];
+                    options.IncludeUntaggedMigrations = false;
+                });
+            using var provider = services.BuildServiceProvider();
+            using var scope = provider.CreateScope();
+            var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+            // The disposable C.1 launcher must be able to prove the tenant binding
+            // before cleanup even if a later feature migration fails.
+            if (bindBeforeFeatureMigrations && bound is null)
+            {
+                runner.MigrateUp(202611150001);
+                BindTenant();
+            }
+            if (version is long limit)
+                runner.MigrateUp(limit);
+            else
+                runner.MigrateUp();
+        }
 
         void BindTenant()
         {

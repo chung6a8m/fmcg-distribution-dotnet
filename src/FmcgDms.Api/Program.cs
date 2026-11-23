@@ -27,6 +27,10 @@ builder.Services.AddScoped<App02c1Service>();
 builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
+bool app03A1 = App03A1Profile.Enabled(app.Configuration, app.Environment);
+if (app03A1)
+    await App03A1Profile.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(),
+        app.Configuration["App02C1:Nonce"], CancellationToken.None);
 bool app02d1 = App02d1Runtime.Enabled(app.Configuration, app.Environment);
 bool app02d2 = App02d2Runtime.Enabled(app.Configuration, app.Environment);
 if (app02d2)
@@ -78,7 +82,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     if (c1 && app.Configuration.GetValue<bool>("DevF02:Enabled"))
         App02DevF02Routes.Map(app);
     if (app.Configuration.GetValue<bool>("App02C2:Enabled"))
-        App02c2Routes.Map(app, visits);
+        App02c2Routes.Map(app, visits, app03A1);
     if (devF05) App02DevF05Routes.Map(app);
     if (devF06) App02DevF06Routes.Map(app);
     if (devF07) App02DevF07Routes.Map(app);

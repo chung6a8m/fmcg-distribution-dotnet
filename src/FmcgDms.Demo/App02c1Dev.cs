@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dapper;
+using FmcgDms.Api.Persistence;
 using Microsoft.Data.SqlClient;
 
 namespace FmcgDms.Demo;
@@ -37,7 +38,9 @@ internal static class App02c1Dev
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        bool visit = increment == "DevF01";
+        bool integrated = increment == "App03A1";
+        bool verifyUpgrade = integrated && mode == "Verify";
+        bool visit = integrated || increment == "DevF01";
         bool advance = increment == "DevF02";
         bool fefo = increment == "DevF03";
         bool pricing = increment == "DevF04";
@@ -45,7 +48,7 @@ internal static class App02c1Dev
         bool adjustments = increment == "DevF06";
         bool gifts = increment == "DevF07";
         bool refunds = increment == "DevF08";
-        bool returnLane = returns || adjustments || gifts || refunds;
+        bool returnLane = integrated || returns || adjustments || gifts || refunds;
         bool c6 = increment == "App02C6";
         if (c6 && mode != "Verify") throw new ArgumentException("C.6 requires Verify mode.");
         bool d4 = increment == "App02D4";
@@ -58,6 +61,7 @@ internal static class App02c1Dev
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
         string feature = advance ? "DEV-F02" : refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
+        if (integrated) feature = App03A1Profile.Name;
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -116,14 +120,11 @@ internal static class App02c1Dev
                 if (c2) await App02c2DevFixture.Seed(db, tenant, Actor,
                     returnLane ? DevF05Evidence.FixtureUtc : pricing ? DevF04Evidence.FixtureUtc :
                         fefo ? DevF03Evidence.FixtureUtc : acceptance?.InitialTime.UtcDateTime);
-                if (visit)
+                if (visit && !integrated)
                 {
                     FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF01(run.Connection(tenant), tenant, run.Id,
                         Microsoft.Extensions.Logging.LogLevel.Warning);
-                    await db.ExecuteAsync("""
-                        INSERT dbo.F01CustomerScope(TenantId,CustomerId,ActorId)
-                        SELECT TenantId,Id,@Actor FROM dbo.Customer WHERE TenantId=@tenant AND Code=N'C2-FIXTURE'
-                        """, new { tenant, Actor });
+                    await AssignVisitCustomer(db, tenant);
                 }
                 if (advance)
                 {
@@ -151,12 +152,17 @@ internal static class App02c1Dev
                 if (returnLane)
                 {
                     string connection = run.Connection(tenant);
-                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF03(connection, tenant, run.Id,
-                        Microsoft.Extensions.Logging.LogLevel.Warning);
-                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF04(connection, tenant, run.Id,
-                        Microsoft.Extensions.Logging.LogLevel.Warning);
-                    FmcgDms.Api.Persistence.ScratchMigrator.MigrateDevF05(connection, tenant, run.Id,
-                        Microsoft.Extensions.Logging.LogLevel.Warning);
+                    if (integrated && (!verifyUpgrade || tenant == "tenant-b"))
+                    {
+                        ScratchMigrator.MigrateApp03A1(connection, tenant, run.Id, LogLevel.Warning);
+                        await AssignVisitCustomer(db, tenant);
+                    }
+                    else
+                    {
+                        ScratchMigrator.MigrateDevF03(connection, tenant, run.Id, LogLevel.Warning);
+                        ScratchMigrator.MigrateDevF04(connection, tenant, run.Id, LogLevel.Warning);
+                        ScratchMigrator.MigrateDevF05(connection, tenant, run.Id, LogLevel.Warning);
+                    }
                     Guid quarantineId = await DevF05Evidence.Seed(db, tenant, lifetime.Token);
                     if (adjustments)
                     {
@@ -187,7 +193,8 @@ internal static class App02c1Dev
                 "--urls", d4 ? apiUrl : $"http://localhost:{ApiPort}");
             // Only the child API receives the signing key and SQL credentials.
             foreach (string name in apiStart.Environment.Keys.Where(n =>
-                n.StartsWith("App02C6__", StringComparison.OrdinalIgnoreCase)
+                n.StartsWith("App03__", StringComparison.OrdinalIgnoreCase)
+                || n.StartsWith("App02C6__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("App02D1__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("App02D2__", StringComparison.OrdinalIgnoreCase)
                 || n.StartsWith("App02D3__", StringComparison.OrdinalIgnoreCase)
@@ -206,7 +213,8 @@ internal static class App02c1Dev
             apiStart.Environment["SyntheticAuth__Audience"] = "fmcg-synthetic-app00";
             apiStart.Environment["App02Worker__Enabled"] = "false";
             apiStart.Environment["App02C1__Enabled"] = "true";
-            apiStart.Environment["DevF01__Enabled"] = visit ? "true" : "false";
+            apiStart.Environment["DevF01__Enabled"] = visit && !verifyUpgrade ? "true" : "false";
+            if (integrated && !verifyUpgrade) apiStart.Environment["App03__Profile"] = App03A1Profile.Name;
             apiStart.Environment["DevF02__Enabled"] = advance ? "true" : "false";
             apiStart.Environment["DevF03__Enabled"] = fefo || returnLane ? "true" : "false";
             apiStart.Environment["DevF04__Enabled"] = pricing || returnLane ? "true" : "false";
@@ -225,7 +233,7 @@ internal static class App02c1Dev
                 apiStart.Environment[$"TenantDatabases__{tenant}"] = run.Connection(tenant);
             if (fefo || pricing || returnLane)
             {
-                string profile = refunds ? "dev-f08" : gifts ? "dev-f07" : adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";
+                string profile = integrated ? "app03-1a" : refunds ? "dev-f08" : gifts ? "dev-f07" : adjustments ? "dev-f06" : returns ? "dev-f05" : pricing ? "dev-f04" : "dev-f03";
                 DateTime clockTime = returnLane ? DevF05Evidence.FixtureUtc : pricing ? DevF04Evidence.FixtureUtc : DevF03Evidence.FixtureUtc;
                 string clock = Path.Combine(root, "TestResults", profile, run.Id, "clock.utc");
                 Directory.CreateDirectory(Path.GetDirectoryName(clock)!);
@@ -343,6 +351,7 @@ internal static class App02c1Dev
             if (d1Run is not null)
                 await d1Run.Initialize(client, webUrl, lifetime.Token);
             var browserStart = StartInfo("node", web, playwright, "test", "--config",
+                integrated ? "playwright.app03-1a.config.ts" :
                 advance ? "playwright.dev-f02.config.ts" : refunds ? "playwright.dev-f08.config.ts" : gifts ? "playwright.dev-f07.config.ts" : adjustments ? "playwright.dev-f06.config.ts" : returns ? "playwright.dev-f05.config.ts" : pricing ? "playwright.dev-f04.config.ts" : fefo ? "playwright.dev-f03.config.ts" : visit ? "playwright.dev-f01.config.ts" : d4 ? "playwright.app02d4.config.ts" : d3 ? "playwright.app02d3.config.ts" : d2 ? "playwright.app02d2.config.ts" : d1 ? "playwright.app02d1.config.ts" : c6 ? "playwright.app02c6.config.ts" : c5 ? "playwright.app02c5.config.ts" : c4 ? "playwright.app02c4.config.ts" : c3 ? "playwright.app02c3.config.ts" :
                 c2 ? "playwright.app02c2.config.ts" : "playwright.app02c1.config.ts");
             browserStart.Environment["APP02C1_WEB_URL"] = webUrl;
@@ -363,6 +372,30 @@ internal static class App02c1Dev
                 browserStart.Environment["DEV_F05_QA_UNASSIGNED"] = Sign("tenant-a", "case_checker", DevF05Evidence.UnassignedQa);
                 foreach (var (role, credential) in returnCredentials)
                     browserStart.Environment["DEV_F05_" + role.ToUpperInvariant()] = credential;
+            }
+            if (verifyUpgrade)
+            {
+                var evidence = new App03A1Evidence(run, root, Actor);
+                browserStart.Environment["APP03_CHECKPOINTS"] = evidence.DirectoryPath;
+                browser = Start(browserStart);
+                await evidence.Verify(browser, source, apiSha256, async upgrade =>
+                {
+                    await Stop(api);
+                    api = null;
+                    apiStart.Environment["DevF01__Enabled"] = "true";
+                    apiStart.Environment["App03__Profile"] = App03A1Profile.Name;
+                    await App03A1Evidence.ExpectStartupRejection(apiStart, "requires its complete schema", lifetime.Token);
+                    await upgrade();
+                    apiStart.Environment["DevF04__Enabled"] = "false";
+                    await App03A1Evidence.ExpectStartupRejection(apiStart, "requires synthetic auth", lifetime.Token);
+                    apiStart.Environment["DevF04__Enabled"] = "true";
+                    apiStart.Environment["DevF02__Enabled"] = "true";
+                    await App03A1Evidence.ExpectStartupRejection(apiStart, "does not support D", lifetime.Token);
+                    apiStart.Environment["DevF02__Enabled"] = "false";
+                    api = Start(apiStart);
+                    await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
+                }, lifetime.Token);
+                return;
             }
             if (adjustments)
             {
@@ -581,6 +614,11 @@ internal static class App02c1Dev
             }
         }
     }
+
+    internal static Task<int> AssignVisitCustomer(SqlConnection db, string tenant) => db.ExecuteAsync("""
+        INSERT dbo.F01CustomerScope(TenantId,CustomerId,ActorId)
+        SELECT TenantId,Id,@Actor FROM dbo.Customer WHERE TenantId=@tenant AND Code=N'C2-FIXTURE'
+        """, new { tenant, Actor });
 
     private static async Task VerifySql(DemoRun run, string root, string source, string apiVersion, string apiSha256)
     {
