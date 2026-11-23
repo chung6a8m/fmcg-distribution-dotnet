@@ -9,7 +9,7 @@ import { VisitWorkspace } from './VisitWorkspace'
 import { HttpError, readError, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
-type Session = { token: string; identity: Identity & { sales: boolean; warehouse: boolean; visits: boolean } }
+type Session = { token: string; identity: Identity & { sales: boolean; warehouse: boolean; visits: boolean; profile?: string } }
 const sections = [
   { id: 'customers', label: 'Khách hàng và địa chỉ giao', authority: 'sales' },
   { id: 'visits', label: 'Viếng thăm', authority: 'sales' },
@@ -50,8 +50,14 @@ export function SalesWorkspace() {
   return <main className="page c1-page sales-workspace">
     <header className="page-heading c1-header">
       <div><h1>Sales A</h1><p>DEV tổng hợp{session && ' · ' + session.identity.tenantId}</p></div>
-      <div className="button-row"><ThemeSelect /><a className="page-link" href="/sales/mixed-trip">Đối soát Mixed · DEV</a><a className="page-link" href="/sales/b-stock">Kho B · DEV</a>
-        <a className="page-link" href="/sales/b-sale">Bán và giao hàng B · DEV</a>
+      <div className="button-row"><ThemeSelect />
+        {session?.identity.profile === 'APP-03.1a-v1' ? (
+          <a className="page-link" href="/sales/returns">Trả hàng · DEV</a>
+        ) : session && <>
+          <a className="page-link" href="/sales/mixed-trip">Đối soát Mixed · DEV</a>
+          <a className="page-link" href="/sales/b-stock">Kho B · DEV</a>
+          <a className="page-link" href="/sales/b-sale">Bán và giao hàng B · DEV</a>
+        </>}
         {session && <Button onClick={() => setSession(null)}>Đổi phiên DEV</Button>}
       </div>
     </header>

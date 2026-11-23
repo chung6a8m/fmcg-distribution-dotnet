@@ -1,6 +1,6 @@
 # APP-03 — Ứng dụng DEV tích hợp, dùng lại cùng dữ liệu
 
-**Ngày chốt roadmap:** 23/11/2026. **Trạng thái:** `ROADMAP_APPROVED / IMPLEMENTATION_NOT_STARTED`.
+**Ngày chốt roadmap:** 23/11/2026. **Trạng thái triển khai:** xem bảng tại mục 4.
 
 Owner đã đồng ý đề xuất đánh giá lại APP-03 sau DEV-F09 và yêu cầu trực tiếp: **“Tôi đồng ý đề xuất trên, bạn commit roadmap APP-03 vào repo”**. Tài liệu này ghi nhận phạm vi và thứ tự đã thống nhất. Commit ghi roadmap chỉ thay tài liệu; chưa triển khai hoặc nghiệm thu APP-03. Các PR triển khai tiếp theo thực hiện từng increment trong phạm vi synthetic DEV này, giữ review và kiểm chứng theo thay đổi; không cần một vòng hồ sơ vận hành hoặc xác nhận lại cùng phạm vi để bắt đầu.
 
@@ -54,7 +54,7 @@ Mỗi hàng là một PR triển khai độc lập có thay đổi thực chất
 
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
-| APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | NOT_STARTED |
+| APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [IMPLEMENTED](app-03-1a-runtime-schema.md) |
 | APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | NOT_STARTED |
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | NOT_STARTED |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | NOT_STARTED |
@@ -72,6 +72,8 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 **Phạm vi:** bắt đầu bằng A với F03+F04+F05, ghép thêm visit F01 vào cùng cấu hình và schema. Đây là tổ hợp bàn giao đầu tiên; F02/F06–F08 và D được thêm theo nhu cầu increment sở hữu, không quảng bá là đã hỗ trợ chỉ vì route tồn tại. Ghi version của profile/schema và migration cần chạy; kiểm upgrade từ trạng thái DEV tương ứng mà không xóa chứng từ. Có một điểm khởi chạy React+API cho profile mới.
 
 **Nguồn sửa/tái sử dụng:** `src/FmcgDms.Api/Program.cs`, `Persistence/ScratchMigrator.cs`, `src/FmcgDms.Demo/App02c1Dev.cs`, các cấu hình tenant/profile và runner liên quan. Có thể tách phần điều phối mới thành file nhỏ; không sao chép business command của C/F.
+
+[Profile v1, launcher, migration và kịch bản kiểm chứng](app-03-1a-runtime-schema.md).
 
 **Hoàn tất:**
 

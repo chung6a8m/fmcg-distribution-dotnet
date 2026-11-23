@@ -7,7 +7,11 @@ using Microsoft.Data.SqlClient;
 namespace FmcgDms.Api.Persistence;
 
 public sealed record C2Option(Guid Id, string Label);
-public sealed record C2Identity(string TenantId, string ActorId, string SessionId, bool Sales, bool Warehouse, bool Visits = false);
+public sealed record C2Identity(string TenantId, string ActorId, string SessionId, bool Sales, bool Warehouse, bool Visits = false)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Profile { get; init; }
+}
 public sealed record C2Catalog(IReadOnlyList<C2Option> Customers, IReadOnlyList<C2Option> Trips,
     IReadOnlyList<C2Option> Skus, IReadOnlyList<C2Option> Warehouses,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<F03UnitView>? Units = null);

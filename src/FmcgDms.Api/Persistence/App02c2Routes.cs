@@ -4,7 +4,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App02c2Routes
 {
-    public static void Map(WebApplication app, bool visits)
+    public static void Map(WebApplication app, bool visits, bool app03A1)
     {
         var routes = app.MapGroup("/api/synthetic/app02c2").RequireAuthorization();
         routes.AddEndpointFilter(async (context, next) =>
@@ -15,7 +15,7 @@ internal static class App02c2Routes
         routes.MapGet("/catalog", async (ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
             Results.Ok(await service.CatalogC2(user, ct)));
         routes.MapGet("/session", async (ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
-            Results.Ok((await service.IdentityC2(user, ct)) with { Visits = visits }));
+            Results.Ok((await service.IdentityC2(user, ct)) with { Visits = visits, Profile = app03A1 ? App03A1Profile.Name : null }));
         routes.MapGet("/orders", async (ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
             Results.Ok(await service.OrdersC2(user, ct)));
         routes.MapGet("/commands/{id:guid}", async (Guid id, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
