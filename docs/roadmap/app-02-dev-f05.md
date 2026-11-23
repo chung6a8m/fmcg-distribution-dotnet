@@ -12,3 +12,16 @@ Fixture v1 gồm A source SKU R-05, base EA bước 1, 2 EA tại MAIN cost 6667
 | F05-04 | Đồng thời với cùng hoặc hai identity không thể vượt Delivery, lot, nhận, hay release hai lần. Partial qua hai case giữ cùng source cost. |
 
 UI `/sales/returns` và synthetic API `/api/synthetic/dev-f05`. SQL lưu cạnh nguồn hiện hành và stock ledger. Mỗi case hiện hành có đường đọc lại trạng thái. Hồ sơ kỳ khóa và điều chỉnh thuộc DEV-F06. Quà và waiver, refund thực thuộc F07/F08.
+
+## Biên nhận DEV
+
+Ngày 23/11/2026, fixture v1 chạy Chromium vào UI, API và LocalDB synthetic. Run `66323b88cca44cfda86ae3e0b1a58034` tại source `ef9bb8895e8f203d720fc49e57c8f839a51f5b72`, tree `1c455bf92f2610afe0dd9963b45d2c66b27d80d2`. Chromium 1/1, .NET Release 351/351. SQL khớp 6 checkpoint, ảnh tồn và giá vốn cuối, 2 bộ stage/ledger và tenant đối chứng. Sau hai release, MAIN 2 EA / 6.667 VND, QA 0 EA, COGS 0 VND, AR 20.000 VND. Mỗi case giữ chứng từ của Sales, kho nhận, Finance và QA. Browser còn kiểm lượng đếm sai, QA chưa được phân công, tranh chấp lượng trả cuối, chéo tenant và replay.
+
+| Artifact | Giá trị |
+| --- | --- |
+| Browser fixture SHA-256 | `A0A47CB37C0089E173E64D58A71FFD26B2A4A4AED80B3A7EF8F0AABA67D4B26B` |
+| JUnit SHA-256 | `4DC362B1497BA2AACF8EBA99BF55FBD202785879E04FB2EB772313CB31959757` |
+| SQL result SHA-256 | `A89F567A42FEC45510FF0868CD3F561FCA9A46F84BEB2943DF172DA6A3720553` |
+| API DLL SHA-256 | `4F24AB05C3524D462F04FBD1C3112DF13ED6677046BAB975551D538B0EBD5884` |
+
+Tái chạy bằng `./scripts/Run-App02C1.ps1 -Increment DevF05 -Verify`. Kết quả nằm tại `TestResults/dev-f05/<run>/sql-result.json` và `web/test-results-app02c5/<run>/junit.xml`. Fixture sử dụng SQL LocalDB do nonce sở hữu. Kho với hàng thật, chấp nhận vật lý và tenant go-live chưa kiểm.
