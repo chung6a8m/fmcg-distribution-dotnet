@@ -45,7 +45,7 @@ public sealed partial class App01a2CommandService
         return ExecuteAsync(principal, key, "F05_" + input.Action,
             [("Request", JsonSerializer.Serialize(input, C1Validation.Json))],
             (db, tx, tenant, actor, command, token) => ApplyReturn(db, tx, tenant, actor, command,
-                key.SourceNumber, input, token), ct, role, isF05Return: true);
+                key.SourceNumber, input, connections.UsesDevF06, token), ct, role, isF05Return: true);
     }
 
     public Task<F05Identity> ReturnIdentity(ClaimsPrincipal principal, CancellationToken ct) =>
@@ -93,14 +93,7 @@ public sealed partial class App01a2CommandService
         ReadF05<BusinessCommandOutcome?>(principal, async (db, tx, tenant, actor, _) =>
         {
             var key = ReturnKey(principal, id);
-            var result = await db.QuerySingleOrDefaultAsync<F05Stored>(Sql("""
-                SELECT b.Status,b.OutcomeCode,b.ReasonCode,s.Id AS SourceId,scope.RoleCode
-                FROM dbo.BusinessCommand b
-                JOIN dbo.C2CommandScope scope ON scope.TenantId=b.TenantId AND scope.CommandRowId=b.Id AND scope.IsF05Return=1
-                LEFT JOIN dbo.BusinessSource s ON s.TenantId=b.TenantId AND s.BusinessCommandId=b.Id
-                WHERE b.TenantId=@Tenant AND b.ActorId=@Actor AND b.ProducerId=@ProducerId AND b.CommandId=@CommandId
-                    AND b.Status IN ('APPLIED','REJECTED')
-                """, new { Tenant = tenant, Actor = actor, key.ProducerId, key.CommandId }, tx, ct));
+            var result = await FindReturnCommandOutcome(db, tx, tenant, actor, key, ct);
             if (result is null) return null;
             if (!principal.HasClaim("synthetic_role", result.RoleCode))
                 throw new UnauthorizedAccessException("Return command role no longer assigned.");
@@ -115,8 +108,20 @@ public sealed partial class App01a2CommandService
             return new BusinessCommandOutcome(result.Status, result.OutcomeCode, result.ReasonCode, true, result.SourceId);
         }, ct);
 
+    private static Task<F05Stored?> FindReturnCommandOutcome(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, C2CommandKey key, CancellationToken ct) =>
+        db.QuerySingleOrDefaultAsync<F05Stored>(Sql("""
+            SELECT b.Status,b.OutcomeCode,b.ReasonCode,s.Id AS SourceId,scope.RoleCode
+            FROM dbo.BusinessCommand b
+            JOIN dbo.C2CommandScope scope ON scope.TenantId=b.TenantId AND scope.CommandRowId=b.Id AND scope.IsF05Return=1
+            LEFT JOIN dbo.BusinessSource s ON s.TenantId=b.TenantId AND s.BusinessCommandId=b.Id
+            WHERE b.TenantId=@Tenant AND b.ActorId=@Actor AND b.ProducerId=@ProducerId AND b.CommandId=@CommandId
+                AND b.Status IN ('APPLIED','REJECTED')
+            """, new { Tenant = tenant, Actor = actor, key.ProducerId, key.CommandId }, tx, ct));
+
     private async Task<T> ReadF05<T>(ClaimsPrincipal principal,
-        Func<SqlConnection, SqlTransaction, string, string, string, Task<T>> read, CancellationToken ct)
+        Func<SqlConnection, SqlTransaction, string, string, string, Task<T>> read, CancellationToken ct,
+        IReadOnlyList<string>? roles = null)
     {
         if (!connections.UsesDevF05) throw new UnauthorizedAccessException("DEV-F05 disabled.");
         string tenant = App02a3Sql.Tenant(principal);
@@ -126,7 +131,7 @@ public sealed partial class App01a2CommandService
         var active = (await db.QueryAsync<string>(Sql("""
             SELECT RoleCode FROM dbo.App02ActorRoleGrant WHERE TenantId=@Tenant AND ActorId=@Actor AND IsActive=1
             """, new { Tenant = tenant, Actor = actor }, tx, ct))).ToHashSet(StringComparer.Ordinal);
-        string role = ReturnRoles.FirstOrDefault(role => active.Contains(role) && principal.HasClaim("synthetic_role", role))
+        string role = (roles ?? ReturnRoles).FirstOrDefault(role => active.Contains(role) && principal.HasClaim("synthetic_role", role))
             ?? throw new UnauthorizedAccessException("Current returns role required.");
         var result = await read(db, tx, tenant, actor, role);
         await tx.CommitAsync(ct);
@@ -178,7 +183,7 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Delivery = delivery, Lot = lot }, tx, ct));
 
     private static async Task<BusinessCommandOutcome> ApplyReturn(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid command, string sourceNumber, F05Command input, CancellationToken ct)
+        string tenant, string actor, Guid command, string sourceNumber, F05Command input, bool correction, CancellationToken ct)
     {
         string? reason = C1Validation.Text(input.Reason, 200);
         if (reason is null) return BusinessCommandOutcome.Rejected("F05_FIELDS_INVALID");
@@ -231,7 +236,14 @@ public sealed partial class App01a2CommandService
                 if (!stages.ContainsKey("APPROVE")) return BusinessCommandOutcome.Rejected("F05_APPROVAL_REQUIRED");
                 DateTime date = await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {LotBusinessDate}", null, tx, ct));
                 if (date > source.ExpiresOn) return BusinessCommandOutcome.Rejected("F05_LOT_EXPIRED");
-                if (date.Year != source.BusinessDate.Year || date.Month != source.BusinessDate.Month)
+                long basis = (long)source.Cost;
+                if (correction)
+                {
+                    var (effective, error) = await ReturnCostForPeriod(db, tx, tenant, source, date, ct);
+                    if (error is not null) return BusinessCommandOutcome.Rejected(error);
+                    basis = effective;
+                }
+                else if (MonthStart(date) != MonthStart(source.BusinessDate))
                     return BusinessCommandOutcome.Rejected("F05_PERIOD_REVIEW_REQUIRED");
                 await App02a3Sql.Lock(db, tx, $"DEVF03:RESERVE:{source.SkuId:N}:{source.WarehouseId:N}", ct);
                 decimal previous = await db.ExecuteScalarAsync<decimal>(Sql("""
@@ -239,7 +251,7 @@ public sealed partial class App01a2CommandService
                         ON s.TenantId=r.TenantId AND s.CaseId=r.Id AND s.Stage='RELEASE'
                     WHERE r.TenantId=@Tenant AND r.DeliveryId=@DeliveryId
                     """, new { Tenant = tenant, source.DeliveryId }, tx, ct));
-                cost = F04Pricing.Portion((long)source.Cost, (long)source.Cost, source.Issued, previous, item.Quantity).Net;
+                cost = F04Pricing.Portion(basis, basis, source.Issued, previous, item.Quantity).Net;
                 destination = source.WarehouseId;
 
                 var stock = await db.QuerySingleOrDefaultAsync<F05Stock>(Sql("""
