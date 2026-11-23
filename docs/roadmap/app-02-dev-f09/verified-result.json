@@ -1,0 +1,62 @@
+{
+  "schema": "DEV_F09_VERIFIED_RESULT_V1",
+  "status": "PASS_WITH_D4_RERUN",
+  "source": "8118bca0a4fdcddf03a5344e33852d1d593ce374",
+  "tree": "d9f6dd48f01b86bbd57a9bfdf79b1546a8082ba8",
+  "reviewSource": "072e4e9541ba1e4adfb743237e2340b2d026a457",
+  "runId": "7c897b59ba0e47faa76089f8048b6258",
+  "d4RerunId": "6e0e4e9b577241699da1c76915eb7aae",
+  "foundationActual": 175.0,
+  "foundationExpected": 175,
+  "functionalActual": 8,
+  "functionalExpected": 8,
+  "chromiumActual": 29.0,
+  "chromiumExpected": 29,
+  "dotnetActual": 352,
+  "dotnetExpected": 352,
+  "catalog": {
+    "before": 36,
+    "after": 36,
+    "matches": true
+  },
+  "d4Catalog": {
+    "matches": true,
+    "after": 36,
+    "before": 36
+  },
+  "environment": "SYNTHETIC_NONPRODUCTION Windows LocalDB",
+  "evidence": [
+    {
+      "sha256": "BC22F8E002CE0FC8B3A75407D0C0BD03A2E7972D2000FB366186D26C17E16E8F",
+      "file": "integrated-attempt.json"
+    },
+    {
+      "sha256": "37E214A4B24AE9D40BA044233ABB3D4BBDA156AF8749647A9918096ACFC92BD9",
+      "file": "d4-targeted-rerun.json"
+    }
+  ],
+  "firstAttempt": {
+    "runId": "eabb060d824642e4a5a39556236a32ca",
+    "source": "6577acff8b46c5c392ae4733e7833ff99b8be747",
+    "status": "FAIL",
+    "error": "F01/F02 receipt property casing and concurrent LocalDB catalog change",
+    "sha256": "293365CF330E1517264CCCFF4C55F0EC66DEE59CB35107B26103C4D1F28E6135",
+    "catalog": {
+      "before": 38,
+      "after": 36,
+      "matches": false
+    }
+  },
+  "d4Failure": {
+    "symptom": "HTTP 503 ACCOUNTING_ACK_UNKNOWN during D4-12 concurrent posting",
+    "cases": [
+      {
+        "caseId": "D4-12",
+        "tenant": "tenant-a",
+        "status": "FAIL"
+      }
+    ],
+    "runId": "eda50e5f1d384b68a39f383d94903607",
+    "sqlSha256": "4B02DE27F968306C27A4D917E68D4578EE6ED058DA6E6F61696C4F5A3B566BC3"
+  }
+}
