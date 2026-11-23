@@ -10,7 +10,7 @@ namespace FmcgDms.Demo;
 
 internal sealed partial class App02d4Dev
 {
-    private sealed record FixtureSource(DateTimeOffset OccurredAt, decimal Quantity, decimal Gross, decimal Ar, decimal Cost);
+    private sealed record FixtureSource(DateTimeOffset OccurredAt, DateTimeOffset RecordedAt, decimal Quantity, decimal Gross, decimal Ar, decimal Cost);
 
     private async Task<SqlConnection> Owner(string tenant)
     {
@@ -133,13 +133,15 @@ internal sealed partial class App02d4Dev
             await PermissionDenied(app, "UPDATE d4app.AccountingCorrection SET Gross=0 WHERE 1=0", "app cannot change frozen correction delta");
         }
 
-        var values = (await oracleDb.QueryAsync<FixtureSource>("SELECT OccurredAt,Quantity,Gross,Ar,Cost FROM d4app.CommittedSource ORDER BY OccurredAt")).ToArray();
+        var values = (await oracleDb.QueryAsync<FixtureSource>("SELECT OccurredAt,RecordedAt,Quantity,Gross,Ar,Cost FROM d4app.CommittedSource ORDER BY OccurredAt")).ToArray();
         Equal("fixture delivery count", values.Length, 3);
         int i = 0;
         foreach (var expected in fixture.GetProperty("deliveries").EnumerateArray())
         {
             var fact = values[i++];
-            Equal("source time", fact.OccurredAt, expected.GetProperty("occurredUtc").GetDateTimeOffset());
+            var occurredAt = expected.GetProperty("occurredUtc").GetDateTimeOffset();
+            Equal($"source time {fact.Quantity}", fact.OccurredAt, occurredAt);
+            Equal($"synchronous fixture recording time {fact.Quantity}", fact.RecordedAt, occurredAt);
             Amount(expected.GetProperty("key").GetString()!, [fact.Quantity, fact.Gross, fact.Ar, fact.Cost],
                 expected.GetProperty("key").GetString()!);
         }
