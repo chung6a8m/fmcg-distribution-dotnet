@@ -13,14 +13,14 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Start
 | `receiver` | Sau khi chuyến hết tiền thực giữ và đề nghị chờ nhận, trả tồn xe. Dùng **Trả hàng** để nhận hàng khách trả vào cách ly và **Quà khuyến mại** để ghi thực nhận quà theo lần giao quà gốc. |
 | `finance`, `qa` | Mở cùng hồ sơ trả hàng để duyệt và giải phóng hàng theo phân công. Kế toán có thể phát ứng, duyệt chi và duyệt đề nghị miễn thu hồi quà trong sổ nguồn tương ứng. |
 
-Màn hình hiển thị VND cho các khoản của chuyến. Sổ tạm ứng F02 theo nhân viên và chứng từ, tách khỏi tiền khách, tiền thực giữ, quỹ đã nhận và công nợ. Khi mất phản hồi, dùng **Tra cứu yêu cầu** hoặc **Gửi lại cùng yêu cầu**. Khi kết nối lại, kiểm tra chuyến và đề nghị đang chọn trước khi ghi tiếp.
+Màn hình hiển thị VND cho các khoản của chuyến. Sổ tạm ứng F02 theo nhân viên và chứng từ, tách khỏi tiền khách, tiền thực giữ, quỹ đã nhận và công nợ. Khi mất phản hồi, dùng **Tra cứu yêu cầu** hoặc **Gửi lại cùng yêu cầu**. **Tải lại danh sách chuyến** cập nhật toàn bộ đề nghị chờ nhận và giữ chuyến đang xem. Khi kết nối lại, màn hình khóa lệnh mới cho đến khi tải thành công danh sách và số liệu chuyến đang chọn. Nếu tải lỗi, có thể tải lại danh sách hoặc tra cứu và gửi lại lệnh đã lưu.
 
 ## Tổ hợp DEV và nguồn dữ liệu
 
 - `APP-03.6-v1` ghép C.1–C.5, D.1–D.3 và F01/F02/F03/F04/F05/F07 trên hai database LocalDB của cùng phiên. Start dùng profile này. Resume và NextDay nâng phiên dùng bootstrap .2–.5 sau khi xác minh instance, tên, tenant binding, ownership marker và nonce của cả hai database. Phiên seed .1b tiếp tục dùng A/F. Migration `202611240002` ghi nguồn lô trả xe và mốc cài bootstrap phân công. Bootstrap chỉ bổ sung danh tính, phân công, chương trình quà và tồn mở giả lập. Chương trình DEV cấp 1 quà cho mỗi 2 EA mua ròng của SKU R-05.
 - Offer ghi đề nghị, giữ nguyên custody và fund. Accept dùng số tiền do thủ quỹ được phân công kiểm đếm, kiểm khớp đề nghị và người gửi độc lập, rồi ghi chứng cứ, trừ custody và tăng fund trong cùng transaction. D.3 giữ đúng tiền VND của A/F04 và B/F04 trong profile này.
 - Trả tồn xe đọc nguồn nạp, giao và quyền giữ của chuyến. Hàng A trả về kho vẫn thuộc quyền giữ A. Lô trả gắn với dòng nạp và được hiển thị trong dấu vết lô của đơn. Quota B chưa tiêu thụ được giải phóng, kể cả quota chưa nạp. Xe dùng lại giữ lượng của chuyến khác. Warehouse return dùng cùng kho nguồn trong một chuyến và giữ chuyến ở `RECONCILING`. Chuyến đã giao hết vẫn có thể bàn giao để đối soát khi tiền đã nộp. Điều kiện đóng chuyến cuối nằm ở mốc sau.
-- Hồ sơ khách trả gắn delivery và lô F05. Hàng nhận vào quarantine qua các bước kiểm đếm, duyệt và QA của đúng hồ sơ. F07 theo dõi quà cấp/nhận từ nguồn mua A đủ điều kiện và đề nghị miễn thu hồi. F02 giữ riêng khoản ứng, chứng từ chi và hoàn ứng.
+- Hồ sơ khách trả gắn delivery và lô F05. Hàng nhận vào quarantine qua các bước kiểm đếm, duyệt và QA của đúng hồ sơ. F07 theo dõi quà cấp/nhận từ nguồn mua A đủ điều kiện và đề nghị miễn thu hồi. Danh mục và lệnh tạo/xác nhận đơn A cùng loại SKU quà khỏi hàng bán. F02 giữ riêng khoản ứng, chứng từ chi và hoàn ứng.
 - Tổ hợp B kế thừa giá, quota, tiền mặt VND và SKU không quản lý lô của .5. B_NO_CHANNEL, ghi offline, F06, F08, D.4 và worker giữ ranh giới increment tương ứng. Nghiệm thu thiết bị và vận hành thuộc các mốc riêng.
 
 ## Kiểm chứng
@@ -49,3 +49,15 @@ Hồi quy local qua APP-03.5 (run `3e4f62d87c2948948bd8efe0ed69af0b`) và D.3 đ
 | `sql-review.json` | `B41863D101722773D3E18D2A8248A779C7B0496AEAED94D9709968DC717EE100` |
 | `vehicle-reuse.json` | `8B931A45A65B0F7E43D2F8DE79B686BE1060AEC2878FC1775788A8425F17920B` |
 | `quota-only.json` | `1458A3914E2DC0DE25EBCB82934D456834A2EF5A77002DC47F8AA7FB43416D0A` |
+
+### Kiểm chứng sau review PR #140
+
+- Run `ee34e5079ae84728a6ebf66d71511c70` qua Chromium và LocalDB hai tenant. Thủ quỹ giữ chuyến đang xem khi tải lại, thấy đề nghị của chuyến khác xuất hiện sau Offer và biến mất sau Accept. Bài hồi quy trình duyệt mô phỏng tải chậm, lỗi tải danh sách và lỗi tải chi tiết khi xác minh lại. Màn hình khóa lệnh mới, giữ mã lệnh chờ cho tra cứu và mở lại thao tác khi số liệu mới đã tải thành công.
+- Gọi API tạo đơn trực tiếp bằng `GiftSkuId` thực của chương trình F07 trả `C2_SKU_INVALID`. Ảnh dòng SQL trước và sau ở hai tenant giữ nguyên cho bản nháp, đơn, quyền giữ, nguồn và sổ. Luồng SKU bán A và giao/nhận quà vẫn qua trong cùng kịch bản.
+
+Hồi quy APP-03.2 và vòng đời .1b qua với profile .6 (run `9d418641ca95418aa18feb583896f94d`). Bài thử lại NextDay qua launcher dùng cùng profile với phiên đang kiểm, và ảnh dòng bao gồm phân công thủ quỹ cùng mốc bootstrap. D.3 độc lập qua (run `1f5eb3146bca47e59cb61a057bd8f49d`). Bộ .NET đạt 352/352. Playwright tổng đạt 57 bài, với một bài cài PWA standalone bỏ qua theo cấu hình local.
+
+| Artifact trong thư mục run | SHA-256 |
+| --- | --- |
+| `junit.xml` | `384AB397B603B0A4F97AAB0C2F351C26065F334F2485E47205EE81ABB00961A9` |
+| `gift-only-draft.json` | `187A4472F0DED9EF69FB509F1F4C331B9970777FF0799ACFCEA8EBE56A3BD6DE` |

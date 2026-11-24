@@ -172,10 +172,12 @@ internal static class App03DevSessionEvidence
             Ensure(tenantA == new DayBalance(3, 0, 0, 64000, 3)
                 && tenantB == new DayBalance(3, 6, 20001, 0, 0), "Incorrect shared MAIN balance or tenant isolation.");
             await Stop();
-            var beforeRetry = await DevF01Evidence.Capture(run, [.. Tables, "Trip", "C3TripWriter", "C4DeliveryWriter"]);
+            string[] rolloverTables = [.. Tables, "Trip", "C3TripWriter", "C4DeliveryWriter",
+                "D3CashierTrip", "App03SettlementDay"];
+            var beforeRetry = await DevF01Evidence.Capture(run, rolloverTables);
             await RunScript(Path.Combine(root, "scripts", "Run-App03Dev.ps1"), run.Id, ct,
                 "NextDay", "-BusinessDate", "2026-11-24");
-            var afterRetry = await DevF01Evidence.Capture(run, [.. Tables, "Trip", "C3TripWriter", "C4DeliveryWriter"]);
+            var afterRetry = await DevF01Evidence.Capture(run, rolloverTables);
             Ensure(beforeRetry.SequenceEqual(afterRetry),
                 "Retrying the completed date changed trips or business rows.");
             await Reject(() => Advance(date.AddDays(-1)), "next date");
@@ -287,7 +289,8 @@ internal static class App03DevSessionEvidence
         }
 
         Task RunOperation(string operation) => App03DevSession.Run(operation, root, source, run.Id);
-        Task Advance(DateOnly date) => App03DevSession.Run("NextDay", root, source, run.Id, businessDate: date);
+        Task Advance(DateOnly date) =>
+            App03DevSession.Run("NextDay", root, source, run.Id, businessDate: date, settlement: true);
 
         async Task<App03DevHost> Open(string operation)
         {
@@ -296,7 +299,7 @@ internal static class App03DevSessionEvidence
             {
                 ready.SetResult(host);
                 return Task.CompletedTask;
-            });
+            }, settlement: true);
             if (await Task.WhenAny(ready.Task, hostTask).WaitAsync(ct) == hostTask) await hostTask;
             return await ready.Task.WaitAsync(ct);
         }

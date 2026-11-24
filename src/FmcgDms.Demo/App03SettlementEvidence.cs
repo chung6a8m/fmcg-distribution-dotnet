@@ -11,6 +11,35 @@ internal static partial class App03SettlementEvidence
 {
     private const string D3 = "/api/synthetic/app02d3";
 
+    internal static async Task CheckGiftOnlyDraft(DemoRun run, App03DevHost host, Guid trip, string output,
+        CancellationToken ct)
+    {
+        const string tenant = "tenant-a";
+        await run.Verify(tenant, app03Session: true);
+        await run.Verify("tenant-b", app03Session: true);
+        await using var db = new SqlConnection(run.Connection(tenant));
+        var offer = await db.QuerySingleAsync<(Guid Sku, Guid Customer, Guid Selection)>(new CommandDefinition("""
+            SELECT p.GiftSkuId,b.CustomerId,b.SelectionId FROM dbo.F07Program p
+            JOIN dbo.D2ShipToBinding b ON b.TenantId=p.TenantId
+            WHERE p.TenantId=@tenant;
+            """, new { tenant }, cancellationToken: ct));
+        string[] tables = ["BusinessSource", "BusinessSourceLine", "C2OrderDraft", "C2OrderDraftLine",
+            "F03DraftQuantity", "AOrder", "AOrderLine", "StockRight", "LedgerEffect"];
+        var before = await DevF01Evidence.Capture(run, tables);
+        var payload = new C2DraftInput(Guid.NewGuid(), offer.Customer, trip, offer.Selection, [new(offer.Sku, 1)]);
+        using var request = new HttpRequestMessage(HttpMethod.Post, host.WebUrl + "/api/synthetic/app02c2/drafts");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", host.SourceToken);
+        request.Content = JsonContent.Create(payload);
+        using var response = await host.Client.SendAsync(request, ct);
+        var result = await response.Content.ReadFromJsonAsync<BusinessCommandOutcome>(cancellationToken: ct);
+        var after = await DevF01Evidence.Capture(run, tables);
+        if (response.StatusCode != System.Net.HttpStatusCode.UnprocessableEntity ||
+            result is not { Status: "REJECTED", ReasonCode: "C2_SKU_INVALID", SourceId: null } ||
+            !before.SequenceEqual(after))
+            throw new InvalidOperationException($"Gift-only SKU was not rejected without business effects: {response.StatusCode}, {result}.");
+        await Save("gift-only-draft", new { payload, result, before, after }, output, ct);
+    }
+
     internal static async Task Review(DemoRun run, App03DevHost host, string output, string source,
         App03FieldEvidence.UpgradeReview upgrade, CancellationToken ct)
     {

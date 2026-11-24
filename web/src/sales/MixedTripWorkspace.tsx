@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
@@ -104,42 +104,68 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
   const [session, setSession] = useState<Session | null>(null)
   const [trip, setTrip] = useState('')
   const [report, setReport] = useState<Report | null>(null)
-  const [pending, setPending] = useState<Command | null>(null)
+  const [pending, setPending] = useState<Command | null>(() =>
+    workspaceSession ? restore(workspaceSession.identity) : null)
   const [busy, setBusy] = useState(false)
   const [source, setSource] = useState('')
   const [notice, setNotice] = useState('')
   const active = useRef(false)
   const [reload, setReload] = useState(0)
-  const entryTrip = useRef(startTrip)
+  const entryTrip = useRef(pending?.tripId ?? startTrip)
   const reportRequest = useRef(0)
+  const validatedReport = useRef<{ request: number; data: Report | null } | null>(null)
+  const [queueState, setQueueState] = useState<'loading' | 'ready' | 'invalid'>('loading')
+  const [queueNotice, setQueueNotice] = useState('')
   const online = useSyncExternalStore(watchOnline, () => navigator.onLine)
   const blocked = busy || !online
+  const selectingBlocked = blocked || (integrated && queueState !== 'ready')
+  const writesBlocked = selectingBlocked || pending !== null
+
+  const refreshQueue = useCallback(() => {
+    reportRequest.current++
+    setQueueState('loading')
+    setQueueNotice('')
+    setReload(value => value + 1)
+  }, [])
+
+  useEffect(() => {
+    if (integrated) return watchOnline(refreshQueue)
+  }, [integrated, refreshQueue])
 
   useEffect(() => {
     if (!workspaceSession || !online) return
-    let current = true
-    const identity = workspaceSession.identity
-    const saved = restore(identity)
-    setPending(saved)
-    async function load(token: string) {
-      const id = ++reportRequest.current
-      const trips = await read<Trip[]>(token, '/trips')
-      if (!current || id !== reportRequest.current) return
-      const requested = saved?.tripId || entryTrip.current
-      const selection = requested ? trips.find(item => item.tripId === requested) : trips[0]
-      setSession({ ...workspaceSession!, trips })
+    const currentSession = workspaceSession
+    const request = ++reportRequest.current
+    const current = () => request === reportRequest.current && navigator.onLine
+
+    async function load() {
+      const trips = await read<Trip[]>(currentSession.token, '/trips')
+      if (!current()) return
+      const requested = entryTrip.current
+      const selection = requested === undefined ? trips[0] : trips.find(item => item.tripId === requested)
+      const next = selection
+        ? await read<Report>(currentSession.token, '/trips/' + encodeURIComponent(selection.tripId))
+        : null
+      if (!current()) return
+      if (next && next.tripId !== selection?.tripId) throw new Error('Unexpected trip report')
+
+      if (selection) entryTrip.current = selection.tripId
+      setSession({ ...currentSession, trips })
       setTrip(selection?.tripId ?? '')
-      setReport(null)
-      setNotice(trips.length ? '' : 'Phiên này chưa được phân công chuyến.')
-      if (selection) {
-        const report = await read<Report>(token, '/trips/' + selection.tripId)
-        if (current && id === reportRequest.current) setReport(report)
-      }
+      setReport(next)
+      validatedReport.current = { request, data: next }
+      setQueueState('ready')
+      setQueueNotice(trips.length ? '' : 'Phiên này chưa được phân công chuyến.')
     }
-    void load(workspaceSession.token).catch(error => {
-      if (current) setNotice(failure(error, false))
+
+    void load().catch(error => {
+      if (!current()) return
+      setQueueState('invalid')
+      setQueueNotice(failure(error, false))
     })
-    return () => { current = false }
+    return () => {
+      if (request === reportRequest.current) reportRequest.current++
+    }
   }, [workspaceSession, online, reload])
 
   async function work(operation: () => Promise<void>) {
@@ -161,6 +187,8 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
     if (id) {
       const next = await read<Report>(current.token, '/trips/' + encodeURIComponent(id))
       if (request !== reportRequest.current) return
+      if (next.tripId !== id) throw new Error('Unexpected trip report')
+      validatedReport.current = { request, data: next }
       setReport(next)
       setSession(previous => previous && { ...previous, trips: previous.trips.map(item =>
         item.tripId === id ? { ...item, pendingOfferAmount: next.pendingOfferAmount ?? undefined } : item) })
@@ -168,7 +196,7 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
   }
 
   function chooseTrip(id: string) {
-    if (!session) return
+    if (!session || selectingBlocked) return
     setSource('')
     setNotice('')
     entryTrip.current = id
@@ -195,8 +223,9 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
   }
 
   function resolve(command: Command, lookup: boolean, fresh = false) {
-    if (!session) return
-    const { token, identity } = session
+    const current = workspaceSession ?? session
+    if (!current) return
+    const { token, identity } = current
     void work(async () => {
       if (!lookup) {
         rememberPending(pendingKey(identity), command)
@@ -227,10 +256,15 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
           ? result.outcomeCode === 'TRIP_HANDOFF_RECONCILING' ? 'Đã ghi bàn giao chuyến để đối soát.' : disposition[command.kind]
           : rejection[result.reasonCode ?? ''] ?? 'Yêu cầu bị từ chối' + (result.reasonCode ? ' · ' + result.reasonCode : '.')
         if (result.sourceId) setSource(result.sourceId)
-        try {
-          await showTrip(session, command.tripId)
+        if (integrated) {
+          refreshQueue()
           setNotice(message)
-        } catch { setNotice(message + ' Hãy tải lại số liệu chuyến.') }
+        } else if (session) {
+          try {
+            await showTrip(session, command.tripId)
+            setNotice(message)
+          } catch { setNotice(message + ' Hãy tải lại số liệu chuyến.') }
+        }
       } catch (error) {
         if (fresh && error instanceof HttpError && [401, 403].includes(error.status)) {
           forgetPending(pendingKey(identity), command.commandId)
@@ -243,7 +277,9 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
 
   function submit(event: FormEvent<HTMLFormElement>, kind: Kind) {
     event.preventDefault()
-    if (!session || !report || report.tripId !== trip || pending || active.current || !navigator.onLine) return
+    if (!session || !report || report.tripId !== trip || writesBlocked || active.current || !navigator.onLine ||
+        (integrated && (validatedReport.current?.request !== reportRequest.current ||
+          validatedReport.current.data !== report))) return
     const base = {
       producerId: session.identity.actorId, commandId: crypto.randomUUID(),
       sourceNumber: crypto.randomUUID(), tripId: report.tripId,
@@ -281,14 +317,14 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
       <div><h1>Đối soát chuyến Mixed</h1><p>Windows LocalDB · DEV</p></div>
       <div className="button-row"><ThemeSelect /><a className="page-link" href="/sales">Workspace Sales</a></div>
     </header>}
-    {!session ? integrated ? <Button disabled={blocked} onClick={() => setReload(value => value + 1)}>Tải danh sách chuyến</Button> : <form className="panel panel-content sales-filter" onSubmit={connect}>
+    {!session ? integrated ? <Button disabled={blocked || queueState === 'loading'} onClick={refreshQueue}>Tải lại danh sách chuyến</Button> : <form className="panel panel-content sales-filter" onSubmit={connect}>
       <Field name="token" label="Mã truy cập DEV" type="password" autoComplete="off" required />
       <Button type="submit" variant="primary" disabled={blocked}>Kết nối</Button>
     </form> : <section className="panel panel-content" aria-label="Chuyến được phân công">
       {integrated && session.identity.roles.includes('cashier') && <ul className="c1-rows">
         {session.trips.filter(item => item.pendingOfferAmount).map(item => <li key={item.tripId}>
           <span>{item.label} · Chờ nhận {money(item.pendingOfferAmount!)}</span>
-          {trip !== item.tripId && <Button disabled={blocked || !!pending} onClick={() => chooseTrip(item.tripId)}>
+          {trip !== item.tripId && <Button disabled={writesBlocked} onClick={() => chooseTrip(item.tripId)}>
             Mở đề nghị
           </Button>}
         </li>)}
@@ -296,14 +332,16 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
       <div className="sales-filter">
         <label className="field">
           <span>Chuyến</span>
-          <select value={trip} disabled={blocked || Boolean(pending)}
+          <select value={trip} disabled={writesBlocked}
             onChange={event => chooseTrip(event.currentTarget.value)}>
             <option value="">Chọn chuyến</option>
             {session.trips.map(item => <option key={item.tripId} value={item.tripId}>{item.label}{integrated && !!item.pendingOfferAmount ? ' · Chờ nhận ' + money(item.pendingOfferAmount) : ''}</option>)}
           </select>
         </label>
         <div className="button-row">
-          <Button disabled={blocked || !trip} onClick={() => { void work(() => showTrip(session, trip)) }}>Tải lại chuyến</Button>
+          {integrated
+            ? <Button disabled={blocked || queueState === 'loading'} onClick={refreshQueue}>Tải lại danh sách chuyến</Button>
+            : <Button disabled={blocked || !trip} onClick={() => { void work(() => showTrip(session, trip)) }}>Tải lại chuyến</Button>}
           {!integrated && <Button disabled={busy} onClick={() => {
             setSession(null)
             setTrip('')
@@ -339,7 +377,7 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
     {report && canPost && report.canOffer && !report.pendingOfferId &&
       <form className="panel panel-content" onSubmit={event => submit(event, 'offer')}>
         <h2>Đề nghị nộp tiền</h2>
-        <fieldset className="sales-filter" disabled={blocked || Boolean(pending)}>
+        <fieldset className="sales-filter" disabled={writesBlocked}>
           <Field name="offeredAmount" label="Số tiền đề nghị nộp" type="number" min="0.0001" step="0.0001" required />
           <Button type="submit" variant="primary">Gửi đề nghị nộp tiền</Button>
         </fieldset>
@@ -347,7 +385,7 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
     {report && canPost && report.canAccept && report.pendingOfferId &&
       <form className="panel panel-content" onSubmit={event => submit(event, 'accept')}>
         <h2>Thủ quỹ nhận tiền</h2>
-        <fieldset className="sales-filter" disabled={blocked || Boolean(pending)}>
+        <fieldset className="sales-filter" disabled={writesBlocked}>
           {integrated
             ? <Field name="countedAmount" label="Số tiền kiểm đếm (VND)" type="number" min="0.0001" step="0.0001" required />
             : <Field name="countEvidenceRef" label="Chứng cứ kiểm đếm" maxLength={128} required />}
@@ -358,7 +396,7 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
       <form className="panel panel-content" onSubmit={event => submit(event, 'unload')}>
         <h2>{carryStock ? 'Trả hàng về kho' : 'Bàn giao chuyến'}</h2>
         {(report.custody !== 0 || report.pendingOfferId) && <p>Hoàn tất nộp và nhận tiền trước khi trả xe.</p>}
-        <Button type="submit" variant="primary" disabled={blocked || Boolean(pending) || report.custody !== 0 || !!report.pendingOfferId}>
+        <Button type="submit" variant="primary" disabled={writesBlocked || report.custody !== 0 || !!report.pendingOfferId}>
           {carryStock ? 'Trả hàng tồn xe' : 'Bàn giao để đối soát'}
         </Button>
       </form>}
@@ -371,6 +409,8 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
       </div>
     </section>}
     {!online && <p role="status">Cần kết nối để ghi nghiệp vụ.</p>}
+    {integrated && online && queueState === 'loading' && <p role="status">Đang xác minh dữ liệu chuyến…</p>}
+    {queueNotice && <p role={queueState === 'invalid' ? 'alert' : 'status'}>{queueNotice}</p>}
     {notice && <p role="status">{notice}</p>}
     {source && <p className="c3-source">Mã nguồn {source}</p>}
   </Container>

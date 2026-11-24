@@ -23,7 +23,7 @@ public sealed partial class App01a2CommandService
         Guid? RegisteredId, int? RegisteredRevision);
     private sealed record C2SkuUnit(Guid Id, string BaseUom);
     private sealed record C2PreparedLine(int LineNumber, Guid SkuId, decimal BaseQuantity, string BaseUom,
-        string CurrentBaseUom, bool IsActive, string SkuCode);
+        string CurrentBaseUom, bool IsSaleSku, string SkuCode);
     private sealed record C2CommercialPolicy(Guid Id, int Version, string Decision, DateTime EffectiveFromUtc,
         DateTime EffectiveUntilUtc, string Maker, string? Checker, DateTime? ApprovedAtUtc, string EvidenceRef,
         decimal? UnitPrice, decimal? DiscountPerUnit, decimal? TaxRate, int? TermsDays, decimal? CreditCap, string? SellerTimeZone);
@@ -39,6 +39,8 @@ public sealed partial class App01a2CommandService
         string source = "C2-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(producer + "/" + id)));
         return new(producer, id, source);
     }
+
+    private string C2SaleSkuFilter => connections.UsesApp03Settlement ? "AND " + App03FieldB.NonGiftSku : "";
 
     public Task<BusinessCommandOutcome> DraftC2(ClaimsPrincipal principal, C2DraftInput input, CancellationToken ct) =>
         ExecuteAsync(principal, C2Key(principal, input.CommandId), "C2_DRAFT",
@@ -72,8 +74,9 @@ public sealed partial class App01a2CommandService
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
                 if (!await IsCurrentC2Trip(db, tx, trip!, token))
                     return BusinessCommandOutcome.Rejected("TRIP_BUSINESS_DATE_MISMATCH");
-                var units = (await db.QueryAsync<C2SkuUnit>(Sql("""
-                    SELECT Id,BaseUom FROM dbo.Sku WHERE TenantId=@Tenant AND IsActive=1 AND Id IN @Skus
+                var units = (await db.QueryAsync<C2SkuUnit>(Sql($"""
+                    SELECT k.Id,k.BaseUom FROM dbo.Sku k
+                    WHERE k.TenantId=@Tenant AND k.IsActive=1 AND k.Id IN @Skus {C2SaleSkuFilter}
                     """, new { Tenant = tenant, Skus = lines.Select(l => l.SkuId).ToArray() }, tx, token)))
                     .ToDictionary(row => row.Id, row => row.BaseUom);
                 if (units.Count != lines.Length || units.Values.Any(string.IsNullOrWhiteSpace))
@@ -179,12 +182,13 @@ public sealed partial class App01a2CommandService
         if (address is null || C1Validation.AddressPayload(address) != selected.Payload)
             return BusinessCommandOutcome.Rejected("C2_SHIP_TO_INVALID");
 
-        var lines = (await db.QueryAsync<C2PreparedLine>(Sql("""
-            SELECT l.LineNumber,l.SkuId,l.BaseQuantity,l.BaseUom,s.BaseUom AS CurrentBaseUom,s.IsActive,s.Code AS SkuCode
-            FROM dbo.C2OrderDraftLine l JOIN dbo.Sku s ON s.TenantId=l.TenantId AND s.Id=l.SkuId
+        var lines = (await db.QueryAsync<C2PreparedLine>(Sql($"""
+            SELECT l.LineNumber,l.SkuId,l.BaseQuantity,l.BaseUom,k.BaseUom AS CurrentBaseUom,
+                CONVERT(bit, CASE WHEN k.IsActive=1 {C2SaleSkuFilter} THEN 1 ELSE 0 END) AS IsSaleSku,k.Code AS SkuCode
+            FROM dbo.C2OrderDraftLine l JOIN dbo.Sku k ON k.TenantId=l.TenantId AND k.Id=l.SkuId
             WHERE l.TenantId=@Tenant AND l.DraftId=@OrderId ORDER BY l.LineNumber
             """, scope, tx, ct))).AsList();
-        if (lines.Count == 0 || lines.Any(l => !l.IsActive))
+        if (lines.Count == 0 || lines.Any(l => !l.IsSaleSku))
             return BusinessCommandOutcome.Rejected("C2_SKU_INVALID");
         if (lines.Any(l => !string.Equals(l.BaseUom, l.CurrentBaseUom, StringComparison.Ordinal)))
             return BusinessCommandOutcome.Rejected("C2_BASE_UOM_CHANGED");

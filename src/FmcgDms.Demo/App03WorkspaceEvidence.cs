@@ -30,6 +30,7 @@ internal static class App03WorkspaceEvidence
                 await Stop();
                 active = await Open("Resume", enableSettlement: true);
                 upgrade = await App03FieldEvidence.CheckUpgrade(run, active, predecessor, ct);
+                await App03SettlementEvidence.CheckGiftOnlyDraft(run, active, predecessor.Delivery.TripId, evidence.FullName, ct);
             }
             else if (field)
             {

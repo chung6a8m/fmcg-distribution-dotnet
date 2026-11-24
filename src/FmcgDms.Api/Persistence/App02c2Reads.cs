@@ -53,7 +53,7 @@ public sealed partial class App01a2CommandService
                     AND (@CurrentDayOnly=0 OR t.BusinessDate={LotBusinessDate}) ORDER BY t.Code;
                 SELECT k.Id,CAST(k.Code+N' · '+k.Name AS nvarchar(300)) AS Label
                 FROM dbo.Sku k WHERE k.TenantId=@Tenant AND k.IsActive=1
-                    {(connections.UsesApp03Settlement ? "AND " + App03FieldB.NonGiftSku : "")} ORDER BY k.Code;
+                    {C2SaleSkuFilter} ORDER BY k.Code;
                 SELECT l.Id,l.Code AS Label FROM dbo.StockLocation l
                 WHERE l.TenantId=@Tenant AND l.Kind='WAREHOUSE' AND l.IsActive=1
                     AND (@Settlement=0 OR EXISTS (SELECT 1 FROM dbo.StockPool p
