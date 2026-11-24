@@ -2,6 +2,8 @@
 
 ## Khởi chạy và quản lý phiên
 
+Trên source có APP-03.3, dùng [điểm vào chung `/` và mã theo vai](app-03-3-workspace.md). Hướng dẫn `/sales` dưới đây mô tả điểm vào khi bàn giao .1b.
+
 Chạy từ thư mục gốc trên Windows với .NET 10.0.404, Node 26 LTS, LocalDB `MSSQLLocalDB` và dependency web đã cài bằng `npm --prefix web ci`.
 
 ```powershell

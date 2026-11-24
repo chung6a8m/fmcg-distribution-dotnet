@@ -1,0 +1,35 @@
+# APP-03.3 — Phiên người dùng và khung ứng dụng
+
+## Mở phiên làm việc
+
+Từ thư mục gốc trên Windows, dùng .NET 10.0.404, Node 26 LTS, LocalDB `MSSQLLocalDB` và cài dependency web bằng `npm --prefix web ci`.
+
+```powershell
+pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1
+```
+
+Lưu `RunId`. Mở URL gốc mà launcher in ra và dán mã DEV từ clipboard một lần trong tab. Sau khi đổi danh tính hoặc khi mã hết hạn, lấy mã mới từ terminal rồi kết nối lại. Các mã có hạn 15 phút.
+
+| Lệnh trong terminal | Phạm vi |
+| --- | --- |
+| `source` | Tenant A, actor nguồn đã được cấp Sales và Warehouse trong fixture A/F. |
+| `receiver` | Tenant A, actor kho nhận hàng trả. |
+| `finance` | Tenant A, actor duyệt trả hàng. |
+| `qa` | Tenant A, actor kiểm tra và giải phóng hàng. |
+| `peer` | Actor nguồn của tenant B đối chứng. |
+
+Sidebar hiển thị các màn theo grant hiện hành và profile A/F01/F03/F04/F05. Các danh sách và lệnh tiếp tục kiểm theo phân công của từng nghiệp vụ. Chọn chuyến trên màn đơn hoặc nạp để mang sang màn nạp và giao. Từ đơn đã xác nhận, mở báo cáo AR theo đơn, rồi mở lần giao có lô để đề nghị trả. Báo cáo và JSON xuất trong profile này dùng VND. Công cụ và UI Lab có trang riêng tại `/dev`.
+
+Mã truy cập chỉ nằm trong tab. Sau **Đổi danh tính**, shell bỏ mã cũ và xóa ngữ cảnh trên URL. Các lựa chọn và lệnh chưa rõ kết quả được giữ theo run, tenant và actor. Khi quay lại đúng actor, API kiểm quyền hiện hành trước khi hiển thị nguồn hay cho tra cứu hoặc gửi lại lệnh cũ. Browser tải lại màn khi khôi phục trang từ bộ nhớ back/forward. Không có lệnh ghi offline.
+
+Sau `Stop` hoặc `NextDay`, dùng `Resume` với cùng `RunId`, tải lại URL và kết nối bằng mã mới. Lịch sử và lệnh chưa rõ kết quả tiếp tục dùng nguồn cũ. Xem [vòng đời phiên](app-03-1b-dev-session.md) và [chuẩn bị ngày mới](app-03-2-day-bootstrap.md).
+
+## Kiểm chứng
+
+```powershell
+pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action VerifyWorkspace
+```
+
+Runner mở một cặp LocalDB synthetic có dấu sở hữu theo run. Chromium dùng shell để tạo đơn 2 EA, Confirm/Reserve, nạp và giao trên chuyến B của ngày 23/11, mở AR theo đơn rồi lập đề nghị trả 1 EA từ lần giao đó. Playwright bỏ ACK sau khi máy chủ commit. Finance và tenant B không dùng được lệnh chờ của Sales A. Quay lại Sales A tra được kết quả gốc. Sau khi gỡ grant Sales, API phải trả 403 cho đọc công nợ trên chuyến, tra cứu và gửi lại lệnh trả. JWT hết hạn phải nhận 401 tại phiên và endpoint nghiệp vụ. Đối chiếu SQL độc lập phải có đúng một đơn, một lần giao và một hồ sơ trả chưa qua bước xử lý tiếp ở tenant A, cùng số dòng bằng 0 ở tenant B.
+
+Artifact nằm tại `TestResults/app03-3/<RunId>/`, gồm kết quả JUnit, đối chiếu SQL và ảnh Chromium desktop/320 CSS px. Phạm vi kiểm chứng là synthetic DEV, với thiết bị thật, zoom vật lý 125%, PREPROD và production theo cổng nghiệm thu riêng.

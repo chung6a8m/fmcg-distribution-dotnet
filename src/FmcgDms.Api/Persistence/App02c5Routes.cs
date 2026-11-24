@@ -5,7 +5,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App02c5Routes
 {
-    public static void Map(WebApplication app)
+    public static void Map(WebApplication app, bool app03Workspace)
     {
         app.MapGet("/api/synthetic/app02c5/ar", async (string? asOf, Guid? customerId, Guid? orderId,
             Guid? deliveryId, DateOnly? due, bool? overdue, bool? download,
@@ -24,7 +24,7 @@ internal static class App02c5Routes
             var report = await service.ReceivablesC5(user, cutoff, new(customerId, orderId, deliveryId, due, overdue), ct);
             if (report is null) return Results.BadRequest(new { error = "UTC_CUTOFF_IN_FUTURE" });
             if (download == true) context.Response.Headers.ContentDisposition = "attachment; filename=\"sales-a-ar.json\"";
-            return Results.Ok(report);
+            return Results.Ok(app03Workspace ? report with { Currency = "VND" } : report);
         }).RequireAuthorization("SyntheticSales");
     }
 }

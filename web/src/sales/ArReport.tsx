@@ -15,6 +15,7 @@ type CustomerTotal = {
   knownBalance: string | null; knownOverdue: string | null
 }
 type Report = {
+  currency?: 'VND'
   asOf: string; expected: number | null; reconciled: number; knownBalance: string | null
   knownOverdue: string | null; customers: CustomerTotal[]; sources: Source[]
 }
@@ -36,7 +37,7 @@ function queryFor(filter: Filter) {
   return query
 }
 
-function SourceDetail({ source }: { source: Source }) {
+function SourceDetail({ source, returnUrl }: { source: Source; returnUrl?: string }) {
   return <details className="panel panel-content">
     <summary>{source.customer} · {source.trip} · {statusText[source.status]}</summary>
     <dl className="sales-facts">
@@ -64,10 +65,11 @@ function SourceDetail({ source }: { source: Source }) {
       {source.deliveryId && <><dt>Mã lần giao</dt><dd>{source.deliveryId}</dd></>}
       {source.shipToSnapshotId && <><dt>Bản chụp địa chỉ</dt><dd>{source.shipToSnapshotId}</dd></>}
     </dl>
+    {returnUrl && source.deliveryId && <a className="page-link" href={returnUrl + '?delivery=' + source.deliveryId}>Trả hàng từ lần giao này</a>}
   </details>
 }
 
-export function ArReport({ token, orderId }: { token: string; orderId: string }) {
+export function ArReport({ token, orderId, returnUrl }: { token: string; orderId: string; returnUrl?: string }) {
   const [filter, setFilter] = useState<Filter>({ asOf: '', customerId: '', orderId, deliveryId: '', due: '', overdue: '' })
   const [report, setReport] = useState<Report | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -145,7 +147,7 @@ export function ArReport({ token, orderId }: { token: string; orderId: string })
     {error && <p role="alert">{error}</p>}
     {report && <section className="panel panel-content" aria-label="Kết quả báo cáo AR">
       <p>Mốc UTC <time dateTime={report.asOf}>{report.asOf}</time></p>
-      <p>Phạm vi chuyến được phân công · SYNTHETIC_UNITLESS</p>
+      <p>Phạm vi chuyến được phân công · {report.currency ?? 'SYNTHETIC_UNITLESS'}</p>
       <Button disabled={exporting} onClick={() => void download(report.asOf)}>Xuất JSON</Button>
       {report.expected === null ? <p>Chưa có bằng chứng giao hàng trong phạm vi này.</p> : <>
         <p>Nguồn đã đối soát {report.reconciled}/{report.expected} lần giao đã ghi nhận</p>
@@ -157,7 +159,7 @@ export function ArReport({ token, orderId }: { token: string; orderId: string })
             <span>{c.reconciled}/{c.expected} · Còn nợ {decimal(c.knownBalance)} · Quá hạn {decimal(c.knownOverdue)}</span>
           </li>)}
         </ul>
-        {report.sources.map(source => <SourceDetail key={JSON.stringify([source.owner, source.commandId])} source={source} />)}
+        {report.sources.map(source => <SourceDetail key={JSON.stringify([source.owner, source.commandId])} source={source} returnUrl={returnUrl} />)}
       </>}
     </section>}
   </section>

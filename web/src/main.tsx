@@ -1,3 +1,4 @@
+import './style.css'
 import { lazy, StrictMode, Suspense, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
@@ -6,7 +7,7 @@ import { Button, ThemeSelect } from './ui/controls'
 import { FoundationsDemo } from './ui/FoundationsDemo'
 import { DataEntryDemo } from './ui/DataEntryDemo'
 import { SourceCommandDemo } from './ui/SourceCommandDemo'
-import './style.css'
+import { WorkspaceEntry } from './workspace/Workspace'
 
 const CustomerWorkspace = lazy(() => import('./sales/CustomerWorkspace')
   .then(module => ({ default: module.CustomerWorkspace })))
@@ -41,9 +42,11 @@ const MixedTripWorkspace = lazy(() => import('./sales/MixedTripWorkspace')
 
 type Health = 'Đang kiểm tra API…' | 'API hoạt động' | 'Không kết nối API'
 
-function HealthShell() {
-  const [status, setStatus] = useState<Health>('Đang kiểm tra API…')
+function HealthShell({ tools = false, live }: { tools?: boolean; live?: boolean } = {}) {
+  const [status, setStatus] = useState<Health>(live === undefined ? 'Đang kiểm tra API…'
+    : live ? 'API hoạt động' : 'Không kết nối API')
   useEffect(() => {
+    if (live !== undefined) return
     let active = true
     const controller = new AbortController()
     fetch('/health/live', { signal: controller.signal, cache: 'no-store' })
@@ -54,12 +57,12 @@ function HealthShell() {
       active = false
       controller.abort()
     }
-  }, [])
+  }, [live])
 
   return <main className="page health-page">
     <header className="page-heading">
-      <h1>FMCG Distribution · APP-00A</h1>
-      <p>Application foundation — Synthetic / Nonproduction</p>
+      <h1>{tools ? 'Công cụ DEV và UI Lab' : 'FMCG Distribution · APP-00A'}</h1>
+      {tools ? <a className="page-link" href="/">Trang chính</a> : <p>Application foundation — Synthetic / Nonproduction</p>}
     </header>
     <section className="panel panel-content" aria-labelledby="connection">
       <h2 id="connection">Trạng thái kết nối</h2>
@@ -87,10 +90,10 @@ function HealthShell() {
       <a className="page-link" href="/sales/gifts">Quà khuyến mại · DEV</a>
       <a className="page-link" href="/sales/refunds">Credit và hoàn tiền · DEV</a>
     </section>
-    <section className="panel panel-content">
+    {!tools && <section className="panel panel-content">
       <h2>Increment tiếp theo</h2>
       <p>APP-01A: Tenant/Customer/SKU/Trip, source/command ledger và isolation tests.</p>
-    </section>
+    </section>}
   </main>
 }
 
@@ -142,7 +145,11 @@ function App() {
                 ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình nạp hàng…</p>}><LoadWorkspace /></Suspense>
                 : location.pathname === '/sales/delivery'
                   ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình giao hàng…</p>}><DeliveryWorkspace /></Suspense>
-                  : <HealthShell />}
+                  : location.pathname === '/dev' ? <HealthShell tools />
+                    : location.pathname.startsWith('/work/')
+                      ? <WorkspaceEntry fallback={() => <main className="page"><h1>Chưa kết nối APP-03 DEV</h1>
+                        <p>Mở lại trang khi phiên APP-03 DEV đang chạy.</p><a className="page-link" href="/">Trang chính</a></main>} />
+                      : <WorkspaceEntry fallback={live => <HealthShell live={live} />} />}
   </>
 }
 

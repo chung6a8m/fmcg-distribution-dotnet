@@ -181,7 +181,9 @@ function CustomerDetail({ detail, editing, disabled, edit, select }: {
   </>
 }
 
-export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string }) {
+export function CustomerWorkspace({ workspaceToken, startCustomer, onCustomerChange }: {
+  workspaceToken?: string; startCustomer?: string; onCustomerChange?: (customer: string) => void
+}) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -233,6 +235,14 @@ export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string 
       setSession({ token, identity })
       setCustomers(list)
       setPending(restorePending(identity))
+      if (startCustomer) {
+        if (list.some(row => row.id === startCustomer)) {
+          lastRequested.current = startCustomer
+          setDetail(await read<Detail>(token, '/customers/' + startCustomer))
+        } else {
+          onCustomerChange?.('')
+        }
+      }
     } catch (error) {
       setLoadError(readError(error))
     } finally {
@@ -361,6 +371,7 @@ export function CustomerWorkspace({ workspaceToken }: { workspaceToken?: string 
           {customers.map(row => <li key={row.id}><Button aria-current={detail?.customer.id === row.id ? 'true' : undefined}
             disabled={selectionLocked || offline} onClick={() => {
               setFeedback(null)
+              onCustomerChange?.(row.id)
               void refresh(session.token, row.id)
             }}><strong>{row.code}</strong><span>{row.name}</span></Button></li>)}
         </ul>

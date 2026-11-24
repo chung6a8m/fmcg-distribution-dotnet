@@ -25,7 +25,11 @@ public sealed record C5ArFilter(Guid? CustomerId, Guid? OrderId, Guid? DeliveryI
 public sealed record C5ArReport(DateTime AsOf, C5ArFilter Filter,
     int Reconciled, int? Expected, IReadOnlyList<C5ArCustomer> Customers, IReadOnlyList<C5ArSource> Sources,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal? KnownBalance,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal? KnownOverdue);
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal? KnownOverdue)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Currency { get; init; }
+}
 
 public sealed partial class App01a2CommandService
 {

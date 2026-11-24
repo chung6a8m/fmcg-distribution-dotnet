@@ -70,7 +70,20 @@ app.Use(async (context, next) =>
 });
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapGet("/health/live", () => Results.Ok(new { status = "live", scope = "APP-00A", businessWrites = false }));
+bool app03Workspace = app.Configuration.GetValue<bool>("App03:Workspace");
+app.MapGet("/health/live", (HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return app03Workspace
+        ? Results.Ok(new { status = "live", scope = "APP-00A", businessWrites = false, workspaceProfile = App03A1Profile.Name })
+        : Results.Ok(new { status = "live", scope = "APP-00A", businessWrites = false });
+});
+if (app03Workspace)
+{
+    if (!app03A1 || App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not string workspaceClock)
+        throw new InvalidOperationException("APP-03 workspace requires the supported DEV profile and its run clock.");
+    App03WorkspaceRoutes.Map(app, workspaceClock);
+}
 
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled"))
@@ -94,7 +107,7 @@ if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Integrati
     {
         App02c4Routes.Map(app);
         if (app.Configuration.GetValue<bool>("App02C5:Enabled"))
-            App02c5Routes.Map(app);
+            App02c5Routes.Map(app, app03Workspace);
     }
 }
 

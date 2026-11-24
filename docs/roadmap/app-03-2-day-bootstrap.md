@@ -2,6 +2,8 @@
 
 ## Khởi chạy
 
+Trên source có APP-03.3, dùng [điểm vào chung `/`](app-03-3-workspace.md). Các bước bootstrap và `NextDay` giữ cùng hợp đồng.
+
 Trên Windows, dùng .NET 10.0.404, Node 26 LTS, LocalDB `MSSQLLocalDB` và cài dependency bằng `npm --prefix web ci`.
 
 ```powershell

@@ -112,6 +112,8 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** dùng lại UI C/D/F và UI-01–03; điểm vào nghiệp vụ, phiên chung trong các workspace, điều hướng theo vai, tenant/actor đang thao tác, giữ nguồn/chuyến khi chuyển màn. Trang gốc giới thiệu đúng ứng dụng DEV hiện hành; công cụ chọn profile, tạo lỗi và diễn tập có điểm vào riêng. Đổi actor/tenant xóa lựa chọn không còn quyền; phục hồi công việc cũ khi quay lại đúng actor bằng nguồn đã lưu, không dùng chung pending-command namespace giữa danh tính.
 
+[Hướng dẫn dùng phiên chung và kiểm chứng APP-03.3](app-03-3-workspace.md).
+
 **Hoàn tất:**
 
 - [ ] Mỗi actor mở phiên một lần, đi giữa các workspace được phép và reload mà không phải dán mã DEV tại từng trang.

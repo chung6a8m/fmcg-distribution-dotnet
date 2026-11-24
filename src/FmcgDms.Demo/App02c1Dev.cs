@@ -245,6 +245,7 @@ internal static class App02c1Dev
             if (persistent is not null)
             {
                 apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
+                apiStart.Environment["App03__Workspace"] = "true";
                 if (persistent.UsesBusinessDay)
                     apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
             }
@@ -307,7 +308,9 @@ internal static class App02c1Dev
             if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);
             if (observe is not null)
             {
-                await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id));
+                await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id, tokenB,
+                    Sign("tenant-a", "finance", DevF05Evidence.Finance),
+                    Token(key, "tenant-a", roles, validitySeconds: -60)));
                 await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
                 return;
             }
@@ -317,6 +320,36 @@ internal static class App02c1Dev
                 string initialCredential = advance ? financeToken! : tokenA;
                 await CopyCredential(initialCredential);
                 clipboardCredential = initialCredential;
+                if (persistent is not null)
+                {
+                    Console.WriteLine($"Open {webUrl}/ and paste the DEV credential once per browser tab.");
+                    Console.WriteLine("Enter source, receiver, finance, qa or peer to copy a fresh credential.");
+                    Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
+                    while (!Console.IsInputRedirected)
+                    {
+                        var choice = (await Task.Run(Console.ReadLine).WaitAsync(lifetime.Token))?.Trim().ToLowerInvariant();
+                        if (choice is null) break;
+                        string? credential = choice switch
+                        {
+                            "source" => Token(key, "tenant-a", roles, uniqueSession: true),
+                            "peer" => Token(key, "tenant-b", roles, uniqueSession: true),
+                            "receiver" => Sign("tenant-a", "warehouse", DevF05Evidence.Receiver),
+                            "finance" => Sign("tenant-a", "finance", DevF05Evidence.Finance),
+                            "qa" => Sign("tenant-a", "case_checker", DevF05Evidence.Qa),
+                            _ => null
+                        };
+                        if (credential is null)
+                        {
+                            Console.WriteLine("Choose source, receiver, finance, qa or peer.");
+                            continue;
+                        }
+                        await CopyCredential(credential);
+                        clipboardCredential = credential;
+                        Console.WriteLine($"Copied {choice} DEV credential.");
+                    }
+                    await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
+                    return;
+                }
                 if (advance)
                 {
                     Console.WriteLine($"Open {webUrl}/sales/advances. Finance DEV credential is in the clipboard.");
@@ -834,14 +867,16 @@ internal static class App02c1Dev
         }
     }
 
-    private static string Token(string key, string tenant, string[] roles, string actor = Actor, bool uniqueSession = false)
+    private static string Token(string key, string tenant, string[] roles, string actor = Actor, bool uniqueSession = false,
+        int validitySeconds = 900)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var payload = JsonSerializer.SerializeToUtf8Bytes(new
         {
             iss = "fmcg-synthetic-app00", aud = "fmcg-synthetic-app00", sub = actor, actor_id = actor,
             tenant_id = tenant, synthetic_role = roles,
-            iat = now, nbf = now - 1, exp = now + 900,
+            iat = Math.Min(now, now + validitySeconds - 120),
+            nbf = Math.Min(now - 1, now + validitySeconds - 120), exp = now + validitySeconds,
             jti = uniqueSession ? Guid.NewGuid().ToString("N") : null
         });
         static string B64(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
