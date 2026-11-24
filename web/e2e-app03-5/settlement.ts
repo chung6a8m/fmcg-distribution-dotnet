@@ -161,17 +161,62 @@ export async function verifySettlement(page: Page, request: APIRequestContext, i
   await expect(warehousePage.getByText('Đã ghi nghiệp vụ quà.')).toBeVisible()
   await cashierPage.goto(settlement)
   await expect(cashierTrip).toHaveValue(trip)
-  const otherOffer = cashierPage.getByRole('listitem').filter({ hasText: 'DEV-20261123-B · Chờ nhận 20.000 VND' })
-  const emptyOffer = await request.post(d3 + '/offer', { headers: auth(sales),
-    data: { ...command('c1-dev-sales'), tripId: bOnly, offeredAmount: 20000 } })
-  const emptyOfferBody = await emptyOffer.json()
-  expect(emptyOfferBody).toMatchObject({ status: 'APPLIED' })
+  const otherOffer = cashierPage.getByRole('listitem').filter({ hasText: 'DEV-20261123-B · Chờ nhận 10.000 VND' })
+  async function offerB() {
+    const response = await request.post(d3 + '/offer', { headers: auth(sales),
+      data: { ...command('c1-dev-sales'), tripId: bOnly, offeredAmount: 10000 } })
+    const result = await response.json()
+    expect(result).toMatchObject({ status: 'APPLIED' })
+    return result.sourceId as string
+  }
+
+  const firstOffer = await offerB()
   await refreshQueue.click()
   await expect(otherOffer).toBeVisible()
   await expect(cashierTrip).toHaveValue(trip)
-  const emptyAccept = await request.post(d3 + '/accept', { headers: auth(cashier),
-    data: { ...command('app03-cashier'), tripId: bOnly, offerId: emptyOfferBody.sourceId, countedAmount: 20000 } })
-  expect(await emptyAccept.json()).toMatchObject({ status: 'APPLIED' })
+
+  const countPage = await page.context().newPage()
+  await countPage.goto('/work/settlement?trip=' + bOnly)
+  await signIn(countPage, cashier)
+  const count = countPage.getByLabel('Số tiền kiểm đếm (VND)')
+  const acceptCount = countPage.getByRole('button', { name: 'Xác nhận đã nhận tiền' })
+  const refreshCount = countPage.getByRole('button', { name: 'Tải lại danh sách chuyến' })
+  await count.fill('10000')
+  await refreshCount.click()
+  await expect(count).toBeEnabled()
+  await expect(count).toHaveValue('10000')
+
+  const firstAccept = await request.post(d3 + '/accept', { headers: auth(cashier),
+    data: { ...command('app03-cashier'), tripId: bOnly, offerId: firstOffer, countedAmount: 10000 } })
+  expect(await firstAccept.json()).toMatchObject({ status: 'APPLIED' })
+  const secondOffer = await offerB()
+  expect(secondOffer).not.toBe(firstOffer)
+  expect(await read(d3 + '/trips/' + bOnly, cashier)).toMatchObject({
+    pendingOfferId: secondOffer, pendingOfferAmount: 10000, custody: 10000, fund: 10000,
+  })
+
+  let submitted: { offerId: string; countedAmount: number } | undefined
+  await countPage.route('**' + d3 + '/accept', route => {
+    submitted = route.request().postDataJSON()
+    return route.continue()
+  })
+  await Promise.all([
+    countPage.waitForResponse(response => new URL(response.url()).pathname === d3 + '/trips/' + bOnly),
+    refreshCount.click(),
+  ])
+  await expect(count).toBeEnabled()
+  await expect(count).toHaveValue('')
+  await expect(countPage.getByText('Mã đề nghị ' + secondOffer)).toBeVisible()
+  await acceptCount.click()
+  await expect(count).toBeFocused()
+  expect(submitted).toBeUndefined()
+  expect(await read(d3 + '/trips/' + bOnly, cashier)).toMatchObject({ pendingOfferId: secondOffer, fund: 10000 })
+
+  await count.fill('10000')
+  await acceptCount.click()
+  await expect(countPage.getByText('Đã ghi nhận thủ quỹ nhận tiền.')).toBeVisible()
+  expect(submitted).toMatchObject({ offerId: secondOffer, countedAmount: 10000 })
+  await countPage.close()
   await refreshQueue.click()
   await expect(otherOffer).toHaveCount(0)
   await expect(cashierTrip).toHaveValue(trip)

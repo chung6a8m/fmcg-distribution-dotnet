@@ -383,8 +383,10 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
         </fieldset>
       </form>}
     {report && canPost && report.canAccept && report.pendingOfferId &&
-      <form className="panel panel-content" onSubmit={event => submit(event, 'accept')}>
+      <form key={report.tripId + ':' + report.pendingOfferId}
+        className="panel panel-content" onSubmit={event => submit(event, 'accept')}>
         <h2>Thủ quỹ nhận tiền</h2>
+        <p className="c3-source">Mã đề nghị {report.pendingOfferId}</p>
         <fieldset className="sales-filter" disabled={writesBlocked}>
           {integrated
             ? <Field name="countedAmount" label="Số tiền kiểm đếm (VND)" type="number" min="0.0001" step="0.0001" required />

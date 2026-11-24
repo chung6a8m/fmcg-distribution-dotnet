@@ -9,7 +9,7 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Start
 | Danh tính DEV | Công việc |
 | --- | --- |
 | `source` | Mở **Đối soát chuyến** từ **Chuyến và công việc**, kiểm tiền thực giữ và gửi đề nghị nộp tiền. Trong **Trả hàng**, chọn lần giao A và lô khách trả. Trong **Tạm ứng và hoàn ứng**, chọn khoản ứng của mình và ghi đề nghị hoàn. |
-| `cashier` | Mở **Đối soát chuyến và nộp tiền**, chọn đề nghị đang chờ và nhập số tiền đã kiểm đếm. Dùng **Tạm ứng và hoàn ứng** khi nhận tiền hoàn ứng của nhân viên. |
+| `cashier` | Mở **Đối soát chuyến và nộp tiền**, kiểm tra mã đề nghị đang chờ và nhập số tiền đã kiểm đếm. Khi mã đề nghị thay đổi, nhập lại số tiền cho đề nghị mới. Dùng **Tạm ứng và hoàn ứng** khi nhận tiền hoàn ứng của nhân viên. |
 | `receiver` | Sau khi chuyến hết tiền thực giữ và đề nghị chờ nhận, trả tồn xe. Dùng **Trả hàng** để nhận hàng khách trả vào cách ly và **Quà khuyến mại** để ghi thực nhận quà theo lần giao quà gốc. |
 | `finance`, `qa` | Mở cùng hồ sơ trả hàng để duyệt và giải phóng hàng theo phân công. Kế toán có thể phát ứng, duyệt chi và duyệt đề nghị miễn thu hồi quà trong sổ nguồn tương ứng. |
 
@@ -61,3 +61,11 @@ Hồi quy APP-03.2 và vòng đời .1b qua với profile .6 (run `9d418641ca954
 | --- | --- |
 | `junit.xml` | `384AB397B603B0A4F97AAB0C2F351C26065F334F2485E47205EE81ABB00961A9` |
 | `gift-only-draft.json` | `187A4472F0DED9EF69FB509F1F4C331B9970777FF0799ACFCEA8EBE56A3BD6DE` |
+
+### Kiểm chứng vòng review 2
+
+Run `1e517805cc34439fa264759849ed8ab7` qua Chromium và LocalDB. Hai đề nghị 10.000 VND của cùng chuyến được kiểm ở hai phiên thao tác. Tải lại cùng mã giữ số đã nhập. Khi đề nghị sau thay đề nghị trước, màn hình hiện mã mới và để trống ô kiểm đếm. Bấm xác nhận khi ô trống không gửi Accept. Sau khi nhập lại, Accept ghi đúng mã đề nghị mới. Ca mất ACK và tra cứu lệnh gốc vẫn qua trong cùng run.
+
+SHA-256 của `junit.xml` là `D22304386E463FD0780878F685CB0B0A163BEB66A8CDB541168A35BB5BFB2317`. Bộ kiểm tra web đạt 23/23, Playwright tổng đạt 57 bài với một bài cài PWA standalone bỏ qua theo cấu hình local.
+
+APP-02C.6 qua lượt chạy lại local (run `a960755370a34bfdb6ba23355cbb9e71`, 15/15 ca theo tenant) sau khi lượt CI của HEAD trước bị timeout ở nhóm kiểm chứng nâng cao.
