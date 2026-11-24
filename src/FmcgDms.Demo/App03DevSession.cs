@@ -65,6 +65,12 @@ internal sealed class App03DevSession
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
+        if (operation == "VerifyAcceptance")
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-03 requires Windows LocalDB.");
+            await App03AcceptanceEvidence.Run(root, source);
+            return;
+        }
         if (operation == "VerifyFinance") { await App03FinanceEvidence.Run(root, source); return; }
         if (operation == "VerifySettlement") { await App03WorkspaceEvidence.Run(root, source, settlement: true); return; }
         if (operation == "VerifyField") { await App03WorkspaceEvidence.Run(root, source, field: true); return; }

@@ -1,6 +1,6 @@
 # Sổ quyết định UI/UX
 
-**Cập nhật hiện hành 23/11/2026:** Owner đồng ý [roadmap APP-03](../roadmap/app-03.md), gồm ánh xạ UI-05 vào .3–.8 và nghiệm thu tích hợp .9. Trạng thái `ROADMAP_APPROVED / IMPLEMENTATION_NOT_STARTED`; commit ghi nhận chỉ thay tài liệu. C/D/F đã có implementation và bằng chứng DEV theo [APP-02](../roadmap/app-02.md). Các đoạn ngày 20–22/11 bên dưới giữ provenance lịch sử, không phải trạng thái implementation hiện tại.
+**Cập nhật hiện hành 24/11/2026:** Owner đồng ý [roadmap APP-03](../roadmap/app-03.md), gồm ánh xạ UI-05 vào .3–.8 và nghiệm thu tích hợp .9. Quyết định ngày 23/11 phê duyệt roadmap. [APP-03.9](../roadmap/app-03-9-acceptance.md) ghi bằng chứng nghiệm thu synthetic DEV của các increment tiếp theo. C/D/F đã có implementation và bằng chứng DEV theo [APP-02](../roadmap/app-02.md). Các đoạn ngày 20–22/11 bên dưới giữ provenance lịch sử, không phải trạng thái implementation hiện tại.
 
 > Hồ sơ giữ quyết định và provenance lịch sử. PR #79 đã merge, baseline là `ADOPTED`; UI-01 đã `MERGED / CI_VERIFIED` trong phạm vi synthetic/nonproduction theo [closeout](../closeout/2026-11-20-ui-01.md) và [bằng chứng](ui-01-verification.md).
 
@@ -55,7 +55,7 @@ PR #78 bổ sung Tailwind v4 adapter, Dark semantic overrides, generator/checker
 
 [Quyết định DEV-first của Owner](../decisions/owner-app02c-dev-first-2026-11-22.md) cấp quyền liên tục cho C.1–C.5 source/migrations/UI và chạy thật UI→API→SQL với dữ liệu synthetic trong DEV riêng, ban đầu dùng nonce-owned LocalDB và các guard hiện hành. Mỗi increment có UI tối thiểu của feature; C.5 tích hợp workspace/report. Không cần blanket PREPROD foundation hoặc một vòng cấp quyền lại cho cùng scope. [C DEV handoff](../roadmap/app-02c-dev-handoff.md) giữ các điều kiện nghiệp vụ/kỹ thuật theo feature; [operations debt](../roadmap/app-02c-operations-debt.md) giữ physical/PREPROD/C.6 và Pilot riêng. Tại lúc ghi amendment ngày 22/11, thay đổi là DOCS_ONLY và C implementation `NOT_STARTED`; sau đó C.1–C.5 đã merge, C.6 có [DEV closeout đã ký](../closeout/2026-11-22-app-02c6-localdb.md).
 
-[PR #86](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/86) UI-04 là OPEN / DOCS_ONLY readiness candidate cần rebase và đối chiếu quyết định mới, không là dependency trước C.1 hoặc bằng chứng UI đã triển khai/merge. UI-05 tại mốc amendment 22/11 chưa được ủy quyền; phạm vi tích hợp nay đã được Owner đồng ý trong [APP-03 ngày 23/11](../roadmap/app-03.md), implementation chưa bắt đầu. Quyết định 22/11 thay timing/authorization của DEV; các receipts và giới hạn bằng chứng UI-01..03 dưới đây vẫn là lịch sử đúng scope.
+[PR #86](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/86) UI-04 là OPEN / DOCS_ONLY readiness candidate cần rebase và đối chiếu quyết định mới, không là dependency trước C.1 hoặc bằng chứng UI đã triển khai/merge. UI-05 tại mốc amendment 22/11 chưa được ủy quyền; phạm vi tích hợp nay đã được Owner đồng ý trong [APP-03 ngày 23/11](../roadmap/app-03.md), kết quả hiện tại xem tại [APP-03.9](../roadmap/app-03-9-acceptance.md). Quyết định 22/11 thay timing/authorization của DEV; các receipts và giới hạn bằng chứng UI-01..03 dưới đây vẫn là lịch sử đúng scope.
 
 ## Ủy quyền UI-03 riêng (20/11/2026)
 

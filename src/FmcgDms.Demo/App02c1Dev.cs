@@ -336,6 +336,7 @@ internal static class App02c1Dev
                     ["RECONCILER"] = Sign("tenant-a", "reconciler", App03FinanceBootstrap.AccountingActor("reconciler")),
                     ["MAKER"] = Sign("tenant-a", "maker", App03FinanceBootstrap.AccountingActor("maker")),
                     ["CHECKER"] = Sign("tenant-a", "checker", App03FinanceBootstrap.AccountingActor("checker")),
+                    ["PEER_CASHIER"] = Sign("tenant-b", "cashier", App03SettlementBootstrap.Cashier),
                     ["PEER_ACCOUNTANT"] = Sign("tenant-b", "accountant", App03FinanceBootstrap.AccountingActor("accountant")),
                     ["REFUND_CHECKER"] = Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker),
                     ["OWNER"] = Sign("tenant-a", "owner", App03FinanceBootstrap.Owner),
@@ -929,12 +930,12 @@ internal static class App02c1Dev
         return value + "." + B64(HMACSHA256.HashData(Encoding.UTF8.GetBytes(key), Encoding.ASCII.GetBytes(value)));
     }
 
-    private static async Task CopyCredential(string token, bool clear = false)
+    internal static async Task CopyCredential(string token, bool clear = false)
     {
         string command = clear
-            ? "$value = [Console]::In.ReadToEnd(); if ((Get-Clipboard -Raw) -ceq $value) { Set-Clipboard -Value '' }"
+            ? "$value = [Console]::In.ReadToEnd(); if ((Get-Clipboard -Raw) -ceq $value) { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::Clear() }"
             : "Set-Clipboard -Value ([Console]::In.ReadToEnd())";
-        var info = StartInfo("powershell.exe", Environment.CurrentDirectory, "-NoProfile", "-NonInteractive", "-Command", command);
+        var info = StartInfo("powershell.exe", Environment.CurrentDirectory, "-NoProfile", "-NonInteractive", "-STA", "-Command", command);
         info.RedirectStandardInput = true;
         using var clipboard = Start(info);
         await clipboard.StandardInput.WriteAsync(token);
