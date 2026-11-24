@@ -29,7 +29,7 @@ internal static class App03FinanceEvidence
             await Stop();
 
             var november = await Capture();
-            Require(november.Primary, new Review(2, 1, 2, 2, 0, 1, 10000, 4000, 96000, 6000, 0, 0, 0, 0), "November");
+            Require(november.Primary, new Review(2, 1, 2, 0, 0, 1, 10000, 4000, 96000, 6000, 0, 0, 0, 0), "November");
             Require(november.Peer, new Review(0, 0, 0, 0, 0, 0, 0, 0, 100000, 0, 0, 0, 0, 0), "peer November");
 
             await Advance(App03DayBootstrap.FirstDay.AddDays(1));
@@ -37,27 +37,48 @@ internal static class App03FinanceEvidence
             await Browser(active, delivery, "accounting");
             await Stop();
 
-            var beforeRollover = await Capture();
-            Require(beforeRollover.Primary, november.Primary with { Correction = 1, Closed = 1 }, "accounting");
-            Require(beforeRollover.Peer, november.Peer, "peer accounting");
-            var original = await Original(delivery);
+            var posted = await Capture();
+            Require(posted.Primary, november.Primary with { Posting = 2 }, "accounting");
+            Require(posted.Peer, november.Peer, "peer accounting");
 
-            for (var day = App03DayBootstrap.FirstDay.AddDays(2); day <= App03DevSession.FinanceRollover; day = day.AddDays(1))
+            await Advance(App03DayBootstrap.FirstDay.AddDays(2));
+            active = await Open("Resume", finance: true);
+            await Browser(active, delivery, "approval");
+            await Stop();
+            var beforeRollover = await Capture();
+            Require(beforeRollover.Primary, posted.Primary with { Correction = 1 }, "partner committed before rollover");
+            Require(beforeRollover.Peer, november.Peer, "peer approval");
+            var pendingApproval = await CorrectionState();
+            if (pendingApproval is not { Cases: 1, ClosedCases: 0, ApprovalPosts: 1, AppPostingId: null, PartnerPostingId: not null,
+                    PartnerAckLost: 1, ClosedReportId: null })
+                throw new InvalidOperationException($"APP-03.7 expected committed partner correction with unknown app outcome: {pendingApproval}.");
+
+            await AddHistoricalAlias();
+
+            for (var day = App03DayBootstrap.FirstDay.AddDays(3); day <= App03DevSession.FinanceRollover; day = day.AddDays(1))
                 await Advance(day);
             active = await Open("Resume", finance: true);
+            await Browser(active, delivery, "recovery");
+            var recovered = await CorrectionState();
+            if (recovered is not { Cases: 2, ClosedCases: 2, ApprovalPosts: 1, PartnerAckLost: 1, ClosedReportId: not null }
+                || recovered.AppPostingId != pendingApproval.PartnerPostingId
+                || recovered.PartnerPostingId != pendingApproval.PartnerPostingId
+                || recovered.ClosedReportId != recovered.FreshReportId)
+                throw new InvalidOperationException($"APP-03.7 correction recovery or closure changed identities: {recovered}.");
+            var original = await Original(delivery);
             await Browser(active, delivery, "cost");
             var december = await Capture();
-            Require(december.Primary, beforeRollover.Primary with { LockedPeriod = 1, CostAdjustment = 1, PriorAdjustment = 100 }, "December");
+            Require(december.Primary, beforeRollover.Primary with { Closed = 2, LockedPeriod = 1, CostAdjustment = 1, PriorAdjustment = 100 }, "December");
             Require(december.Peer, november.Peer with { LockedPeriod = 1 }, "peer December");
             var originalAfter = await Original(delivery);
             if (original != originalAfter || original is not { Outstanding: 0, SaleCost: 6000, ReleasedCost: 3000,
                     Gross: 20000, CorrectedGross: 20000, CorrectedAr: 20000, CorrectedCost: 6000, CorrectedQuantity: 2,
-                    FinanceActors: 4, AccountingActors: 2, Reports: 2 })
+                    FinanceActors: 4, AccountingActors: 2, Reports: 4 })
                 throw new InvalidOperationException($"APP-03.7 original source mismatch: before {original}; after {originalAfter}.");
 
             await File.WriteAllTextAsync(Path.Combine(folder, "sql-review.json"),
                 JsonSerializer.Serialize(new { source, runId = run.Id, predecessor = predecessor.Ar.SourceId, delivery, november,
-                    beforeRollover, december, original, originalAfter }, new JsonSerializerOptions { WriteIndented = true }), ct);
+                    posted, beforeRollover, pendingApproval, recovered, december, original, originalAfter }, new JsonSerializerOptions { WriteIndented = true }), ct);
         }
         finally
         {
@@ -103,6 +124,9 @@ internal static class App03FinanceEvidence
             start.Environment["APP02C1_WEB_URL"] = active.WebUrl;
             start.Environment["APP02C1_RUN_ID"] = run.Id;
             start.Environment["APP03_FINANCE_STAGE"] = stage;
+            start.Environment["APP03_FINANCE_EVIDENCE_DIR"] = folder;
+            if (stage == "recovery")
+                start.Environment["APP03_FINANCE_PENDING"] = await File.ReadAllTextAsync(Path.Combine(folder, "pending-approval.json"), ct);
             start.Environment["APP03_FINANCE_DELIVERY"] = delivery.ToString();
             start.Environment["APP03_SOURCE_TOKEN"] = active.SourceToken;
             start.Environment["APP03_RECEIVER_TOKEN"] = active.ReceiverToken;
@@ -128,6 +152,41 @@ internal static class App03FinanceEvidence
         }
 
         async Task<Snapshot> Capture() => new(await ReadSql("tenant-a"), await ReadSql("tenant-b"));
+
+        async Task AddHistoricalAlias()
+        {
+            // Simulate a case already recorded by the earlier Finance runtime for the same posting.
+            await run.Verify("tenant-a", app03Session: true);
+            await using var db = new SqlConnection(run.Connection("tenant-a"));
+            int inserted = await db.ExecuteAsync(new CommandDefinition("""
+                INSERT d4app.AccountingCase(Id,ReportId,SourceLineId,OwnerRole,NextAction)
+                SELECT NEWID(),other.ReportId,other.SourceLineId,'reconciler','REVIEW_POSTING_DIFFERENCE'
+                FROM d4app.AccountingCase c
+                JOIN d4app.AccountingReportLine original ON original.ReportId=c.ReportId AND original.SourceLineId=c.SourceLineId
+                JOIN d4app.AccountingReportLine other ON other.ReportId<>c.ReportId AND other.SourceLineId=original.SourceLineId
+                    AND other.PostingId=original.PostingId AND other.SourceHash=original.SourceHash AND other.Reason=original.Reason;
+                """, cancellationToken: ct));
+            if (inserted != 1) throw new InvalidOperationException($"Expected one historical case alias, got {inserted}.");
+        }
+
+        async Task<ApprovalState> CorrectionState()
+        {
+            await run.Verify("tenant-a", app03Session: true);
+            await using var db = new SqlConnection(run.Connection("tenant-a"));
+            return await db.QuerySingleAsync<ApprovalState>(new CommandDefinition("""
+                SELECT c.PostingId AS AppPostingId,p.Id AS PartnerPostingId,x.ClosedReportId,
+                    (SELECT TOP(1) Id FROM d4app.AccountingReport WHERE Status='RECONCILED_OK'
+                        ORDER BY AsOf DESC,FinanceSequence DESC) AS FreshReportId,
+                    (SELECT COUNT(*) FROM d4app.AccountingCase) AS Cases,
+                    (SELECT COUNT(*) FROM d4app.AccountingCase WHERE ClosedReportId=x.ClosedReportId) AS ClosedCases,
+                    (SELECT COUNT(*) FROM d4accounting.Posting WHERE Kind='CORRECTION' AND ApprovalId=c.ApprovalId) AS ApprovalPosts,
+                    (SELECT COUNT(*) FROM d4accounting.Journal WHERE Operation='CORRECTION'
+                        AND Outcome='COMMITTED_NO_ACK' AND SourceLineId=c.SourceLineId) AS PartnerAckLost
+                FROM d4app.AccountingCorrection c
+                JOIN d4app.AccountingCase x ON x.Id=c.CaseId
+                LEFT JOIN d4accounting.Posting p ON p.CorrectionId=c.Id;
+                """, cancellationToken: ct));
+        }
 
         async Task<OriginalSource> Original(Guid delivery)
         {
@@ -242,6 +301,8 @@ internal static class App03FinanceEvidence
     private sealed record Right(Guid Id);
     private sealed record DeliveryLine(Guid Id, int ShipToVersion);
     private sealed record Snapshot(Review Primary, Review Peer);
+    private sealed record ApprovalState(Guid? AppPostingId, Guid? PartnerPostingId, Guid? ClosedReportId,
+        Guid? FreshReportId, int Cases, int ClosedCases, int ApprovalPosts, int PartnerAckLost);
     private sealed record OriginalSource(decimal Outstanding, decimal SaleCost, decimal ReleasedCost,
         long Gross, decimal CorrectedGross, decimal CorrectedAr, decimal CorrectedCost, decimal CorrectedQuantity,
         int FinanceActors, int AccountingActors, int Reports, string Digest);

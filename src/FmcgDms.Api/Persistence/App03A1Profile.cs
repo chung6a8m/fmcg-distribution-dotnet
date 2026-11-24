@@ -75,7 +75,9 @@ public static class App03A1Profile
             RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement, finance: connections.UsesApp03Finance);
             if (connections.UsesApp03Settlement) await VerifySettlementSchema(db, ct);
             if (connections.UsesApp03Finance && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
-                SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'd4app.FinanceQueue',N'V') IS NOT NULL
+                SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'd4app.FinanceQueueProvenance',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'd4app.FinanceCases',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'd4app.FinanceCorrectionPosting',N'V') IS NOT NULL
                     AND OBJECT_ID(N'dbo.F06Period',N'U') IS NOT NULL AND OBJECT_ID(N'dbo.F08Treasury',N'U') IS NOT NULL
                     THEN 1 ELSE 0 END);
                 """, cancellationToken: ct)))
@@ -122,6 +124,7 @@ public static class App03A1Profile
             yield return (App02DevF06Schema.Profile, 202611230007);
             yield return (App02DevF08Schema.Profile, 202611230009);
             yield return (FinanceName, App03FinanceSchema.Version);
+            yield return (FinanceName, App03FinanceReviewSchema.Version);
         }
     }
 

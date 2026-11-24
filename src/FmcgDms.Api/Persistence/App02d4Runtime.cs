@@ -122,14 +122,12 @@ internal sealed class App02d4Runtime(TenantConnections connections, IConfigurati
         await using var db = await Open(user, "", ct);
         using var rows = await db.QueryMultipleAsync(new CommandDefinition("""
             SELECT DeliveryId,SourceLineId,Seller,Channel,OccurredAt,Quantity,Gross,Ar,Cost,ReceiptId,PostingId,
-                ReportId,ReconciliationStatus,Customer,Sku,Trip FROM d4app.FinanceQueue ORDER BY OccurredAt DESC,DeliveryId;
+                ReportId,ReconciliationStatus,Customer,Sku,Trip,ReportFromUtc,ReportCutoff,ReportAsOf,ReconciliationStale
+            FROM d4app.FinanceQueueProvenance ORDER BY OccurredAt DESC,DeliveryId;
             SELECT Id,FromUtc,Cutoff,AsOf,Status FROM d4app.AccountingReport ORDER BY FinanceSequence DESC;
-            SELECT c.Id,c.ReportId,q.DeliveryId,c.SourceLineId,c.ClosedReportId,l.Reason
-            FROM d4app.AccountingCase c
-            JOIN d4app.AccountingReportLine l ON l.ReportId=c.ReportId AND l.SourceLineId=c.SourceLineId
-            JOIN d4app.FinanceQueue q ON q.SourceLineId=c.SourceLineId
-            ORDER BY l.OccurredAt DESC,c.Id;
-            SELECT c.Id,c.CaseId,q.DeliveryId,c.Period,c.PostingId,c.ApprovalId
+            SELECT Id,ReportId,DeliveryId,SourceLineId,ClosedReportId,Reason,ClosedBy
+            FROM d4app.FinanceCases ORDER BY OccurredAt DESC,Id;
+            SELECT c.Id,c.CaseId,q.DeliveryId,c.Period,c.PostingId,c.ApprovalId,c.Maker
             FROM d4app.AccountingCorrection c
             JOIN d4app.FinanceQueue q ON q.SourceLineId=c.SourceLineId
             ORDER BY q.OccurredAt DESC,c.Id;
@@ -146,10 +144,11 @@ internal sealed class App02d4Runtime(TenantConnections connections, IConfigurati
 
     private sealed record FinanceSource(Guid DeliveryId, Guid SourceLineId, string Seller, string Channel,
         DateTimeOffset OccurredAt, decimal Quantity, decimal Gross, decimal Ar, decimal Cost,
-        Guid? ReceiptId, Guid? PostingId, Guid? ReportId, string? ReconciliationStatus, string Customer, string Sku, string Trip);
+        Guid? ReceiptId, Guid? PostingId, Guid? ReportId, string? ReconciliationStatus, string Customer, string Sku, string Trip,
+        DateTimeOffset? ReportFromUtc, DateTimeOffset? ReportCutoff, DateTimeOffset? ReportAsOf, bool ReconciliationStale);
     private sealed record FinanceReport(Guid Id, DateTimeOffset FromUtc, DateTimeOffset Cutoff, DateTimeOffset AsOf, string Status);
-    private sealed record FinanceCase(Guid Id, Guid ReportId, Guid DeliveryId, Guid SourceLineId, Guid? ClosedReportId, string? Reason);
-    private sealed record FinanceCorrection(Guid Id, Guid CaseId, Guid DeliveryId, string Period, Guid? PostingId, Guid? ApprovalId);
+    private sealed record FinanceCase(Guid Id, Guid ReportId, Guid DeliveryId, Guid SourceLineId, Guid? ClosedReportId, string? Reason, string? ClosedBy);
+    private sealed record FinanceCorrection(Guid Id, Guid CaseId, Guid DeliveryId, string Period, Guid? PostingId, Guid? ApprovalId, string Maker);
 
     internal async Task<SqlConnection> Open(ClaimsPrincipal user, string role, CancellationToken ct)
     {

@@ -49,3 +49,25 @@ Runner nâng phiên .6 đã có lần giao lên .7. Một lần giao mới đư�
 Hồi quy APP-03.1b/.2 qua trên profile .7 (run `3b3f1561b8cc4727a8349a7869b07623`). D.4 độc lập qua 36/36 ca theo tenant và 2/2 Chromium (run `481613c03b0448a3a6dd9850b3031499`). F06 và F08 độc lập qua Chromium và đối chiếu SQL (run `dba761ca2e9340c58cc7dd8af4b9f5ec` và `6e8c9cd56ab74846b2bcb0fac32feeb4`). Lượt F08 ghi một GET F05 bị hủy khi chuyển màn. Bộ .NET đạt 352/352, kiểm tra web đạt 23/23 và Playwright tổng đạt 58 bài, với một bài cài PWA standalone bỏ qua theo cấu hình local.
 
 Bằng chứng thuộc phạm vi synthetic DEV trên LocalDB. Nghiệm thu .9, CI hosted và vận hành giữ mốc riêng.
+
+## Sửa sau review PR #141
+
+- Hàng đợi dùng một hồ sơ sai lệch cho cùng bút toán, dòng nguồn, hash và lý do. Mỗi báo cáo giữ kết quả lịch sử và trỏ đến hồ sơ chung. Hồ sơ trùng từ runtime cũ được nhóm khi đọc. Việc đóng cả hồ sơ trùng chỉ áp dụng khi báo cáo mới đáp ứng cùng cửa sổ đối soát.
+- Đề nghị, duyệt và đóng hồ sơ giữ định danh nguồn để tra cứu hoặc gửi lại sau reload. Khi đối tác đã ghi bút toán trước khi khóa kỳ, API đối chiếu lại chứng cứ ghi sổ và khôi phục mã posting của ứng dụng. Kỳ đã khóa chặn ghi bút toán điều chỉnh mới.
+- Dòng hàng đợi hiển thị mã báo cáo, khoảng thời gian và mốc AsOf riêng. Lần đối soát cũ được đánh dấu khi thông tin tiếp nhận hoặc ghi sổ thay đổi. Reconciler có thể mở báo cáo từ dòng nguồn.
+
+Run `15946ed7585b4300815bf7a136a40485` đạt 5/5 chặng Chromium → API → SQL trên hai tenant LocalDB. Tree mã và kiểm thử `eb6ed1f867cf683551de6fcb22a21e2beebad729` trên base `a161d82a03d31328aeb6276da76249e9fba64e4c`.
+
+- Hai báo cáo sai lệch giữ hai mốc AsOf và dùng một hồ sơ. Runner bổ sung một hồ sơ trùng theo cấu trúc cũ trong dữ liệu giả lập để kiểm nâng cấp. Hàng đợi vẫn chỉ hiện hồ sơ chung. Báo cáo khớp đóng cả hai bản ghi cùng cửa sổ.
+- Đối tác ghi đúng một bút toán khi mất ACK. Sau Stop, NextDay và Resume qua ngày 01/12, mã posting trong ứng dụng khớp mã đối tác, và gửi lại đề nghị trả cùng mã gốc. Mất ACK khi đóng hồ sơ vẫn tra được đúng mã hồ sơ và báo cáo đóng sau reload.
+- Hồi quy D.4 đạt 36/36 và Chromium 2/2 (run `1d47b897ed4946998b6bb8374502ed8f`). F06 (run `9eee53a894214a109a8b70ed55c7f0a0`) và F08 (run `fdc2e46b1ae84a8fa378615b8cb6f97a`) đều qua Chromium và đối chiếu SQL. F08 ghi một GET F05 bị hủy khi chuyển màn. .NET đạt 352/352, các kiểm tra web đạt 23/23, Playwright đạt 58 bài và bỏ qua một bài PWA standalone theo cấu hình local.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `refund.xml` | `7212C7DB1FEA13233D61E5D6A7CDD9E5286267E615BE0E4117CFC8BA865FD1E7` |
+| `accounting.xml` | `9F64B867C684060C81E4C18EE404808F8FFA9DC76CA1D6955554B1F27692AFE2` |
+| `approval.xml` | `481D94426B8D11457998B818EF49A72393F1315CE2A4E23418685F3BCDA64F1E` |
+| `recovery.xml` | `A045354F7276976CB584911C3BE53A5BBCC98A13C3CBB1EC55FFF8B53A914A99` |
+| `cost.xml` | `09943824CFB2481ABA0613BD0D2704E73C6A679FA5D1616A238A3F78E2C28D89` |
+| `sql-review.json` | `7949015C6B12E3251D29BCD38D562AC85B988EEEE066A4DAE30C02617D6136CB` |
+| `app03-7-review-final.trx` | `8620349B9FD4EF1DF2593B158A07EC846A7E530001334DA4C9C195637A8F936B` |

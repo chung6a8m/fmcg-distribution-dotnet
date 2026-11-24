@@ -7,6 +7,8 @@ namespace FmcgDms.Api.Persistence;
 
 internal static partial class App02d4Accounting
 {
+    private const string FinanceCasesLock = "APP-03.7:accounting-cases";
+
     private sealed record ReconcileRequest(DateTimeOffset From, DateTimeOffset Cutoff, DateTimeOffset AsOf, bool UnknownScope, Guid? RequestId);
     private sealed record Line(Guid ReportId, Guid DeliveryId, Guid SourceLineId, string SourceHash, DateTimeOffset OccurredAt,
         string Period, Guid? ReceiptId, Guid? PostingId, string Status, string? Reason,
@@ -40,7 +42,7 @@ internal static partial class App02d4Accounting
         {
             var saved = await FindStoredReport(db, id, null, ct);
             if (saved is not null)
-                return saved.Matches(request, requestActor) ? await ReadReport(db, id, ct)
+                return saved.Matches(request, requestActor) ? await ReadReport(db, id, runtime.UsesFinance, ct)
                     : Results.Conflict(new Error("REPORT_REQUEST_CONFLICT"));
         }
         using var client = runtime.Client(http, Partner);
@@ -88,13 +90,15 @@ internal static partial class App02d4Accounting
         if (!scopeKnown) lines = [];
 
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        if (runtime.UsesFinance && lines.Any(line => line.Status == Diff && line.PostingId is not null))
+            await App02a3Sql.Lock(db, tx, FinanceCasesLock, ct);
         if (requestId is not null)
         {
             var saved = await FindStoredReport(db, reportId, tx, ct);
             if (saved is not null)
             {
                 await tx.CommitAsync(ct);
-                return saved.Matches(request, requestActor) ? await ReadReport(db, reportId, ct)
+                return saved.Matches(request, requestActor) ? await ReadReport(db, reportId, runtime.UsesFinance, ct)
                     : Results.Conflict(new Error("REPORT_REQUEST_CONFLICT"));
             }
         }
@@ -124,13 +128,24 @@ internal static partial class App02d4Accounting
             var cases = lines.Where(line => line.Status == Diff && line.PostingId is not null)
                 .Select(line => new { Id = Guid.NewGuid(), line.ReportId, line.SourceLineId }).ToArray();
             if (cases.Length > 0)
-                await db.ExecuteAsync(new CommandDefinition("""
+                await db.ExecuteAsync(new CommandDefinition(runtime.UsesFinance ? """
+                    INSERT d4app.AccountingCase (Id,ReportId,SourceLineId,OwnerRole,NextAction)
+                    SELECT @Id,@ReportId,@SourceLineId,'reconciler','REVIEW_POSTING_DIFFERENCE'
+                    FROM d4app.AccountingReportLine currentLine
+                    WHERE currentLine.ReportId=@ReportId AND currentLine.SourceLineId=@SourceLineId
+                      AND NOT EXISTS (
+                        SELECT 1 FROM d4app.AccountingCase existing
+                        JOIN d4app.AccountingReportLine earlier ON earlier.ReportId=existing.ReportId
+                            AND earlier.SourceLineId=existing.SourceLineId
+                        WHERE earlier.PostingId=currentLine.PostingId AND earlier.SourceLineId=currentLine.SourceLineId
+                            AND earlier.SourceHash=currentLine.SourceHash AND earlier.Reason=currentLine.Reason)
+                    """ : """
                     INSERT d4app.AccountingCase (Id,ReportId,SourceLineId,OwnerRole,NextAction)
                     VALUES (@Id,@ReportId,@SourceLineId,'reconciler','REVIEW_POSTING_DIFFERENCE')
                     """, cases, tx, cancellationToken: ct));
         }
         await tx.CommitAsync(ct);
-        return await ReadReport(db, report.Id, ct);
+        return await ReadReport(db, report.Id, runtime.UsesFinance, ct);
     }
 
     private static Task<StoredReport?> FindStoredReport(SqlConnection db, Guid id, System.Data.Common.DbTransaction? tx,
@@ -188,17 +203,23 @@ internal static partial class App02d4Accounting
         CancellationToken ct)
     {
         await using var db = await runtime.Open(http.User, "reconciler", ct);
-        return await ReadReport(db, reportId, ct);
+        return await ReadReport(db, reportId, runtime.UsesFinance, ct);
     }
 
-    private static async Task<IResult> ReadReport(SqlConnection db, Guid reportId, CancellationToken ct)
+    private static async Task<IResult> ReadReport(SqlConnection db, Guid reportId, bool finance, CancellationToken ct)
     {
-        using var reader = await db.QueryMultipleAsync(new CommandDefinition("""
+        string cases = finance ? """
+            LEFT JOIN d4app.FinanceCases c ON c.PostingId=l.PostingId AND c.SourceLineId=l.SourceLineId
+                AND c.SourceHash=l.SourceHash AND c.Reason=l.Reason
+            """ : """
+            LEFT JOIN d4app.AccountingCase c ON c.ReportId=l.ReportId AND c.SourceLineId=l.SourceLineId
+            """;
+        using var reader = await db.QueryMultipleAsync(new CommandDefinition($"""
             SELECT Id,FromUtc,Cutoff,AsOf,ExpectedCount,ReceivedCount,PostedCount,OkCount,DiffCount,PendingCount,
                 OutsideCount,Status,Reason,CreatedAt
             FROM d4app.AccountingReport WHERE Id=@ReportId;
             SELECT l.*,c.Id AS CaseId FROM d4app.AccountingReportLine l
-            LEFT JOIN d4app.AccountingCase c ON c.ReportId=l.ReportId AND c.SourceLineId=l.SourceLineId
+            {cases}
             WHERE l.ReportId=@ReportId ORDER BY l.OccurredAt,l.SourceLineId;
             """, new { ReportId = reportId }, cancellationToken: ct));
         var report = await reader.ReadSingleOrDefaultAsync<Report>();

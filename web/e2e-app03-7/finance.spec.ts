@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
 const sale = process.env.APP03_FINANCE_DELIVERY!
@@ -11,6 +13,7 @@ async function open(context: BrowserContext, role: string, path: string) {
   await page.goto('/work/' + path)
   await page.getByLabel('Mã truy cập DEV').fill(process.env['APP03_' + role + '_TOKEN']!)
   await page.getByRole('button', { name: 'Kết nối' }).click()
+  await expect(page.getByRole('navigation', { name: 'Công việc DEV' })).toBeVisible()
   return page
 }
 
@@ -133,26 +136,32 @@ test('refund from a shared delivery goes through QA, credit, verification and ca
   expect(peer.status(), await peer.text()).toBe(200)
   expect((await peer.json()).sources).toEqual([])
   expect((await request.get(accounting + '/queue', { headers: auth('SOURCE') })).status()).toBe(403)
-  await sourceRow.getByRole('button').click()
-  await accountant.getByLabel('Kịch bản ghi sổ DEV').selectOption('wrong-amount')
-  await accountant.getByRole('button', { name: 'Ghi sổ nguồn' }).click()
-  await expect(sourceRow).toContainText('Đã tiếp nhận · Đã ghi sổ · Chưa đối soát')
-
   const otherRow = accountant.locator(`li[data-delivery]:not([data-delivery=${JSON.stringify(sale)}])`)
   await otherRow.getByRole('button').click()
-  await accountant.getByLabel('Kịch bản ghi sổ DEV').selectOption('')
   await accountant.getByRole('button', { name: 'Tiếp nhận nguồn' }).click()
   await expect(otherRow).toContainText('Đã tiếp nhận · Chưa ghi sổ · Chưa đối soát')
-  await accountant.getByRole('button', { name: 'Ghi sổ nguồn' }).click()
-  await expect(otherRow).toContainText('Đã tiếp nhận · Đã ghi sổ · Chưa đối soát')
   await accountant.screenshot({ path: info.outputPath('receipt.png'), fullPage: true })
 })
 
-test('accounting posts the original source, corrects the discrepancy and reconciles in the open period', async ({ context }, info) => {
+async function reconciliationWindow(page: Page, asOf: string) {
+  await page.getByLabel('Từ (gồm)', { exact: true }).fill('2026-11-23T00:00:00+07:00')
+  await page.getByLabel('Cutoff (loại trừ)', { exact: true }).fill('2026-11-24T00:00:00+07:00')
+  await page.getByLabel('Đối soát tính đến').fill(asOf)
+}
+
+function deliveryRow(page: Page) {
+  return page.locator(`li[data-delivery=${JSON.stringify(sale)}]`)
+}
+
+async function readQueue(page: Page, role: string) {
+  const response = await page.request.get(accounting + '/queue', { headers: auth(role) })
+  expect(response.status(), await response.text()).toBe(200)
+  return response.json()
+}
+
+test('accounting preserves report provenance and marks reconciliation stale after posting', async ({ context }) => {
   const reconciler = await open(context, 'RECONCILER', 'finance')
-  await reconciler.getByLabel('Từ (gồm)', { exact: true }).fill('2026-11-23T00:00:00+07:00')
-  await reconciler.getByLabel('Cutoff (loại trừ)', { exact: true }).fill('2026-11-24T00:00:00+07:00')
-  await reconciler.getByLabel('Đối soát tính đến').fill('2026-11-24T08:59:00+07:00')
+  await reconciliationWindow(reconciler, '2026-11-24T08:59:00+07:00')
   let reportRequest: { requestId: string; from: string; cutoff: string; asOf: string } | undefined
   await reconciler.route('**' + accounting + '/reconcile', async route => {
     reportRequest = route.request().postDataJSON()
@@ -171,28 +180,130 @@ test('accounting posts the original source, corrects the discrepancy and reconci
   const conflict = await reconciler.request.post(accounting + '/reconcile', { headers: auth('RECONCILER'),
     data: { ...reportRequest, from: '2026-11-22T00:00:00+07:00' } })
   expect(conflict.status()).toBe(409)
-  await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText('AMOUNT_MISMATCH')
+  await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText('POSTING_MISSING')
+
+  const accountant = await open(context, 'ACCOUNTANT', 'finance')
+  const sourceRow = deliveryRow(accountant)
+  await sourceRow.getByRole('button').click()
+  await accountant.getByLabel('Kịch bản ghi sổ DEV').selectOption('wrong-amount')
+  await accountant.getByRole('button', { name: 'Ghi sổ nguồn' }).click()
+  await expect(sourceRow).toContainText('Đã tiếp nhận · Đã ghi sổ · PENDING')
+  const otherRow = accountant.locator(`li[data-delivery]:not([data-delivery=${JSON.stringify(sale)}])`)
+  await otherRow.getByRole('button').click()
+  await accountant.getByLabel('Kịch bản ghi sổ DEV').selectOption('')
+  await accountant.getByRole('button', { name: 'Ghi sổ nguồn' }).click()
+  await expect(otherRow).toContainText('Đã tiếp nhận · Đã ghi sổ · PENDING')
+
+  await reconciler.getByRole('button', { name: 'Tải lại hàng đợi' }).click()
+  const row = deliveryRow(reconciler)
+  await expect(row).toContainText('Đối soát trước khi nguồn thay đổi')
+  await expect(row).toContainText('08:59:00')
+  await expect(row).toContainText(reportRequest!.requestId)
+  await row.getByRole('button', { name: 'Mở báo cáo nguồn' }).click()
+  await expect(reconciler.getByText(reportRequest!.requestId, { exact: true })).toBeVisible()
+  await expect(sourceRow.getByRole('button', { name: 'Mở báo cáo nguồn' })).toHaveCount(0)
+
+  await reconciliationWindow(reconciler, '2026-11-24T09:00:00+07:00')
+  await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
+  await expect(row).toContainText('RECONCILED_DIFF')
+  await expect(row).toContainText('09:00:00')
+  await expect(row).not.toContainText('Đối soát trước khi nguồn thay đổi')
+  const options = reconciler.getByLabel('Báo cáo đối soát', { exact: true }).locator('option')
+  await expect(options.filter({ hasText: '08:59:00' })).toHaveCount(1)
+  await expect(options.filter({ hasText: '09:00:00' })).toHaveCount(1)
+})
+
+test('approval preserves one discrepancy across repeated reports and loses the partner acknowledgement', async ({ context }) => {
+  const reconciler = await open(context, 'RECONCILER', 'finance')
+  const casePicker = reconciler.getByLabel('Hồ sơ sai lệch', { exact: true })
+  await casePicker.selectOption({ index: 1 })
+  const caseId = await casePicker.inputValue()
+  await reconciliationWindow(reconciler, '2026-11-25T09:00:00+07:00')
+  await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
+  await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText(caseId)
+  await expect(casePicker.locator('option')).toHaveCount(2)
+
   const maker = await open(context, 'MAKER', 'finance')
-  await expect(maker.getByRole('heading', { name: 'Hàng đợi kế toán' })).toBeVisible()
-  await maker.getByLabel('Hồ sơ sai lệch', { exact: true }).selectOption({ index: 1 })
-  const caseId = await maker.getByLabel('Hồ sơ sai lệch', { exact: true }).inputValue()
+  await maker.getByLabel('Hồ sơ sai lệch', { exact: true }).selectOption(caseId)
+  await maker.route('**' + accounting + '/reports/*/corrections', async route => {
+    expect((await route.fetch()).ok()).toBeTruthy()
+    await route.abort()
+  }, { times: 1 })
   await maker.getByRole('button', { name: 'Đề nghị điều chỉnh' }).click()
+  await expect(maker.getByText(/Chưa rõ kết quả điều chỉnh/)).toBeVisible()
+  await maker.reload()
+  await maker.getByRole('button', { name: 'Tra cứu điều chỉnh gốc' }).click()
   await expect(maker.getByText(/^PROPOSED ·/)).toBeVisible()
 
   const checker = await open(context, 'CHECKER', 'finance')
-  await checker.getByLabel('Đề nghị điều chỉnh', { exact: true }).selectOption({ index: 1 })
+  const proposal = checker.getByLabel('Đề nghị điều chỉnh', { exact: true })
+  await proposal.selectOption({ index: 1 })
+  const correctionId = await proposal.inputValue()
+  const unresolved = await checker.request.post(accounting + '/corrections/' + correctionId + '/approve', {
+    headers: auth('CHECKER'), data: { recoverOnly: true },
+  })
+  expect(unresolved.status()).toBe(404)
+  await checker.route('**' + accounting + '/corrections/' + correctionId + '/approve', async route => {
+    const response = await route.fetch({ postData: { fault: 'after-commit' } })
+    expect(response.status()).toBe(503)
+    await route.fulfill({ response })
+  }, { times: 1 })
   await checker.getByRole('button', { name: 'Duyệt điều chỉnh' }).click()
-  await expect(checker.getByText(/^CORRECTION_POSTED ·/)).toBeVisible()
+  await expect(checker.getByText(/Chưa rõ kết quả điều chỉnh/)).toBeVisible()
+  await checker.reload()
+  await expect(checker.getByText(/Chưa rõ kết quả điều chỉnh/)).toBeVisible()
+  expect((await readQueue(checker, 'CHECKER')).corrections[0]).toMatchObject({ id: correctionId, postingId: null })
+  const pending = await checker.evaluate(() => Object.fromEntries(
+    Object.entries(sessionStorage).filter(([key]) => key.startsWith('app03.accounting.v1.') && key.endsWith('.correction')),
+  ))
+  expect(Object.keys(pending)).toHaveLength(1)
+  await writeFile(join(process.env.APP03_FINANCE_EVIDENCE_DIR!, 'pending-approval.json'), JSON.stringify(pending))
+})
 
-  await reconciler.getByLabel('Từ (gồm)', { exact: true }).fill('2026-11-23T00:00:00+07:00')
-  await reconciler.getByLabel('Cutoff (loại trừ)', { exact: true }).fill('2026-11-24T00:00:00+07:00')
-  await reconciler.getByLabel('Đối soát tính đến').fill('2026-11-24T09:00:00+07:00')
+test('recovery links the committed correction after NextDay and finds the original case closure', async ({ context }, info) => {
+  const checker = await open(context, 'CHECKER', 'finance')
+  const saved = JSON.parse(process.env.APP03_FINANCE_PENDING!)
+  await checker.evaluate(entries => {
+    for (const [key, value] of Object.entries(entries)) sessionStorage.setItem(key, value as string)
+  }, saved)
+  await checker.reload()
+  await expect(checker.getByText('Ngày nghiệp vụ')).toContainText('01/12/2026')
+  await checker.getByRole('button', { name: 'Tra cứu điều chỉnh gốc' }).click()
+  await expect(checker.getByText(/^CORRECTION_POSTED ·/)).toBeVisible()
+  const queue = await readQueue(checker, 'CHECKER')
+  expect(queue.corrections).toHaveLength(1)
+  expect(queue.corrections[0].postingId).toBeTruthy()
+
+  const reconciler = await open(context, 'RECONCILER', 'finance')
+  await reconciliationWindow(reconciler, '2026-12-01T09:00:00+07:00')
+  const reconciliationResponse = reconciler.waitForResponse(response => response.url().endsWith(accounting + '/reconcile'))
   await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
-  await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).not.toContainText('AMOUNT_MISMATCH')
+  const fresh = await reconciliationResponse
+  expect(fresh.ok(), await fresh.text()).toBeTruthy()
+  const reportId = (await fresh.json()).report.id
+  await expect(reconciler.getByLabel('Báo cáo đối soát', { exact: true })).toHaveValue(reportId)
   await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText('RECONCILED_OK')
-  await reconciler.getByLabel('Hồ sơ sai lệch', { exact: true }).selectOption(caseId)
+  const casePicker = reconciler.getByLabel('Hồ sơ sai lệch', { exact: true })
+  await casePicker.selectOption({ index: 1 })
+  const caseId = await casePicker.inputValue()
+  await reconciler.route('**' + accounting + '/cases/' + caseId + '/close', async route => {
+    expect((await route.fetch()).ok()).toBeTruthy()
+    await route.abort()
+  }, { times: 1 })
   await reconciler.getByRole('button', { name: 'Đóng hồ sơ sai lệch' }).click()
-  await expect(reconciler.getByText(/^CLOSED ·/)).toBeVisible()
+  await expect(reconciler.getByText(/Chưa rõ kết quả điều chỉnh/)).toBeVisible()
+  await reconciler.reload()
+  await expect(casePicker.locator('option')).toHaveCount(1)
+  await reconciler.getByRole('button', { name: 'Tra cứu điều chỉnh gốc' }).click()
+  await expect(reconciler.getByText(/^CLOSED ·/)).toContainText(reportId)
+  await expect(reconciler.getByRole('region', { name: 'Hồ sơ đã đóng' })).toContainText(caseId)
+  const closed = (await readQueue(reconciler, 'RECONCILER')).cases
+  expect(closed).toMatchObject([{ id: caseId, closedReportId: reportId }])
+  const oldProposal = await reconciler.request.post(accounting + '/reports/' + closed[0].reportId + '/corrections', {
+    headers: auth('MAKER'), data: { deliveryId: sale },
+  })
+  expect(oldProposal.status(), await oldProposal.text()).toBe(200)
+  expect(await oldProposal.json()).toMatchObject({ status: 'PROPOSED', id: queue.corrections[0].id })
   await reconciler.screenshot({ path: info.outputPath('reconciliation.png'), fullPage: true })
 })
 
