@@ -57,7 +57,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [DEV_VERIFIED_LOCAL](app-03-1a-runtime-schema.md#kết-quả-local-ngày-23112026) |
 | APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | [DEV_VERIFIED_LOCAL](app-03-1b-dev-session.md#kết-quả-local-ngày-23112026) |
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | [DEV_VERIFIED_LOCAL](app-03-2-day-bootstrap.md#kết-quả-local-ngày-23112026) |
-| APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | NOT_STARTED |
+| APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | [DEV_VERIFIED_LOCAL](app-03-3-workspace.md#kết-quả-local-ngày-24112026) |
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | NOT_STARTED |
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | NOT_STARTED |
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | NOT_STARTED |
@@ -116,10 +116,10 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Hoàn tất:**
 
-- [ ] Mỗi actor mở phiên một lần, đi giữa các workspace được phép và reload mà không phải dán mã DEV tại từng trang.
-- [ ] Server vẫn kiểm quyền/tenant/phân công; token hết hạn hoặc quyền bị thu hồi không làm lộ nguồn hay cho replay trái quyền.
-- [ ] Giữ ngữ cảnh qua đường dẫn và danh sách; màn chưa được profile hỗ trợ không được thể hiện như một chức năng dùng được.
-- [ ] Desktop Compact, Noto Sans, Light/Dark/System, sidebar và adaptive list/detail theo baseline; kiểm keyboard/focus/theme trên các phần thay đổi.
+- [x] Mỗi actor mở phiên một lần, đi giữa các workspace được phép và reload mà không phải dán mã DEV tại từng trang.
+- [x] Server vẫn kiểm quyền/tenant/phân công; token hết hạn hoặc quyền bị thu hồi không làm lộ nguồn hay cho replay trái quyền.
+- [x] Giữ ngữ cảnh qua đường dẫn và danh sách; màn chưa được profile hỗ trợ không được thể hiện như một chức năng dùng được.
+- [x] Desktop Compact, Noto Sans, Light/Dark/System, sidebar và adaptive list/detail theo baseline; kiểm keyboard/focus/theme trên các phần thay đổi.
 
 ### APP-03.4 — Sales bàn giao Kho
 

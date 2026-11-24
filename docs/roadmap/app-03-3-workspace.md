@@ -33,3 +33,20 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action VerifyWorkspace
 Runner mở một cặp LocalDB synthetic có dấu sở hữu theo run. Chromium dùng shell để tạo đơn 2 EA, Confirm/Reserve, nạp và giao trên chuyến B của ngày 23/11, mở AR theo đơn rồi lập đề nghị trả 1 EA từ lần giao đó. Playwright bỏ ACK sau khi máy chủ commit. Finance và tenant B không dùng được lệnh chờ của Sales A. Quay lại Sales A tra được kết quả gốc. Sau khi gỡ grant Sales, API phải trả 403 cho đọc công nợ trên chuyến, tra cứu và gửi lại lệnh trả. JWT hết hạn phải nhận 401 tại phiên và endpoint nghiệp vụ. Đối chiếu SQL độc lập phải có đúng một đơn, một lần giao và một hồ sơ trả chưa qua bước xử lý tiếp ở tenant A, cùng số dòng bằng 0 ở tenant B.
 
 Artifact nằm tại `TestResults/app03-3/<RunId>/`, gồm kết quả JUnit, đối chiếu SQL và ảnh Chromium desktop/320 CSS px. Phạm vi kiểm chứng là synthetic DEV, với thiết bị thật, zoom vật lý 125%, PREPROD và production theo cổng nghiệm thu riêng.
+
+## Kết quả local ngày 24/11/2026
+
+**DEV_VERIFIED_LOCAL** trên source `27a50bd4fcd54b72cbb7bdadae8080ec01529997`, tree `e8dd8e5806b01580a09c2c0cf0cec8eda4aa9dfd`. Windows LocalDB, .NET 10.0.404, Node 26.13.1.
+
+- **APP-03.3** · run `07dc1367e32648e08a0c256495482c27` · Chromium 1/1. Reload giữ chuyến, AR dùng VND và liên kết đúng lần giao. Mất ACK, cách ly actor/tenant, JWT hết hạn và thu hồi Sales khớp kỳ vọng. SQL xác nhận tenant A có một đơn, một lần giao, một hồ sơ trả và chưa có bước xử lý trả. Các số đếm ở tenant B đều bằng 0.
+- **APP-03.1a** · run `45609e13f21e444b911b123b0e685843` · Chromium 1/1, giữ được đơn qua nâng cấp schema và kiểm lại các cấu hình khởi động bị chặn.
+- **APP-03.2/.1b** · run `34cc5e5d76564fd69252e4bbd0c25ed0` · bootstrap, ngày kế tiếp, restart, tra cứu ACK, replay và thu hồi phiên có kiểm tra ownership đều qua.
+- **.NET** · `dotnet test --solution FmcgDms.slnx -- --report-trx` · 352/352, không có lỗi hoặc ca bỏ qua.
+- **Web** · build và các bài unit/dependency/PWA 23/23. Bộ Playwright web 51 qua, một bài cài PWA standalone bỏ qua theo cấu hình local của repo.
+
+| Artifact local | SHA-256 |
+| --- | --- |
+| `TestResults/app03-3/07dc1367e32648e08a0c256495482c27/sql-review.json` | `8C99BAE93A8D8A6EFB54B9CC44B41EBC97F033397CF0F037B1F3E3F27EFFD95C` |
+| `TestResults/app03-3/07dc1367e32648e08a0c256495482c27/junit.xml` | `F7633BEA8DCB6D88EA51541429E276B3B617F65C8FCBEFC42FD411D1ED86BF34` |
+
+Workflow Windows có bước chạy `VerifyWorkspace` và tải artifact. CI từ xa và merge còn chờ xác nhận.
