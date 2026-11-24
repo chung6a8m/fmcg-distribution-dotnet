@@ -152,7 +152,7 @@ function Initialize-LocalDb {
     $report = [ordered]@{
         schemaVersion = 'CI_LOCALDB_BOOTSTRAP_V1'; startedUtc = [DateTime]::UtcNow.ToString('o')
         status = 'FAILED'; failure = $null; mode = 'UNKNOWN'; instance = 'MSSQLLocalDB'
-        expectedVersion = '15.0'; engineVersion = $null; installedVersions = @(); readinessAttempts = 0
+        expectedVersion = '15.0'; selectedVersion = $null; engineVersion = $null; installedVersions = @(); readinessAttempts = 0
         deadlineSeconds = $DeadlineSeconds; elapsedMilliseconds = 0; attempts = @(); requireWarm = [bool]$RequireWarm
         sourceHeadSha = if ($env:CI_LOCALDB_SOURCE_HEAD_SHA -cmatch '\A[a-f0-9]{40}\z') { $env:CI_LOCALDB_SOURCE_HEAD_SHA }
         workflowSha = if ($env:GITHUB_SHA -cmatch '\A[a-f0-9]{40}\z') { $env:GITHUB_SHA }
@@ -188,10 +188,13 @@ function Initialize-LocalDb {
                 $match.Groups[1].Value
             })
             $report.installedVersions = $installed
-            if (!@($installed | Where-Object { $_ -match '\A15\.0\.' }).Count) {
-                Stop-LocalDbBootstrap 'EngineUnavailable'
-            }
-            $create = Invoke-LocalDbBootstrapStage $context 'create' @('create', 'MSSQLLocalDB', '15.0')
+            $matching = @($installed | Where-Object { $_ -match '\A15\.0\.' })
+            if ($matching.Count -eq 0) { Stop-LocalDbBootstrap 'EngineUnavailable' }
+            if ($matching.Count -ne 1) { Stop-LocalDbBootstrap 'InstanceMetadataMismatch' }
+            # Use the registered runtime identity rather than assuming the
+            # native API accepts a shortened major.minor request on this image.
+            $report.selectedVersion = $matching[0]
+            $create = Invoke-LocalDbBootstrapStage $context 'create' @('create', 'MSSQLLocalDB', $report.selectedVersion)
             Assert-LocalDbBootstrapStage $create
             $info = Invoke-LocalDbBootstrapStage $context 'info' @('info', 'MSSQLLocalDB')
         }

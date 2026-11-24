@@ -25,7 +25,7 @@ Các lượt trên dùng image `20261116.370.1`. Thông báo “automatic instan
 `scripts/Initialize-LocalDb.ps1` được gọi ở cả bốn worker APP00A và sáu job SQL B3–B8. Helper chỉ chấp nhận đúng `MSSQLLocalDB` trên GitHub-hosted Windows. Database scratch, migration, ownership và nonce tiếp tục do các script/test hiện có bảo vệ.
 
 1. Xác nhận môi trường và hai executable có sẵn; kiểm tra instance.
-2. Chỉ khi nhận đúng toàn bộ câu thông báo instance `MSSQLLocalDB` chưa được tạo, đọc `versions` để xác nhận runtime 15.0 đã đăng ký, rồi gọi `create MSSQLLocalDB 15.0` một lần. File version của executable không thay thế được inventory runtime.
+2. Chỉ khi nhận đúng toàn bộ câu thông báo instance `MSSQLLocalDB` chưa được tạo, đọc `versions` để xác nhận đúng một runtime family 15.0 đã đăng ký, rồi gọi `create MSSQLLocalDB <version đầy đủ đã đăng ký>` một lần. File version của executable không thay thế được inventory runtime; không tự chọn một family khác hoặc cài thêm runtime.
 3. Đọc lại metadata duy nhất và hợp lệ. Giữ runtime family `15.0` đang dùng, không cài hoặc tự chuyển engine version.
 4. Nếu `Stopped`, gọi `start` một lần. Native exit và thông báo thành công đều phải hợp lệ; output lỗi/không nhận diện không được một probe sau đó che đi.
 5. Xác nhận lại `Running`, rồi truy vấn chỉ đọc trong `master`, kiểm `IsLocalDB` và version trước khi trả `READY`.

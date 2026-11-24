@@ -76,7 +76,7 @@ function Invoke-LocalDbProbe {
             return Native-Result $text
         }
         'create' {
-            Assert-That (($Arguments -join '|') -ceq 'create|MSSQLLocalDB|15.0') 'Unexpected creation target/version.'
+            Assert-That (($Arguments -join '|') -ceq 'create|MSSQLLocalDB|15.0.4382.1') 'Creation must use the exact registered runtime version.'
             Assert-That ($script:State -eq 'Missing') 'Existing instance must not be recreated.'
             if ($script:Scenario -eq 'MissingEngine') {
                 return Native-Result 'The specified LocalDB version is not installed.' 1 'COMMAND_FAILED'
