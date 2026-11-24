@@ -20,6 +20,7 @@ internal sealed class App03DevSession
 
     internal DemoRun RunId { get; }
     internal bool Resume { get; }
+    internal bool VerifyHandoff { get; private init; }
     internal bool UsesBusinessDay { get; private set; } = true;
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
@@ -47,7 +48,7 @@ internal sealed class App03DevSession
     internal static bool HasManifest(string id) => File.Exists(Path.Combine(Home, new DemoRun(id).Id, "session.json"));
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
-        Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null)
+        Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
@@ -55,7 +56,10 @@ internal sealed class App03DevSession
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
-        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume");
+        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume")
+        {
+            VerifyHandoff = verifyHandoff
+        };
 
         using var sessionLock = session.Acquire();
         if (operation == "Remove")

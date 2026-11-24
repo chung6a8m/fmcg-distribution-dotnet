@@ -58,6 +58,36 @@ async function login(page: Page, token: string) {
 const nav = (page: Page, name: string) => page.getByRole('navigation', { name: 'Công việc DEV' })
   .getByRole('link', { name, exact: true })
 
+test('APP-03 recovers an unknown draft with its original customer, trip, ShipTo and quantity', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**' + c2 + '/catalog', route => route.fulfill({ json: {
+    customers: [{ id: tripPeer, label: 'Khách hàng thử' }],
+    trips: [{ id: tripA, label: 'Chuyến A' }], skus: [{ id: orderA, label: 'SKU thử' }], warehouses: [],
+  } }))
+  const original = JSON.stringify({ commandId: pendingId, customerId: tripPeer, tripId: tripA, selectionId: tripB,
+    lines: [{ skuId: orderA, quantity: 2, uomCode: 'PACK' }] })
+  await page.goto('/work/orders')
+  await login(page, 'source')
+  await expect(page.getByLabel('Bước xử lý')).toBeVisible()
+  await page.evaluate(([id, body]) => {
+    sessionStorage.setItem('app02c2.pending.' + JSON.stringify(['test-run', 'tenant-a', 'nhan-vien-a']),
+      JSON.stringify({ id, body, path: '/drafts' }))
+  }, [pendingId, original])
+  await page.reload()
+  const recovery = page.getByRole('region', { name: 'Khôi phục lệnh' })
+  for (const value of ['Lưu đơn nháp', 'Khách hàng thử', 'Chuyến A', tripB, 'SKU thử · 2 PACK'])
+    await expect(recovery).toContainText(value)
+  await expect(recovery.getByRole('button', { name: 'Gửi lại yêu cầu' })).toHaveCount(0)
+  await recovery.getByRole('link', { name: 'Mở khu phục hồi lệnh' }).click()
+  await expect(page).toHaveURL(/recover=1/)
+  await expect(page.getByLabel('Bước xử lý')).toHaveCount(0)
+  await page.route('**' + c2 + '/drafts', route => route.fulfill({ json: { status: 'APPLIED', sourceId: orderA } }))
+  const replay = page.waitForRequest(req => req.url().endsWith(c2 + '/drafts') && req.method() === 'POST')
+  await recovery.getByRole('button', { name: 'Gửi lại yêu cầu' }).click()
+  expect((await replay).postData()).toBe(original)
+  await expect(page.getByRole('status')).toContainText(orderA)
+})
+
 test('APP-03 uses one browser session and restores only the current identity’s trip', async ({ page }) => {
   const state = await mockWorkspace(page)
   await page.goto('/')

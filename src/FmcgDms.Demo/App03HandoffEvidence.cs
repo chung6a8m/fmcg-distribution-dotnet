@@ -47,8 +47,8 @@ internal static class App03HandoffEvidence
     {
         var primary = await Read("tenant-a");
         var peer = await Read("tenant-b");
-        if (primary != new Counts(5, 2, 3, 0, 6, 6, 6, 0, 0, 0, 80000, 60000, 2)
-            || peer != new Counts(0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0))
+        if (primary != new Counts(5, 2, 3, 0, 6, 6, 6, 0, 0, 0, 80000, 60000, 2, 2, 1, 1)
+            || peer != new Counts(0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 1, 0, 0))
             throw new InvalidOperationException($"Unexpected APP-03.4 SQL state: tenant-a={primary}, tenant-b={peer}.");
         await File.WriteAllTextAsync(Path.Combine(directory, "sql-review.json"),
             JsonSerializer.Serialize(new { source, runId = run.Id, primary, peer },
@@ -75,12 +75,18 @@ internal static class App03HandoffEvidence
                     (SELECT COALESCE(SUM(GrossAmount),0) FROM dbo.F04PriceLine WHERE TenantId=@Tenant) AS ConfirmedVnd,
                     (SELECT COALESCE(SUM(GrossAmount),0) FROM dbo.F04DeliveryPricing WHERE TenantId=@Tenant) AS DeliveredVnd,
                     (SELECT COUNT(*) FROM dbo.F03DraftQuantity q JOIN dbo.AOrder o ON o.TenantId=q.TenantId AND o.Id=q.DraftId
-                        WHERE q.TenantId=@Tenant AND q.UomCode=N'PACK' AND q.EnteredQuantity=2 AND q.Factor=2) AS PackSnapshots
+                        WHERE q.TenantId=@Tenant AND q.UomCode=N'PACK' AND q.EnteredQuantity=2 AND q.Factor=2) AS PackSnapshots,
+                    (SELECT COUNT(*) FROM dbo.F03LotOpening WHERE TenantId=@Tenant) AS OpeningLots,
+                    (SELECT COUNT(*) FROM (SELECT StockRightId FROM dbo.F03LotHold WHERE TenantId=@Tenant
+                        GROUP BY StockRightId HAVING COUNT(*)>1) r) AS MultiLotRights,
+                    (SELECT COUNT(*) FROM (SELECT ManifestLineId FROM dbo.F03LotLoad WHERE TenantId=@Tenant
+                        GROUP BY ManifestLineId HAVING COUNT(*)>1) m) AS MultiLotManifestLines
                 """, new { Tenant = tenant }, cancellationToken: ct));
         }
     }
 
     private sealed record Counts(int Drafts, int Orders, int PriceRejections, int RejectedSources,
         decimal LotHeld, decimal LotLoaded, decimal LotIssued, decimal MainOnHand, decimal MainAllocated,
-        decimal VehicleOnHand, long ConfirmedVnd, long DeliveredVnd, int PackSnapshots);
+        decimal VehicleOnHand, long ConfirmedVnd, long DeliveredVnd, int PackSnapshots,
+        int OpeningLots, int MultiLotRights, int MultiLotManifestLines);
 }

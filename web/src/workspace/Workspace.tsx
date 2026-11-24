@@ -306,6 +306,7 @@ function WorkArea({ access, token }: Session) {
   const delivery = query.get('delivery') ?? ''
   const requestedOrder = query.get('order') ?? ''
   const requestedSource = query.get('handoffSource') ?? ''
+  const requestedTrace = query.get('handoffTrace') ?? ''
   const requestedTrip = query.get('trip') ?? ''
   const loadOrder = guid.test(requestedOrder) ? requestedOrder : ''
   const returnUrl = access.returnRole === 'sales' ? '/work/returns' : undefined
@@ -328,6 +329,7 @@ function WorkArea({ access, token }: Session) {
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr}
           selectedOrder={requestedOrder} selectedSource={guid.test(requestedSource) ? requestedSource : ''}
+          selectedTrace={requestedTrace} recovering={query.get('recover') === '1'}
           onSelectOrder={(id, tripId) => { if (tripId) saveTrip(tripId); saveArOrder(id) }}
           context={{ trip, customer, onCustomerChange: saveCustomer, onTripChange: saveTrip }} />}
         {current?.id === 'ar' && <Ar orderId={order} token={token} returnUrl={returnUrl} onCheckOrder={saveArOrder} />}

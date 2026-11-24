@@ -29,6 +29,7 @@
   .app03-handoff-table { border-collapse: collapse; width: 100%; }
   .app03-handoff-table :is(caption, th, td) { text-align: start; padding: 0.5rem; }
   .app03-handoff-table tbody tr { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
+  .app03-handoff-table [data-source-active] { background: var(--fmcg-color-surface-subtle); }
   .app03-lot-label { display: none; }
   @media (max-width: 680px) {
     .app03-nav-group .button { min-height: var(--fmcg-density-field-control-min); }

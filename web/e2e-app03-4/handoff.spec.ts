@@ -65,6 +65,7 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   const orderA = await draft(customer.id, tripA)
   expect(await get(handoff, warehouse)).toEqual([])
   expect((await post(c2 + '/confirm', { commandId: crypto.randomUUID(), orderId: orderA }, warehouse)).status()).toBe(403)
+  const orderB = await draft(customer.id, tripB)
   await page.goto('/work/orders')
   await signIn(page, sales)
   await expect(page).toHaveTitle('FMCG DMS — APP-03 DEV')
@@ -73,9 +74,26 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(new RegExp(orderA))
   await expect(page.getByRole('region', { name: 'Đơn A và giữ hàng' })).toBeFocused()
+  let droppedConfirm: string | null = null
+  await page.route('**' + c2 + '/confirm', async route => {
+    droppedConfirm = route.request().postData()
+    await route.abort()
+  }, { times: 1 })
   await page.getByRole('button', { name: 'Confirm đơn' }).click()
+  await expect(page.getByText(/Chưa rõ kết quả/)).toBeVisible()
+  await page.goto(`/work/orders?trip=${tripB}&order=${orderB}`)
+  await expect(page.getByRole('link', { name: 'Mở đơn của lệnh đang chờ' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gửi lại yêu cầu' })).toHaveCount(0)
+  expect((await get<Order[]>(handoff)).filter(order => order.confirmSourceId)).toEqual([])
+  await page.getByRole('link', { name: 'Mở đơn của lệnh đang chờ' }).click()
+  await expect(page).toHaveURL(new RegExp(orderA))
+  await page.getByRole('button', { name: 'Tra cứu kết quả' }).click()
+  await expect(page.getByText(/Chưa tìm thấy kết quả/)).toBeVisible()
+  const replayedConfirm = page.waitForRequest(req => req.url().endsWith(c2 + '/confirm') && req.method() === 'POST')
+  await page.getByRole('button', { name: 'Gửi lại yêu cầu' }).click()
+  expect((await replayedConfirm).postData()).toBe(droppedConfirm)
   await expect(page.getByText(/Đã Confirm · Chưa giữ hàng/)).toBeVisible()
-  const orderB = await draft(customer.id, tripB)
+  expect((await get<Order[]>(handoff)).filter(order => order.confirmSourceId).map(order => order.id)).toEqual([orderA])
   await accepted(await post(c2 + '/confirm', { commandId: crypto.randomUUID(), orderId: orderB }))
   const orders = await get<Order[]>(handoff)
   const beforePricing = orders.map(o => o.lines[0].pricing)
@@ -91,6 +109,7 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
 
   await page.getByRole('button', { name: 'Đổi danh tính' }).click()
   await signIn(page, warehouse)
+  await expect(page.getByLabel('Bước xử lý')).toHaveValue('all')
   await page.getByLabel('Bước xử lý').selectOption('reserve')
   await expect(page.getByRole('button', { name: 'Confirm đơn' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: /DEV-20261123-[AB]/ })).toHaveCount(2)
@@ -98,6 +117,15 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   await expect(page.getByRole('link', { name: /DEV-20261123-B/ })).toHaveCount(0)
   await page.getByRole('link', { name: /DEV-20261123-A/ }).click()
   await expect(page.getByText(/2 PACK × 2 = 4 EA/)).toBeVisible()
+  await page.goBack()
+  await expect(page.getByLabel('Lọc theo chuyến')).toHaveValue(tripA)
+  await expect(page.getByLabel('Bước xử lý')).toHaveValue('reserve')
+  await page.goForward()
+  await expect(page).toHaveURL(new RegExp(orderA))
+  await page.getByRole('link', { name: 'Về hàng đợi', exact: true }).click()
+  await expect(page.getByLabel('Lọc theo chuyến')).toHaveValue(tripA)
+  await expect(page.getByLabel('Bước xử lý')).toHaveValue('reserve')
+  await page.getByRole('link', { name: /DEV-20261123-A/ }).click()
   const reserve = (id: string, quantity: number) => {
     const order = orders.find(row => row.id === id)!
     return { commandId: crypto.randomUUID(), orderId: id, lineId: order.lines[0].lineId,
@@ -114,8 +142,41 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   await page.getByRole('button', { name: 'Reserve hàng' }).click()
   await expect.poll(() => results?.map(response => response.status()).sort()).toEqual([200, 422])
   const loser = results![0].ok() ? orderB : orderA
+  const winner = loser === orderA ? orderB : orderA
+  const loserTrip = loser === orderA ? tripA : tripB
+  const winnerTrip = loser === orderA ? tripB : tripA
+  const winningSource = (await results!.find(response => response.ok())!.json()).sourceId as string
   await rejected(results!.find(response => !response.ok())!, 'F03_LOT_STOCK_INSUFFICIENT')
-  await accepted(await post(c2 + '/reserve', reserve(loser, 2), warehouse))
+  await expect(page.getByRole('button', { name: 'Tải lại đơn' })).toBeEnabled()
+  await page.goto(`/work/orders?trip=${loserTrip}&order=${loser}`)
+  await page.getByRole('combobox', { name: 'Kho', exact: true }).selectOption(locationId)
+  await page.getByLabel('Số lượng giữ').fill('2')
+  let heldSource = ''
+  await page.route('**' + c2 + '/reserve', async route => {
+    heldSource = (await accepted(await route.fetch())).sourceId
+    await route.abort()
+  }, { times: 1 })
+  await page.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText(/Chưa rõ kết quả/)).toBeVisible()
+  await page.goto(`/work/orders?trip=${winnerTrip}&order=${winner}`)
+  await expect(page.getByRole('link', { name: 'Mở đơn của lệnh đang chờ' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gửi lại yêu cầu' })).toHaveCount(0)
+  const reserveTrail = page.getByRole('table', { name: 'Lịch sử lô' })
+  const early = reserveTrail.getByRole('row').filter({ hasText: 'RET-EARLY' })
+  const origin = reserveTrail.getByRole('row').filter({ hasText: 'RET-ORIGIN' })
+  await expect(early.getByRole('link', { name: winningSource })).toBeVisible()
+  await origin.getByRole('link', { name: winningSource }).click()
+  await expect(origin).toBeFocused()
+  await expect(early).not.toBeFocused()
+  await page.getByRole('link', { name: 'Mở đơn của lệnh đang chờ' }).click()
+  const recovery = page.getByRole('region', { name: 'Khôi phục lệnh' })
+  await expect(recovery).toContainText(loser)
+  await expect(recovery).toContainText('2 EA')
+  await recovery.getByRole('button', { name: 'Tra cứu kết quả' }).click()
+  await expect(recovery).toHaveCount(0)
+  await expect(page.getByRole('link', { name: heldSource })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Tải lại đơn' })).toBeEnabled()
+  await page.goto(`/work/orders?trip=${tripA}&order=${orderA}`)
   const [rightA] = await get<Right[]>(c3 + '/trips/' + tripA + '/rights', warehouse)
   const [rightB] = await get<Right[]>(c3 + '/trips/' + tripB + '/rights', warehouse)
   expect(rightA.orderId).toBe(orderA)
@@ -152,9 +213,12 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   await rejected(await post(c3 + '/load', load(tripA, rightA), warehouse), 'C3_STALE_WAREHOUSE_HELD')
   await page.getByRole('link', { name: 'Xem đơn và lịch sử lô' }).click()
   await expect(page).toHaveURL(new RegExp(`order=${orderA}&handoffSource=${replay.sourceId}`))
-  await expect(page.getByRole('table', { name: 'Lịch sử lô' }).getByRole('row', {
-    name: new RegExp(replay.sourceId),
-  })).toBeFocused()
+  if (winner === orderA)
+    await expect(page.getByText(`Nguồn ${replay.sourceId} có 2 dòng lô.`, { exact: true })).toBeFocused()
+  else
+    await expect(page.getByRole('table', { name: 'Lịch sử lô' }).getByRole('row', {
+      name: new RegExp(replay.sourceId),
+    })).toBeFocused()
   await expect(page.getByText(new RegExp(`Còn ở kho 0 EA · Còn trên xe ${Number(rightA.warehouseHeld)} EA`))).toBeVisible()
   await page.screenshot({ path: info.outputPath('handoff-desktop.png'), fullPage: true })
 
@@ -176,4 +240,12 @@ test('Sales hands two orders to Warehouse on the same constrained lot', async ({
   await lotTrail.screenshot({ path: info.outputPath('handoff-320-dark.png') })
   expect(pageErrors).toEqual([])
   expect(await get(handoff, peer)).toEqual([])
+  await page.getByRole('button', { name: 'Đổi danh tính' }).click()
+  await signIn(page, peer)
+  await expect(page.getByLabel('Lọc theo chuyến')).toHaveValue('')
+  await expect(page.getByLabel('Bước xử lý')).toHaveValue('all')
+  await page.getByRole('button', { name: 'Đổi danh tính' }).click()
+  await signIn(page, warehouse)
+  await expect(page.getByLabel('Lọc theo chuyến')).toHaveValue(tripA)
+  await expect(page.getByLabel('Bước xử lý')).toHaveValue('reserve')
 })

@@ -4,12 +4,14 @@
 
 Mở ứng dụng theo [hướng dẫn phiên APP-03](app-03-3-workspace.md). Trong **Đơn A và giữ hàng**, dùng **Lọc theo chuyến** và **Bước xử lý** để mở một đơn cụ thể.
 
+Bộ lọc được phục hồi theo phiên DEV, tenant và actor khi quay về hàng đợi. Lệnh C.2 đang chờ hiển thị yêu cầu gốc và mở đơn tương ứng trước khi tra cứu hoặc gửi lại. Khu phục hồi riêng dùng cho lệnh tạo nháp và lệnh có đơn nằm ngoài danh sách hiện hành.
+
 | Bước | Thao tác |
 | --- | --- |
 | Confirm | Dùng mã `source` để xác nhận đơn nháp. Màn hình giữ ShipTo, quy đổi và giá VND đã chốt theo nguồn. |
 | Reserve | Dùng mã `receiver` để mở đơn đã Confirm, kiểm số lượng còn thiếu và giữ hàng theo đơn vị cơ sở. Quyền Reserve theo grant Warehouse hiện hành trong tenant. |
 | Load | Chọn **Nạp đơn lên xe** trên công việc đủ điều kiện. C.3 kiểm phân công chuyến, quyền giữ hàng và lô còn hạn. Nếu liên kết đã cũ, màn hình giữ phạm vi đơn. Lệnh nạp đang chờ của đơn khác được khôi phục từ chuyến của lệnh gốc. |
-| Đối chiếu | Từ đợt nạp, dùng **Xem đơn và lịch sử lô** để quay lại dòng nguồn vừa ghi. Danh sách giữ, nạp và xuất giao theo lô gồm hạn dùng, số lượng và mã nguồn. Sales mở công nợ theo đơn từ nguồn Confirm. |
+| Đối chiếu | Từ đợt nạp, dùng **Xem đơn và lịch sử lô** để mở nhóm lô của nguồn vừa ghi. Liên kết trên từng dòng mở đúng dòng đó, kể cả khi nhiều lô dùng chung mã nguồn. Danh sách giữ, nạp và xuất giao theo lô gồm hạn dùng, số lượng và mã nguồn. Sales mở công nợ theo đơn từ nguồn Confirm. |
 
 Trong tenant A, chuyến mới giao quyền nạp cho `receiver` và quyền giao cho `source`. Chuyến đã có tiếp tục dùng phân công hiện tại. Resume và NextDay giữ lịch sử và phân công cũ. APP-03.4 dùng schema C.2/C.3/F03/F04 đã cài trong profile A/F01/F03/F04/F05.
 
@@ -21,7 +23,7 @@ Trong tenant A, chuyến mới giao quyền nạp cho `receiver` và quyền gia
 pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action VerifyHandoff
 ```
 
-Runner dùng hai LocalDB synthetic riêng của phiên. Hai đơn đặt 2 PACK mỗi đơn với hệ số 2 EA/PACK, cùng yêu cầu giữ 4 EA từ một lô có 6 EA. Một yêu cầu giữ 4 EA thành công và yêu cầu kia bị từ chối. Sau khi giữ thêm 2 EA cho đơn còn lại, hai chuyến nạp và xuất tổng 6 EA. Runner kiểm replay không tăng nguồn, lệnh dựa trên số giữ cũ bị từ chối, và đọc/ghi chéo tenant không tạo chứng từ. Ba ca thiếu plan, plan hết hiệu lực và người Confirm cũng là checker đều bị từ chối. Tổng snapshot hai đơn là 80.000 VND, tổng giao thực là 60.000 VND.
+Runner dùng hai LocalDB synthetic riêng của phiên. Hai đơn đặt 2 PACK mỗi đơn với hệ số 2 EA/PACK, cùng yêu cầu giữ 4 EA từ tồn MAIN 6 EA. Fixture review chia tồn thành hai lô 1 EA và 5 EA để kiểm tra một nguồn chứa nhiều dòng lô. Một yêu cầu giữ 4 EA thành công và yêu cầu kia bị từ chối. Sau khi giữ thêm 2 EA cho đơn còn lại, hai chuyến nạp và xuất tổng 6 EA. Runner kiểm replay không tăng nguồn, lệnh dựa trên số giữ cũ bị từ chối, và đọc/ghi chéo tenant không tạo chứng từ. Ba ca thiếu plan, plan hết hiệu lực và người Confirm cũng là checker đều bị từ chối. Tổng snapshot hai đơn là 80.000 VND, tổng giao thực là 60.000 VND.
 
 Artifact trong `TestResults/app03-4/<RunId>/` gồm JUnit, ảnh Chromium và đối chiếu SQL độc lập. Phạm vi là synthetic DEV trên LocalDB. PREPROD, thiết bị thật, EV/P0 và production thuộc các mốc nghiệm thu riêng.
 
@@ -40,3 +42,14 @@ Artifact trong `TestResults/app03-4/<RunId>/` gồm JUnit, ảnh Chromium và đ
 | `junit.xml` | `5D94715641EED2CE3B9EED2511078D6DD0CDA6AF73F99B12670570100C7286DA` |
 
 Workflow Windows chạy `VerifyHandoff` và tải artifact. CI từ xa và merge còn chờ xác nhận.
+
+### Kiểm chứng sau review PR #138
+
+- Chromium mất ACK trước khi gửi Confirm cho đơn A và sau khi Reserve đã commit. Đơn đang xem khác chỉ dẫn về đơn của lệnh gốc. Gửi lại Confirm dùng nguyên nội dung đã lưu. Tra cứu Reserve trả về đúng nguồn đã commit. Playwright web kiểm thêm khu phục hồi riêng cho lệnh tạo nháp, gồm khách hàng, chuyến, lựa chọn ShipTo và lượng đặt.
+- Fixture có hai lô cùng kho/SKU với tổng 6 EA. SQL ghi nhận một quyền giữ và một dòng nạp đi qua cả hai lô. Chromium mở đúng dòng lô thứ hai có chung mã nguồn, kiểm bộ lọc sau Back/Forward và sau khi đổi actor.
+- `VerifyHandoff` đạt 1/1 ở run `1a0dd68069a04439b473a58370f20993`. `VerifyWorkspace` đạt 1/1 ở run `5ed418b65c014a36950c7f5c2381227c`. Bộ .NET đạt 352/352, web unit/dependency/PWA đạt 23/23, Playwright web đạt 55 với một bài cài PWA standalone bỏ qua theo cấu hình local.
+
+| Artifact của run `1a0dd68069a04439b473a58370f20993` | SHA-256 |
+| --- | --- |
+| `sql-review.json` | `24815605114985AD3FEBDB43CBCC422F1F189B1DED808B69569303F94C2141C8` |
+| `junit.xml` | `1C6A532AF9F52E446684A766F872757E18BADA78E34168944B0F056014D99D8C` |

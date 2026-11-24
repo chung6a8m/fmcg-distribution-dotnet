@@ -8,7 +8,7 @@ public sealed record C2HandoffActions(bool Confirm, bool Reserve, bool Load);
 public sealed record C2LineHandoff(decimal WarehouseHeld, decimal Unreserved, C2QuantitySnapshot? Quantity,
     IReadOnlyList<C2LotStep> Lots);
 public sealed record C2QuantitySnapshot(string UomCode, decimal EnteredQuantity, decimal Factor);
-public sealed record C2LotStep(int Stage, Guid SourceId, string LotCode, DateTime ExpiresOn, decimal Quantity);
+public sealed record C2LotStep(int Stage, Guid SourceId, string TraceId, string LotCode, DateTime ExpiresOn, decimal Quantity);
 
 public sealed partial class App01a2CommandService
 {
@@ -52,10 +52,10 @@ public sealed partial class App01a2CommandService
         return new(sales, warehouse, date, trips.Select(trip => trip.Id).ToHashSet());
     }
 
-    private sealed record HandoffLotRow(Guid LineId, int Stage, Guid SourceId, string LotCode, DateTime ExpiresOn,
-        decimal Quantity)
+    private sealed record HandoffLotRow(Guid LineId, int Stage, Guid SourceId, Guid EventId, Guid LotId, string LotCode,
+        DateTime ExpiresOn, decimal Quantity)
     {
-        internal C2LotStep ToView() => new(Stage, SourceId, LotCode, ExpiresOn, Quantity);
+        internal C2LotStep ToView() => new(Stage, SourceId, $"{Stage}:{EventId:N}:{LotId:N}", LotCode, ExpiresOn, Quantity);
     }
 
     private sealed record HandoffQuantityRow(Guid OrderId, int LineNumber, string UomCode, decimal EnteredQuantity,
@@ -86,7 +86,7 @@ public sealed partial class App01a2CommandService
                 FROM dbo.F03DraftQuantity WHERE TenantId=@Tenant AND DraftId IN @Orders;
 
                 WITH traces AS (
-                    SELECT a.Id AS LineId,1 AS Stage,sl.BusinessSourceId AS SourceId,h.LotId,h.Quantity
+                    SELECT a.Id AS LineId,1 AS Stage,sl.BusinessSourceId AS SourceId,sr.Id AS EventId,h.LotId,h.Quantity
                     FROM dbo.AOrderLine a
                     JOIN dbo.AReservation r ON r.TenantId=a.TenantId AND r.AOrderLineId=a.Id
                     JOIN dbo.StockRight sr ON sr.TenantId=r.TenantId AND sr.Id=r.StockRightId
@@ -94,22 +94,22 @@ public sealed partial class App01a2CommandService
                     JOIN dbo.F03LotHold h ON h.TenantId=sr.TenantId AND h.StockRightId=sr.Id
                     WHERE a.TenantId=@Tenant AND a.AOrderId IN @Orders
                     UNION ALL
-                    SELECT a.Id,2,m.LoadBusinessSourceId,l.LotId,l.Quantity
+                    SELECT a.Id,2,m.LoadBusinessSourceId,m.Id,l.LotId,l.Quantity
                     FROM dbo.AOrderLine a
                     JOIN dbo.AReservation r ON r.TenantId=a.TenantId AND r.AOrderLineId=a.Id
                     JOIN dbo.TripManifestLine m ON m.TenantId=r.TenantId AND m.StockRightId=r.StockRightId AND m.IsC3=1
                     JOIN dbo.F03LotLoad l ON l.TenantId=m.TenantId AND l.ManifestLineId=m.Id
                     WHERE a.TenantId=@Tenant AND a.AOrderId IN @Orders AND m.LoadBusinessSourceId IS NOT NULL
                     UNION ALL
-                    SELECT a.Id,3,d.BusinessSourceId,i.LotId,i.Quantity
+                    SELECT a.Id,3,d.BusinessSourceId,d.Id,i.LotId,i.Quantity
                     FROM dbo.AOrderLine a
                     JOIN dbo.SaleDelivery d ON d.TenantId=a.TenantId AND d.AOrderLineId=a.Id AND d.RightKind='A'
                     JOIN dbo.F03LotIssue i ON i.TenantId=d.TenantId AND i.DeliveryId=d.Id
                     WHERE a.TenantId=@Tenant AND a.AOrderId IN @Orders
                 )
-                SELECT t.LineId,t.Stage,t.SourceId,l.Code AS LotCode,l.ExpiresOn,t.Quantity
+                SELECT t.LineId,t.Stage,t.SourceId,t.EventId,t.LotId,l.Code AS LotCode,l.ExpiresOn,t.Quantity
                 FROM traces t JOIN dbo.F03Lot l ON l.TenantId=@Tenant AND l.Id=t.LotId
-                ORDER BY t.Stage,l.ExpiresOn,l.Code,t.SourceId;
+                ORDER BY t.Stage,l.ExpiresOn,l.Code,t.SourceId,t.EventId;
                 """, new { Tenant = tenant, Orders = batch }, tx, ct));
             foreach (var row in await grid.ReadAsync<HandoffQuantityRow>())
                 quantities.Add((row.OrderId, row.LineNumber), row.ToView());

@@ -20,7 +20,7 @@ internal static class App03WorkspaceEvidence
         {
             ready.SetResult(active);
             return Task.CompletedTask;
-        });
+        }, verifyHandoff: handoff);
         try
         {
             if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
