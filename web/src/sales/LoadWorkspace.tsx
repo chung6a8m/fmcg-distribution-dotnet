@@ -115,8 +115,9 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
       setPending(saved)
       setSource('')
       const selected = available.find(t => t.id === saved?.tripId) ?? available.find(t => t.id === startTrip)
-      if (startTrip && !available.some(t => t.id === startTrip)) onTripChange?.('')
-      await refresh(token, selected?.id ?? available[0]?.id ?? '')
+      const effectiveTrip = selected?.id ?? available[0]?.id ?? ''
+      onTripChange?.(effectiveTrip)
+      await refresh(token, effectiveTrip)
     })
   }
 

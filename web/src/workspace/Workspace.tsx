@@ -10,7 +10,7 @@ const Order = lazy(() => import('../sales/OrderWorkspace').then(m => ({ default:
 const Load = lazy(() => import('../sales/LoadWorkspace').then(m => ({ default: m.LoadWorkspace })))
 const Delivery = lazy(() => import('../sales/DeliveryWorkspace').then(m => ({ default: m.DeliveryWorkspace })))
 const Visit = lazy(() => import('../sales/VisitWorkspace').then(m => ({ default: m.VisitWorkspace })))
-const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ArReport })))
+const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ScopedArReport })))
 const Returns = lazy(() => import('../sales/ReturnWorkspace').then(m => ({ default: m.ReturnWorkspace })))
 
 const api = '/api/synthetic/app03'
@@ -46,6 +46,18 @@ function store(key: string, value: string) {
 
 function identityKey(access: Access) {
   return JSON.stringify([access.sessionId, access.tenantId, access.actorId])
+}
+
+function bindHistoryContext(access: Access) {
+  const identity = identityKey(access)
+  const scope = location.pathname === '/work/returns' ? identity + '.' + access.returnRole : identity
+  const entryScope = history.state?.app03Context
+  const previous = stored(lastIdentityKey)
+  if (entryScope !== scope) {
+    const discard = (entryScope && entryScope !== scope) || (previous && previous !== identity)
+    history.replaceState({ ...history.state, app03Context: scope }, '', discard ? location.pathname : location.href)
+  }
+  store(lastIdentityKey, identity)
 }
 
 function valid(key: Selection, value: string) {
@@ -136,10 +148,7 @@ function Workspace() {
         if (stale()) return
         if (!Number.isFinite(access.expiresAt)) throw new Error('Missing session expiry')
         if (access.expiresAt * 1000 <= Date.now()) return reject('Phiên DEV đã hết hạn.')
-        const identity = identityKey(access)
-        const previous = stored(lastIdentityKey)
-        if (previous && previous !== identity) history.replaceState(null, '', location.pathname)
-        store(lastIdentityKey, identity)
+        bindHistoryContext(access)
         store(tokenKey, token)
         setSession({ access, token })
         setError('')
@@ -194,7 +203,7 @@ function Workspace() {
   function changeIdentity() {
     activeToken.current = ''
     store(tokenKey, '')
-    history.replaceState(null, '', location.pathname)
+    history.replaceState(history.state, '', location.pathname)
     setSession(null)
     setChecking(false)
     setError('')
@@ -248,7 +257,7 @@ function WorkArea({ access, token }: Session) {
   }
 
   const [customer, setCustomer] = useState(() => initial('customer'))
-  const [order] = useState(() => initial('order'))
+  const [order, setOrder] = useState(() => initial('order'))
   const [trip, setTrip] = useState(() => initial('trip'))
   const [source] = useState(() => initial('source'))
   const area = useRef<HTMLDivElement>(null)
@@ -263,7 +272,7 @@ function WorkArea({ access, token }: Session) {
     if (value) params.set(key, value)
     else params.delete(key)
     if (key === 'source') params.delete('delivery')
-    history.replaceState(null, '', location.pathname + (params.size ? '?' + params : ''))
+    history.replaceState(history.state, '', location.pathname + (params.size ? '?' + params : ''))
   }
   function saveTrip(id: string) {
     setTrip(id)
@@ -277,6 +286,10 @@ function WorkArea({ access, token }: Session) {
     store(contextKey('order'), id)
     location.assign('/work/ar?order=' + id)
   }
+  function saveArOrder(id: string) {
+    setOrder(id)
+    remember('order', id)
+  }
 
   const groupOf = (route: typeof routes[number]) => route.id === 'orders' && !access.sales ? 'Kho'
     : route.group || (access.returnRole ? returnGroup[access.returnRole] : '')
@@ -289,8 +302,7 @@ function WorkArea({ access, token }: Session) {
         <strong>{group}</strong>
         {allowed.filter(route => groupOf(route) === group).map(route => <a
           key={route.id} className="button button-secondary" href={'/work/' + route.id
-            + (trip && (route.id === 'delivery' || route.id === 'load') ? '?trip=' + trip
-              : order && (route.id === 'orders' || route.id === 'ar') ? '?order=' + order : '')}
+            + (trip && (route.id === 'delivery' || route.id === 'load') ? '?trip=' + trip : '')}
           aria-current={route.id === current?.id ? 'page' : undefined}>{route.label}</a>)}
       </div>)}
     </nav>
@@ -303,7 +315,7 @@ function WorkArea({ access, token }: Session) {
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr} selectedOrder={order}
           context={{ trip, customer, onCustomerChange: saveCustomer, onTripChange: saveTrip }} />}
-        {current?.id === 'ar' && <Ar orderId={order} token={token} returnUrl={returnUrl} />}
+        {current?.id === 'ar' && <Ar orderId={order} token={token} returnUrl={returnUrl} onCheckOrder={saveArOrder} />}
         {current?.id === 'load' && <Load workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
         {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}

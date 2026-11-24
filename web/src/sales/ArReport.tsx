@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import { Button, Field } from '../ui/controls'
 import { HttpError, read, readError, requestSalesApi, type Customer } from './customer-api'
 
@@ -69,7 +69,41 @@ function SourceDetail({ source, returnUrl }: { source: Source; returnUrl?: strin
   </details>
 }
 
-export function ArReport({ token, orderId, returnUrl }: { token: string; orderId: string; returnUrl?: string }) {
+type ReportProps = { token: string; orderId: string; returnUrl?: string }
+
+export function ScopedArReport({ onCheckOrder, ...props }: ReportProps & { onCheckOrder: (id: string) => void }) {
+  const { orderId, token } = props
+  const [checked, setChecked] = useState('')
+  const [error, setError] = useState('')
+  const publish = useEffectEvent((id: string) => onCheckOrder(id))
+
+  useEffect(() => {
+    if (!orderId) return
+    let active = true
+    async function load<T>(api: string, path: string): Promise<T[]> {
+      const response = await requestSalesApi(api, token, path)
+      if (!response.ok) throw new HttpError(response.status)
+      return response.json() as Promise<T[]>
+    }
+    void Promise.all([
+      load<{ id: string; trip: string }>('/api/synthetic/app02c2', '/orders'),
+      load<{ code: string }>('/api/synthetic/app02c4', '/trips'),
+    ]).then(([orders, trips]) => {
+      if (!active) return
+      const order = orders.find(row => row.id === orderId)
+      const allowed = order && trips.some(trip => trip.code === order.trip)
+      publish(allowed ? orderId : '')
+      if (allowed) setChecked(orderId)
+    }).catch(error => { if (active) setError(readError(error)) })
+    return () => { active = false }
+  }, [token, orderId])
+
+  if (!orderId || checked === orderId) return <ArReport {...props} />
+  if (error) return <p role="alert">{error}</p>
+  return <p role="status">Đang kiểm tra phạm vi của đơn…</p>
+}
+
+export function ArReport({ token, orderId, returnUrl }: ReportProps) {
   const [filter, setFilter] = useState<Filter>({ asOf: '', customerId: '', orderId, deliveryId: '', due: '', overdue: '' })
   const [report, setReport] = useState<Report | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
