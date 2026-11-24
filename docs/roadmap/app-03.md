@@ -2,6 +2,8 @@
 
 **Ngày chốt roadmap:** 23/11/2026. **Trạng thái triển khai:** xem bảng tại mục 4.
 
+**Hướng tiếp theo, 24/11/2026:** .1a–.9 đã có implementation và bằng chứng synthetic DEV; [APP-03.9](app-03-9-acceptance.md#nghiệm-thu-cuối-pr-143) giữ biên nhận cuối. [APP-05](app-05.md) tiếp nhận phần đóng chuyến và A còn lại xuyên ngày, theo lựa chọn Owner về người/hạn trước đóng và Trip kế nhiệm chọn hôm sau. Thứ tự bắt đầu .1a/.1b trong kế hoạch gốc bên dưới là lịch sử, không phải yêu cầu làm lại nền đã hoàn tất.
+
 Owner đã đồng ý đề xuất đánh giá lại APP-03 sau DEV-F09 và yêu cầu trực tiếp: **“Tôi đồng ý đề xuất trên, bạn commit roadmap APP-03 vào repo”**. Tài liệu này ghi nhận phạm vi và thứ tự đã thống nhất. Commit ghi roadmap chỉ thay tài liệu; chưa triển khai hoặc nghiệm thu APP-03. Các PR triển khai tiếp theo thực hiện từng increment trong phạm vi synthetic DEV này, giữ review và kiểm chứng theo thay đổi; không cần một vòng hồ sơ vận hành hoặc xác nhận lại cùng phạm vi để bắt đầu.
 
 ## 1. Mục tiêu và mốc bàn giao
@@ -45,7 +47,7 @@ Các mã APP-04 dưới đây là đề xuất trong trao đổi trước; nay c
 4. **Clock và snapshot:** ngày nghiệp vụ, cutoff, kỳ mở/khóa, hiệu lực policy và hạn lô phải nhất quán. Resume giữ ngữ cảnh thời gian của phiên; chuyển ngày là thao tác có chủ đích. Đơn/nguồn cũ giữ giá, thuế, terms, quy đổi và lô đã snapshot; không sửa lịch sử để khớp ngày máy hiện tại.
 5. **Tiền và cấp tổng hợp:** F04/F08 dùng VND; một số nguồn C/D dùng `SYNTHETIC_UNITLESS`. Chốt đơn vị cho bộ dữ liệu chung ở .2, ưu tiên VND trong các luồng đã hỗ trợ. Khi ghép D, triển khai đúng hợp đồng tiền hoặc trình bày riêng từng đơn vị; không cộng chéo đơn vị hoặc đặt tỷ giá giả. Tồn MAIN theo kho/SKU/lô chỉ đếm một lần khi nhiều chuyến tham chiếu. AR, customer credit, custody, quỹ và tạm ứng F02 có nguồn/sổ riêng.
 6. **Danh tính và phân nhiệm:** năm nhóm điều hướng không giới hạn hệ thống vào năm quyền hoặc năm tài khoản. Server kiểm tenant, actor, grant hiện hành và phân công tại thời điểm đọc/ghi/replay. Giữ maker/checker, QA, người xác minh và thủ quỹ độc lập theo từng command. Đổi vai trong DEV phải cấp danh tính hợp lệ; không dùng superuser hoặc cờ `verified=true` phía client để bỏ bước.
-7. **Trạng thái:** durable intake ACK, business outcome, receipt, posted, reconciled và UNKNOWN giữ nghĩa riêng. Mất ACK tra cứu cùng command/source ID; replay không tạo hiệu ứng mới. Mixed giữ kết quả `RECONCILING`; một trạng thái đóng chuyến cuối cùng cần increment quy định điều kiện xử lý hết phần chờ.
+7. **Trạng thái:** durable intake ACK, business outcome, receipt, posted, reconciled và UNKNOWN giữ nghĩa riêng. Mất ACK tra cứu cùng command/source ID; replay không tạo hiệu ứng mới. Mixed giữ kết quả `RECONCILING`; [APP-05.1/.2](app-05.md) sở hữu readiness, bàn giao việc tồn và trạng thái đóng chuyến cuối cùng.
 8. **Ranh giới:** chỉ synthetic/nonproduction, `invoiceEligible=false`, đối tác giả lập D.4; offline business writes tắt, B_NO_CHANNEL bị chặn. Giữ `business/`, `business.lock.json`, hồ sơ E v0.1 đã đóng băng và bằng chứng lịch sử. LAB/Vault/Docker, physical PREPROD và EV/P0 thực tế là nghĩa vụ tại mốc tương ứng, không là điều kiện bắt đầu APP-03. Không biến dữ liệu hoặc biên nhận giả định thành bằng chứng vận hành thật.
 
 ## 4. Các increment và phụ thuộc
@@ -220,7 +222,7 @@ Giữ [Design Baseline đã duyệt](../decisions/owner-uiux-2026-11-20.md): Des
 ## 6. Hướng dẫn thực hiện và kiểm chứng cho Codex
 
 1. Đọc roadmap này, [AGENTS](../../AGENTS.md), [APP-02](app-02.md), các spec C/D/F của phần sửa và [UI/UX Standard](../ui-ux/README.md). Kiểm tra main/PR hiện tại để tránh thực hiện lại một increment đã hoàn thành sau snapshot khảo sát.
-2. Bắt đầu **APP-03.1a** bằng thay đổi runtime/schema có thể chạy, sau đó **APP-03.1b**. Gộp các quyết định kỹ thuật thường lệ, expected, hướng dẫn chạy và cập nhật trạng thái vào PR có code của increment. Không tạo chuỗi PR xin bằng chứng thật trước DEV.
+2. Thứ tự khởi đầu lịch sử là **APP-03.1a → APP-03.1b**; hai phần này và các increment tiếp theo hiện đã có kết quả ở mục 4. Công việc tiếp theo theo [APP-05](app-05.md). Gộp các quyết định kỹ thuật thường lệ, expected, hướng dẫn chạy và cập nhật trạng thái vào PR có code của increment. Không tạo chuỗi PR xin bằng chứng thật trước DEV.
 3. Với mỗi increment, chốt trước hành trình, nguồn, giả định và expected của phần mới; triển khai API/SQL/UI cần thiết, chạy hành trình và đối chiếu độc lập. Dữ liệu có thể giả định; kết quả PASS phải đến từ thực thi thật. Trạng thái không chạy/không đủ điều kiện ghi `NOT_RUN`/`BLOCKED` cùng nguyên nhân cụ thể.
 4. Dùng runner và test hiện có theo ảnh hưởng; thêm kiểm chứng cho rủi ro mới do ghép profile, chung dữ liệu, resume, bàn giao hoặc tổng hợp. Không tạo test chỉ lặp lại implementation, không chạy lại toàn bộ mỗi bộ fixture chỉ để tăng số PASS. Giữ các gate bắt buộc của repo và hồi quy cuối .9.
 5. Mỗi PR bàn giao ghi phạm vi đã chạy, source/tree, lệnh, artifact và giới hạn; cập nhật hàng trạng thái ở đây sau kết quả thực nhận. `MERGED`, `DEV_VERIFIED` và nghiệm thu thực tế được ghi riêng. Không viết lại hồ sơ v0.1 đã đóng băng hoặc tạo chuỗi closeout chỉ để ghi nhận lần merge trước.
@@ -245,6 +247,7 @@ Hai lệnh DevF05 giữ profile riêng. [Launcher App03A1](app-03-1a-runtime-sch
 | Refund nguồn giao nhiều đợt hoặc đơn có nghĩa vụ quà | Backlog mở rộng AC-19/07; APP-03.7 sở hữu nếu hành trình .9 yêu cầu | Credit/refund/residual và nghĩa vụ quà đúng theo từng nguồn, không vượt lượng/tiền hợp lệ; F08 v1 không được coi là bằng chứng cho nhánh này |
 | Dùng customer credit cho hóa đơn/chứng từ mới | Backlog mở rộng AC-19/21 sau phạm vi APP-03 v1 | Allocation có nguồn, đúng quyền/số dư, không dùng trùng credit và đối chiếu AR/credit độc lập |
 | Điều chỉnh giá vốn sau nhiều QA release hoặc hàng đã dịch chuyển | Backlog mở rộng AC-06; .7 hiển thị đúng case chưa tự xử lý | Có phương trình/source-cost riêng, điều chỉnh kỳ hiện hành và bảo toàn kỳ khóa; không ép case vào oracle một lần release của F06 |
-| Đóng chuyến cuối cùng sau RECONCILING | Backlog nghiệp vụ riêng sau D.3/.6 | Quy định rõ điều kiện hết quyền/hàng/tiền/đối soát chờ, trạng thái kết thúc và xử lý phần còn chờ |
+| Đóng chuyến cuối cùng sau RECONCILING | [APP-05.1/.2](app-05.md), roadmap đã chốt, chưa triển khai | Readiness, CLOSED/CLOSED_WITH_OPEN_CASES, bàn giao người/hạn, snapshot bất biến; gồm chuyến có nghĩa vụ nhưng chưa nạp |
+| Tiếp tục phần A chưa giao qua chuyến/ngày khác | [APP-05.3–.7](app-05.md), roadmap đã chốt, chưa triển khai | Cùng Order/Confirm/snapshot; chuyển HELD và Reserve phần chưa giữ riêng; giao hoặc đóng phần còn có nguồn; browser mới tiếp tục công việc |
 
 Các mục này là phạm vi chức năng cụ thể, không đổi nhãn thành nợ vận hành. Mốc DEV dùng hằng ngày không phải chờ mọi nhánh mở rộng; hành trình nào công bố hỗ trợ thì phải triển khai và kiểm đúng nhánh đó. EV/P0 thực tế, physical PREPROD, Pilot và Go-Live tiếp tục theo các điều kiện đã ghi trong [operations debt](app-02c-operations-debt.md) và [truy vết E](app-02e-ac-ev-p0-traceability.md).

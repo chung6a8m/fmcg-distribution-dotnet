@@ -1,6 +1,8 @@
 # FMCG Distribution — .NET DMS Application
 
-**APP-03 — Ứng dụng DEV tích hợp.** [Roadmap đã duyệt](docs/roadmap/app-03.md) giữ thứ tự bàn giao từng vai. Tổ hợp A/F có phiên DEV giữ dữ liệu qua Start/Stop/Resume, chuẩn bị ngày mới và [điểm vào chung cho các workspace](docs/roadmap/app-03-3-workspace.md). Xem trạng thái và bằng chứng riêng của từng increment trong roadmap.
+**Bước tiếp theo — APP-05: hoàn tất ca DEV và tiếp tục việc tồn ngày sau.** [Roadmap ngày 24/11/2026](docs/roadmap/app-05.md) có trạng thái `ROADMAP_APPROVED / IMPLEMENTATION_NOT_STARTED`, dựa trên [thiết kế bàn giao](docs/superpowers/specs/2026-11-24-dev-daily-close-design.md). Owner chọn hoàn tất ca trên dữ liệu mẫu: phần A chưa giao cần người phụ trách và hạn trước khi đóng chuyến; chọn chuyến giao tiếp vào ngày sau. Bắt đầu APP-05.0 ổn định CI, rồi .1 readiness/việc tồn; mỗi increment có phụ thuộc và tiêu chí nghiệm thu riêng.
+
+**APP-03 — Nền ứng dụng DEV tích hợp đã có.** .1a–.9 có implementation và bằng chứng synthetic DEV theo [roadmap](docs/roadmap/app-03.md) và [biên nhận APP-03.9](docs/roadmap/app-03-9-acceptance.md). Phiên giữ dữ liệu qua Start/Stop/Resume, chuẩn bị ngày mới và [điểm vào chung cho các workspace](docs/roadmap/app-03-3-workspace.md). APP-05 mở rộng đóng chuyến và nghĩa vụ xuyên ngày trên nền này.
 
 **Nền DEV đã có.** C.1–C.5 và C.6, D.1–D.4, APP-02E và DEV-F01–F09 đã có implementation/bằng chứng trong các phạm vi ghi tại [APP-02](docs/roadmap/app-02.md). [E-SIM-01](docs/roadmap/app-02e-ev-p0/e-sim-01.md) đã merge qua PR #124. [F09](docs/roadmap/app-02-dev-f09.md) chạy các fixture trên cùng cây mã, mỗi fixture dùng scratch riêng; APP-03 bổ sung bằng chứng dữ liệu bền qua vai/ngày/restart. Các chức năng từng đề xuất thành APP-04 được [ánh xạ lại](docs/roadmap/app-03.md), không xây lại phần DEV-F đã có. [C.1 guide](docs/roadmap/app-02c1-customer-shipto.md) và [C DEV handoff](docs/roadmap/app-02c-dev-handoff.md) giữ hướng dẫn lịch sử của từng profile.
 
