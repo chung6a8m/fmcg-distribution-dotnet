@@ -138,15 +138,23 @@ jobs:
             throw 'B7_SINGLE_TLS_BACKUP_NO_OVERWRITE_AND_BINDING_GUARDS_REQUIRED'
           }
       - name: Confirm exact source HEAD and disposable LocalDB
+        id: localdb
         shell: pwsh
         env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_HEAD) { throw 'B7_SOURCE_HEAD_MISMATCH' }
-          sqllocaldb info MSSQLLocalDB
-          sqllocaldb start MSSQLLocalDB
-          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -b -Q 'SELECT @@VERSION;'
-          if ($LASTEXITCODE -ne 0) { throw 'B7_LOCALDB_NOT_AVAILABLE' }
+          ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: FULL / DIFF / LOG backup and physical restore in two disposable LocalDB tenants
         shell: pwsh
         env:
@@ -182,4 +190,6 @@ jobs:
           name: app02b7-localdb-pitr-ci-only
           path: |
             TestResults/APP-02B7-LOCALDB-WITNESS.json
+            TestResults/LocalDbBootstrap/
+            TestResults/LAB-E02/
           if-no-files-found: error

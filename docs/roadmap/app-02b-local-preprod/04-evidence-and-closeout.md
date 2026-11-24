@@ -306,7 +306,11 @@ Hai tenant đều ghi đúng hai bút toán phân bổ, 0 bút toán khi đề n
 <a id="lab-e03"></a>
 ## LAB-E03 — Fix LocalDB bootstrap có root cause
 
-**Status:** PLANNED. **PR boundary:** một PR độc lập để review. **Source/API dependencies:** LAB-E02. Setup, approval và live evidence là điều kiện bổ sung.
+**Status:** `SOURCE_REVIEW / NATIVE_CAUSE_INVESTIGATION_BLOCKED` cho [cải tiến CI mục 4 ngày 25/11/2026](../localdb-ci-bootstrap.md). **PR boundary:** một PR độc lập để review. **Source/API dependencies:** LAB-E02. Source CI không thay thế live/physical acceptance.
+
+**Phạm vi source đang triển khai:** Owner yêu cầu xử lý bootstrap theo diagnostics trên HEAD sau PR #146 (`ac2ca0d`). Đã đọc original failures B4 `45499265441`, B5 `45445278577` attempt 1 và hai artifact APP00A `14805903355`/`14800342549`. Chúng xác định implicit creation/start thất bại trước tests, rồi instance tồn tại nhưng Stopped; chưa lưu native cause của Event 528. Helper chung tạo instance tường minh khi đúng trạng thái uncreated, kiểm version/state và giới hạn readiness, bổ sung history/diagnostics cho cả B3–B8. Chỉ pure login timeout sau Running mới được thử lại; không retry lỗi tạo/start chưa phân loại. Collector bổ sung numeric SQL log signatures cho lần điều tra tiếp theo, giữ raw payload riêng tư. Chi tiết, hồi quy và giới hạn ở hồ sơ được liên kết; source SHA/review/CI/artifact cuối ghi trong PR triển khai.
+
+**Điều kiện còn mở:** chưa chứng minh nguyên nhân engine/Windows, chưa tái hiện hoặc xác nhận recovery lỗi native trên cùng worker. Vì vậy các tiêu chí root-cause closeout dưới đây vẫn giữ nguyên, #75 không đóng theo lượt CI xanh; HTTP 500 thuộc E04. Không có thao tác LAB host hoặc physical acceptance trong thay đổi CI này.
 
 **Files:** tạo `scripts/Initialize-LocalDb.ps1` chỉ khi diagnostics chứng minh orchestration là điểm lỗi; sửa đúng bootstrap step trong `.github/workflows/app00a.yml` và helper sở hữu lỗi. Regression đặt cạnh helper mới hoặc test fixture hiện có. Không đổi API/business transaction để chữa lỗi bootstrap.
 
