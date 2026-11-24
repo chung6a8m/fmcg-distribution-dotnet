@@ -82,6 +82,9 @@ function Invoke-LocalDbProbe {
         'create' {
             Assert-That (($Arguments -join '|') -ceq 'create|MSSQLLocalDB') 'Automatic creation must use the verified default runtime.'
             Assert-That ($script:State -eq 'Missing') 'Existing instance must not be recreated.'
+            if ($script:Scenario -eq 'SlowColdCreate' -and $TimeoutMilliseconds -lt 20000) {
+                return @{ status = 'TIMEOUT'; exitCode = $null; stdout = ''; stderr = ''; truncated = $false }
+            }
             if ($script:Scenario -eq 'MissingEngine') {
                 return Native-Result 'The specified LocalDB version is not installed.' 1 'COMMAND_FAILED'
             }
@@ -159,6 +162,8 @@ $cold = Run-Case 'Cold' 'Missing' 'READY'
 Assert-That (($script:Calls -join ',') -ceq 'info,versions,create,info,start,info,readiness') 'Cold sequence must verify registered runtime before creation.'
 Assert-That ($cold.mode -ceq 'COLD' -and $cold.attempts.Count -eq 7) 'Cold history incomplete.'
 Assert-That ($cold.installedVersions -contains '15.0.4382.1') 'Installed runtime version was not retained.'
+$slowCold = Run-Case 'SlowColdCreate' 'Missing' 'READY'
+Assert-That (@($slowCold.attempts | Where-Object stage -eq 'create').Count -eq 1) 'Slow cold creation was retried.'
 $warm = Run-Case 'Warm' 'Running' 'READY'
 Assert-That (($script:Calls -join ',') -ceq 'info,readiness') 'Warm instance was changed.'
 Assert-That ($warm.mode -ceq 'WARM') 'Warm receipt is not classified.'

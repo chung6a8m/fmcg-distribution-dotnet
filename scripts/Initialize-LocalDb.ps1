@@ -72,7 +72,10 @@ function Invoke-LocalDbBootstrapStage {
     param([hashtable]$Context, [string]$Stage, [string[]]$Arguments, [int]$Attempt = 1)
     $remaining = $Context.deadlineMilliseconds - $Context.watch.ElapsedMilliseconds
     if ($remaining -le 0) { Stop-LocalDbBootstrap 'DeadlineExceeded' }
-    $limit = if ($Stage -in 'info', 'versions') { 3000 } elseif ($Stage -eq 'readiness') { 12000 } else { 15000 }
+    $limit = if ($Stage -in 'info', 'versions') { 3000 }
+        elseif ($Stage -eq 'create') { 45000 }
+        elseif ($Stage -eq 'readiness') { 12000 }
+        else { 15000 }
     $timeout = [int][Math]::Min($limit, $remaining)
     $executable = if ($Stage -eq 'readiness') { 'SQLCMD.EXE' } else { 'SqlLocalDB.exe' }
     $started = [DateTime]::UtcNow.ToString('o')
@@ -104,6 +107,7 @@ function Invoke-LocalDbBootstrapStage {
     $code = [regex]::Match($text, '(?i)\b0x[0-9a-f]{8}\b').Value
     $record = [ordered]@{
         stage = $Stage; attempt = $Attempt; startedUtc = $started
+        timeoutMilliseconds = $timeout
         elapsedMilliseconds = $Context.watch.ElapsedMilliseconds
         status = $native.status; exitCode = $native.exitCode; error = $errorKind
         nativeDetail = if ($errorKind -ne 'None') { Get-LocalDbNativeDetail $text } else { $null }

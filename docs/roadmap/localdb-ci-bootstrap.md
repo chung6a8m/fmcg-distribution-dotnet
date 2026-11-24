@@ -20,6 +20,11 @@ Hai ZIP diagnostics đã được tải và đối chiếu SHA-256 với metadat
 
 Các lượt trên dùng image `20261116.370.1`. Thông báo “automatic instance chưa được tạo” cũng xuất hiện trước một lượt thành công, nên đó là trạng thái cold hợp lệ. Ngược lại, Event 528, exit code được wrapper ghi là 0 và một lần rerun xanh không chứng minh lỗi tạo/start là transient. Artifact cũ chỉ có metadata log/event; không thể suy ra lỗi quyền, cấu hình, disk hoặc hỏng model database từ những dữ liệu này.
 
+Trong PR #147, các control heads `77adf81`, `0ff932b2` và `f02d82f0` xác định lời gọi explicit-version bị từ chối với exit 0; dùng version đầy đủ không sửa được lỗi. Head `24ec4b1` chuyển sang lệnh automatic-instance chuẩn, sau khi xác minh default runtime/tool: cả bốn APP00A worker và B3/B5/B6/B8 qua bootstrap, core_sql qua warm check. Hai thất bại còn lại được giữ nguyên để phân biệt:
+
+- [B4 run 45508702927](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45508702927/job/138850508144): create bị cắt ở cap 15 giây; collector còn thấy một process SQL, không có numeric SQL error/event. Cap riêng của cold creation được điều chỉnh lên 45 giây trong deadline tổng 60 giây, không thêm lần create.
+- [B7 run 45508702885](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45508702885/job/138850508243): `InstanceStartFailed` trong create, native exit 0; log có **5173 / severity 16 / state 1** hai lần, cùng Event 528. Microsoft mô tả 5173 là bất nhất giữa các file database; signature này chưa xác định file/cause vật lý. Giữ FAIL và investigation mở, không coi đây là login timeout để retry hoặc tự sửa system database.
+
 ## 2. Luồng bootstrap chung
 
 `scripts/Initialize-LocalDb.ps1` được gọi ở cả bốn worker APP00A và sáu job SQL B3–B8. Helper chỉ chấp nhận đúng `MSSQLLocalDB` trên GitHub-hosted Windows. Database scratch, migration, ownership và nonce tiếp tục do các script/test hiện có bảo vệ.
@@ -42,7 +47,7 @@ Các lượt trên dùng image `20261116.370.1`. Thông báo “automatic instan
 | Timeout kèm lỗi tạo instance, quyền, auth hoặc lỗi thứ hai chưa nhận diện | FAIL; không coi cả đoạn output là transient |
 | Hết ba readiness probes hoặc deadline tổng | FAIL; không chuyển sang test |
 
-Deadline đơn điệu tối đa **60 giây** bao gồm các bước init/readiness, với giới hạn riêng cho từng process và SQL login/query. Kiểm lại budget ngay trước khi tạo process, kể cả khi tìm executable chậm. Khi hết giờ chỉ dừng launcher thuộc helper, không kill cả cây có thể chứa engine SQL. Các bước ghi evidence/collector chạy sau kết quả bootstrap với timeout riêng; không được diễn giải 60 giây thành giới hạn cho cả job.
+Deadline đơn điệu tối đa **60 giây** bao gồm các bước init/readiness: cold create tối đa 45 giây, start 15 giây, info/versions 3 giây và readiness process 12 giây, mỗi bước đều bị chặn bởi thời gian còn lại; SQL login/query có timeout riêng. Kiểm lại budget ngay trước khi tạo process, kể cả khi tìm executable chậm. Khi hết giờ chỉ dừng launcher thuộc helper, không kill cả cây có thể chứa engine SQL. Các bước ghi evidence/collector chạy sau kết quả bootstrap với timeout riêng; không được diễn giải 60 giây thành giới hạn cho cả job.
 
 Không retry migration, lệnh HTTP, ledger hoặc test suite. Không xóa/reset/stop instance, thay system database, đổi quyền thư mục hoặc xóa log.
 
@@ -72,4 +77,5 @@ Giữ [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) cùng
 - [Microsoft: first-use automatic instance và connection timeout](https://learn.microsoft.com/en-us/sql/database-engine/configure-windows/sql-server-express-localdb).
 - [Microsoft: SqlLocalDB utility](https://learn.microsoft.com/en-us/sql/tools/sqllocaldb-utility).
 - [Microsoft: sqlcmd timeout/error options](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-utility).
+- [Microsoft: SQL error 5173](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-5000-to-5999?view=sql-server-ver15).
 - [Kế hoạch triển khai](../superpowers/plans/2026-11-25-localdb-bootstrap.md), [CI bốn worker](app-00a-parallel-ci.md), [hủy PR bị thay thế](pr-ci-concurrency.md).
