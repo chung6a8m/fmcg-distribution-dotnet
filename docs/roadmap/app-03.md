@@ -63,7 +63,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | [DEV_VERIFIED_LOCAL](app-03-6-settlement.md#kết-quả-local-ngày-24112026) |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn và credit/refund theo vai trên cùng hồ sơ .6 | [DEV_VERIFIED_LOCAL](app-03-7-finance.md#kết-quả-local-ngày-24112026) |
 | APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | [DEV_VERIFIED_LOCAL](app-03-8-owner.md#kết-quả-local-ngày-24112026) |
-| APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | [Tự động đã kiểm chứng, lượt trực tiếp còn mở](app-03-9-acceptance.md) |
+| APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | [DEV_VERIFIED_LOCAL](app-03-9-acceptance.md#nghiệm-thu-cuối-pr-143) |
 
 Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8 → .9**. .2 và .3 có thể tiến hành độc lập khi hợp đồng phiên/bootstrap đã rõ; không phát sinh PR tài liệu trung gian chỉ để xin bắt đầu các hàng đã được chốt.
 
@@ -197,7 +197,7 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 - [x] Một hồ sơ trả/QA/credit/refund đủ điều kiện truy về delivery được tạo bằng command trong phiên.
 - [x] Để lại ít nhất một công việc pending và một kết quả cần phục hồi, dừng process rồi mở lại; tiếp tục đúng ID và đúng quyền, không tạo thêm hiệu ứng.
 - [x] Tạo chuyến/ngày hai trên cùng DB; số cuối ngày trước khớp đầu ngày sau, opening và snapshot cũ giữ nguyên.
-- [ ] Một lượt thao tác trực tiếp từ trình duyệt và một hành trình tự động trọng tâm có bằng chứng UI→API→SQL; đối chiếu SQL độc lập, expected/actual/diff theo nguồn và đơn vị.
+- [x] Một lượt thao tác trực tiếp từ trình duyệt và một hành trình tự động trọng tâm có bằng chứng UI→API→SQL; đối chiếu SQL độc lập, expected/actual/diff theo nguồn và đơn vị.
 - [x] Chạy hồi quy F09 và các gate repo áp dụng trên source cuối; ghi command, môi trường, source/tree, run ID, kết quả, log/SQL/JUnit/TRX và hash artifact. Không gắn PASS của bản trước cho mã đã thay đổi.
 
 [Runner, ma trận và biên nhận kiểm chứng APP-03.9](app-03-9-acceptance.md).
