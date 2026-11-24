@@ -50,3 +50,17 @@ Artifact nằm tại `TestResults/app03-3/<RunId>/`, gồm kết quả JUnit, đ
 | `TestResults/app03-3/07dc1367e32648e08a0c256495482c27/junit.xml` | `F7633BEA8DCB6D88EA51541429E276B3B617F65C8FCBEFC42FD411D1ED86BF34` |
 
 Workflow Windows có bước chạy `VerifyWorkspace` và tải artifact. CI từ xa và merge còn chờ xác nhận.
+
+### Kiểm chứng sau review PR #137
+
+Source `16ffae101fb99cc0e7375c6019f2dfaa3141a5a9`, tree `6f74fb33dd3bd58c6808f6e5f9eadea29be01f01`.
+
+- Lịch sử trình duyệt giữ phạm vi theo run, tenant và actor, thêm vai cho màn trả hàng. Khi Back/Forward đi vào mục lịch sử của danh tính khác, shell xóa ngữ cảnh cũ trước khi mở màn. AR chỉ khôi phục mã đơn sau khi đối chiếu danh sách đơn và phân công chuyến từ API.
+- Nạp và Giao đồng bộ chuyến thực tế với URL, sidebar và lựa chọn đã lưu. Thứ tự chọn là chuyến của lệnh chờ còn được phân công, chuyến trong ngữ cảnh còn được phân công, rồi chuyến mặc định. Tra cứu vẫn dùng mã lệnh gốc.
+- Playwright web 53 qua, một bài standalone chỉ dành cho CI được bỏ qua ở local. Hai regression mới tái hiện lỗi trước sửa rồi qua sau sửa. Web build và unit/dependency/PWA 23/23.
+- APP-03.3 Chromium → API → LocalDB 1/1, run `a74645969550491b957ea972089d7897`. SQL giữ đúng một đơn, một lần giao, một hồ sơ trả ở tenant A và không phát sinh các dòng này ở tenant B. APP-03.1a Chromium → API → LocalDB 1/1, run `641c057ed3b14faaabd38caea1269c8a`.
+
+| Artifact local | SHA-256 |
+| --- | --- |
+| `TestResults/app03-3/a74645969550491b957ea972089d7897/sql-review.json` | `49C97BF4774B517F3B7E07560DEF4B2734A5BE6DBE0B4B9C0124E3450031E5A0` |
+| `TestResults/app03-3/a74645969550491b957ea972089d7897/junit.xml` | `E34A99510E802A3C71DDBA6AC895BB26453C088D813396B18A6CCA294D0F20A4` |
