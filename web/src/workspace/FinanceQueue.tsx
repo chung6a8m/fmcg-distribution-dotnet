@@ -14,7 +14,10 @@ type Source = {
   reconciliationStale: boolean
 }
 type Report = { id: string; fromUtc: string; cutoff: string; asOf: string; status: string }
-type Case = { id: string; reportId: string; deliveryId: string; reason: string; closedReportId: string | null; closedBy: string | null }
+type Case = {
+  id: string; reportId: string; deliveryId: string; reason: string; closedReportId: string | null; closedBy: string | null
+  canonicalCaseId: string
+}
 type Correction = { id: string; caseId: string; deliveryId: string; period: string; postingId: string | null; maker: string }
 type Queue = { asOf: string; sources: Source[]; reports: Report[]; cases: Case[]; corrections: Correction[] }
 type Pending = {
@@ -65,6 +68,7 @@ async function request<T>(token: string, path: string, body?: object) {
 
 const format = (date: string) => timestamp.format(new Date(date))
 const sourceLabel = (source: Source) => `${source.trip} · ${source.customer} · ${source.sku} · ${amount.format(source.gross)} VND`
+const isCorrectionCase = (row: Case) => row.reason === 'AMOUNT_MISMATCH' && (row.canonicalCaseId ?? row.id) === row.id
 const reportLabel = (report: Report) => `${format(report.fromUtc)} → ${format(report.cutoff)} · Tính đến ${format(report.asOf)} · ${report.status} · ${report.id}`
 
 export function FinanceQueue({ token, identity, roles, offline }: {
@@ -91,6 +95,9 @@ export function FinanceQueue({ token, identity, roles, offline }: {
   const source = queue?.sources.find(row => row.deliveryId === selection)
   const selectedReport = queue?.reports.find(row => row.id === reportId)
   const selectedCase = queue?.cases.find(row => row.id === caseId && !row.closedReportId)
+  const mayPropose = selectedCase && isCorrectionCase(selectedCase)
+  const reportsById = new Map(queue?.reports.map(item => [item.id, item]))
+  const originalCaseReport = selectedCase && reportsById.get(selectedCase.reportId)
   const selectedCorrection = queue?.corrections.find(row => row.id === correctionId)
   const blocked = offline || busy || loadedRevision !== revision || !queue
   const canWrite = !blocked && !pending && !pendingReport && !pendingCorrection
@@ -281,7 +288,7 @@ export function FinanceQueue({ token, identity, roles, offline }: {
     let details: CorrectionAction
     switch (action) {
       case 'propose':
-        if (!selectedCase) return
+        if (!selectedCase || !mayPropose) return
         details = { action, caseId: selectedCase.id, reportId: selectedCase.reportId, deliveryId: selectedCase.deliveryId }
         break
       case 'approve':
@@ -299,7 +306,8 @@ export function FinanceQueue({ token, identity, roles, offline }: {
     resolveCorrection(command, false)
   }
 
-  const options = queue?.cases.filter(row => !row.closedReportId && (!roles.includes('maker') || row.reason === 'AMOUNT_MISMATCH')) ?? []
+  const options = queue?.cases.filter(row => !row.closedReportId &&
+    (roles.includes('reconciler') || isCorrectionCase(row))) ?? []
   const closedCases = roles.includes('reconciler') ? queue?.cases.filter(row => row.closedReportId) ?? [] : []
   return <>
     <section className="panel panel-content" aria-label="Hàng đợi kế toán">
@@ -381,7 +389,11 @@ export function FinanceQueue({ token, identity, roles, offline }: {
         {(roles.includes('maker') || roles.includes('reconciler')) && <div className="field"><label htmlFor="finance-case">Hồ sơ sai lệch</label>
           <select id="finance-case" value={selectedCase?.id ?? ''} disabled={busy} onChange={event => setCaseId(event.currentTarget.value)}>
             <option value="">Chọn hồ sơ</option>
-            {options.map(row => <option key={row.id} value={row.id}>{row.reason} · {row.deliveryId} · {row.id}</option>)}
+            {options.map(row => {
+              const original = reportsById.get(row.reportId)
+              const window = original ? format(original.fromUtc) + ' → ' + format(original.cutoff) : row.reportId
+              return <option key={row.id} value={row.id}>{row.reason} · {window} · {row.id}</option>
+            })}
           </select>
         </div>}
         {roles.includes('checker') && <div className="field"><label htmlFor="finance-correction">Đề nghị điều chỉnh</label>
@@ -398,8 +410,12 @@ export function FinanceQueue({ token, identity, roles, offline }: {
           </select>
         </div>}
       </div>
+      {selectedCase && <div className="c3-source">
+        <p>Báo cáo gốc {selectedCase.reportId}{originalCaseReport && ' · Tính đến ' + format(originalCaseReport.asOf)}</p>
+        {selectedCase.canonicalCaseId && selectedCase.id !== selectedCase.canonicalCaseId && <p>Bút toán điều chỉnh theo hồ sơ {selectedCase.canonicalCaseId}</p>}
+      </div>}
       <div className="button-row">
-        {roles.includes('maker') && <Button disabled={!canWrite || !selectedCase} onClick={() => correct('propose')}>Đề nghị điều chỉnh</Button>}
+        {roles.includes('maker') && <Button disabled={!canWrite || !mayPropose} onClick={() => correct('propose')}>Đề nghị điều chỉnh</Button>}
         {roles.includes('checker') && <Button disabled={!canWrite || !selectedCorrection || !!selectedCorrection.postingId}
           onClick={() => correct('approve')}>Duyệt điều chỉnh</Button>}
         {roles.includes('reconciler') && <>

@@ -71,3 +71,24 @@ Run `15946ed7585b4300815bf7a136a40485` đạt 5/5 chặng Chromium → API → S
 | `cost.xml` | `09943824CFB2481ABA0613BD0D2704E73C6A679FA5D1616A238A3F78E2C28D89` |
 | `sql-review.json` | `7949015C6B12E3251D29BCD38D562AC85B988EEEE066A4DAE30C02617D6136CB` |
 | `app03-7-review-final.trx` | `8620349B9FD4EF1DF2593B158A07EC846A7E530001334DA4C9C195637A8F936B` |
+
+## Sửa cửa sổ đối soát của hồ sơ lịch sử
+
+Hồ sơ trùng từ runtime cũ tiếp tục xuất hiện cho người đối soát theo mã và báo cáo gốc của từng hồ sơ. Những hồ sơ của cùng dòng nguồn, hash, bút toán và lý do dùng bút toán điều chỉnh của hồ sơ chính. Maker chỉ chọn hồ sơ chính để lập điều chỉnh. Đóng hồ sơ vẫn yêu cầu báo cáo mới khớp với chính cửa sổ của hồ sơ đang đóng và có kết quả OK ở dòng nguồn đó.
+
+Runner dùng các báo cáo tạo qua trình duyệt rồi bổ sung hai bản ghi hồ sơ theo cấu trúc cũ khi phiên đã dừng. Sau Resume, báo cáo mới cửa sổ 23–24/11 đóng hồ sơ chính và hồ sơ cùng cửa sổ. API từ chối dùng báo cáo đó để đóng hồ sơ cửa sổ 22–24/11. Hồ sơ 22–24/11 đóng với báo cáo của cửa sổ này và cùng bút toán điều chỉnh. SQL đối chiếu mã đóng, dòng nguồn, cửa sổ và digest các báo cáo lịch sử.
+
+Run `cd65e64e54db467290c62cdeb0cfa910` đạt 5/5 chặng Chromium → API → SQL trên hai tenant LocalDB. Tree mã và kiểm thử `c5532254eecccd749ed0bfe9a2d49fe2a4f8b256` trên base `3f9de477e4b12443055b6f63be12202610f66c42`. SQL xác nhận 3/3 hồ sơ đóng với báo cáo đúng cửa sổ, một bút toán điều chỉnh và digest báo cáo lịch sử khớp trước và sau.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `refund.xml` | `4DBD5B440DA540472235E07BBF8D31C08A76F275F5F26E47D89A54B9FF76CA78` |
+| `accounting.xml` | `7E8937FC905D7F427BE22F5813454F0468A10A48EC4D54513B9FF33D633418DC` |
+| `approval.xml` | `749594805E3EE366F8B1CA92E12A7BDCA4D84E99BA0C71E17B5A3F5E46F5261C` |
+| `recovery.xml` | `3111B23400AE4DE83626551E241284AEC39A2F6FB48FD37F3EB35417E41179ED` |
+| `cost.xml` | `556B79CFEA17ABFDBF3D3BAC32DA41003CBDFCC17570D237E56222452A735C0C` |
+| `sql-review.json` | `F7286FF51E4FA10E79AC67836C208A62F857FA7D1AAC571AF0C4B01E4721803B` |
+| `app03-7-review-cross-window.trx` | `D51CF401D141A6DD8156B25DCF65AED04236C3D825767749D979FE961F4A5CA8` |
+
+Hồi quy local D.4 đạt 36/36 ca theo tenant và 2/2 Chromium (run `a2d06fa49b694c7c892ba987db7229c6`). F06 (run `9b02ffd831ca4af7b6ff1a3eb9258492`) và F08 (run `939b724fe8c7467f8898c8ae3af3d0c3`) đều qua Chromium và đối chiếu SQL. F08 đạt khi chạy lại sau lỗi chia sẻ file checkpoint của lượt đầu. Bộ .NET đạt 352/352. Các kiểm tra web đạt 23/23.
+Playwright tổng đạt 58 bài. Một bài cài PWA standalone bỏ qua theo cấu hình local.

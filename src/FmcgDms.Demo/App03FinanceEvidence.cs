@@ -53,32 +53,36 @@ internal static class App03FinanceEvidence
                     PartnerAckLost: 1, ClosedReportId: null })
                 throw new InvalidOperationException($"APP-03.7 expected committed partner correction with unknown app outcome: {pendingApproval}.");
 
-            await AddHistoricalAlias();
+            await AddHistoricalAliases();
+            var historicalReportDigest = await HistoricalReportDigest();
 
             for (var day = App03DayBootstrap.FirstDay.AddDays(3); day <= App03DevSession.FinanceRollover; day = day.AddDays(1))
                 await Advance(day);
             active = await Open("Resume", finance: true);
             await Browser(active, delivery, "recovery");
             var recovered = await CorrectionState();
-            if (recovered is not { Cases: 2, ClosedCases: 2, ApprovalPosts: 1, PartnerAckLost: 1, ClosedReportId: not null }
+            if (recovered is not { Cases: 3, ClosedCases: 3, ApprovalPosts: 1, PartnerAckLost: 1, ClosedReportId: not null }
                 || recovered.AppPostingId != pendingApproval.PartnerPostingId
                 || recovered.PartnerPostingId != pendingApproval.PartnerPostingId
                 || recovered.ClosedReportId != recovered.FreshReportId)
                 throw new InvalidOperationException($"APP-03.7 correction recovery or closure changed identities: {recovered}.");
+            var historicalReportDigestAfter = await HistoricalReportDigest();
+            if (historicalReportDigest != historicalReportDigestAfter)
+                throw new InvalidOperationException("APP-03.7 historical reconciliations changed during closure.");
             var original = await Original(delivery);
             await Browser(active, delivery, "cost");
             var december = await Capture();
-            Require(december.Primary, beforeRollover.Primary with { Closed = 2, LockedPeriod = 1, CostAdjustment = 1, PriorAdjustment = 100 }, "December");
+            Require(december.Primary, beforeRollover.Primary with { Closed = 3, LockedPeriod = 1, CostAdjustment = 1, PriorAdjustment = 100 }, "December");
             Require(december.Peer, november.Peer with { LockedPeriod = 1 }, "peer December");
             var originalAfter = await Original(delivery);
             if (original != originalAfter || original is not { Outstanding: 0, SaleCost: 6000, ReleasedCost: 3000,
                     Gross: 20000, CorrectedGross: 20000, CorrectedAr: 20000, CorrectedCost: 6000, CorrectedQuantity: 2,
-                    FinanceActors: 4, AccountingActors: 2, Reports: 4 })
+                    FinanceActors: 4, AccountingActors: 2, Reports: 6 })
                 throw new InvalidOperationException($"APP-03.7 original source mismatch: before {original}; after {originalAfter}.");
 
             await File.WriteAllTextAsync(Path.Combine(folder, "sql-review.json"),
                 JsonSerializer.Serialize(new { source, runId = run.Id, predecessor = predecessor.Ar.SourceId, delivery, november,
-                    posted, beforeRollover, pendingApproval, recovered, december, original, originalAfter }, new JsonSerializerOptions { WriteIndented = true }), ct);
+                    posted, beforeRollover, pendingApproval, recovered, historicalReportDigest, historicalReportDigestAfter, december, original, originalAfter }, new JsonSerializerOptions { WriteIndented = true }), ct);
         }
         finally
         {
@@ -153,9 +157,9 @@ internal static class App03FinanceEvidence
 
         async Task<Snapshot> Capture() => new(await ReadSql("tenant-a"), await ReadSql("tenant-b"));
 
-        async Task AddHistoricalAlias()
+        async Task AddHistoricalAliases()
         {
-            // Simulate a case already recorded by the earlier Finance runtime for the same posting.
+            // Simulate duplicate cases already recorded by the earlier Finance runtime for the same posting.
             await run.Verify("tenant-a", app03Session: true);
             await using var db = new SqlConnection(run.Connection("tenant-a"));
             int inserted = await db.ExecuteAsync(new CommandDefinition("""
@@ -166,7 +170,21 @@ internal static class App03FinanceEvidence
                 JOIN d4app.AccountingReportLine other ON other.ReportId<>c.ReportId AND other.SourceLineId=original.SourceLineId
                     AND other.PostingId=original.PostingId AND other.SourceHash=original.SourceHash AND other.Reason=original.Reason;
                 """, cancellationToken: ct));
-            if (inserted != 1) throw new InvalidOperationException($"Expected one historical case alias, got {inserted}.");
+            if (inserted != 2) throw new InvalidOperationException($"Expected two historical case aliases, got {inserted}.");
+        }
+
+        async Task<string> HistoricalReportDigest()
+        {
+            await run.Verify("tenant-a", app03Session: true);
+            await using var db = new SqlConnection(run.Connection("tenant-a"));
+            return await db.QuerySingleAsync<string>(new CommandDefinition("""
+                SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                    SELECT h.*,JSON_QUERY((SELECT l.* FROM d4app.AccountingReportLine l
+                        WHERE l.ReportId=h.Id ORDER BY l.SourceLineId FOR JSON PATH)) AS Lines
+                    FROM d4app.AccountingReport h WHERE h.AsOf<@Rollover
+                    ORDER BY h.FinanceSequence FOR JSON PATH,INCLUDE_NULL_VALUES
+                )),2);
+                """, new { Rollover = new DateTimeOffset(App03DayBootstrap.Clock(App03DevSession.FinanceRollover)) }, cancellationToken: ct));
         }
 
         async Task<ApprovalState> CorrectionState()
@@ -176,14 +194,21 @@ internal static class App03FinanceEvidence
             return await db.QuerySingleAsync<ApprovalState>(new CommandDefinition("""
                 SELECT c.PostingId AS AppPostingId,p.Id AS PartnerPostingId,x.ClosedReportId,
                     (SELECT TOP(1) Id FROM d4app.AccountingReport WHERE Status='RECONCILED_OK'
+                        AND FromUtc=original.FromUtc AND Cutoff=original.Cutoff
                         ORDER BY AsOf DESC,FinanceSequence DESC) AS FreshReportId,
                     (SELECT COUNT(*) FROM d4app.AccountingCase) AS Cases,
-                    (SELECT COUNT(*) FROM d4app.AccountingCase WHERE ClosedReportId=x.ClosedReportId) AS ClosedCases,
+                    (SELECT COUNT(*) FROM d4app.AccountingCase k
+                        JOIN d4app.AccountingReport prior ON prior.Id=k.ReportId
+                        JOIN d4app.AccountingReport fresh ON fresh.Id=k.ClosedReportId AND fresh.FromUtc=prior.FromUtc
+                            AND fresh.Cutoff=prior.Cutoff AND fresh.AsOf>prior.AsOf AND fresh.Status='RECONCILED_OK'
+                        JOIN d4app.AccountingReportLine evidence ON evidence.ReportId=fresh.Id AND evidence.SourceLineId=k.SourceLineId
+                            AND evidence.Status='RECONCILED_OK') AS ClosedCases,
                     (SELECT COUNT(*) FROM d4accounting.Posting WHERE Kind='CORRECTION' AND ApprovalId=c.ApprovalId) AS ApprovalPosts,
                     (SELECT COUNT(*) FROM d4accounting.Journal WHERE Operation='CORRECTION'
                         AND Outcome='COMMITTED_NO_ACK' AND SourceLineId=c.SourceLineId) AS PartnerAckLost
                 FROM d4app.AccountingCorrection c
                 JOIN d4app.AccountingCase x ON x.Id=c.CaseId
+                JOIN d4app.AccountingReport original ON original.Id=x.ReportId
                 LEFT JOIN d4accounting.Posting p ON p.CorrectionId=c.Id;
                 """, cancellationToken: ct));
         }

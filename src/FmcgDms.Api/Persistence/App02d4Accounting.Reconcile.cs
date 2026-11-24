@@ -208,18 +208,18 @@ internal static partial class App02d4Accounting
 
     private static async Task<IResult> ReadReport(SqlConnection db, Guid reportId, bool finance, CancellationToken ct)
     {
-        string cases = finance ? """
-            LEFT JOIN d4app.FinanceCases c ON c.PostingId=l.PostingId AND c.SourceLineId=l.SourceLineId
-                AND c.SourceHash=l.SourceHash AND c.Reason=l.Reason
-            """ : """
-            LEFT JOIN d4app.AccountingCase c ON c.ReportId=l.ReportId AND c.SourceLineId=l.SourceLineId
-            """;
+        string canonicalJoin = finance ? """
+            LEFT JOIN d4app.FinanceCases canonical ON canonical.PostingId=l.PostingId AND canonical.SourceLineId=l.SourceLineId
+                AND canonical.SourceHash=l.SourceHash AND canonical.Reason=l.Reason
+            """ : "";
+        string caseId = finance ? "COALESCE(c.Id,canonical.Id)" : "c.Id";
         using var reader = await db.QueryMultipleAsync(new CommandDefinition($"""
             SELECT Id,FromUtc,Cutoff,AsOf,ExpectedCount,ReceivedCount,PostedCount,OkCount,DiffCount,PendingCount,
                 OutsideCount,Status,Reason,CreatedAt
             FROM d4app.AccountingReport WHERE Id=@ReportId;
-            SELECT l.*,c.Id AS CaseId FROM d4app.AccountingReportLine l
-            {cases}
+            SELECT l.*,{caseId} AS CaseId FROM d4app.AccountingReportLine l
+            LEFT JOIN d4app.AccountingCase c ON c.ReportId=l.ReportId AND c.SourceLineId=l.SourceLineId
+            {canonicalJoin}
             WHERE l.ReportId=@ReportId ORDER BY l.OccurredAt,l.SourceLineId;
             """, new { ReportId = reportId }, cancellationToken: ct));
         var report = await reader.ReadSingleOrDefaultAsync<Report>();

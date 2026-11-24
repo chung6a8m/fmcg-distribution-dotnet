@@ -222,6 +222,10 @@ test('approval preserves one discrepancy across repeated reports and loses the p
   await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
   await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText(caseId)
   await expect(casePicker.locator('option')).toHaveCount(2)
+  await reconciler.getByLabel('Từ (gồm)', { exact: true }).fill('2026-11-22T00:00:00+07:00')
+  await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
+  await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText(caseId)
+  await expect(casePicker.locator('option')).toHaveCount(2)
 
   const maker = await open(context, 'MAKER', 'finance')
   await maker.getByLabel('Hồ sơ sai lệch', { exact: true }).selectOption(caseId)
@@ -284,8 +288,19 @@ test('recovery links the committed correction after NextDay and finds the origin
   await expect(reconciler.getByLabel('Báo cáo đối soát', { exact: true })).toHaveValue(reportId)
   await expect(reconciler.getByRole('region', { name: 'Dòng đối soát' })).toContainText('RECONCILED_OK')
   const casePicker = reconciler.getByLabel('Hồ sơ sai lệch', { exact: true })
-  await casePicker.selectOption({ index: 1 })
-  const caseId = await casePicker.inputValue()
+  const caseId = queue.corrections[0].caseId
+  const historical = await readQueue(reconciler, 'RECONCILER')
+  const originalCases = historical.cases as { id: string; canonicalCaseId: string; reportId: string; closedReportId: string | null }[]
+  expect(originalCases).toHaveLength(3)
+  const alias = originalCases.find(row => row.id !== caseId && historical.reports.some(
+    (candidate: { id: string; fromUtc: string }) => candidate.id === row.reportId && Date.parse(candidate.fromUtc) === Date.parse('2026-11-22T00:00:00+07:00'),
+  ))!
+  expect(alias).toMatchObject({ canonicalCaseId: caseId, closedReportId: null })
+  const maker = await open(context, 'MAKER', 'finance')
+  const makerCases = maker.getByLabel('Hồ sơ sai lệch', { exact: true }).locator('option')
+  await expect(makerCases).toHaveCount(2)
+  await expect(makerCases.nth(1)).toHaveAttribute('value', caseId)
+  await casePicker.selectOption(caseId)
   await reconciler.route('**' + accounting + '/cases/' + caseId + '/close', async route => {
     expect((await route.fetch()).ok()).toBeTruthy()
     await route.abort()
@@ -293,13 +308,46 @@ test('recovery links the committed correction after NextDay and finds the origin
   await reconciler.getByRole('button', { name: 'Đóng hồ sơ sai lệch' }).click()
   await expect(reconciler.getByText(/Chưa rõ kết quả điều chỉnh/)).toBeVisible()
   await reconciler.reload()
-  await expect(casePicker.locator('option')).toHaveCount(1)
+  await expect(casePicker.locator('option')).toHaveCount(2)
   await reconciler.getByRole('button', { name: 'Tra cứu điều chỉnh gốc' }).click()
   await expect(reconciler.getByText(/^CLOSED ·/)).toContainText(reportId)
   await expect(reconciler.getByRole('region', { name: 'Hồ sơ đã đóng' })).toContainText(caseId)
-  const closed = (await readQueue(reconciler, 'RECONCILER')).cases
-  expect(closed).toMatchObject([{ id: caseId, closedReportId: reportId }])
-  const oldProposal = await reconciler.request.post(accounting + '/reports/' + closed[0].reportId + '/corrections', {
+  const afterCanonical = (await readQueue(reconciler, 'RECONCILER')).cases
+  expect(afterCanonical.find((row: { id: string }) => row.id === caseId)).toMatchObject({ closedReportId: reportId })
+  expect(afterCanonical.find((row: { id: string }) => row.id === alias.id)).toMatchObject({ closedReportId: null })
+  const wrongWindow = await reconciler.request.post(accounting + '/cases/' + alias.id + '/close', {
+    headers: auth('RECONCILER'), data: { reportId },
+  })
+  expect(wrongWindow.status()).toBe(409)
+  expect(await wrongWindow.json()).toMatchObject({ status: 'RECONCILIATION_REQUIRED' })
+
+  await reconciliationWindow(reconciler, '2026-12-01T09:00:00+07:00')
+  await reconciler.getByLabel('Từ (gồm)', { exact: true }).fill('2026-11-22T00:00:00+07:00')
+  const aliasResponse = reconciler.waitForResponse(response => response.url().endsWith(accounting + '/reconcile'))
+  await reconciler.getByRole('button', { name: 'Chạy đối soát' }).click()
+  const aliasFresh = await aliasResponse
+  expect(aliasFresh.ok(), await aliasFresh.text()).toBeTruthy()
+  const aliasReportId = (await aliasFresh.json()).report.id
+  expect(aliasReportId).not.toBe(reportId)
+  await expect(reconciler.getByLabel('Báo cáo đối soát', { exact: true })).toHaveValue(aliasReportId)
+  await casePicker.selectOption(alias.id)
+  await expect(reconciler.getByText('Bút toán điều chỉnh theo hồ sơ ' + caseId, { exact: true })).toBeVisible()
+  await reconciler.getByRole('button', { name: 'Đóng hồ sơ sai lệch' }).click()
+  await expect(reconciler.getByText(/^CLOSED ·/)).toContainText(aliasReportId)
+  await expect(casePicker.locator('option')).toHaveCount(1)
+  await expect(reconciler.getByRole('region', { name: 'Hồ sơ đã đóng' })).toContainText(alias.id)
+  const finalQueue = await readQueue(reconciler, 'RECONCILER')
+  expect(finalQueue.cases).toHaveLength(3)
+  expect(finalQueue.cases.find((row: { id: string }) => row.id === alias.id)).toMatchObject({
+    canonicalCaseId: caseId, reportId: alias.reportId, closedReportId: aliasReportId,
+  })
+  expect(finalQueue.corrections).toHaveLength(1)
+  const canonical = originalCases.find(row => row.id === caseId)!
+  const historicalAliasReport = await reconciler.request.get(accounting + '/reports/' + alias.reportId, {
+    headers: auth('RECONCILER'),
+  })
+  expect((await historicalAliasReport.json()).lines.find((line: { deliveryId: string }) => line.deliveryId === sale).caseId).toBe(alias.id)
+  const oldProposal = await reconciler.request.post(accounting + '/reports/' + canonical.reportId + '/corrections', {
     headers: auth('MAKER'), data: { deliveryId: sale },
   })
   expect(oldProposal.status(), await oldProposal.text()).toBe(200)

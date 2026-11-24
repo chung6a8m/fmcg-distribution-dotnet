@@ -170,10 +170,13 @@ internal static partial class App02d4Accounting
         if (@case.ClosedReportId is not null)
             return @case.ClosedReportId == request.ReportId ? Results.Ok(new { Id = caseId, Status = "CLOSED" }) :
                 Results.Conflict(new Error("CASE_ALREADY_CLOSED"));
-        var closure = await db.ExecuteAsync(new CommandDefinition("""
+        string caseJoin = runtime.UsesFinance ? "JOIN d4app.FinanceCaseLinks link ON link.Id=c.Id" : "";
+        string correctionCaseId = runtime.UsesFinance ? "link.CanonicalCaseId" : "c.Id";
+        var closure = await db.ExecuteAsync(new CommandDefinition($"""
             UPDATE c SET ClosedReportId=@ReportId,ClosedBy=@Actor,ClosedAt=@Now,NextAction='CLOSED_RECONCILED'
             FROM d4app.AccountingCase c
-            JOIN d4app.AccountingCorrection fix ON fix.CaseId=c.Id AND fix.PostingId IS NOT NULL
+            {caseJoin}
+            JOIN d4app.AccountingCorrection fix ON fix.CaseId={correctionCaseId} AND fix.PostingId IS NOT NULL
             JOIN d4app.AccountingReport old ON old.Id=c.ReportId
             JOIN d4app.AccountingReport fresh ON fresh.Id=@ReportId AND fresh.FromUtc=old.FromUtc
                 AND fresh.Cutoff=old.Cutoff AND fresh.AsOf>old.AsOf AND fresh.AsOf>=fix.ApprovedAt
