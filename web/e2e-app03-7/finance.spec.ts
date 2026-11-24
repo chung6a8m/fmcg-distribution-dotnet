@@ -29,9 +29,9 @@ test('owner-overview reads the shared sources with a distinct tenant grant', asy
   const advances = '/api/synthetic/dev-f02/commands'
   const employee = await request.get('/api/synthetic/app03/session', { headers: auth('SOURCE') })
   const { actorId } = await employee.json()
-  const advance = async (role: string, action: string, fields: object) => {
+  const advance = async (role: string, action: string, fields: object, evidenceKey = action) => {
     const result = await request.post(advances, { headers: auth(role), data: {
-      commandId: crypto.randomUUID(), action, evidence: 'APP03-8-' + action, ...fields,
+      commandId: crypto.randomUUID(), action, evidence: 'APP03-8-' + evidenceKey, ...fields,
     } })
     expect(result.ok(), await result.text()).toBe(true)
     return (await result.json()).id as string
@@ -40,6 +40,19 @@ test('owner-overview reads the shared sources with a distinct tenant grant', asy
   const offer = await advance('SOURCE', 'RETURN_OFFER', { advanceId, amount: 200000 })
   await advance('CASHIER', 'RETURN_ACCEPT', { advanceId, referenceId: offer, amount: 200000, decisionReason: 'Đã kiểm đếm DEV' })
 
+  const partial = await advance('SOURCE', 'EXPENSE_REQUEST', { advanceId, amount: 100000 }, 'EXPENSE-PARTIAL')
+  const full = await advance('SOURCE', 'EXPENSE_REQUEST', { advanceId, amount: 20000 }, 'EXPENSE-FULL')
+  await advance('FINANCE', 'EXPENSE_APPROVE', { advanceId, referenceId: partial, amount: 40000,
+    decisionReason: 'Duyệt một phần DEV' }, 'APPROVE-PARTIAL')
+  await advance('FINANCE', 'EXPENSE_APPROVE', { advanceId, referenceId: full, amount: 20000,
+    decisionReason: 'Duyệt đủ DEV' }, 'APPROVE-FULL')
+  const ownerResponse = await request.get(endpoint, { headers: auth('OWNER') })
+  expect(ownerResponse.ok(), await ownerResponse.text()).toBe(true)
+  const summary = (await ownerResponse.json()).metrics.find((m: { metric: string }) => m.metric === 'advance-expense-pending')
+  expect(summary).toMatchObject({ unit: 'VND', known: 2, expected: 2, value: '60000.0000', sources: expect.arrayContaining([
+    expect.objectContaining({ id: partial, relatedId: advanceId, value: '60000.0000', ownerRole: 'finance' }),
+    expect.objectContaining({ id: full, relatedId: advanceId, value: '0.0000', state: 'APPROVED', ownerRole: null }),
+  ]) })
   expect((await request.get(endpoint)).status()).toBe(401)
   expect((await request.get(endpoint, { headers: auth('SOURCE') })).status()).toBe(403)
 
@@ -54,9 +67,14 @@ test('owner-overview reads the shared sources with a distinct tenant grant', asy
   await owner.getByRole('button', { name: 'Đóng chi tiết' }).click()
   await expect(owner.getByRole('button', { name: /Credit còn lại F08/ })).toBeFocused()
   await owner.getByRole('button', { name: /Tạm ứng còn lại F02/ }).click()
-  await expect(owner.getByRole('table', { name: 'Nguồn Tạm ứng còn lại F02' })).toContainText('300.000')
+  await expect(owner.getByRole('table', { name: 'Nguồn Tạm ứng còn lại F02' })).toContainText('240.000')
   await expect(owner.getByRole('table', { name: 'Nguồn Tạm ứng còn lại F02' })).toContainText(advanceId)
   await expect(owner.getByText('Chưa đủ dữ liệu', { exact: false }).first()).toBeVisible()
+  await owner.getByRole('button', { name: /Khoản chi F02 chờ duyệt/ }).click()
+  const expenseTable = owner.getByRole('table', { name: 'Nguồn Khoản chi F02 chờ duyệt' })
+  await expect(expenseTable.getByRole('row').filter({ hasText: partial })).toContainText('60.000 VND')
+  await expect(expenseTable.getByRole('row').filter({ hasText: partial })).toContainText('Duyệt khoản chi')
+  await expect(expenseTable.getByRole('row').filter({ hasText: full })).toContainText('0 VND')
   await owner.setViewportSize({ width: 390, height: 844 })
   expect(await owner.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 
@@ -65,6 +83,8 @@ test('owner-overview reads the shared sources with a distinct tenant grant', asy
   const body = await peer.text()
   expect(body).not.toContain(sale)
   expect(body).not.toContain(advanceId)
+  expect(body).not.toContain(partial)
+  expect(body).not.toContain('advance-expense-pending')
   expect(JSON.parse(body)).toMatchObject({ tenantId: 'tenant-b' })
   expect((await request.post(endpoint, { headers: auth('OWNER'), data: {} })).status()).toBe(405)
   expect((await request.post(advances, { headers: auth('OWNER'), data: {

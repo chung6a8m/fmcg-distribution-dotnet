@@ -308,6 +308,17 @@ internal static class App03FinanceEvidence
             warehouse.Id, 1, secondConfirm), host.ReceiverToken);
         var sharedRight = (await Send<Right[]>(c3 + $"/trips/{trip.Id}/rights", token: host.ReceiverToken)).Single(row => row.Id != right.Id);
         await Command(c3 + "/load", new C3LoadInput(Guid.NewGuid(), trip.Id, [new(sharedRight.Id, 1, 1)]), host.ReceiverToken);
+
+        // The first trip has an active reservation for a different SKU that has never been loaded.
+        var firstTrip = catalog.Trips.Single(row => row.Label == "DEV-20261123-A");
+        var reservedAddress = await Send<C1Outcome>(c1 + "/ship-to-selections",
+            new C1SelectionInput(Guid.NewGuid(), customer.Id, null, address.Id, address.Revision, null));
+        Guid reservedOrder = (await Command(c2 + "/drafts",
+            new C2DraftInput(Guid.NewGuid(), customer.Id, firstTrip.Id, reservedAddress.Id!.Value, [new(sku.Id, 1)]))).SourceId!.Value;
+        Guid reservedConfirm = (await Command(c2 + "/confirm", new C2ConfirmInput(Guid.NewGuid(), reservedOrder))).SourceId!.Value;
+        Guid reservedLine = (await Send<C2OrderView[]>(c2 + "/orders")).Single(row => row.Id == reservedOrder).Lines.Single().LineId!.Value;
+        await Command(c2 + "/reserve", new C2ReserveInput(Guid.NewGuid(), reservedOrder, reservedLine,
+            warehouse.Id, 1, reservedConfirm), host.ReceiverToken);
         await run.Verify("tenant-a", app03Session: true);
         await using var db = new SqlConnection(run.Connection("tenant-a"));
         return await db.QuerySingleAsync<Guid>(new CommandDefinition(

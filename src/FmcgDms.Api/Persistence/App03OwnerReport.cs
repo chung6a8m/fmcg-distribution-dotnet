@@ -16,8 +16,8 @@ internal sealed record OwnerMetric(string Metric, string Unit, int Known, int Ex
 
 internal static partial class App03OwnerReport
 {
-    private sealed record TripStock(Guid TripId, Guid SkuId, string Label, string Unit, decimal Quantity,
-        decimal VehicleQuantity, decimal VehicleCost);
+    private sealed record TripStock(Guid TripId, Guid SkuId, Guid? VehicleLocationId, string Label, string Unit,
+        bool NeverLoaded, decimal? Quantity, decimal? VehicleQuantity, decimal? VehicleCost);
 
     internal static Task<string> Session(TenantConnections connections, ClaimsPrincipal user, CancellationToken ct) =>
         WithOwner(connections, user, (db, tx, _) => db.QuerySingleAsync<string>(
@@ -30,13 +30,7 @@ internal static partial class App03OwnerReport
                 $"SELECT TODATETIMEOFFSET(SYSUTCDATETIME(),'+00:00'), TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00');",
                 new { Tenant = tenant, Employee = (string?)null }, tx, ct));
             var rows = (await result.ReadAsync<OwnerSource>()).AsList();
-            foreach (var stock in await result.ReadAsync<TripStock>())
-            {
-                rows.Add(new("trip-qty", stock.Unit, stock.TripId, stock.SkuId, stock.Label, "TRIP_LEDGER", stock.Quantity));
-                decimal? value = stock.Quantity >= 0 && stock.Quantity <= stock.VehicleQuantity
-                    ? App01dCashierUnloadService.D3CarryingCost(stock.VehicleCost, stock.VehicleQuantity, stock.Quantity) : null;
-                rows.Add(new("trip-value", "VND", stock.TripId, stock.SkuId, stock.Label, "D3_CARRYING_COST", value));
-            }
+            AddTripStock(rows, await result.ReadAsync<TripStock>());
             var clock = await result.ReadSingleAsync<(DateTimeOffset AsOf, DateTimeOffset BusinessCutoff)>();
             var metrics = rows.GroupBy(row => (row.Metric, row.Unit)).Select(group =>
             {
@@ -46,6 +40,41 @@ internal static partial class App03OwnerReport
             }).ToArray();
             return new { TenantId = tenant, clock.AsOf, clock.BusinessCutoff, Metrics = metrics };
         }, ct);
+
+    private static void AddTripStock(List<OwnerSource> rows, IEnumerable<TripStock> stocks)
+    {
+        foreach (var vehicle in stocks.GroupBy(stock => (stock.VehicleLocationId, stock.SkuId)))
+        {
+            var baseline = vehicle.First();
+            decimal vehicleQuantity = baseline.VehicleQuantity.GetValueOrDefault();
+            decimal vehicleCost = baseline.VehicleCost.GetValueOrDefault();
+            bool reconciled = baseline.VehicleQuantity.HasValue && baseline.VehicleCost.HasValue
+                && vehicle.All(stock => stock.Quantity is >= 0)
+                && vehicle.Sum(stock => stock.Quantity.GetValueOrDefault()) == vehicleQuantity;
+            decimal cumulativeQuantity = 0;
+            decimal allocatedValue = 0;
+            foreach (var stock in vehicle)
+            {
+                decimal? quantity = null;
+                decimal? value = null;
+                if (stock.NeverLoaded)
+                    quantity = value = 0;
+                else if (reconciled)
+                {
+                    quantity = stock.Quantity.GetValueOrDefault();
+                    cumulativeQuantity += quantity.Value;
+                    // Consecutive rounded totals telescope to one stored-precision vehicle allocation.
+                    decimal cumulativeValue = App01dCashierUnloadService.D3CarryingCost(vehicleCost, vehicleQuantity, cumulativeQuantity);
+                    value = cumulativeValue - allocatedValue;
+                    allocatedValue = cumulativeValue;
+                }
+                rows.Add(new("trip-qty", stock.Unit, stock.TripId, stock.SkuId, stock.Label,
+                    stock.NeverLoaded ? "NOT_LOADED" : quantity.HasValue ? "TRIP_LEDGER" : "RECONCILIATION_REQUIRED", quantity));
+                rows.Add(new("trip-value", "VND", stock.TripId, stock.SkuId, stock.Label,
+                    stock.NeverLoaded ? "NOT_LOADED" : value.HasValue ? "D3_CARRYING_COST" : "RECONCILIATION_REQUIRED", value));
+            }
+        }
+    }
 
     private static async Task<T> WithOwner<T>(TenantConnections connections, ClaimsPrincipal user,
         Func<SqlConnection, SqlTransaction, string, Task<T>> read, CancellationToken ct)

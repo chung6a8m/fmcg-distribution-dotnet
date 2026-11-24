@@ -76,13 +76,15 @@ internal static class App03WorkspaceEvidence
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(2), settlement: true);
-                    active = await Open("Resume", enableSettlement: true);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
                     var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct);
+                    await App03OwnerEvidence.ReviewTripCoverage(run, active, secondTrip, thirdTrip,
+                        evidence.FullName, source, ct);
                     await App03SettlementEvidence.VerifyVehicleReuse(run, active, secondTrip, thirdTrip, evidence.FullName, ct);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(3), settlement: true);
-                    active = await Open("Resume", enableSettlement: true);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
                     var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
                     await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
                     await Stop();

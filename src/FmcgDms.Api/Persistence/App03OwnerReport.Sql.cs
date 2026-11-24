@@ -139,6 +139,19 @@ internal static partial class App03OwnerReport
             UNION ALL
             SELECT 'advance-pending','advances',Id,NULL,EmployeeId,Evidence,IIF(PendingReturns>0,1,0) FROM Advance
             UNION ALL
+            SELECT 'advance-expense-pending',a.Currency,r.Id,a.Id,a.EmployeeId+N' · '+r.Evidence,
+                CASE WHEN approved.Amount=r.Amount THEN 'APPROVED'
+                     WHEN approved.Amount=0 THEN 'AWAITING_APPROVAL' ELSE 'PARTIALLY_APPROVED' END,
+                r.Amount-approved.Amount
+            FROM dbo.F02AdvanceEntry r
+            JOIN dbo.F02Advance a ON a.TenantId=r.TenantId AND a.Id=r.AdvanceId
+            CROSS APPLY (
+                SELECT COALESCE(SUM(e.Amount),0) AS Amount FROM dbo.F02AdvanceEntry e
+                WHERE e.TenantId=r.TenantId AND e.AdvanceId=r.AdvanceId
+                    AND e.ReferenceId=r.Id AND e.Kind='EXPENSE_APPROVE'
+            ) approved
+            WHERE r.TenantId=@Tenant AND r.Kind='EXPENSE_REQUEST'
+            UNION ALL
             SELECT 'return-credit','VND',Id,DeliveryId,'F08ReturnCredit',CONVERT(nvarchar(36),CaseId),Available FROM Credits
             UNION ALL
             SELECT 'refund-treasury','VND',NULL,NULL,'F08Treasury','AVAILABLE',AvailableAmount
@@ -180,6 +193,7 @@ internal static partial class App03OwnerReport
                 WHEN r.Metric='return-pending' AND display.State='AWAITING_APPROVAL' THEN 'finance'
                 WHEN r.Metric='return-pending' AND display.State='AWAITING_QA' THEN 'case_checker'
                 WHEN r.Metric IN ('cash-pending','advance-pending') AND r.Value=1 THEN 'cashier'
+                WHEN r.Metric='advance-expense-pending' AND r.Value>0 THEN 'finance'
                 WHEN r.Metric='cost-pending' AND r.Value=1 THEN 'case_checker'
                 WHEN r.Metric='refund-pending' AND display.State='PROPOSED' THEN 'refund-checker'
                 WHEN r.Metric='refund-pending' AND display.State='APPROVED' THEN 'cashier / case_checker' END AS OwnerRole,
@@ -189,6 +203,7 @@ internal static partial class App03OwnerReport
                 WHEN r.Metric='return-pending' AND display.State='AWAITING_QA' THEN N'Kiểm tra và giải phóng hàng'
                 WHEN r.Metric='cash-pending' AND r.Value=1 THEN N'Kiểm đếm và nhận bàn giao'
                 WHEN r.Metric='advance-pending' AND r.Value=1 THEN N'Nhận tiền hoàn ứng'
+                WHEN r.Metric='advance-expense-pending' AND r.Value>0 THEN N'Duyệt khoản chi'
                 WHEN r.Metric='cost-pending' AND r.Value=1 THEN N'Kiểm chứng tồn và duyệt điều chỉnh'
                 WHEN r.Metric='refund-pending' AND display.State='PROPOSED' THEN N'Duyệt đề nghị hoàn tiền'
                 WHEN r.Metric='refund-pending' AND display.State='APPROVED' THEN N'Xác minh chứng từ và ghi thực chi' END AS NextAction
@@ -198,17 +213,47 @@ internal static partial class App03OwnerReport
         """;
 
     private const string TripStockSql = """
-        SELECT t.Id AS TripId,k.Id AS SkuId,t.Code+N' · '+k.Code AS Label,k.BaseUom AS Unit,
-            SUM(e.QuantityDelta) AS Quantity,b.OnHandBaseQuantity AS VehicleQuantity,b.OnHandCostAmount AS VehicleCost
-        FROM dbo.Trip t
-        JOIN dbo.BusinessSource s ON s.TenantId=t.TenantId AND s.TripId=t.Id
-        JOIN dbo.BusinessSourceLine l ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
-        JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
-            AND e.StockLocationId=t.VehicleLocationId AND e.LedgerKind='PHYSICAL_STOCK'
-        JOIN dbo.PhysicalStockBalance b ON b.TenantId=e.TenantId AND b.StockLocationId=e.StockLocationId AND b.SkuId=e.SkuId
-        JOIN dbo.Sku k ON k.TenantId=b.TenantId AND k.Id=b.SkuId
-        WHERE t.TenantId=@Tenant
-        GROUP BY t.Id,k.Id,t.Code,k.Code,k.BaseUom,b.OnHandBaseQuantity,b.OnHandCostAmount
-        ORDER BY t.Code,k.Code;
+        WITH VehicleLedger AS (
+            SELECT t.Id AS TripId,e.SkuId,SUM(e.QuantityDelta) AS Quantity
+            FROM dbo.Trip t
+            JOIN dbo.BusinessSource s ON s.TenantId=t.TenantId AND s.TripId=t.Id
+            JOIN dbo.BusinessSourceLine l ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
+            JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
+                AND e.StockLocationId=t.VehicleLocationId AND e.LedgerKind='PHYSICAL_STOCK'
+            WHERE t.TenantId=@Tenant AND e.SkuId IS NOT NULL
+            GROUP BY t.Id,e.SkuId
+        ), Manifest AS (
+            SELECT m.TripId,m.SkuId,SUM(m.LoadedBaseQuantity) AS Loaded,
+                SUM(m.LoadedBaseQuantity-delivery.Quantity-COALESCE(u.BaseQuantity,0)) AS Remaining,
+                MAX(CASE WHEN m.LoadedBaseQuantity>0 AND (v.Id IS NULL
+                    OR m.LoadedBaseQuantity<delivery.Quantity+COALESCE(u.BaseQuantity,0)) THEN 1 ELSE 0 END) AS MissingProof
+            FROM dbo.TripManifestLine m
+            LEFT JOIN dbo.PhysicalStockMovement v ON v.TenantId=m.TenantId AND v.TripManifestLineId=m.Id
+            LEFT JOIN dbo.D3TripUnloadLine u ON u.TenantId=m.TenantId AND u.TripManifestLineId=m.Id
+            CROSS APPLY (
+                SELECT CONVERT(decimal(18,3),COALESCE(SUM(d.BaseQuantity),0)) AS Quantity
+                FROM dbo.SaleDelivery d WHERE d.TenantId=m.TenantId AND d.TripManifestLineId=m.Id
+            ) delivery
+            WHERE m.TenantId=@Tenant
+            GROUP BY m.TripId,m.SkuId
+        ), Expected AS (
+            SELECT TripId,SkuId FROM dbo.StockRight WHERE TenantId=@Tenant
+            UNION
+            SELECT TripId,SkuId FROM Manifest
+            UNION
+            SELECT TripId,SkuId FROM VehicleLedger
+        )
+        SELECT t.Id AS TripId,k.Id AS SkuId,t.VehicleLocationId,t.Code+N' · '+k.Code AS Label,k.BaseUom AS Unit,
+            CAST(CASE WHEN v.TripId IS NULL AND COALESCE(m.Loaded,0)=0 THEN 1 ELSE 0 END AS bit) AS NeverLoaded,
+            CASE WHEN v.TripId IS NULL AND COALESCE(m.Loaded,0)=0 THEN 0
+                 WHEN m.MissingProof=0 AND v.Quantity=m.Remaining THEN v.Quantity END AS Quantity,
+            b.OnHandBaseQuantity AS VehicleQuantity,b.OnHandCostAmount AS VehicleCost
+        FROM Expected e
+        JOIN dbo.Trip t ON t.TenantId=@Tenant AND t.Id=e.TripId
+        JOIN dbo.Sku k ON k.TenantId=t.TenantId AND k.Id=e.SkuId
+        LEFT JOIN Manifest m ON m.TripId=t.Id AND m.SkuId=k.Id
+        LEFT JOIN VehicleLedger v ON v.TripId=t.Id AND v.SkuId=k.Id
+        LEFT JOIN dbo.PhysicalStockBalance b ON b.TenantId=t.TenantId AND b.StockLocationId=t.VehicleLocationId AND b.SkuId=k.Id
+        ORDER BY t.BusinessDate,t.Code,t.Id,k.Code;
         """;
 }

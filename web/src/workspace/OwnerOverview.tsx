@@ -31,6 +31,7 @@ const sections = [
     ['confirm-pending', 'Đơn A chờ xác nhận', 'Đơn A theo chuyến'],
     ['cash-pending', 'Đề nghị nộp tiền chờ nhận', 'Đề nghị bàn giao tiền'],
     ['advance-pending', 'Tạm ứng chờ nhận tiền hoàn', 'Chứng từ tạm ứng'],
+    ['advance-expense-pending', 'Khoản chi F02 chờ duyệt', 'Số tiền còn chờ duyệt theo đề nghị chi'],
     ['return-pending', 'Hồ sơ trả hàng còn mở', 'Hồ sơ trả hàng và QA'],
     ['refund-pending', 'Đề nghị hoàn tiền chưa chi', 'Đề nghị hoàn tiền F08'],
     ['cost-pending', 'Đề nghị điều chỉnh giá vốn chưa ghi', 'Đề nghị giá vốn F06'],

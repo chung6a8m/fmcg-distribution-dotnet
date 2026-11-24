@@ -20,12 +20,12 @@ Mỗi dòng chỉ số ghi phạm vi, đơn vị và số nguồn có giá trị
 | --- | --- |
 | Đơn và chuyến | Nháp C.2, trạng thái AOrder và Trip. Mỗi đơn hoặc chuyến một dòng. |
 | MAIN, xe và QA | PhysicalStockBalance theo vị trí và SKU. Giá trị trong profile bootstrap là VND. Dòng lượng dùng đơn vị cơ sở của SKU. Tồn MAIN không đi qua danh sách chuyến. |
-| TRIP | Số lượng theo hiệu ứng vật lý được gắn chuyến và SKU. Giá trị theo tỷ trọng số lượng trong tồn xe tại lần đọc, theo cách D.3 tính giá trị giữ trên xe. Giá trị xe và giá trị phân bổ cho chuyến là hai góc nhìn cùng tồn. |
+| TRIP | Mẫu số gồm quyền giữ, manifest và hiệu ứng vật lý theo chuyến và SKU. Nguồn chưa nạp có lượng và giá trị bằng 0. Nguồn đã nạp cần khớp manifest, hiệu ứng và số dư theo xe/SKU. Phân bổ giá trị theo chênh lệch giữa các mốc lũy kế đã làm tròn, theo thứ tự ngày và mã chuyến. Tổng giá trị phân bổ khớp với giá trị xe khi lượng đối chiếu đủ. |
 | Lô và quyền | Lô theo vị trí, SKU và hạn dùng từ opening, nạp, xuất, trả xe và các bước F05. Quyền giữ A và quota B theo StockRight, độc lập với số lượng vật lý. |
 | AR và giá vốn | AR theo ReceivableOpenItem và lần giao A/B, dùng snapshot F04 hoặc B pricing để xác định đơn vị. C.4 đang chờ kết quả nằm trong độ phủ AR A. Phần đã biết đối chiếu số phải thu gốc và số tiền đã phân bổ hoặc tất toán F08. Nguồn thiếu snapshot tiền nằm trong nhóm `SYNTHETIC_UNITLESS`. Giá vốn là tổng hiệu ứng giao, trả QA và chênh lệch F06. |
 | Tiền khách và quỹ | Hiệu ứng credit tiền khách, custody và fund theo hợp đồng D.3 của profile VND. Credit trả hàng, thực chi và số dư quỹ hoàn tiền thuộc F08. |
 | Tạm ứng | Sổ F02 theo chứng từ và nhân viên, lấy tiền đã cấp trừ khoản chi được duyệt và tiền hoàn đã nhận. |
-| Công việc chờ | Nháp C.2, đề nghị bàn giao tiền D.3, F02/F05/F06/F08 và hàng đợi hoặc hồ sơ chênh lệch D.4. Mỗi nhóm có mẫu số riêng. |
+| Công việc chờ | Nháp C.2, đề nghị bàn giao tiền D.3, F02/F05/F06/F08 và hàng đợi hoặc hồ sơ chênh lệch D.4. Mỗi nhóm có mẫu số riêng. Khoản chi F02 chờ duyệt dùng phần tiền còn lại của từng đề nghị sau các lần duyệt được liên kết. |
 
 ## Kiểm chứng
 
@@ -49,3 +49,12 @@ Môi trường Windows LocalDB `MSSQLLocalDB`, .NET SDK `10.0.404`, Node `26.13.
 - `owner-overview.xml` SHA-256 `5D6384E9C3782BE30D7AEEB9C7CCA8C9B8FDDCD37BC5BEC1F4A899ED4A8EE842`. `owner-review.json` SHA-256 `3BC88FF42B6804A666D5070BFEA1E1F187758D02876D51D0E613D56A5099DDF3`.
 - `VerifySettlement` run `116a805a830041c8afd4ee2057417a50` đạt 1/1 bài Chromium và 3/3 đối chiếu số liệu Owner sau khi nối dữ liệu .6 vào báo cáo. Tiền ngoài thị trường còn 0 VND sau bàn giao, fund tích lũy 40.000 VND và AR B đã tất toán về 0 VND. `owner-settlement-review.json` SHA-256 `DC35427BD1E1D869B228D8552B65A48B9A4B910DF659989BAF122A4C87EEA920`.
 - .NET đạt 352/352. `FmcgDms.Api.Tests_net10.0_x64.trx` SHA-256 `FCCE89AB9512FB1D2AEB78C208B39A53D5512031D8178C83C3C249B117B88AB9`. Web build, web tests 15/15, kiểm PWA 5/5, dependency 3/3 và `Verify-Business.ps1` đều qua.
+
+## Kiểm chứng sau review PR #142
+
+Source runtime tree `ce886ef003e12535f308715e6223d2726bd8d642` trên commit `430696a93707775e512f6aa2102db08fe7226b10`, trước khi bổ sung biên nhận.
+
+- `VerifyFinance` run `60c066f093a64b7f82a85f9143f78fc3` đạt 6/6 bài Chromium và 18/18 đối chiếu SQL. Đề nghị 100.000 VND đã duyệt 40.000 VND còn chờ 60.000 VND. Đề nghị 20.000 VND đã duyệt đủ còn 0. Tạm ứng còn 240.000 VND sau các khoản đã nhận hoàn và đã duyệt. Tenant B không có đề nghị của tenant A. Mẫu số TRIP 4/4 gồm cả dòng giữ hàng chưa nạp có lượng và giá trị bằng 0.
+- `owner-review.json` SHA-256 `018CE4C53BEAC64EBA0A9DD827BBA9CA65C5ED0C3B9B49EB3861E4CD395156D2`. `owner-overview.xml` SHA-256 `6EB1B0DE493755A1AA15497520B5C88F81E1EDA29A68C2DC599715F3CE60D55D`.
+- `VerifySettlement` run `cab9c8957e6440ec832eff8e35b7a1c4` đạt 1/1 Chromium và 3/3 đối chiếu tiền của Owner. Hai chuyến cùng xe có giá trị 50,0001 và 50,0000 VND, khớp số dư 100,0001 VND. Mẫu số giữ 5 nguồn. Độ phủ giảm từ 5/5 xuống 2/5 khi số dư xe bị thiếu hoặc lệch theo mỗi chiều. Fixture khôi phục số dư trước khi trả xe. `owner-trip-coverage.json` SHA-256 `D673C9F85D3F222BD97EF1ACB0BC6CEA78AB0DD7E12F85BAD77EC6022461EB3B`.
+- .NET đạt 352/352. `app03-8-findings-final.trx` SHA-256 `DC3ADDF42E1FFC24767837BF8530284B2E55EC10AD669B9AFD2BD8DABFB90B38`. Web build, 23/23 bài kiểm tra web và `Verify-Business.ps1` đều qua.
