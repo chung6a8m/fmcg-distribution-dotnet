@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance', 'VerifyAcceptance')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
     [string] $RunId,
@@ -67,6 +67,7 @@ if ($Action -eq 'Stop') {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
+$previousAcceptanceTree = $env:APP03_ACCEPTANCE_TREE
 Push-Location -LiteralPath $repo
 try {
     $source = git rev-parse HEAD
@@ -74,6 +75,12 @@ try {
     $changes = git status --porcelain
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
+    if ($Action -eq 'VerifyAcceptance') {
+        $env:APP03_ACCEPTANCE_TREE = if (!$changes) {
+            git rev-parse 'HEAD^{tree}'
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the acceptance source tree.' }
+        } else { '' }
+    }
 
     $demo = 'src/FmcgDms.Demo/bin/Release/net10.0/FmcgDms.Demo.dll'
     if ($Action -ne 'Remove' -or !(Test-Path -LiteralPath $demo)) {
@@ -90,8 +97,14 @@ try {
     if ($Action -eq 'VerifyHandoff') { $sessionArgs[1] = 'VerifyHandoff' }
     if ($Action -eq 'VerifyField') { $sessionArgs[1] = 'VerifyField' }
     if ($Action -eq 'VerifySettlement') { $sessionArgs[1] = 'VerifySettlement' }
+    if ($Action -eq 'VerifyAcceptance') { $sessionArgs[1] = 'VerifyAcceptance' }
     if ($Action -eq 'VerifyFinance') { $sessionArgs[1] = 'VerifyFinance' }
     dotnet $demo @sessionArgs
     if ($LASTEXITCODE -ne 0) { throw "APP-03 DEV $Action failed." }
 }
-finally { Pop-Location }
+finally {
+    if ($Action -eq 'VerifyAcceptance') {
+        [Environment]::SetEnvironmentVariable('APP03_ACCEPTANCE_TREE', $previousAcceptanceTree, 'Process')
+    }
+    Pop-Location
+}
