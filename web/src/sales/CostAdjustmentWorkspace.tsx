@@ -3,11 +3,19 @@ import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
+type ReturnHandling = 'NO_LOT_SOURCE' | 'MULTIPLE_RELEASES' | 'WAREHOUSE_WITNESS_MISSING' | 'SUPPORTED'
+const handlingLabels: Record<ReturnHandling, string> = {
+  NO_LOT_SOURCE: 'Nguồn giao không có dấu vết xuất lô.',
+  MULTIPLE_RELEASES: 'Đã giải phóng nhiều lần. Chưa hỗ trợ điều chỉnh phần giá vốn đã hoàn.',
+  WAREHOUSE_WITNESS_MISSING: 'Thiếu chứng cứ tồn kho hiện tại. Chưa hỗ trợ điều chỉnh phần giá vốn đã hoàn.',
+  SUPPORTED: '',
+}
+
 type Role = 'finance' | 'case_checker'
 type Session = { token: string; identity: Identity & { role: Role } }
-type Source = { deliveryId: string; sku: string; originalCost: number; priorReturned: number
+type Source = { deliveryId: string; sku: string; originalCost: number; priorReturned: number; returnHandling?: ReturnHandling
   previousRefund: number; period: string; adjustedCost: number | null }
-type Proposal = { id: string; deliveryId: string; sku: string; originalCost: number; adjustedCost: number
+type Proposal = { id: string; deliveryId: string; sku: string; originalCost: number; adjustedCost: number; returnHandling?: ReturnHandling
   previousRefund: number; priorAdjustment: number | null; status: 'PROPOSED' | 'APPROVED' }
 type Ledger = { sources: Source[]; proposals: Proposal[]; refresh: number }
 type Pending = { commandId: string; body: string; conflict?: boolean }
@@ -82,7 +90,7 @@ export function CostAdjustmentWorkspace() {
   </main>
 }
 
-function AdjustmentPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
+export function AdjustmentPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
   const mayPropose = identity.role === 'finance'
   const action = mayPropose ? 'Đề nghị điều chỉnh' : 'Duyệt điều chỉnh'
   const key = 'dev-f06.adjustment.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
@@ -101,6 +109,7 @@ function AdjustmentPanel({ session: { token, identity }, offline }: { session: S
   const proposals = ledger?.proposals.filter(row => row.status === 'PROPOSED') ?? []
   const source = sources.find(row => row.deliveryId === selection)
   const proposal = proposals.find(row => row.id === selection)
+  const noLotSource = source?.returnHandling === 'NO_LOT_SOURCE'
   const formDisabled = offline || busy || pending !== null || loadError !== '' || ledger?.refresh !== refresh
     || (mayPropose ? sources.length === 0 : proposals.length === 0)
 
@@ -166,7 +175,7 @@ function AdjustmentPanel({ session: { token, identity }, offline }: { session: S
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (formDisabled || operation.current || !navigator.onLine || (!source && !proposal)) return
+    if (formDisabled || operation.current || !navigator.onLine || (!source && !proposal) || noLotSource) return
     const values = new FormData(event.currentTarget)
     const reason = String(values.get('reason') ?? '').trim()
     const evidence = String(values.get('evidence') ?? '').trim()
@@ -175,8 +184,8 @@ function AdjustmentPanel({ session: { token, identity }, offline }: { session: S
       return
     }
     const adjustedCost = Number(values.get('adjustedCost'))
-    if (mayPropose && (!Number.isSafeInteger(adjustedCost) || adjustedCost < 0)) {
-      setMessage('Nhập giá vốn bằng số VND nguyên không âm.')
+    if (mayPropose && (!Number.isSafeInteger(adjustedCost) || adjustedCost < 1)) {
+      setMessage('Nhập giá vốn bằng số VND nguyên lớn hơn 0.')
       return
     }
     const details = source ? { action: 'PROPOSE', deliveryId: source.deliveryId, adjustedCost }
@@ -204,14 +213,14 @@ function AdjustmentPanel({ session: { token, identity }, offline }: { session: S
               onChange={event => setSelection(event.currentTarget.value)}>
               <option value="">{mayPropose ? 'Chọn lần giao' : 'Chọn đề nghị'}</option>
               {mayPropose ? sources.map(row => <option key={row.deliveryId} value={row.deliveryId}>
-                {row.sku} · Kỳ {row.period} · {row.deliveryId}
+                {row.sku} · Kỳ {row.period.slice(0, 7)} · {row.deliveryId}
               </option>) : proposals.map(row => <option key={row.id} value={row.id}>
                 {row.sku} · {vnd.format(row.adjustedCost)} VND · {row.id}
               </option>)}
             </select>
           </div>
           {source && <dl className="sales-facts">
-            <dt>Kỳ nguồn</dt><dd>{source.period}</dd>
+            <dt>Kỳ nguồn</dt><dd>{source.period.slice(0, 7)}</dd>
             <dt>Giá vốn gốc</dt><dd>{vnd.format(source.originalCost)} VND</dd>
             <dt>Đã trả</dt><dd>{quantity.format(source.priorReturned)} EA</dd>
             <dt>Giá vốn đã hoàn</dt><dd>{vnd.format(source.previousRefund)} VND</dd>
@@ -222,11 +231,14 @@ function AdjustmentPanel({ session: { token, identity }, offline }: { session: S
             <dt>Chênh giá vốn nguồn</dt><dd>{difference.format(proposal.adjustedCost - proposal.originalCost)} VND</dd>
             <dt>Giá vốn đã hoàn</dt><dd>{vnd.format(proposal.previousRefund)} VND</dd>
           </dl>}
-          {mayPropose && <Field label="Giá vốn sau điều chỉnh (VND)" name="adjustedCost" type="number" min="0"
-            step="1" required disabled={!source} />}
+          {(source?.returnHandling || proposal?.returnHandling) && <p role="status">
+            {handlingLabels[source?.returnHandling ?? proposal?.returnHandling ?? 'SUPPORTED']}
+          </p>}
+          {mayPropose && <Field label="Giá vốn sau điều chỉnh (VND)" name="adjustedCost" type="number" min="1"
+            step="1" required disabled={!source || noLotSource} />}
           <Field label="Lý do" name="reason" maxLength={200} required />
           <Field label="Chứng từ DEV" name="evidence" maxLength={120} required />
-          <div className="button-row"><Button variant="primary" type="submit" disabled={!source && !proposal}>
+          <div className="button-row"><Button variant="primary" type="submit" disabled={(!source && !proposal) || noLotSource}>
             {action}
           </Button></div>
         </fieldset>

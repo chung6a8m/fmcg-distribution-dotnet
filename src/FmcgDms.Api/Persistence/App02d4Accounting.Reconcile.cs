@@ -7,7 +7,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static partial class App02d4Accounting
 {
-    private sealed record ReconcileRequest(DateTimeOffset From, DateTimeOffset Cutoff, DateTimeOffset AsOf, bool UnknownScope);
+    private sealed record ReconcileRequest(DateTimeOffset From, DateTimeOffset Cutoff, DateTimeOffset AsOf, bool UnknownScope, Guid? RequestId);
     private sealed record Line(Guid ReportId, Guid DeliveryId, Guid SourceLineId, string SourceHash, DateTimeOffset OccurredAt,
         string Period, Guid? ReceiptId, Guid? PostingId, string Status, string? Reason,
         decimal ExpectedQuantity, decimal ExpectedGross, decimal ExpectedAr, decimal ExpectedCost,
@@ -17,6 +17,14 @@ internal static partial class App02d4Accounting
         int? ExpectedCount, int ReceivedCount, int PostedCount, int OkCount, int DiffCount, int PendingCount,
         int OutsideCount, string Status, string? Reason, DateTimeOffset CreatedAt);
 
+    private sealed record StoredReport(DateTimeOffset FromUtc, DateTimeOffset Cutoff, DateTimeOffset AsOf,
+        bool UnknownScope, string? RequestActor)
+    {
+        public bool Matches(ReconcileRequest request, string? actor) =>
+            FromUtc == request.From && Cutoff == request.Cutoff && AsOf == request.AsOf &&
+            UnknownScope == request.UnknownScope && string.Equals(RequestActor, actor, StringComparison.Ordinal);
+    }
+
     private static async Task<IResult> Reconcile(ReconcileRequest request, HttpContext http, App02d4Runtime runtime,
         CancellationToken ct)
     {
@@ -24,6 +32,17 @@ internal static partial class App02d4Accounting
         DateTimeOffset now = runtime.UtcNow;
         if (request.From >= request.Cutoff || request.AsOf < request.Cutoff || request.AsOf > now)
             return Results.BadRequest(new Error("INVALID_RECONCILIATION_WINDOW"));
+        if (request.RequestId == Guid.Empty || (!runtime.UsesFinance && request.RequestId is not null))
+            return Results.BadRequest(new Error("INVALID_REPORT_REQUEST_ID"));
+        var requestId = request.RequestId;
+        var requestActor = Actor(http.User);
+        if (requestId is Guid id)
+        {
+            var saved = await FindStoredReport(db, id, null, ct);
+            if (saved is not null)
+                return saved.Matches(request, requestActor) ? await ReadReport(db, id, ct)
+                    : Results.Conflict(new Error("REPORT_REQUEST_CONFLICT"));
+        }
         using var client = runtime.Client(http, Partner);
         StubSnapshot? snapshot;
         try
@@ -48,7 +67,7 @@ internal static partial class App02d4Accounting
         var ids = scope.Select(source => source.SourceLineId).ToHashSet();
         var receipts = snapshot.Receipts.ToDictionary(row => row.SourceLineId);
         var postings = snapshot.Postings.ToLookup(row => row.SourceLineId);
-        var reportId = Guid.NewGuid();
+        var reportId = requestId ?? Guid.NewGuid();
         var lines = scope.Select(source => Compare(reportId, source, receipts.GetValueOrDefault(source.SourceLineId),
             postings[source.SourceLineId])).ToArray();
         int received = request.UnknownScope ? snapshot.Receipts.Count : lines.Count(row => row.ReceiptId is not null);
@@ -69,13 +88,27 @@ internal static partial class App02d4Accounting
         if (!scopeKnown) lines = [];
 
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        await db.ExecuteAsync(new CommandDefinition("""
+        if (requestId is not null)
+        {
+            var saved = await FindStoredReport(db, reportId, tx, ct);
+            if (saved is not null)
+            {
+                await tx.CommitAsync(ct);
+                return saved.Matches(request, requestActor) ? await ReadReport(db, reportId, ct)
+                    : Results.Conflict(new Error("REPORT_REQUEST_CONFLICT"));
+            }
+        }
+        string requestColumn = requestId is null ? "" : ",RequestActor";
+        string requestValue = requestId is null ? "" : ",@RequestActor";
+        var parameters = new DynamicParameters(report);
+        if (requestId is not null) parameters.Add("RequestActor", requestActor);
+        await db.ExecuteAsync(new CommandDefinition($"""
             INSERT d4app.AccountingReport
                 (Id,FromUtc,Cutoff,AsOf,ExpectedCount,ReceivedCount,PostedCount,OkCount,DiffCount,PendingCount,
-                 OutsideCount,Status,Reason,CreatedAt)
+                 OutsideCount,Status,Reason,CreatedAt{requestColumn})
             VALUES (@Id,@FromUtc,@Cutoff,@AsOf,@ExpectedCount,@ReceivedCount,@PostedCount,@OkCount,@DiffCount,
-                @PendingCount,@OutsideCount,@Status,@Reason,@CreatedAt)
-            """, report, tx, cancellationToken: ct));
+                @PendingCount,@OutsideCount,@Status,@Reason,@CreatedAt{requestValue})
+            """, parameters, tx, cancellationToken: ct));
         if (lines.Length > 0)
         {
             await db.ExecuteAsync(new CommandDefinition("""
@@ -99,6 +132,13 @@ internal static partial class App02d4Accounting
         await tx.CommitAsync(ct);
         return await ReadReport(db, report.Id, ct);
     }
+
+    private static Task<StoredReport?> FindStoredReport(SqlConnection db, Guid id, System.Data.Common.DbTransaction? tx,
+        CancellationToken ct) => db.QuerySingleOrDefaultAsync<StoredReport>(new CommandDefinition($"""
+            SELECT FromUtc,Cutoff,AsOf,CONVERT(bit,IIF(ExpectedCount IS NULL,1,0)) AS UnknownScope,RequestActor
+            FROM d4app.AccountingReport {(tx is null ? "" : "WITH (UPDLOCK,HOLDLOCK)")}
+            WHERE Id=@id
+            """, new { id }, tx, cancellationToken: ct));
 
     private static Line Compare(Guid reportId, D4Source source, Receipt? receipt, IEnumerable<Posting> entries)
     {

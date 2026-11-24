@@ -173,7 +173,7 @@ internal static class App03DevSessionEvidence
                 && tenantB == new DayBalance(3, 6, 20001, 0, 0), "Incorrect shared MAIN balance or tenant isolation.");
             await Stop();
             string[] rolloverTables = [.. Tables, "Trip", "C3TripWriter", "C4DeliveryWriter",
-                "D3CashierTrip", "App03SettlementDay"];
+                "D3CashierTrip", "App03SettlementDay", "F06Period", "F08Treasury"];
             var beforeRetry = await DevF01Evidence.Capture(run, rolloverTables);
             await RunScript(Path.Combine(root, "scripts", "Run-App03Dev.ps1"), run.Id, ct,
                 "NextDay", "-BusinessDate", "2026-11-24");
@@ -290,7 +290,7 @@ internal static class App03DevSessionEvidence
 
         Task RunOperation(string operation) => App03DevSession.Run(operation, root, source, run.Id);
         Task Advance(DateOnly date) =>
-            App03DevSession.Run("NextDay", root, source, run.Id, businessDate: date, settlement: true);
+            App03DevSession.Run("NextDay", root, source, run.Id, businessDate: date, settlement: true, finance: true);
 
         async Task<App03DevHost> Open(string operation)
         {
@@ -299,7 +299,7 @@ internal static class App03DevSessionEvidence
             {
                 ready.SetResult(host);
                 return Task.CompletedTask;
-            }, settlement: true);
+            }, settlement: true, finance: true);
             if (await Task.WhenAny(ready.Task, hostTask).WaitAsync(ct) == hostTask) await hostTask;
             return await ready.Task.WaitAsync(ct);
         }

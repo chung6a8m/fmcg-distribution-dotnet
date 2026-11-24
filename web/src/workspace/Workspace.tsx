@@ -19,6 +19,10 @@ const Settlement = lazy(() => import('../sales/MixedTripWorkspace').then(m => ({
 const Advances = lazy(() => import('../sales/AdvanceWorkspace').then(m => ({ default: m.AdvancePanel })))
 const Gifts = lazy(() => import('../sales/GiftWorkspace').then(m => ({ default: m.GiftPanel })))
 
+const Adjustment = lazy(() => import('../sales/CostAdjustmentWorkspace').then(m => ({ default: m.AdjustmentPanel })))
+const Refunds = lazy(() => import('../sales/RefundWorkspace').then(m => ({ default: m.RefundPanel })))
+const Accounting = lazy(() => import('./FinanceQueue').then(m => ({ default: m.FinanceQueue })))
+
 type HandoffRole = 'sales' | 'warehouse' | 'cashier'
 type AdvanceRole = 'sales' | 'finance' | 'cashier'
 type GiftRole = 'sales' | 'warehouse' | 'finance'
@@ -29,6 +33,9 @@ const lastIdentityKey = 'app03.workspace.identity.v1'
 const guid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
 type Access = Identity & {
   handoffRoles?: HandoffRole[]; advanceRole?: AdvanceRole | null; giftRole?: GiftRole | null
+  adjustmentRole?: 'finance' | 'case_checker' | null
+  refundRole?: 'finance' | 'cashier' | 'case_checker' | null
+  accountingRoles?: string[]
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -46,6 +53,9 @@ const routes = [
   { id: 'settlement', label: 'Đối soát chuyến và nộp tiền', group: '', show: (a: Access) => !!a.handoffRoles?.length },
   { id: 'advances', label: 'Tạm ứng và hoàn ứng', group: '', show: (a: Access) => !!a.advanceRole },
   { id: 'gifts', label: 'Quà khuyến mại', group: '', show: (a: Access) => !!a.giftRole },
+  { id: 'finance', label: 'Hàng đợi kế toán', group: 'Kế toán', show: (a: Access) => !!a.accountingRoles?.length },
+  { id: 'cost-adjustments', label: 'Điều chỉnh giá vốn', group: '', show: (a: Access) => !!a.adjustmentRole },
+  { id: 'refunds', label: 'Credit và hoàn tiền', group: '', show: (a: Access) => !!a.refundRole },
   { id: 'returns', label: 'Trả hàng', group: '', show: (a: Access) => a.returnRole !== null },
 ] as const
 const handoffGroup = { sales: 'Hiện trường', warehouse: 'Kho', finance: 'Kế toán', cashier: 'Thủ quỹ' }
@@ -92,7 +102,7 @@ export function WorkspaceEntry({ fallback, fieldRoute, settlementRoute }: {
       .then(readApiHealth)
       .then(health => {
         if (request.signal.aborted) return
-        const settlement = health?.workspaceProfile === 'APP-03.6-v1'
+        const settlement = health?.workspaceProfile === 'APP-03.6-v1' || health?.workspaceProfile === 'APP-03.7-v1'
         const field = health?.workspaceProfile === 'APP-03.5-v1' || settlement
         if (settlement && settlementRoute) {
           location.replace(settlementRoute)
@@ -271,7 +281,8 @@ function Workspace() {
     }}>Thử lại</Button>}
     {authorized && <WorkArea key={JSON.stringify([identityKey(authorized.access), authorized.access.sales,
       authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
-      authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole])} {...authorized} offline={offline} />}
+      authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole,
+      authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -339,6 +350,9 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
   }
 
   const groupOf = (route: typeof routes[number]) => {
+    if (route.id === 'cost-adjustments') return access.adjustmentRole === 'finance' ? 'Kế toán' : returnGroup.case_checker
+    if (route.id === 'refunds') return access.refundRole === 'cashier' ? 'Thủ quỹ'
+      : access.refundRole === 'finance' ? 'Kế toán' : returnGroup.case_checker
     if (route.id === 'orders' && !access.sales) return 'Kho'
     if (route.id === 'settlement') {
       const roles = access.handoffRoles ?? []
@@ -374,6 +388,12 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         ? 'Chọn công việc trong menu để tiếp tục.'
         : 'Màn hình này cần quyền phù hợp và profile DEV có hỗ trợ.'}</p>}
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
+        {current?.id === 'finance' && <Accounting token={token} identity={access}
+          roles={access.accountingRoles ?? []} offline={offline} />}
+        {current?.id === 'cost-adjustments' && access.adjustmentRole && <Adjustment offline={offline}
+          session={{ token, identity: { ...access, role: access.adjustmentRole } }} />}
+        {current?.id === 'refunds' && access.refundRole && <Refunds offline={offline} integrated canOpenReturn={access.returnRole != null}
+          session={{ token, identity: { ...access, role: access.refundRole } }} />}
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr}
           selectedOrder={requestedOrder} selectedSource={guid.test(requestedSource) ? requestedSource : ''}

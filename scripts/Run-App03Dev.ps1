@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
     [string] $RunId,
@@ -90,6 +90,7 @@ try {
     if ($Action -eq 'VerifyHandoff') { $sessionArgs[1] = 'VerifyHandoff' }
     if ($Action -eq 'VerifyField') { $sessionArgs[1] = 'VerifyField' }
     if ($Action -eq 'VerifySettlement') { $sessionArgs[1] = 'VerifySettlement' }
+    if ($Action -eq 'VerifyFinance') { $sessionArgs[1] = 'VerifyFinance' }
     dotnet $demo @sessionArgs
     if ($LASTEXITCODE -ne 0) { throw "APP-03 DEV $Action failed." }
 }

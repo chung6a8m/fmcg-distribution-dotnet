@@ -39,9 +39,9 @@ public static class ScratchMigrator
             throughVersion: 202611230006, migrationTag: App02DevF05Schema.Profile);
 
     public static void MigrateApp03A1(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel = LogLevel.Information, bool field = false, bool settlement = false) =>
+        LogLevel minimumLogLevel = LogLevel.Information, bool field = false, bool settlement = false, bool finance = false) =>
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
-            throughVersion: App03A1Profile.BaseVersion, app03A1: true, app03Field: field, app03Settlement: settlement);
+            throughVersion: App03A1Profile.BaseVersion, app03A1: true, app03Field: field, app03Settlement: settlement, app03Finance: finance);
 
     public static void MigrateDevF07(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
@@ -80,7 +80,7 @@ public static class ScratchMigrator
 
     private static void MigrateCore(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion, string? migrationTag = null,
-        bool app03A1 = false, bool app03Field = false, bool app03Settlement = false)
+        bool app03A1 = false, bool app03Field = false, bool app03Settlement = false, bool app03Finance = false)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -130,11 +130,11 @@ public static class ScratchMigrator
             try
             {
                 App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(),
-                    complete: false, field: app03Field, settlement: app03Settlement);
-                foreach (var (tag, version) in App03A1Profile.MigrationSteps(app03Field, app03Settlement))
+                    complete: false, field: app03Field, settlement: app03Settlement, finance: app03Finance);
+                foreach (var (tag, version) in App03A1Profile.MigrationSteps(app03Field, app03Settlement, app03Finance))
                     Apply(tag, version);
                 App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(),
-                    complete: true, field: app03Field, settlement: app03Settlement);
+                    complete: true, field: app03Field, settlement: app03Settlement, finance: app03Finance);
             }
             finally
             {

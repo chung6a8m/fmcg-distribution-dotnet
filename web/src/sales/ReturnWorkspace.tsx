@@ -278,7 +278,7 @@ function ReturnPanel({ session: { token, identity }, offline, startSource = '', 
       <h2>Danh sách hồ sơ trả hàng</h2>
       {ledger && ledger.cases.length === 0 && <p>Chưa có hồ sơ trả hàng.</p>}
       {ledger && ledger.cases.length > 0 && <ul className="c1-rows">
-        {ledger.cases.map(row => <li key={row.id}><div className="c3-source">
+        {ledger.cases.map(row => <li key={row.id} id={'return-' + row.id}><div className="c3-source">
           <strong>{row.customer} · {row.sku} · {row.lotCode}</strong>
           <p>{states[row.state]} · {amounts.format(row.quantity)} EA</p>
           {row.releasedCost != null && <p>Giá vốn hoàn {amounts.format(row.releasedCost)} VND</p>}
