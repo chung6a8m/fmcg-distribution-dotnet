@@ -56,7 +56,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | --- | --- | --- | --- |
 | APP-03.1a — Runtime/schema tích hợp đầu tiên | C/D/F đã merge | Một tổ hợp A/F chạy chung và ma trận hỗ trợ rõ ràng | [DEV_VERIFIED_LOCAL](app-03-1a-runtime-schema.md#kết-quả-local-ngày-23112026) |
 | APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | [DEV_VERIFIED_LOCAL](app-03-1b-dev-session.md#kết-quả-local-ngày-23112026) |
-| APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | NOT_STARTED |
+| APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | [DEV_VERIFIED_LOCAL](app-03-2-day-bootstrap.md#kết-quả-local-ngày-23112026) |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | NOT_STARTED |
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | NOT_STARTED |
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | NOT_STARTED |
@@ -99,12 +99,14 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** seed tối thiểu có phiên bản cho hai tenant: customer/outlet/ship-to, SKU/UoM/lô, kho/xe, nhân sự/actor/phân công, opening và policy giả lập. Tái sử dụng giá trị/oracle phù hợp từ C/F; bổ sung đường tạo/chuẩn bị chuyến mới. Không gọi lại mọi `Evidence.Seed()` để dựng một ngày đã hoàn tất.
 
+[Hợp đồng dữ liệu, lệnh NextDay và kịch bản kiểm chứng](app-03-2-day-bootstrap.md).
+
 **Hoàn tất:**
 
-- [ ] Seed/chạy lại cùng phiên không tạo thêm opening, tồn, ledger hoặc bản policy trùng.
-- [ ] Có hai chuyến cùng SKU và một chuyến ngày tiếp theo; dữ liệu ngày sau tiếp nối số dư và lịch sử ngày trước.
-- [ ] Clock, hiệu lực giá/policy, kỳ và hạn lô nhất quán; nguồn cũ giữ snapshot. Các giả định được ghi cùng expected trước chạy.
-- [ ] Chốt đơn vị tiền/cấp dữ liệu cho các nguồn được đưa vào phiên; phần chưa hỗ trợ có trạng thái rõ, không cộng gộp sai.
+- [x] Seed/chạy lại cùng phiên không tạo thêm opening, tồn, ledger hoặc bản policy trùng.
+- [x] Có hai chuyến cùng SKU và một chuyến ngày tiếp theo; dữ liệu ngày sau tiếp nối số dư và lịch sử ngày trước.
+- [x] Clock, hiệu lực giá/policy, kỳ và hạn lô nhất quán trong kỳ synthetic đã công bố; nguồn cũ giữ snapshot. Các giả định có trong bảng expected.
+- [x] Chốt đơn vị tiền/cấp dữ liệu cho các nguồn được đưa vào phiên; phần chưa hỗ trợ có trạng thái rõ, không cộng gộp sai.
 
 ### APP-03.3 — Phiên người dùng và khung ứng dụng chung
 

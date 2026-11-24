@@ -16,6 +16,7 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
 
     private readonly string? clockPath = App02c6Clock.GetConfiguredPath(config, host);
     internal bool UsesApp02c6Clock => clockPath is not null;
+    internal bool UsesApp03BusinessDay { get; } = config[App03A1Profile.DayBootstrapKey] == App03A1Profile.DayBootstrapVersion;
     internal bool UsesDevF07 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))
         && config.GetValue<bool>("DevF07:Enabled");
     internal bool UsesDevF08 { get; } = (host.IsDevelopment() || host.IsEnvironment("IntegrationTest"))

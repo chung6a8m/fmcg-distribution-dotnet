@@ -63,6 +63,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
     private sealed class Trip
     {
         public string Status { get; set; } = "";
+        public DateTime BusinessDate { get; set; }
         public Guid? VehicleLocationId { get; set; }
         public string VehicleKind { get; set; } = "";
         public bool VehicleActive { get; set; }
@@ -315,7 +316,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
     private static Task<Trip?> FindTrip(SqlConnection db, SqlTransaction tx,
         string tenant, Guid tripId, CancellationToken ct) =>
         db.QuerySingleOrDefaultAsync<Trip>(Sql("""
-            SELECT t.Status,t.VehicleLocationId,
+            SELECT t.Status,t.BusinessDate,t.VehicleLocationId,
                 v.Kind AS VehicleKind,v.IsActive AS VehicleActive
             FROM dbo.Trip t WITH (UPDLOCK,HOLDLOCK)
             LEFT JOIN dbo.StockLocation v WITH (HOLDLOCK)

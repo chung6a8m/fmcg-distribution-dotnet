@@ -9,7 +9,7 @@ internal sealed class App03DevSession
 {
     private const string ManifestVersion = "APP-03-session-v1";
     private const string SchemaVersion = "C5+F01+F03+F04+F05/v1";
-    private const string SeedVersion = "APP-03-C2-F05-v1";
+    private const string LegacySeedVersion = "APP-03-C2-F05-v1";
     private readonly string folder;
     private readonly string manifestPath;
     private readonly string lockPath;
@@ -19,6 +19,7 @@ internal sealed class App03DevSession
 
     internal DemoRun RunId { get; }
     internal bool Resume { get; }
+    internal bool UsesBusinessDay { get; private set; } = true;
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
     internal CancellationToken StopToken { get; private set; }
@@ -35,7 +36,8 @@ internal sealed class App03DevSession
         signalName = $@"Local\FmcgDms.APP03.{id}";
         expected = new Manifest(ManifestVersion, id, DemoRun.Instance,
             new Binding("tenant-a", RunId.Name("tenant-a"), id), new Binding("tenant-b", RunId.Name("tenant-b"), id),
-            App03A1Profile.Name, SchemaVersion, SeedVersion, DevF05Evidence.FixtureUtc, source, WebPort: 0, Ready: false);
+            App03A1Profile.Name, SchemaVersion, App03DayBootstrap.Version,
+            App03DayBootstrap.Clock(App03DayBootstrap.FirstDay), source, WebPort: 0, Ready: false);
     }
 
     private static string Home => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -44,11 +46,12 @@ internal sealed class App03DevSession
     internal static bool HasManifest(string id) => File.Exists(Path.Combine(Home, new DemoRun(id).Id, "session.json"));
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
-        Func<App03DevHost, Task>? observe = null)
+        Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
-        if (operation is not ("Start" or "Resume" or "Remove") || (id is null && operation != "Start"))
-            throw new ArgumentException("Expected Start, Resume or Remove. Resume and Remove require a RunId.");
+        if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
+            || (operation == "NextDay") != businessDate.HasValue)
+            throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
         var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume");
 
         using var sessionLock = session.Acquire();
@@ -57,11 +60,17 @@ internal sealed class App03DevSession
             var metadata = await session.Read();
             await session.RunId.Remove(app03Session: true, allowUnbound: !metadata.Ready);
             File.Delete(session.ClockPath);
+            File.Delete(session.ClockPath + ".pending");
             File.Delete(session.manifestPath + ".pending");
             File.Delete(session.manifestPath);
             if (!Directory.EnumerateFileSystemEntries(session.folder).Any())
                 Directory.Delete(session.folder, recursive: false);
             Console.WriteLine($"APP-03 DEV removed {session.RunId.Id}.");
+            return;
+        }
+        if (operation == "NextDay")
+        {
+            await session.Advance(businessDate!.Value);
             return;
         }
 
@@ -108,11 +117,58 @@ internal sealed class App03DevSession
         var metadata = await Read();
         if (!metadata.Ready)
             throw new InvalidOperationException("APP-03 session is not ready. Remove the incomplete synthetic session before starting a new one.");
-        foreach (string tenant in DemoRun.Tenants) await RunId.Verify(tenant, app03Session: true);
-        if (await File.ReadAllTextAsync(ClockPath) != metadata.ClockUtc.ToString("O"))
-            throw new InvalidOperationException("APP-03 session clock does not match its manifest.");
+        await VerifyBindings();
+        UsesBusinessDay = metadata.Seed == App03DayBootstrap.Version;
+        if (!UsesBusinessDay)
+        {
+            if (await File.ReadAllTextAsync(ClockPath) != metadata.ClockUtc.ToString("O"))
+                throw new InvalidOperationException("APP-03 session clock does not match its manifest.");
+        }
+        else
+        {
+            await PrepareDay(metadata.ClockUtc);
+        }
         WebPort = metadata.WebPort;
         Console.WriteLine($"APP-03 DEV resuming {RunId.Id} from {metadata.CreatedSource}, runtime {source}.");
+    }
+
+    private async Task Advance(DateOnly target)
+    {
+        var metadata = await Read();
+        if (!metadata.Ready || metadata.Seed != App03DayBootstrap.Version)
+            throw new InvalidOperationException("NextDay requires a ready APP-03.2 bootstrap session.");
+        var current = DateOnly.FromDateTime(metadata.ClockUtc);
+        if (target < current || target > App03DayBootstrap.LastDay || target.DayNumber > current.DayNumber + 1)
+            throw new InvalidOperationException("NextDay must name the current date (retry) or the next date in the bootstrap period.");
+        await VerifyBindings();
+        DateTime clock = App03DayBootstrap.Clock(target);
+
+        // Publish the requested date before preparing either tenant. A crash can leave one tenant
+        // prepared; NextDay and Resume both finish the same date before a host can serve it.
+        if (target != current)
+        {
+            await PrepareDay(metadata.ClockUtc);
+            await Write(metadata with { ClockUtc = clock });
+        }
+        await PrepareDay(clock);
+        Console.WriteLine($"APP-03 DEV {RunId.Id} prepared {target:yyyy-MM-dd} at 09:00 ICT.");
+    }
+
+    private async Task VerifyBindings()
+    {
+        foreach (string tenant in DemoRun.Tenants) await RunId.Verify(tenant, app03Session: true);
+    }
+
+    private async Task PrepareDay(DateTime clock)
+    {
+        foreach (string tenant in DemoRun.Tenants)
+            await App03DayBootstrap.PrepareDay(RunId, tenant, DateOnly.FromDateTime(clock), StopToken);
+        string value = clock.ToString("O");
+        if (!File.Exists(ClockPath) || await File.ReadAllTextAsync(ClockPath) != value)
+        {
+            await File.WriteAllTextAsync(ClockPath + ".pending", value);
+            File.Move(ClockPath + ".pending", ClockPath, overwrite: true);
+        }
     }
 
     private async Task<Manifest> Read()
@@ -124,9 +180,22 @@ internal sealed class App03DevSession
         var loaded = JsonSerializer.Deserialize<Manifest>(await File.ReadAllTextAsync(manifestPath));
         if (loaded is null || string.IsNullOrWhiteSpace(loaded.CreatedSource)
             || loaded.WebPort is < 1024 or > 65535 or App02c1Dev.ApiPort
-            || loaded != expected with { CreatedSource = loaded.CreatedSource, Ready = loaded.Ready, WebPort = loaded.WebPort })
+            || !ValidClock(loaded)
+            || loaded != expected with { CreatedSource = loaded.CreatedSource, Ready = loaded.Ready,
+                WebPort = loaded.WebPort, Seed = loaded.Seed, ClockUtc = loaded.ClockUtc })
             throw new InvalidOperationException("APP-03 session manifest does not match its run, bindings, profile, schema, seed or clock.");
         return loaded;
+    }
+
+    private static bool ValidClock(Manifest metadata)
+    {
+        if (metadata.ClockUtc.Kind != DateTimeKind.Utc) return false;
+        if (metadata.Seed == LegacySeedVersion) return metadata.ClockUtc == DevF05Evidence.FixtureUtc;
+        var date = DateOnly.FromDateTime(metadata.ClockUtc);
+        return metadata.Seed == App03DayBootstrap.Version
+            && date >= App03DayBootstrap.FirstDay && date <= App03DayBootstrap.LastDay
+            && (metadata.Ready || date == App03DayBootstrap.FirstDay)
+            && metadata.ClockUtc == App03DayBootstrap.Clock(date);
     }
 
     private async Task Write(Manifest value)

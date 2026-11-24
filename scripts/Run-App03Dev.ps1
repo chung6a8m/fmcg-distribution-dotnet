@@ -1,15 +1,19 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'Verify')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
-    [string] $RunId
+    [string] $RunId,
+    [string] $BusinessDate
 )
 
 $ErrorActionPreference = 'Stop'
-$requiresRunId = $Action -in 'Stop', 'Resume', 'Remove'
+$requiresRunId = $Action -in 'Stop', 'Resume', 'Remove', 'NextDay'
 if ($requiresRunId -ne [bool] $RunId) {
-    throw 'Supply -RunId for Stop, Resume or Remove only.'
+    throw 'Supply -RunId for Stop, Resume, Remove or NextDay only.'
+}
+if (($Action -eq 'NextDay') -ne [bool] $BusinessDate) {
+    throw 'Supply -BusinessDate (yyyy-MM-dd) for NextDay only.'
 }
 if ($Action -eq 'Stop') {
     if (!$IsWindows) { throw 'The APP-03 session requires Windows.' }
@@ -80,7 +84,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'MSSQLLocalDB did not start.' }
     $id = if ($RunId) { $RunId } else { '-' }
     $actionName = [char]::ToUpperInvariant($Action[0]) + $Action.Substring(1).ToLowerInvariant()
-    dotnet $demo App03Session $actionName $repo $source $id
+    $sessionArgs = @('App03Session', $actionName, $repo, $source, $id)
+    if ($Action -eq 'NextDay') { $sessionArgs[1] = 'NextDay'; $sessionArgs += $BusinessDate }
+    dotnet $demo @sessionArgs
     if ($LASTEXITCODE -ne 0) { throw "APP-03 DEV $Action failed." }
 }
 finally { Pop-Location }

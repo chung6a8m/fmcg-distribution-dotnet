@@ -36,17 +36,18 @@ public sealed partial class App01a2CommandService
     public Task<C2Catalog> CatalogC2(ClaimsPrincipal principal, CancellationToken ct) =>
         ReadC2(principal, async (db, tx, tenant, _) =>
         {
-            using var grid = await db.QueryMultipleAsync(Sql("""
+            using var grid = await db.QueryMultipleAsync(Sql($"""
                 SELECT Id,CAST(Code+N' · '+Name AS nvarchar(300)) AS Label
                 FROM dbo.Customer WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code;
                 SELECT t.Id,t.Code AS Label FROM dbo.Trip t JOIN dbo.StockLocation l
                     ON l.TenantId=t.TenantId AND l.Id=t.VehicleLocationId AND l.Kind='VEHICLE' AND l.IsActive=1
-                WHERE t.TenantId=@Tenant AND t.Status='PREPARED' ORDER BY t.Code;
+                WHERE t.TenantId=@Tenant AND t.Status='PREPARED'
+                    AND (@CurrentDayOnly=0 OR t.BusinessDate={LotBusinessDate}) ORDER BY t.Code;
                 SELECT Id,CAST(Code+N' · '+Name AS nvarchar(300)) AS Label
                 FROM dbo.Sku WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code;
                 SELECT Id,Code AS Label FROM dbo.StockLocation
                 WHERE TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1 ORDER BY Code;
-                """, new { Tenant = tenant }, tx, ct));
+                """, new { Tenant = tenant, CurrentDayOnly = connections.UsesApp03BusinessDay }, tx, ct));
             var customers = (await grid.ReadAsync<C2Option>()).AsList();
             var trips = (await grid.ReadAsync<C2Option>()).AsList();
             var skus = (await grid.ReadAsync<C2Option>()).AsList();
