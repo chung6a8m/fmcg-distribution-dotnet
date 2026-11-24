@@ -8,6 +8,11 @@ internal static class App03WorkspaceRoutes
     internal static void Map(WebApplication app, string clock)
     {
         var routes = app.MapGroup("/api/synthetic/app03");
+        routes.MapGet("/handoff", async (HttpContext context, App01a2CommandService service, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(await service.OrdersC2(context.User, ct, handoff: true));
+        }).RequireAuthorization();
         routes.MapGet("/session", async (HttpContext context, App01a2CommandService service, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";

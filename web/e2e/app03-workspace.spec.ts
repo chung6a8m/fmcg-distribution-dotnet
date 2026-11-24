@@ -12,7 +12,8 @@ test.use({ serviceWorkers: 'block' })
 
 async function mockWorkspace(page: Page) {
   const state = { revoked: false, noTrips: false, withoutTripA: false,
-    peerArFilters: [] as string[], orderFilters: [] as string[], loadLookups: [] as string[] }
+    peerArFilters: [] as string[], orderFilters: [] as string[], loadLookups: [] as string[],
+    loadRights: [] as object[] }
   await page.route('**/health/live', route => route.fulfill({ json: {
     status: 'live', scope: 'APP-00A', businessWrites: false, workspaceProfile: 'APP-03.1a-v1',
   } }))
@@ -40,6 +41,7 @@ async function mockWorkspace(page: Page) {
       state.loadLookups.push(path)
       return route.fulfill({ json: { status: 'APPLIED', sourceId: orderA } })
     }
+    if (path.includes('/app02c3/') && path.endsWith('/rights')) return route.fulfill({ json: state.loadRights })
     if (path.endsWith('/trips') && state.noTrips) return route.fulfill({ json: [] })
     if (path.endsWith('/trips')) return route.fulfill({ json: peer ? [{ id: tripPeer, code: 'Chuyến đối chứng' }]
       : [{ id: tripA, code: 'Chuyến A' }, { id: tripB, code: 'Chuyến B' }].filter(row => !state.withoutTripA || row.id !== tripA) })
@@ -55,6 +57,36 @@ async function login(page: Page, token: string) {
 
 const nav = (page: Page, name: string) => page.getByRole('navigation', { name: 'Công việc DEV' })
   .getByRole('link', { name, exact: true })
+
+test('APP-03 recovers an unknown draft with its original customer, trip, ShipTo and quantity', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**' + c2 + '/catalog', route => route.fulfill({ json: {
+    customers: [{ id: tripPeer, label: 'Khách hàng thử' }],
+    trips: [{ id: tripA, label: 'Chuyến A' }], skus: [{ id: orderA, label: 'SKU thử' }], warehouses: [],
+  } }))
+  const original = JSON.stringify({ commandId: pendingId, customerId: tripPeer, tripId: tripA, selectionId: tripB,
+    lines: [{ skuId: orderA, quantity: 2, uomCode: 'PACK' }] })
+  await page.goto('/work/orders')
+  await login(page, 'source')
+  await expect(page.getByLabel('Bước xử lý')).toBeVisible()
+  await page.evaluate(([id, body]) => {
+    sessionStorage.setItem('app02c2.pending.' + JSON.stringify(['test-run', 'tenant-a', 'nhan-vien-a']),
+      JSON.stringify({ id, body, path: '/drafts' }))
+  }, [pendingId, original])
+  await page.reload()
+  const recovery = page.getByRole('region', { name: 'Khôi phục lệnh' })
+  for (const value of ['Lưu đơn nháp', 'Khách hàng thử', 'Chuyến A', tripB, 'SKU thử · 2 PACK'])
+    await expect(recovery).toContainText(value)
+  await expect(recovery.getByRole('button', { name: 'Gửi lại yêu cầu' })).toHaveCount(0)
+  await recovery.getByRole('link', { name: 'Mở khu phục hồi lệnh' }).click()
+  await expect(page).toHaveURL(/recover=1/)
+  await expect(page.getByLabel('Bước xử lý')).toHaveCount(0)
+  await page.route('**' + c2 + '/drafts', route => route.fulfill({ json: { status: 'APPLIED', sourceId: orderA } }))
+  const replay = page.waitForRequest(req => req.url().endsWith(c2 + '/drafts') && req.method() === 'POST')
+  await recovery.getByRole('button', { name: 'Gửi lại yêu cầu' }).click()
+  expect((await replay).postData()).toBe(original)
+  await expect(page.getByRole('status')).toContainText(orderA)
+})
 
 test('APP-03 uses one browser session and restores only the current identity’s trip', async ({ page }) => {
   const state = await mockWorkspace(page)
@@ -126,13 +158,53 @@ test('APP-03 strips another identity’s AR history on Back and Forward', async 
   expect(state.peerArFilters.every(filter => filter === '')).toBe(true)
 
   await page.getByRole('button', { name: 'Đổi danh tính' }).click()
-  await login(page, 'source')
+  await page.goto('/')
   state.withoutTripA = true
   state.orderFilters.length = 0
+  await login(page, 'source')
+  await expect(page.getByText('tenant-a · nhan-vien-a')).toBeVisible()
   await page.goto('/work/ar?order=' + orderA)
   await expect(page.getByRole('region', { name: 'Kết quả báo cáo AR' })).toBeVisible()
   await expect(order).toHaveValue('')
-  expect(state.orderFilters).toEqual([''])
+  expect(state.orderFilters.length).toBeGreaterThan(0)
+  expect(state.orderFilters.every(filter => filter === '')).toBe(true)
+})
+
+test('APP-03 keeps a stale order link scoped until Warehouse opens other work', async ({ page }) => {
+  const state = await mockWorkspace(page)
+  state.loadRights = [{ id: pendingId, orderId: tripPeer, warehouseId: 'main', warehouseCode: 'MAIN',
+    skuCode: 'OTHER', baseUom: 'EA', granted: '4', loaded: '0', warehouseHeld: '4' }]
+  const link = `/work/load?trip=${tripA}&order=${orderA}`
+  await page.goto(link)
+  await login(page, 'source')
+  await expect(page.getByText('Đơn này không có dòng giữ hàng để nạp trên chuyến đã chọn.')).toBeVisible()
+  await expect(page.getByLabel('Số lượng nạp dòng 1')).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Xem đơn và lịch sử lô' })).toHaveAttribute('href',
+    `/work/orders?trip=${tripA}&order=${orderA}`)
+  await page.getByRole('button', { name: 'Tất cả đơn trên chuyến' }).click()
+  await expect(page.getByLabel('Số lượng nạp dòng 1')).toBeVisible()
+  await expect(page).not.toHaveURL(/order=/)
+
+  state.withoutTripA = true
+  await page.goto(link)
+  await expect(page.getByText('Chuyến trong liên kết không còn mở được với phân công hiện hành.')).toBeVisible()
+  await expect(page.getByLabel('Số lượng nạp dòng 1')).toHaveCount(0)
+  await page.getByRole('link', { name: 'Mở danh sách chuyến' }).click()
+  await expect(page.getByRole('combobox', { name: 'Chuyến' })).toHaveValue(tripB)
+
+  state.withoutTripA = false
+  await page.evaluate(([tripId, commandId]) => {
+    sessionStorage.setItem('app02c3.pending.v1.' + JSON.stringify(['test-run', 'tenant-a', 'nhan-vien-a']),
+      JSON.stringify({ tripId, commandId, lines: [{ rightId: commandId, expectedWarehouseHeld: '4', quantity: '2' }] }))
+  }, [tripB, pendingId])
+  await page.goto(link)
+  const recoveryTrip = page.getByRole('link', { name: 'Mở chuyến của lệnh nạp đang chờ' })
+  await expect(recoveryTrip).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gửi lại cùng yêu cầu' })).toHaveCount(0)
+  await recoveryTrip.click()
+  await expect(page.getByRole('combobox', { name: 'Chuyến' })).toHaveValue(tripB)
+  await page.getByRole('button', { name: 'Tra cứu kết quả nạp' }).click()
+  await expect.poll(() => state.loadLookups).toEqual([`/api/synthetic/app02c3/trips/${tripB}/commands/${pendingId}`])
 })
 
 test('APP-03 publishes the restored pending trip and the allowed fallback', async ({ page }) => {

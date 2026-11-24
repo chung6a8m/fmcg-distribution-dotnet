@@ -19,7 +19,11 @@ public sealed partial class App01a2CommandService
 
     public Task<C3TripView[]> LoadTripsC3(ClaimsPrincipal principal, CancellationToken ct) =>
         ReadC3(principal, null, async (db, tx, tenant, actor) =>
-            (await db.QueryAsync<C3TripView>(Sql("""
+            (await AssignedLoadTrips(db, tx, tenant, actor, ct)).ToArray(), ct);
+
+    private static Task<IEnumerable<C3TripView>> AssignedLoadTrips(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, CancellationToken ct) =>
+        db.QueryAsync<C3TripView>(Sql("""
                 SELECT t.Id,t.Code FROM dbo.C3TripWriter w
                 JOIN dbo.Trip t ON t.TenantId=w.TenantId AND t.Id=w.TripId
                 JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
@@ -28,22 +32,32 @@ public sealed partial class App01a2CommandService
                     AND NOT EXISTS(SELECT 1 FROM dbo.TripManifest m
                         WHERE m.TenantId=t.TenantId AND m.TripId=t.Id AND m.IsC3=0)
                 ORDER BY t.Code
-                """, new { Tenant = tenant, Actor = actor }, tx, ct))).ToArray(), ct);
+                """, new { Tenant = tenant, Actor = actor }, tx, ct));
 
     public Task<C3RightView[]> LoadRightsC3(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         ReadC3(principal, trip, async (db, tx, tenant, _) =>
         {
             if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
                 || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
-            var rights = (await EligibleC3Rights(db, tx, tenant, trip, null, ct)).ToArray();
-            if (!connections.UsesDevF03 || rights.Length == 0) return rights;
-            var ids = rights.Select(right => right.Id).ToArray();
+            var rights = (await EligibleC3Rights(db, tx, tenant, [trip], null, ct)).ToArray();
+            return connections.UsesDevF03 ? await WithEligibleC3Lots(db, tx, tenant, rights, ct) : rights;
+        }, ct);
+
+    private static async Task<C3RightView[]> WithEligibleC3Lots(SqlConnection db, SqlTransaction tx, string tenant,
+        C3RightView[] rights, CancellationToken ct)
+    {
+        var result = new List<C3RightView>(rights.Length);
+        foreach (var batch in rights.Chunk(500))
+        {
+            var ids = batch.Select(right => right.Id).ToArray();
             var lots = (await ReadHeldLots(db, tx, tenant, ids, ct)).ToLookup(lot => lot.SourceId, lot => lot.ToView());
             var tracked = await GetTrackedSources(db, tx, tenant, ids, "F03LotHold", "StockRightId", ct);
-            return rights.Select(right => tracked.Contains(right.Id)
+            result.AddRange(batch.Select(right => tracked.Contains(right.Id)
                 ? right with { Lots = lots[right.Id].ToArray(), EligibleWarehouseHeld = lots[right.Id].Sum(lot => lot.Quantity) }
-                : right).ToArray();
-        }, ct);
+                : right));
+        }
+        return result.ToArray();
+    }
 
     public Task<BusinessCommandOutcome?> OutcomeC3(ClaimsPrincipal principal, Guid trip, Guid id, CancellationToken ct) =>
         OutcomePartialLoad(principal, trip, id, false, ct);

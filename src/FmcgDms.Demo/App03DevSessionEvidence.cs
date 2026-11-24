@@ -245,8 +245,9 @@ internal static class App03DevSessionEvidence
                 var confirmed = (await Read<C2OrderView[]>(active, C2 + "/orders")).Single(row => row.Id == id);
                 await Post(C2 + "/reserve", new C2ReserveInput(Guid.NewGuid(), id, confirmed.Lines.Single().LineId!.Value,
                     warehouse.Id, 2, confirmed.ConfirmSourceId!.Value));
-                var right = (await Read<IdView[]>(active, C3 + $"/trips/{tripId}/rights")).Single();
-                await Post(C3 + "/load", new C3LoadInput(Guid.NewGuid(), tripId, [new(right.Id, 2, 2)]));
+                var right = (await Read<IdView[]>(active, C3 + $"/trips/{tripId}/rights", token: active.ReceiverToken)).Single();
+                await Read<JsonElement>(active, C3 + "/load", new C3LoadInput(Guid.NewGuid(), tripId, [new(right.Id, 2, 2)]),
+                    active.ReceiverToken);
                 var line = (await Read<DeliveryLine[]>(active, C4 + $"/trips/{tripId}/lines")).Single();
                 return (id, new C4DeliveryInput(Guid.NewGuid(), tripId, line.Id, line.ShipToVersion, 2));
             }
@@ -306,9 +307,9 @@ internal static class App03DevSessionEvidence
             if (hostTask is not null) await hostTask;
         }
 
-        async Task<T> Read<T>(App03DevHost host, string path, object? input = null)
+        async Task<T> Read<T>(App03DevHost host, string path, object? input = null, string? token = null)
         {
-            using var response = await Send(host, path, input, ct);
+            using var response = await Send(host, path, input, ct, token);
             if (!response.IsSuccessStatusCode)
                 throw new InvalidOperationException($"{path} returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(ct)}");
             return (await response.Content.ReadFromJsonAsync<T>(cancellationToken: ct))!;

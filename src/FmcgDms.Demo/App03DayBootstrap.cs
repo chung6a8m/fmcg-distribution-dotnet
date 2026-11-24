@@ -19,7 +19,7 @@ internal static class App03DayBootstrap
     internal static DateTime Clock(DateOnly date) => new(date, new TimeOnly(2, 0), DateTimeKind.Utc);
     private static DateTime IctMidnightUtc(DateOnly date) => date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc).AddHours(-7);
 
-    internal static async Task Seed(DemoRun run, string tenant, CancellationToken ct)
+    internal static async Task Seed(DemoRun run, string tenant, CancellationToken ct, bool splitOpeningLot = false)
     {
         await run.Verify(tenant, app03Session: true);
         await using var db = new SqlConnection(run.Connection(tenant));
@@ -86,7 +86,15 @@ internal static class App03DayBootstrap
             FROM dbo.PhysicalStockOpening WHERE TenantId=@tenant AND SkuId=@sku;
             INSERT dbo.F03Unit(TenantId,SkuId,UomCode,Factor,[Step]) VALUES(@tenant,@sku,N'EA',1,1);
             INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn) VALUES(@tenant,@lot,@sku,N'RET-ORIGIN',@LotExpiry);
-            INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity) VALUES(@tenant,@lot,@main,6);
+            INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity)
+            VALUES(@tenant,@lot,@main,CASE WHEN @splitOpeningLot=1 THEN 5 ELSE 6 END);
+            IF @splitOpeningLot=1
+            BEGIN
+                DECLARE @earlierLot uniqueidentifier=NEWID();
+                INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn)
+                VALUES(@tenant,@earlierLot,@sku,N'RET-EARLY',DATEADD(day,-1,@LotExpiry));
+                INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity) VALUES(@tenant,@earlierLot,@main,1);
+            END;
 
             DECLARE @plans TABLE(Version int,PlanId uniqueidentifier,QuoteId uniqueidentifier,
                 Starts datetime2,Ends datetime2,Price int,Terms int);
@@ -105,7 +113,7 @@ internal static class App03DayBootstrap
             """, new
         {
             tenant, customer, outlet, registered, register.CommandId, hash, Payload = JsonSerializer.Serialize(address, json),
-            Actor, DevF05Evidence.Receiver, DevF05Evidence.Finance, DevF05Evidence.Qa, Version,
+            Actor, DevF05Evidence.Receiver, DevF05Evidence.Finance, DevF05Evidence.Qa, Version, splitOpeningLot,
             Clock = Clock(FirstDay), LotExpiry = LastDay.ToDateTime(TimeOnly.MinValue),
             Starts = IctMidnightUtc(FirstDay), Cutover = IctMidnightUtc(FirstDay.AddDays(1)),
             Ends = IctMidnightUtc(LastDay.AddDays(1))
@@ -145,9 +153,10 @@ internal static class App03DayBootstrap
             IF @vehicle IS NULL THROW 51702, 'APP-03 trip vehicle is unavailable.', 1;
             SET @id=NEWID();
             INSERT dbo.Trip(Id,TenantId,Code,BusinessDate,VehicleLocationId) VALUES(@id,@tenant,@Code,@Day,@vehicle);
-            INSERT dbo.C3TripWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Actor);
+            INSERT dbo.C3TripWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Warehouse);
             INSERT dbo.C4DeliveryWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Actor);
-            """, new { tenant, args.Day, Actor, Code = prefix + "-" + slot, Truck = "DEV-TRUCK-" + slot },
+            """, new { tenant, args.Day, Actor, Warehouse = tenant == "tenant-a" ? DevF05Evidence.Receiver : Actor,
+                Code = prefix + "-" + slot, Truck = "DEV-TRUCK-" + slot },
             tx, cancellationToken: ct));
     }
 }

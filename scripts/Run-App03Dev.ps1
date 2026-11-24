@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
     [string] $RunId,
@@ -87,6 +87,7 @@ try {
     $sessionArgs = @('App03Session', $actionName, $repo, $source, $id)
     if ($Action -eq 'NextDay') { $sessionArgs[1] = 'NextDay'; $sessionArgs += $BusinessDate }
     if ($Action -eq 'VerifyWorkspace') { $sessionArgs[1] = 'VerifyWorkspace' }
+    if ($Action -eq 'VerifyHandoff') { $sessionArgs[1] = 'VerifyHandoff' }
     dotnet $demo @sessionArgs
     if ($LASTEXITCODE -ne 0) { throw "APP-03 DEV $Action failed." }
 }

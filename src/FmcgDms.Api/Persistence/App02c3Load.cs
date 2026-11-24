@@ -83,7 +83,7 @@ public sealed partial class App01a2CommandService
         Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
         var rights = (d1Load
                 ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, ct)
-                : await EligibleC3Rights(db, tx, tenant, tripId, rightIds, ct))
+                : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct))
             .ToDictionary(right => right.Id);
         if (rights.Count != lines.Length)
             return BusinessCommandOutcome.Rejected(d1Load ? "D1_QUOTA_NOT_ELIGIBLE" : "C3_RESERVATION_NOT_ELIGIBLE");
@@ -182,7 +182,7 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Trip = trip }, tx, ct));
 
     private static Task<IEnumerable<C3RightView>> EligibleC3Rights(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid trip, Guid[]? rightIds, CancellationToken ct)
+        string tenant, Guid[] trips, Guid[]? rightIds, CancellationToken ct)
     {
         const string sql = """
             SELECT r.Id,o.Id AS OrderId,r.StockLocationId AS WarehouseId,w.Code AS WarehouseCode,
@@ -212,12 +212,12 @@ public sealed partial class App01a2CommandService
                 JOIN dbo.PhysicalStockMovement m ON m.TenantId=l.TenantId AND m.TripManifestLineId=l.Id
                 WHERE l.TenantId=r.TenantId AND l.StockRightId=r.Id AND l.IsC3=1
             ) totals
-            WHERE r.TenantId=@Tenant AND r.TripId=@Trip AND r.RightKind='A' AND r.Status='HELD'
+            WHERE r.TenantId=@Tenant AND r.TripId IN @Trips AND r.RightKind='A' AND r.Status='HELD'
                 AND r.ReleasedBaseQuantity=0 AND o.Status IN ('CONFIRMED','PARTIALLY_DELIVERED')
                 AND r.ConsumedBaseQuantity<=totals.Loaded AND totals.Loaded<=r.GrantedBaseQuantity
             """;
         string rightFilter = rightIds is null ? "" : " AND r.Id IN @Ids";
         return db.QueryAsync<C3RightView>(Sql(sql + rightFilter + " ORDER BY w.Code,sku.Code,r.Id",
-            new { Tenant = tenant, Trip = trip, Ids = rightIds }, tx, ct));
+            new { Tenant = tenant, Trips = trips, Ids = rightIds }, tx, ct));
     }
 }
