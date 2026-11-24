@@ -6,10 +6,8 @@ on:
 permissions:
   contents: read
 jobs:
-  validate:
+  core_sql:
     runs-on: windows-2022
-    # APP-05.0: recent successful runs take 25–29 min; main hit the 30-min cap at D.3.
-    # Allow headroom for remaining PWA verification, evidence upload and guarded cleanup.
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -23,16 +21,6 @@ jobs:
         run: |
           $actual = (dotnet --version).Trim()
           if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: '26'
-      - name: Verify Node.js 26 LTS
-        shell: pwsh
-        run: |
-          $actual = (node --version).Trim()
-          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
-          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
       - name: Validate immutable business contract
         shell: pwsh
         run: |
@@ -770,6 +758,76 @@ jobs:
           $results = Get-ChildItem -Path TestResults -Recurse -File -ErrorAction Stop
           if (-not ($results | Where-Object { $_.Extension -eq '.trx' })) { throw 'Expected MTP TRX evidence is missing.' }
           if (-not ($results | Where-Object { $_.Name -like '*.cobertura.xml' })) { throw 'Expected Cobertura coverage evidence is missing.' }
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-test-evidence
+          path: '**/TestResults/**/*'
+          if-no-files-found: warn
+
+  web_sales:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        shell: pwsh
+        run: |
+          $actual = (dotnet --version).Trim()
+          if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
+      - name: Start SQL Server LocalDB
+        id: localdb
+        shell: pwsh
+        run: |
+          . ./scripts/Collect-LocalDbDiagnostics.ps1
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Invoke-BootstrapStage($stage, $command) {
+            try {
+              $native = & $command 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              $kind = Get-LocalDbErrorKind $native
+              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
+              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
+            } catch {
+              return "$stage,unavailable,LaunchFailed,None"
+            }
+          }
+          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
+          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
+          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
+          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
+          # The automatic instance can be absent before the first successful start.
+          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
+            throw "LocalDB startup or SQL readiness failed. $start $ready"
+          }
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
       - name: Install web dependencies
         working-directory: web
         run: npm ci --no-audit --no-fund
@@ -842,6 +900,104 @@ jobs:
       - name: DEV-F08 AC-19 source credit and witnessed disbursement through Chromium and SQL
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment DevF08 -Verify
+      - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
+        shell: pwsh
+        run: ./scripts/Run-App02C6.ps1
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00b-playwright-evidence
+          path: |
+            web/playwright-report/
+            web/test-results/
+            web/test-results-app02c1/
+            web/test-results-app02c2/
+            web/test-results-app02c3/
+            web/test-results-app02c4/
+            web/test-results-app02c5/
+            web/test-results-dev-f02/
+            web/test-results-app02c6/
+          if-no-files-found: warn
+      - name: Verify generated PWA artifacts and user-confirmed update hook
+        working-directory: web
+        run: npm run test:pwa-build
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-test-evidence-web-sales
+          path: '**/TestResults/**/*'
+          if-no-files-found: warn
+
+  app03:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        shell: pwsh
+        run: |
+          $actual = (dotnet --version).Trim()
+          if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
+      - name: Start SQL Server LocalDB
+        id: localdb
+        shell: pwsh
+        run: |
+          . ./scripts/Collect-LocalDbDiagnostics.ps1
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Invoke-BootstrapStage($stage, $command) {
+            try {
+              $native = & $command 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              $kind = Get-LocalDbErrorKind $native
+              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
+              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
+            } catch {
+              return "$stage,unavailable,LaunchFailed,None"
+            }
+          }
+          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
+          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
+          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
+          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
+          # The automatic instance can be absent before the first successful start.
+          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
+            throw "LocalDB startup or SQL readiness failed. $start $ready"
+          }
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
       - name: APP-03.1a DEV-F05 upgrade and integrated A/F journey through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment App03A1 -Verify
@@ -863,9 +1019,97 @@ jobs:
       - name: APP-03.7 Finance queue, correction, costing and refund through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyFinance
-      - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
+      - name: Upload browser test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00b-playwright-evidence-app03
+          path: |
+            web/test-results-app02c5/
+            TestResults/app03-1a/
+            TestResults/app03-2/
+            TestResults/app03-3/
+            TestResults/app03-4/
+            TestResults/app03-5/
+            TestResults/app03-6/
+            TestResults/app03-7/
+          if-no-files-found: warn
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-test-evidence-app03
+          path: '**/TestResults/**/*'
+          if-no-files-found: warn
+
+  distribution:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
         shell: pwsh
-        run: ./scripts/Run-App02C6.ps1
+        run: |
+          $actual = (dotnet --version).Trim()
+          if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
+      - name: Start SQL Server LocalDB
+        id: localdb
+        shell: pwsh
+        run: |
+          . ./scripts/Collect-LocalDbDiagnostics.ps1
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Invoke-BootstrapStage($stage, $command) {
+            try {
+              $native = & $command 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              $kind = Get-LocalDbErrorKind $native
+              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
+              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
+            } catch {
+              return "$stage,unavailable,LaunchFailed,None"
+            }
+          }
+          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
+          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
+          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
+          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
+          # The automatic instance can be absent before the first successful start.
+          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
+            throw "LocalDB startup or SQL readiness failed. $start $ready"
+          }
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
       - name: APP-02D.1 B quota, credit and partial load synthetic matrix
         shell: pwsh
         run: ./scripts/Run-App02D1.ps1
@@ -879,35 +1123,32 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app00b-playwright-evidence
+          name: app00b-playwright-evidence-distribution
           path: |
-            web/playwright-report/
-            web/test-results/
-            web/test-results-app02c1/
-            web/test-results-app02c2/
-            web/test-results-app02c3/
-            web/test-results-app02c4/
-            web/test-results-app02c5/
-            web/test-results-dev-f02/
-            web/test-results-app02c6/
             web/test-results-app02d1/
             web/test-results-app02d2/
             web/test-results-app02d3/
-            TestResults/app03-1a/
-            TestResults/app03-2/
-            TestResults/app03-3/
-            TestResults/app03-4/
-            TestResults/app03-5/
-            TestResults/app03-6/
-            TestResults/app03-7/
           if-no-files-found: warn
-      - name: Verify generated PWA artifacts and user-confirmed update hook
-        working-directory: web
-        run: npm run test:pwa-build
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app00a-test-evidence
+          name: app00a-test-evidence-distribution
           path: '**/TestResults/**/*'
           if-no-files-found: warn
+
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [core_sql, web_sales, app03, distribution]
+    if: ${{ always() }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Test APP-00A job result gate
+        run: python3 -B -m unittest discover -s tests/ci -p 'test_*.py' -v
+      - name: Require all APP-00A execution jobs to succeed
+        env:
+          APP00A_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B tools/verify_app00a_jobs.py
