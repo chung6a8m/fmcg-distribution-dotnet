@@ -31,37 +31,29 @@ jobs:
           ./scripts/Verify-Business.ps1
           python tools/validate_business.py
           python tools/validate_e_sim_01.py
+      - name: Verify deterministic LocalDB bootstrap regressions
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/ci/Test-LocalDbBootstrap.ps1
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
-        run: |
-          . ./scripts/Collect-LocalDbDiagnostics.ps1
-          $PSNativeCommandUseErrorActionPreference = $false
-          function Invoke-BootstrapStage($stage, $command) {
-            try {
-              $native = & $command 2>&1 | Out-String
-              $code = $LASTEXITCODE
-              $kind = Get-LocalDbErrorKind $native
-              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
-              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
-            } catch {
-              return "$stage,unavailable,LaunchFailed,None"
-            }
-          }
-          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
-          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
-          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
-          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
-          # The automatic instance can be absent before the first successful start.
-          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
-            throw "LocalDB startup or SQL readiness failed. $start $ready"
-          }
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
+      - name: Verify warm SQL Server LocalDB bootstrap
+        id: localdb_warm
+        if: steps.localdb.outcome == 'success'
+        shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1 -RequireWarm
       - name: Collect redacted LocalDB startup failure diagnostics
-        if: always() && steps.localdb.outcome == 'failure'
+        if: always() && (steps.localdb.outcome == 'failure' || steps.localdb_warm.outcome == 'failure')
         timeout-minutes: 1
         shell: pwsh
         env:
-          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb_warm.outputs.bootstrap || steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb_warm.outputs.receipt || steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: .NET restore
@@ -798,34 +790,16 @@ jobs:
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
-        run: |
-          . ./scripts/Collect-LocalDbDiagnostics.ps1
-          $PSNativeCommandUseErrorActionPreference = $false
-          function Invoke-BootstrapStage($stage, $command) {
-            try {
-              $native = & $command 2>&1 | Out-String
-              $code = $LASTEXITCODE
-              $kind = Get-LocalDbErrorKind $native
-              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
-              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
-            } catch {
-              return "$stage,unavailable,LaunchFailed,None"
-            }
-          }
-          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
-          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
-          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
-          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
-          # The automatic instance can be absent before the first successful start.
-          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
-            throw "LocalDB startup or SQL readiness failed. $start $ready"
-          }
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
       - name: Collect redacted LocalDB startup failure diagnostics
         if: always() && steps.localdb.outcome == 'failure'
         timeout-minutes: 1
         shell: pwsh
         env:
           LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: .NET restore
@@ -962,34 +936,16 @@ jobs:
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
-        run: |
-          . ./scripts/Collect-LocalDbDiagnostics.ps1
-          $PSNativeCommandUseErrorActionPreference = $false
-          function Invoke-BootstrapStage($stage, $command) {
-            try {
-              $native = & $command 2>&1 | Out-String
-              $code = $LASTEXITCODE
-              $kind = Get-LocalDbErrorKind $native
-              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
-              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
-            } catch {
-              return "$stage,unavailable,LaunchFailed,None"
-            }
-          }
-          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
-          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
-          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
-          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
-          # The automatic instance can be absent before the first successful start.
-          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
-            throw "LocalDB startup or SQL readiness failed. $start $ready"
-          }
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
       - name: Collect redacted LocalDB startup failure diagnostics
         if: always() && steps.localdb.outcome == 'failure'
         timeout-minutes: 1
         shell: pwsh
         env:
           LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: .NET restore
@@ -1074,34 +1030,16 @@ jobs:
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
-        run: |
-          . ./scripts/Collect-LocalDbDiagnostics.ps1
-          $PSNativeCommandUseErrorActionPreference = $false
-          function Invoke-BootstrapStage($stage, $command) {
-            try {
-              $native = & $command 2>&1 | Out-String
-              $code = $LASTEXITCODE
-              $kind = Get-LocalDbErrorKind $native
-              $hex = [regex]::Match($native, '(?i)\b0x[0-9a-f]{8}\b').Value
-              return "$stage,$code,$($kind ?? 'None'),$($hex ? $hex : 'None')"
-            } catch {
-              return "$stage,unavailable,LaunchFailed,None"
-            }
-          }
-          $info = Invoke-BootstrapStage 'info' { sqllocaldb info MSSQLLocalDB }
-          $start = Invoke-BootstrapStage 'start' { sqllocaldb start MSSQLLocalDB }
-          $ready = Invoke-BootstrapStage 'sqlcmd' { sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS Version' }
-          "bootstrap=$info|$start|$ready" >> $env:GITHUB_OUTPUT
-          # The automatic instance can be absent before the first successful start.
-          if ($start -notlike 'start,0,None,*' -or $ready -notlike 'sqlcmd,0,None,*') {
-            throw "LocalDB startup or SQL readiness failed. $start $ready"
-          }
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
       - name: Collect redacted LocalDB startup failure diagnostics
         if: always() && steps.localdb.outcome == 'failure'
         timeout-minutes: 1
         shell: pwsh
         env:
           LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: .NET restore

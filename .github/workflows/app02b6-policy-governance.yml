@@ -73,12 +73,22 @@ jobs:
         run: |
           if ((git rev-parse HEAD).Trim() -cne $env:SOURCE_HEAD) { throw 'B6 source HEAD mismatch' }
       - name: Require disposable SQL Server LocalDB, not PREPROD
+        id: localdb
         shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if ((dotnet --version).Trim() -ne '10.0.404') { throw 'SDK mismatch' }
-          sqllocaldb info MSSQLLocalDB
-          sqllocaldb start MSSQLLocalDB
-          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION'
+          ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: Execute B6 two-tenant SQL policy and replay tests
         shell: pwsh
         env:

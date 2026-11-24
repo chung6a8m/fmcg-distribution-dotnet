@@ -62,12 +62,22 @@ jobs:
         with:
           dotnet-version: '10.0.404'
       - name: Check pinned SDK and SQL Server LocalDB
+        id: localdb
         shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           if ((dotnet --version).Trim() -ne '10.0.404') { throw 'Incorrect SDK' }
-          sqllocaldb info MSSQLLocalDB
-          sqllocaldb start MSSQLLocalDB
-          sqlcmd -S '(localdb)\MSSQLLocalDB' -E -Q 'SELECT @@VERSION AS SqlEngineVersion'
+          ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
       - name: Build isolated SQL Server migration / concurrency test
         shell: pwsh
         run: |
@@ -120,4 +130,6 @@ jobs:
             TestResults/APP-02B3-SQL-WITNESS.json
             TestResults/APP-02B3-SQL-PROVENANCE.txt
             tests/FmcgDms.Preprod.Identity.SqlServer.Tests/TestResults/
+            TestResults/LocalDbBootstrap/
+            TestResults/LAB-E02/
           if-no-files-found: warn
