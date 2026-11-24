@@ -933,9 +933,9 @@ internal static class App02c1Dev
     internal static async Task CopyCredential(string token, bool clear = false)
     {
         string command = clear
-            ? "$value = [Console]::In.ReadToEnd(); if ((Get-Clipboard -Raw) -ceq $value) { Set-Clipboard -Value '' }"
+            ? "$value = [Console]::In.ReadToEnd(); if ((Get-Clipboard -Raw) -ceq $value) { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::Clear() }"
             : "Set-Clipboard -Value ([Console]::In.ReadToEnd())";
-        var info = StartInfo("powershell.exe", Environment.CurrentDirectory, "-NoProfile", "-NonInteractive", "-Command", command);
+        var info = StartInfo("powershell.exe", Environment.CurrentDirectory, "-NoProfile", "-NonInteractive", "-STA", "-Command", command);
         info.RedirectStandardInput = true;
         using var clipboard = Start(info);
         await clipboard.StandardInput.WriteAsync(token);
