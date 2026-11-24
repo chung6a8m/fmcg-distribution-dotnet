@@ -54,6 +54,8 @@ function Get-LocalDbNativeDetail([string]$Text) {
         '(?:(?:LocalDB|Local Database) version.*invalid|invalid.*(?:LocalDB|Local Database|version))' { return 'InvalidVersion' }
         'version available.*lower than.*requested' { return 'VersionTooLow' }
         'instance with the same name already exists.*lower version' { return 'ExistingLowerVersion' }
+        'The parameter for the (?:Local Database|LocalDB) Instance API method is incorrect\.' { return 'LocalDbApiInvalidParameter' }
+        '(?im)^\s*The parameter is incorrect\.\s*$' { return 'Win32InvalidParameter' }
         'parameter.*(?:incorrect|invalid)' { return 'InvalidParameter' }
         'instance name.*invalid' { return 'InvalidInstanceName' }
         '(?:automatic instance.*version|version.*automatic instance)' { return 'AutomaticInstanceVersionConstraint' }
@@ -190,11 +192,17 @@ function Initialize-LocalDb {
             $report.installedVersions = $installed
             $matching = @($installed | Where-Object { $_ -match '\A15\.0\.' })
             if ($matching.Count -eq 0) { Stop-LocalDbBootstrap 'EngineUnavailable' }
-            if ($matching.Count -ne 1) { Stop-LocalDbBootstrap 'InstanceMetadataMismatch' }
-            # Use the registered runtime identity rather than assuming the
-            # native API accepts a shortened major.minor request on this image.
+            if ($matching.Count -ne 1 -or $installed.Count -ne 1) { Stop-LocalDbBootstrap 'InstanceMetadataMismatch' }
+            # Use the documented automatic-instance command only after proving
+            # the tool default and sole registered runtime are the expected 15.0.
             $report.selectedVersion = $matching[0]
-            $create = Invoke-LocalDbBootstrapStage $context 'create' @('create', 'MSSQLLocalDB', $report.selectedVersion)
+            $toolVersion = [regex]::Match($report.tools['SqlLocalDB.exe'].version,
+                '\A(?:2019\.150|15\.0)\.([0-9]+)\.([0-9]+)\z')
+            if (!$toolVersion.Success -or
+                "15.0.$($toolVersion.Groups[1].Value).$($toolVersion.Groups[2].Value)" -cne $report.selectedVersion) {
+                Stop-LocalDbBootstrap 'VersionMismatch'
+            }
+            $create = Invoke-LocalDbBootstrapStage $context 'create' @('create', 'MSSQLLocalDB')
             Assert-LocalDbBootstrapStage $create
             $info = Invoke-LocalDbBootstrapStage $context 'info' @('info', 'MSSQLLocalDB')
         }

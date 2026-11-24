@@ -28,6 +28,9 @@ function Get-LocalDbToolVersion([string]$Name) {
     if ($script:Scenario -eq 'MissingTool' -and $Name -eq 'SQLCMD.EXE') {
         return @{ status = 'COMMAND_NOT_FOUND' }
     }
+    if ($script:Scenario -eq 'WrongDefaultTool' -and $Name -eq 'SqlLocalDB.exe') {
+        return @{ status = 'OK'; executable = $Name; version = '2022.160.4382.1' }
+    }
     return @{ status = 'OK'; executable = $Name; version = '2019.150.4382.1' }
 }
 function Native-Result([string]$Text, [int]$Code = 0, [string]$Status = 'OK') {
@@ -53,6 +56,7 @@ function Invoke-LocalDbProbe {
             Assert-That ($Arguments.Count -eq 1) 'Installed runtime inspection accepts no target.'
             if ($script:Scenario -eq 'UnregisteredEngine') { return Native-Result 'Microsoft SQL Server 2022 (16.0.1000.1)' }
             if ($script:Scenario -eq 'UnknownVersions') { return Native-Result 'Unknown runtime TOP_SECRET_SENTINEL' }
+            if ($script:Scenario -eq 'MultipleDefaultRuntimes') { return Native-Result "Microsoft SQL Server 2019 (15.0.4382.1)`nMicrosoft SQL Server 2022 (16.0.1000.1)" }
             return Native-Result 'Microsoft SQL Server 2019 (15.0.4382.1)'
         }
         'info' {
@@ -76,7 +80,7 @@ function Invoke-LocalDbProbe {
             return Native-Result $text
         }
         'create' {
-            Assert-That (($Arguments -join '|') -ceq 'create|MSSQLLocalDB|15.0.4382.1') 'Creation must use the exact registered runtime version.'
+            Assert-That (($Arguments -join '|') -ceq 'create|MSSQLLocalDB') 'Automatic creation must use the verified default runtime.'
             Assert-That ($script:State -eq 'Missing') 'Existing instance must not be recreated.'
             if ($script:Scenario -eq 'MissingEngine') {
                 return Native-Result 'The specified LocalDB version is not installed.' 1 'COMMAND_FAILED'
@@ -86,6 +90,9 @@ function Invoke-LocalDbProbe {
             }
             if ($script:Scenario -eq 'NativeInvalidParameter') {
                 return Native-Result "Creation of LocalDB instance `"MSSQLLocalDB`" failed because of the following error:`nThe parameter for the Local Database Instance API method is incorrect. Consult the API documentation."
+            }
+            if ($script:Scenario -eq 'NativeWin32InvalidParameter') {
+                return Native-Result "Creation of LocalDB instance `"MSSQLLocalDB`" failed because of the following error:`nThe parameter is incorrect."
             }
             if ($script:Scenario -eq 'CreateFailureZero') {
                 return Native-Result 'Cannot create an automatic instance. TOP_SECRET_SENTINEL'
@@ -166,9 +173,15 @@ $null = Run-Case 'MissingEngine' 'Missing' 'FAILED' 'EngineUnavailable'
 $null = Run-Case 'UnregisteredEngine' 'Missing' 'FAILED' 'EngineUnavailable'
 Assert-That (($script:Calls -join ',') -ceq 'info,versions') 'Unregistered runtime caused an instance mutation.'
 $null = Run-Case 'UnknownVersions' 'Missing' 'FAILED' 'InstanceMetadataMismatch'
+$null = Run-Case 'WrongDefaultTool' 'Missing' 'FAILED' 'VersionMismatch'
+Assert-That (($script:Calls -join ',') -ceq 'info,versions') 'Wrong default tool caused an instance mutation.'
+$null = Run-Case 'MultipleDefaultRuntimes' 'Missing' 'FAILED' 'InstanceMetadataMismatch'
+Assert-That (($script:Calls -join ',') -ceq 'info,versions') 'Ambiguous default runtime caused an instance mutation.'
 $null = Run-Case 'NativeUnavailableVersion' 'Missing' 'FAILED' 'EngineUnavailable'
 $invalidParameter = Run-Case 'NativeInvalidParameter' 'Missing' 'FAILED' 'InstanceCreationFailed'
-Assert-That ($invalidParameter.attempts[-1].nativeDetail -ceq 'InvalidParameter') 'Specific native reason was hidden by its generic creation header.'
+Assert-That ($invalidParameter.attempts[-1].nativeDetail -ceq 'LocalDbApiInvalidParameter') 'Specific native reason was hidden by its generic creation header.'
+$win32Parameter = Run-Case 'NativeWin32InvalidParameter' 'Missing' 'FAILED' 'InstanceCreationFailed'
+Assert-That ($win32Parameter.attempts[-1].nativeDetail -ceq 'Win32InvalidParameter') 'Windows error was attributed to the LocalDB API.'
 $null = Run-Case 'DeniedInfo' 'Stopped' 'FAILED' 'AccessDenied'
 $null = Run-Case 'WrongVersion' 'Stopped' 'FAILED' 'VersionMismatch'
 $null = Run-Case 'ForeignMetadata' 'Stopped' 'FAILED' 'InstanceMetadataMismatch'
