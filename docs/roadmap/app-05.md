@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / IMPLEMENTATION_NOT_STARTED`. Commit lập roadmap là `DOCS_ONLY`; các checkbox bên dưới là việc cần thực hiện, không phải kết quả đã đạt.
+**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / APP05_0_SOURCE_CANDIDATE / CI_PENDING`. Commit lập roadmap là `DOCS_ONLY`; các checkbox chỉ ghi nhận công việc đã thực sự thực hiện; APP-05.1–.7 chưa triển khai.
 
 **Goal:** Owner tự hoàn tất một ca trên laptop Windows với dữ liệu mẫu APP-03: xử lý A chưa giao, đóng chuyến có bàn giao trách nhiệm, rồi tiếp tục đúng đơn và nguồn vào ngày sau trên cùng database.
 
@@ -72,7 +72,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
-| **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `NOT_STARTED` |
+| **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `SOURCE_CANDIDATE / CI_PENDING` |
 | **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 trước merge code | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `NOT_STARTED` |
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `NOT_STARTED` |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `NOT_STARTED` |
@@ -108,10 +108,31 @@ Revision từ read không thay thế recheck trong transaction. Close, assign/re
 
 **Files:** `.github/workflows/app00a.yml`; các script runner liên quan chỉ khi phép đo cho thấy cần sửa. Bắt đầu bằng thời lượng/job/step của run baseline và các lượt PR thành công. `VerifyAcceptance`/F09 All chưa được gọi bởi workflow APP-00A ở baseline; không gọi chúng là gate CI đang có.
 
-- [ ] Ghi thời lượng, step cuối và nguyên nhân hủy; tách lỗi môi trường/timeout khỏi assertion, chỉ ra các gate/artifact chưa chạy được.
-- [ ] Chọn thay đổi nhỏ nhất đủ tin cậy: budget có căn cứ hoặc chia các runner độc lập thành job. Nếu tách, mỗi job giữ scratch/nonce riêng, setup cần thiết, source SHA và artifact không đè nhau. Không xóa test hoặc biến failure thành success.
+- [x] Ghi thời lượng, step cuối và nguyên nhân hủy; tách lỗi môi trường/timeout khỏi assertion, chỉ ra các gate/artifact chưa chạy được.
+- [x] Chọn thay đổi nhỏ nhất đủ tin cậy: budget có căn cứ hoặc chia các runner độc lập thành job. Nếu tách, mỗi job giữ scratch/nonce riêng, setup cần thiết, source SHA và artifact không đè nhau. Không xóa test hoặc biến failure thành success.
 - [ ] Xác minh YAML/runner và chạy CI trên source cuối. Đối chiếu danh sách gate trước/sau, upload artifact cả khi fail và cleanup đúng phạm vi. Có lượt main hoàn tất trước khi đóng .0.
 - [ ] Commit đề xuất: `ci: stabilize LocalDB validation budget`; ghi run/source thật trong PR và hàng trạng thái, không đánh dấu .0 xong chỉ vì đổi timeout.
+
+#### Biên nhận APP-05.0 — thay đổi nguồn, chờ CI và review (24/11/2026)
+
+Đối chiếu tại `main` `a795b844dd45fa38edc17b6dfb2f9dde77c6fe36`, tree `e065ca2c2ed99a33423d88423a6ea755756ba402`. Thời lượng dưới đây là elapsed từ `run_started_at` tới `updated_at` của workflow, gồm cả phần kết thúc job; không phải riêng thời lượng test.
+
+| Workflow APP-00A | Source HEAD | Thời lượng | Kết quả |
+| --- | --- | --- | --- |
+| [45379497955](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45379497955) | `515a9ab13acad28ab7811caf2a08287977b888ba` | 25m04s | SUCCESS |
+| [45385147365](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45385147365) | `d349acaa994df3e6039fc6d5b869310549ee6899` | 26m41s | SUCCESS |
+| [45397979755](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45397979755) | `96f3e8c0c96b57a248fcb2c458922048c5c1d2fa` | 28m59s | SUCCESS |
+| [45402915855](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45402915855) | `29bc4bc2b4a14ad45386f57a8f6bb25a697005ee` | 30m14s | CANCELLED |
+
+Các lượt PR 45369399575, 45367280154, 45365300779, 45360021334 và 45355301169 cũng có conclusion CANCELLED sau khoảng 30 phút; không suy ra lỗi nghiệp vụ cho từng lượt chỉ từ trạng thái này.
+
+**Chẩn đoán:** [job main validate 138475900001](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45402915855/job/138475900001) chạy từ 13:23 UTC; D.3 bắt đầu 13:51:58 UTC, bị hủy 13:53:23 UTC (log cancellation/TaskCanceledException, không phải assertion SQL FAIL). Các bước 1–71 thành công, ngoại trừ diagnostics startup chỉ chạy khi startup fail (SKIPPED đúng điều kiện). Bước 72 D.3 CANCELLED, 73 upload browser evidence SUCCESS, 74 `npm run test:pwa-build` SKIPPED, 75 upload test evidence SUCCESS. Artifact đã upload không đồng nghĩa D.3 hoàn tất hoặc cleanup của runner hoàn tất. [Job PR 138458742273](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45397979755/job/138458742273) chạy D.3 từ 13:19:26 đến 13:22:43 UTC và các bước 72–75 đều SUCCESS.
+
+**Thay đổi:** duy nhất budget job `validate` từ 30 → 45 phút (+15 phút); giữ job/check name, Windows runner, event triggers, pins, mọi step/test/condition, số lượng tối thiểu test, SQL oracle, audit, browser, PWA và hai upload `always()` nguyên vẹn. Budget mới lớn hơn ~1.55 lần lượt thành công 28m59s; không phải SLA hay chứng minh CI đã ổn định. Chọn tăng budget trước khi cân nhắc tách job; không retry tự động, không continue-on-error, không làm nhẹ gate. Không đổi script runner, scratch/nonce/cleanup hoặc nguồn nghiệp vụ. Không đưa VerifyAcceptance/F09 All vào danh sách gate vốn có.
+
+**Kiểm nguồn:** đối chiếu workflow trước/sau, hoàn nguyên đúng đoạn comment/budget mới cho kết quả byte-for-byte bằng text nguồn đã đọc; không thêm/xóa/đổi thứ tự step, tên hay artifact path. Đây là kiểm tra tĩnh, không phải execution Windows, YAML parser độc lập hoặc CI PASS.
+
+**Điều kiện còn mở:** PR final HEAD phải có APP-00A SUCCESS, kiểm step 72–75 đầy đủ, artifact và source/workflow SHA thực tế, cleanup đúng ownership/nonce; giữ toàn bộ regression và independent review. Sau merge cần một lượt main hoàn tất với budget mới trước khi close .0; không đánh dấu hoàn tất theo lượt PR cũ. Lỗi LocalDB login timeout riêng tại [B.3 run 45421920678](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45421920678) trên main roadmap là lỗi bootstrap, chưa có kết quả SQL test; không coi việc tăng budget APP-00A là bản vá B.3. Không thay đổi PREPROD/EV/P0/Pilot hay phạm vi nghiệm thu. Trạng thái hiện tại `SOURCE_CANDIDATE / CI_PENDING`.
 
 ### APP-05.1 — Readiness, việc tồn và fixture dùng chung
 
@@ -257,4 +278,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Bước tiếp theo:** bắt đầu **APP-05.0**, rồi **APP-05.1**. Đích nghiệm thu là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày; các trạng thái này chỉ được công bố sau execution có bằng chứng.
+**Bước tiếp theo:** kiểm chứng và review **APP-05.0** trên PR final HEAD, hoàn tất lượt main sau merge, rồi **APP-05.1**. Đích nghiệm thu là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày; các trạng thái này chỉ được công bố sau execution có bằng chứng.

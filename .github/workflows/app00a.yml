@@ -8,7 +8,9 @@ permissions:
 jobs:
   validate:
     runs-on: windows-2022
-    timeout-minutes: 30
+    # APP-05.0: recent successful runs take 25–29 min; main hit the 30-min cap at D.3.
+    # Allow headroom for remaining PWA verification, evidence upload and guarded cleanup.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
