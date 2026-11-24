@@ -383,7 +383,7 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
 
     private static async Task<BusinessCommandOutcome> AcceptCore(
         SqlConnection db, SqlTransaction tx, string tenant, string actor,
-        Guid commandId, AcceptCashHandoverCommand req, bool d3, CancellationToken ct)
+        Guid commandId, AcceptCashHandoverCommand req, bool d3, CancellationToken ct, decimal? countedAmount = null)
     {
         if (req.OfferId == Guid.Empty || !ValidKey(req.CountEvidenceRef, 128))
             return BusinessCommandOutcome.Rejected("ACCEPT_REFERENCE_INVALID");
@@ -421,23 +421,29 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             """, new { Tenant = tenant, Offer = req.OfferId }, tx, ct)) != 0)
             return BusinessCommandOutcome.Rejected("OFFER_ALREADY_ACCEPTED");
 
-        var witness = await db.QuerySingleOrDefaultAsync<CountScope>(Sql("""
-            SELECT TripId,CountedAmount,CountedBy,VerificationStatus,CountedAtUtc
-            FROM dbo.CashierCountEvidence WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND EvidenceRef=@Evidence;
-            """, new { Tenant = tenant, Evidence = req.CountEvidenceRef }, tx, ct));
-        if (witness is null || witness.TripId != req.TripId
-            || witness.CountedBy != actor || witness.VerificationStatus != "VERIFIED"
-            || witness.CountedAmount != offer.OfferedAmount)
+        if (countedAmount is decimal counted && counted != offer.OfferedAmount)
             return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
-        if (d3 && witness.CountedAtUtc > await db.ExecuteScalarAsync<DateTime>(Sql(
-                $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)))
-            return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
-        if (await db.ExecuteScalarAsync<int>(Sql("""
-            SELECT COUNT(*) FROM dbo.CashHandoverAcceptance WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND EvidenceRef=@Evidence;
-            """, new { Tenant = tenant, Evidence = req.CountEvidenceRef }, tx, ct)) != 0)
-            return BusinessCommandOutcome.Rejected("CASHIER_COUNT_ALREADY_USED");
+
+        if (countedAmount is null)
+        {
+            var witness = await db.QuerySingleOrDefaultAsync<CountScope>(Sql("""
+                SELECT TripId,CountedAmount,CountedBy,VerificationStatus,CountedAtUtc
+                FROM dbo.CashierCountEvidence WITH (UPDLOCK,HOLDLOCK)
+                WHERE TenantId=@Tenant AND EvidenceRef=@Evidence;
+                """, new { Tenant = tenant, Evidence = req.CountEvidenceRef }, tx, ct));
+            if (witness is null || witness.TripId != req.TripId
+                || witness.CountedBy != actor || witness.VerificationStatus != "VERIFIED"
+                || witness.CountedAmount != offer.OfferedAmount)
+                return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
+            if (d3 && witness.CountedAtUtc > await db.ExecuteScalarAsync<DateTime>(Sql(
+                    $"SELECT {App02c6Clock.SqlUtcNow}", null, tx, ct)))
+                return BusinessCommandOutcome.Rejected("CASHIER_COUNT_NOT_VERIFIED");
+            if (await db.ExecuteScalarAsync<int>(Sql("""
+                SELECT COUNT(*) FROM dbo.CashHandoverAcceptance WITH (UPDLOCK,HOLDLOCK)
+                WHERE TenantId=@Tenant AND EvidenceRef=@Evidence;
+                """, new { Tenant = tenant, Evidence = req.CountEvidenceRef }, tx, ct)) != 0)
+                return BusinessCommandOutcome.Rejected("CASHIER_COUNT_ALREADY_USED");
+        }
 
         decimal custody = await Custody(db, tx, tenant, req.TripId, ct);
         if (!await ReconcileCustody(db, tx, tenant, req.TripId, custody, ct))
@@ -447,6 +453,12 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
 
         string clock = d3 ? App02c6Clock.SqlUtcNow : "SYSUTCDATETIME()";
         Guid source = Guid.NewGuid(), line = Guid.NewGuid();
+        if (countedAmount is not null)
+            await db.ExecuteAsync(Sql($"""
+                INSERT dbo.CashierCountEvidence(TenantId,EvidenceRef,TripId,CountedAmount,CountedBy,VerificationStatus,CountedAtUtc)
+                VALUES(@Tenant,@Evidence,@Trip,@Amount,@Actor,N'VERIFIED',{clock});
+                """, new { Tenant = tenant, Evidence = req.CountEvidenceRef, Trip = req.TripId,
+                    Amount = countedAmount.Value, Actor = actor }, tx, ct));
         await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,
                 SourceNumber,ActorId,TripId,OccurredAtUtc)

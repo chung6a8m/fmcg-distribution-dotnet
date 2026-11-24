@@ -4,7 +4,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App02d3Routes
 {
-    internal static void Map(WebApplication app)
+    internal static void Map(WebApplication app, bool settlement)
     {
         var group = app.MapGroup("/api/synthetic/app02d3").RequireAuthorization();
         group.AddEndpointFilter(async (context, next) =>
@@ -26,7 +26,12 @@ internal static class App02d3Routes
             App01dCashierUnloadService service, CancellationToken ct) =>
             CommandHttp(await service.OfferD3Async(user, input, ct)))
             .RequireAuthorization("SyntheticSales");
-        group.MapPost("/accept", async (AcceptCashHandoverCommand input, ClaimsPrincipal user,
+        if (settlement)
+            group.MapPost("/accept", async (App03CashCount input, ClaimsPrincipal user,
+                App01dCashierUnloadService service, CancellationToken ct) =>
+                CommandHttp(await service.AcceptApp03CashAsync(user, input, ct)))
+                .RequireAuthorization("SyntheticCashier");
+        else group.MapPost("/accept", async (AcceptCashHandoverCommand input, ClaimsPrincipal user,
             App01dCashierUnloadService service, CancellationToken ct) =>
             CommandHttp(await service.AcceptD3Async(user, input, ct)))
             .RequireAuthorization("SyntheticCashier");

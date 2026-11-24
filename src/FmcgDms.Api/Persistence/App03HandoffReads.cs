@@ -74,14 +74,14 @@ public sealed partial class App01a2CommandService
             line.LineId is Guid id ? Lots[id].ToArray() : []);
     }
 
-    private static async Task<HandoffLines> ReadHandoffLines(SqlConnection db, SqlTransaction tx, string tenant,
+    private async Task<HandoffLines> ReadHandoffLines(SqlConnection db, SqlTransaction tx, string tenant,
         Guid[] orderIds, CancellationToken ct)
     {
         var lots = new List<HandoffLotRow>();
         var quantities = new Dictionary<(Guid, int), C2QuantitySnapshot>();
         foreach (var batch in orderIds.Chunk(500))
         {
-            using var grid = await db.QueryMultipleAsync(Sql("""
+            using var grid = await db.QueryMultipleAsync(Sql($"""
                 SELECT DraftId AS OrderId,LineNumber,UomCode,EnteredQuantity,Factor
                 FROM dbo.F03DraftQuantity WHERE TenantId=@Tenant AND DraftId IN @Orders;
 
@@ -106,6 +106,16 @@ public sealed partial class App01a2CommandService
                     JOIN dbo.SaleDelivery d ON d.TenantId=a.TenantId AND d.AOrderLineId=a.Id AND d.RightKind='A'
                     JOIN dbo.F03LotIssue i ON i.TenantId=d.TenantId AND i.DeliveryId=d.Id
                     WHERE a.TenantId=@Tenant AND a.AOrderId IN @Orders
+                    {(connections.UsesApp03Settlement ? """
+                    UNION ALL
+                    SELECT a.Id,4,d.TripUnloadId,m.Id,l.LotId,l.Quantity
+                    FROM dbo.AOrderLine a
+                    JOIN dbo.AReservation r ON r.TenantId=a.TenantId AND r.AOrderLineId=a.Id
+                    JOIN dbo.TripManifestLine m ON m.TenantId=r.TenantId AND m.StockRightId=r.StockRightId
+                    JOIN dbo.D3TripUnloadLine d ON d.TenantId=m.TenantId AND d.TripManifestLineId=m.Id
+                    JOIN dbo.App03LotUnload l ON l.TenantId=m.TenantId AND l.ManifestLineId=m.Id
+                    WHERE a.TenantId=@Tenant AND a.AOrderId IN @Orders
+                    """ : "")}
                 )
                 SELECT t.LineId,t.Stage,t.SourceId,t.EventId,t.LotId,l.Code AS LotCode,l.ExpiresOn,t.Quantity
                 FROM traces t JOIN dbo.F03Lot l ON l.TenantId=@Tenant AND l.Id=t.LotId

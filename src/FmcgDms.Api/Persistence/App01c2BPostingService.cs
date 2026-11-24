@@ -234,7 +234,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         }
     }
 
-    private static async Task<BusinessCommandOutcome> ValidateAndPost(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> ValidateAndPost(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid commandId, PostBSaleDeliveryReceiptCommand request,
         D2PostingContext? d2, CancellationToken ct)
     {
@@ -263,7 +263,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                 return BusinessCommandOutcome.Rejected("APP03_B_UNSUPPORTED_INPUT");
             if (!await db.ExecuteScalarAsync<bool>(Sql($"""
                 SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku k WITH (HOLDLOCK)
-                    WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku})
+                    WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku(connections.UsesApp03Settlement)})
                     THEN 1 ELSE 0 END);
                 """, new { Tenant = tenant, request.SkuId }, tx, ct)))
                 return BusinessCommandOutcome.Rejected("APP03_B_SKU_UNSUPPORTED");

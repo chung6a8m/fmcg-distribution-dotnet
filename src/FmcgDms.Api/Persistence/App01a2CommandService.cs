@@ -660,7 +660,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (d1 && connections.UsesApp03Field && (request.BaseQuantity != decimal.Truncate(request.BaseQuantity)
                     || !await db.ExecuteScalarAsync<bool>(Sql($"""
                         SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku k WITH (HOLDLOCK)
-                            WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku})
+                            WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku(connections.UsesApp03Settlement)})
                             THEN 1 ELSE 0 END);
                         """, new { Tenant = tenant, request.SkuId }, tx, token))))
                     return BusinessCommandOutcome.Rejected("APP03_B_SKU_OR_QUANTITY_UNSUPPORTED");

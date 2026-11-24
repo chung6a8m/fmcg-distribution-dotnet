@@ -87,7 +87,7 @@ public sealed partial class App01c2BPostingService
                 WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.RightKind='B' AND l.IsC3=1
                     AND lineRemaining.Qty>0 AND rightRemaining.Qty>0
                     {(connections.UsesApp03Field ? $"""
-                        AND t.BusinessDate={App03FieldB.BusinessDate} AND {App03FieldB.EligibleSku}
+                        AND t.BusinessDate={App03FieldB.BusinessDate} AND {App03FieldB.EligibleSku(connections.UsesApp03Settlement)}
                         AND EXISTS (SELECT 1 FROM dbo.StockLocation v WHERE v.TenantId=t.TenantId
                             AND v.Id=t.VehicleLocationId AND v.Kind='VEHICLE' AND v.IsActive=1)
                         """ : "")}

@@ -13,7 +13,7 @@ type Catalog = { customers: Option[]; trips: Option[]; skus: Option[]; warehouse
   units?: CatalogUnit[] }
 type Pricing = { mode: 'EXCLUSIVE' | 'INCLUSIVE'; currency: 'VND'; base: number; discount: number
   net: number; tax: number; gross: number; version: number }
-type LotStep = { stage: 1 | 2 | 3; sourceId: string; traceId: string; lotCode: string; expiresOn: string; quantity: number }
+type LotStep = { stage: 1 | 2 | 3 | 4; sourceId: string; traceId: string; lotCode: string; expiresOn: string; quantity: number }
 type LineHandoff = { warehouseHeld: number; unreserved: number
   quantity: { uomCode: string; enteredQuantity: number; factor: number } | null; lots: LotStep[] }
 type Line = { lineId: string | null; sku: string; baseUom: string; ordered: number; reserved: number;
@@ -64,7 +64,7 @@ const steps = { confirm: 'Cần Confirm', reserve: 'Cần giữ hàng', load: 'C
 type QueueStep = keyof typeof steps | 'all'
 type QueueFilter = { trip: string; step: QueueStep }
 const allOrders: QueueFilter = { trip: '', step: 'all' }
-const lotStages = { 1: 'Đã giữ', 2: 'Đã nạp', 3: 'Đã giao' }
+const lotStages = { 1: 'Đã giữ', 2: 'Đã nạp', 3: 'Đã giao', 4: 'Đã trả về kho' }
 
 function orderLocation(screen: 'orders' | 'load', order: Order, source?: string, trace?: string) {
   const params = new URLSearchParams({ trip: order.tripId ?? '', order: order.id })

@@ -28,12 +28,12 @@ public sealed partial class App01a2CommandService
         {
             if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
                 || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
-            return (await EligibleD1Rights(db, tx, tenant, trip, null, connections.UsesApp03Field, ct)).ToArray();
+            return (await EligibleD1Rights(db, tx, tenant, trip, null, connections.UsesApp03Field, connections.UsesApp03Settlement, ct)).ToArray();
         }, ct);
     }
 
     private static Task<IEnumerable<C3RightView>> EligibleD1Rights(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid trip, Guid[]? rightIds, bool field, CancellationToken ct)
+        string tenant, Guid trip, Guid[]? rightIds, bool field, bool settlement, CancellationToken ct)
     {
         const string sql = """
             SELECT r.Id,CAST(NULL AS uniqueidentifier) AS OrderId,r.StockLocationId AS WarehouseId,
@@ -64,7 +64,7 @@ public sealed partial class App01a2CommandService
                 AND r.ReleasedBaseQuantity=0 AND r.ConsumedBaseQuantity=0 AND totals.Loaded<=r.GrantedBaseQuantity
             """;
         string rightFilter = rightIds is null ? "" : " AND r.Id IN @Ids";
-        string fieldFilter = field ? " AND " + App03FieldB.EligibleSku + $"""
+        string fieldFilter = field ? " AND " + App03FieldB.EligibleSku(settlement) + $"""
              AND EXISTS (SELECT 1 FROM dbo.Trip t WHERE t.TenantId=r.TenantId AND t.Id=r.TripId
                 AND t.BusinessDate={App03FieldB.BusinessDate})
             """ : "";
@@ -88,7 +88,7 @@ public sealed partial class App01a2CommandService
         if (!warehouse && !finance)
             throw new UnauthorizedAccessException("Current Warehouse or Finance role required.");
 
-        string fieldFilter = connections.UsesApp03Field ? " AND " + App03FieldB.EligibleSku : "";
+        string fieldFilter = connections.UsesApp03Field ? " AND " + App03FieldB.EligibleSku(connections.UsesApp03Settlement) : "";
         using var rows = await db.QueryMultipleAsync(Sql($"""
             SELECT Nonce FROM dbo.App00ScratchMarker;
             SELECT t.Id,t.Code AS Label,
@@ -108,8 +108,11 @@ public sealed partial class App01a2CommandService
                 AND ((@Warehouse=1 AND w.ActorId=@Actor) OR (@Finance=1 AND p.HasPool=1))
                 AND NOT EXISTS(SELECT 1 FROM dbo.TripManifest m WHERE m.TenantId=t.TenantId AND m.TripId=t.Id AND m.IsC3=0)
             ORDER BY t.Code;
-            SELECT Id,Code AS Label FROM dbo.StockLocation
-            WHERE @Warehouse=1 AND TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1 ORDER BY Code;
+            SELECT l.Id,l.Code AS Label FROM dbo.StockLocation l
+            WHERE @Warehouse=1 AND l.TenantId=@Tenant AND l.Kind='WAREHOUSE' AND l.IsActive=1
+                AND (@Settlement=0 OR EXISTS (SELECT 1 FROM dbo.StockPool p
+                    WHERE p.TenantId=l.TenantId AND p.StockLocationId=l.Id))
+            ORDER BY l.Code;
             SELECT k.Id,CAST(k.Code+N' · '+k.Name AS nvarchar(300)) AS Label FROM dbo.Sku k
             WHERE @Warehouse=1 AND k.TenantId=@Tenant AND k.IsActive=1 {fieldFilter} ORDER BY k.Code;
             SELECT c.Id,CAST(c.Code+N' · '+c.Name AS nvarchar(300)) AS Label FROM dbo.Customer c
@@ -132,7 +135,7 @@ public sealed partial class App01a2CommandService
             JOIN dbo.C2CommandScope cs ON cs.TenantId=bs.TenantId AND cs.CommandRowId=bs.BusinessCommandId
                 AND cs.D1GrantTripId=g.TripId AND cs.RoleCode='finance'
             WHERE @Finance=1 AND g.TenantId=@Tenant ORDER BY g.TripId,g.CustomerId,g.Id;
-            """, new { Tenant = tenant, Actor = actor, Warehouse = warehouse, Finance = finance }, tx, ct));
+            """, new { Tenant = tenant, Actor = actor, Warehouse = warehouse, Finance = finance, Settlement = connections.UsesApp03Settlement }, tx, ct));
         var result = new D1Catalog(tenant, actor, await rows.ReadSingleAsync<string>(), warehouse, finance,
             (await rows.ReadAsync<D1TripOption>()).AsList(), (await rows.ReadAsync<C2Option>()).AsList(),
             (await rows.ReadAsync<C2Option>()).AsList(), (await rows.ReadAsync<C2Option>()).AsList(),

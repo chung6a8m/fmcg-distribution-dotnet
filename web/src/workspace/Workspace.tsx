@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { readApiHealth } from '../health'
 import { requestSalesApi, salesAuthorizationChanged, type Identity } from '../sales/customer-api'
@@ -15,11 +15,20 @@ const BSale = lazy(() => import('../sales/BSaleWorkspace').then(m => ({ default:
 const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ScopedArReport })))
 const Returns = lazy(() => import('../sales/ReturnWorkspace').then(m => ({ default: m.ReturnWorkspace })))
 
+const Settlement = lazy(() => import('../sales/MixedTripWorkspace').then(m => ({ default: m.MixedTripWorkspace })))
+const Advances = lazy(() => import('../sales/AdvanceWorkspace').then(m => ({ default: m.AdvancePanel })))
+const Gifts = lazy(() => import('../sales/GiftWorkspace').then(m => ({ default: m.GiftPanel })))
+
+type HandoffRole = 'sales' | 'warehouse' | 'cashier'
+type AdvanceRole = 'sales' | 'finance' | 'cashier'
+type GiftRole = 'sales' | 'warehouse' | 'finance'
+
 const api = '/api/synthetic/app03'
 const tokenKey = 'app03.workspace.token.v1'
 const lastIdentityKey = 'app03.workspace.identity.v1'
 const guid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
 type Access = Identity & {
+  handoffRoles?: HandoffRole[]; advanceRole?: AdvanceRole | null; giftRole?: GiftRole | null
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -34,8 +43,12 @@ const routes = [
   { id: 'delivery', label: 'Giao hàng A', group: 'Hiện trường', show: (a: Access) => a.sales },
   { id: 'b-sale', label: 'Bán và giao hàng B', group: 'Hiện trường', show: (a: Access) => !!a.fieldB && a.sales },
   { id: 'visits', label: 'Viếng thăm', group: 'Hiện trường', show: (a: Access) => a.sales },
+  { id: 'settlement', label: 'Đối soát chuyến và nộp tiền', group: '', show: (a: Access) => !!a.handoffRoles?.length },
+  { id: 'advances', label: 'Tạm ứng và hoàn ứng', group: '', show: (a: Access) => !!a.advanceRole },
+  { id: 'gifts', label: 'Quà khuyến mại', group: '', show: (a: Access) => !!a.giftRole },
   { id: 'returns', label: 'Trả hàng', group: '', show: (a: Access) => a.returnRole !== null },
 ] as const
+const handoffGroup = { sales: 'Hiện trường', warehouse: 'Kho', finance: 'Kế toán', cashier: 'Thủ quỹ' }
 const returnGroup = { sales: 'Bán hàng', warehouse: 'Kho', finance: 'Kế toán', case_checker: 'Kiểm tra chất lượng' }
 
 function stored(key: string) {
@@ -69,7 +82,9 @@ function valid(key: Selection, value: string) {
   return key === 'source' ? value.split(':').length <= 2 && value.split(':').every(part => guid.test(part)) : guid.test(value)
 }
 
-export function WorkspaceEntry({ fallback, fieldRoute }: { fallback: (live: boolean) => ReactNode; fieldRoute?: string }) {
+export function WorkspaceEntry({ fallback, fieldRoute, settlementRoute }: {
+  fallback: (live: boolean) => ReactNode; fieldRoute?: string; settlementRoute?: string
+}) {
   const [profile, setProfile] = useState<'checking' | 'available' | 'foundation' | 'offline'>('checking')
   useEffect(() => {
     const request = new AbortController()
@@ -77,16 +92,22 @@ export function WorkspaceEntry({ fallback, fieldRoute }: { fallback: (live: bool
       .then(readApiHealth)
       .then(health => {
         if (request.signal.aborted) return
-        if (fieldRoute && health?.workspaceProfile === 'APP-03.5-v1') {
+        const settlement = health?.workspaceProfile === 'APP-03.6-v1'
+        const field = health?.workspaceProfile === 'APP-03.5-v1' || settlement
+        if (settlement && settlementRoute) {
+          location.replace(settlementRoute)
+          return
+        }
+        if (fieldRoute && field) {
           location.replace(fieldRoute)
           return
         }
-        setProfile(!fieldRoute && (health?.workspaceProfile === 'APP-03.1a-v1' || health?.workspaceProfile === 'APP-03.5-v1')
+        setProfile(!fieldRoute && !settlementRoute && (health?.workspaceProfile === 'APP-03.1a-v1' || field)
           ? 'available' : health ? 'foundation' : 'offline')
       })
       .catch(() => { if (!request.signal.aborted) setProfile('offline') })
     return () => request.abort()
-  }, [fieldRoute])
+  }, [fieldRoute, settlementRoute])
   if (profile === 'checking') return <main className="page"><p role="status">Đang tải FMCG DMS…</p></main>
   if (profile === 'available') return <Workspace />
   return fallback(profile === 'foundation')
@@ -249,12 +270,13 @@ function Workspace() {
       setAttempt(n => n + 1)
     }}>Thử lại</Button>}
     {authorized && <WorkArea key={JSON.stringify([identityKey(authorized.access), authorized.access.sales,
-      authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB])} {...authorized} />}
+      authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
+      authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
 
-function WorkArea({ access, token }: Session) {
+function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
   const allowed = routes.filter(route => route.show(access))
   const current = allowed.find(route => '/work/' + route.id === location.pathname)
   const query = new URLSearchParams(location.search)
@@ -265,6 +287,12 @@ function WorkArea({ access, token }: Session) {
     const value = query.get(key) || stored(contextKey(key))
     return valid(key, value) ? value : ''
   }
+
+  const handoffRoles = JSON.stringify(access.handoffRoles ?? [])
+  const { sessionId, actorId, tenantId } = access
+  const settlementSession = useMemo(() => ({ token, identity: {
+    sessionId, actorId, tenantId, roles: JSON.parse(handoffRoles) as HandoffRole[],
+  } }), [token, sessionId, actorId, tenantId, handoffRoles])
 
   const [customer, setCustomer] = useState(() => initial('customer'))
   const [order, setOrder] = useState(() => initial('order'))
@@ -310,8 +338,16 @@ function WorkArea({ access, token }: Session) {
     remember('order', id)
   }
 
-  const groupOf = (route: typeof routes[number]) => route.id === 'orders' && !access.sales ? 'Kho'
-    : route.group || (access.returnRole ? returnGroup[access.returnRole] : '')
+  const groupOf = (route: typeof routes[number]) => {
+    if (route.id === 'orders' && !access.sales) return 'Kho'
+    if (route.id === 'settlement') {
+      const roles = access.handoffRoles ?? []
+      return handoffGroup[roles.includes('cashier') ? 'cashier' : roles.includes('sales') ? 'sales' : 'warehouse']
+    }
+    if (route.id === 'advances' && access.advanceRole) return handoffGroup[access.advanceRole]
+    if (route.id === 'gifts' && access.giftRole) return handoffGroup[access.giftRole]
+    return route.group || (access.returnRole ? returnGroup[access.returnRole] : '')
+  }
   const groups = [...new Set(allowed.map(groupOf))]
   const delivery = query.get('delivery') ?? ''
   const requestedOrder = query.get('order') ?? ''
@@ -320,14 +356,14 @@ function WorkArea({ access, token }: Session) {
   const requestedTrip = query.get('trip') ?? ''
   const loadOrder = guid.test(requestedOrder) ? requestedOrder : ''
   const returnUrl = access.returnRole === 'sales' ? '/work/returns' : undefined
-  const field = current?.group === 'Hiện trường'
+  const field = current ? groupOf(current) === 'Hiện trường' : false
   return <div id="workspace-data" className="sales-layout">
     <nav className="panel panel-content sales-nav" aria-label="Công việc DEV">
       {groups.map(group => <div key={group} className="app03-nav-group">
         <strong>{group}</strong>
         {allowed.filter(route => groupOf(route) === group).map(route => <a
           key={route.id} className="button button-secondary" href={'/work/' + route.id
-            + (trip && ['delivery', 'load', 'b-sale', 'b-stock'].includes(route.id) ? '?trip=' + trip : '')}
+            + (trip && ['delivery', 'load', 'b-sale', 'b-stock', 'settlement'].includes(route.id) ? '?trip=' + trip : '')}
           aria-current={route.id === current?.id ? 'page' : undefined}>{route.label}</a>)}
       </div>)}
     </nav>
@@ -349,11 +385,17 @@ function WorkArea({ access, token }: Session) {
           startTrip={loadOrder ? (guid.test(requestedTrip) ? requestedTrip : '') : trip} startOrder={loadOrder}
           onOrderChange={id => remember('order', id)} />}
         {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
-        {current?.id === 'field' && <FieldTrips token={token} />}
+        {current?.id === 'field' && <FieldTrips token={token} settlement={!!access.handoffRoles?.length} />}
         {current?.id === 'b-stock' && <BStock workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
         {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} requestedTrip={query.get('trip')}
           onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}
+        {current?.id === 'settlement' && access.handoffRoles && <Settlement
+          workspaceSession={settlementSession} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'advances' && access.advanceRole && <><h2>Tạm ứng và hoàn ứng</h2>
+          <Advances session={{ token, identity: { ...access, role: access.advanceRole } }} /></>}
+        {current?.id === 'gifts' && access.giftRole && <><h2>Quà khuyến mại</h2>
+          <Gifts session={{ token, identity: { ...access, role: access.giftRole } }} offline={offline} /></>}
         {current?.id === 'returns' && access.returnRole && <Returns
           workspaceSession={{ token, identity: { ...access, role: access.returnRole } }}
           startSource={source} startDelivery={access.returnRole === 'sales' && guid.test(delivery) ? delivery : undefined}
@@ -363,7 +405,7 @@ function WorkArea({ access, token }: Session) {
   </div>
 }
 
-function FieldTrips({ token }: { token: string }) {
+function FieldTrips({ token, settlement }: { token: string; settlement: boolean }) {
   const [trips, setTrips] = useState<{ id: string; code: string; b?: { canSell: boolean } }[] | null>(null)
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -396,6 +438,7 @@ function FieldTrips({ token }: { token: string }) {
                 {trip.b && <a className="button button-secondary" href={'/work/b-sale?trip=' + trip.id}>
                   {trip.b.canSell ? 'Bán B' : 'Lịch sử B'}
                 </a>}
+                {settlement && <a className="button button-secondary" href={'/work/settlement?trip=' + trip.id}>Đối soát chuyến</a>}
               </div>
             </div>
           </li>)}</ul>}

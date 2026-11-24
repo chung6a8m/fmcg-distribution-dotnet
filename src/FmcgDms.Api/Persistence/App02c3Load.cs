@@ -60,14 +60,14 @@ public sealed partial class App01a2CommandService
             (db, tx, tenant, actor, command, token) =>
                 validShape
                     ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load,
-                        connections.UsesDevF03, connections.UsesApp03Field, token)
+                        connections.UsesDevF03, connections.UsesApp03Field, connections.UsesApp03Settlement, token)
                     : Task.FromResult(BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES")),
             ct, "warehouse", input.TripId, d1Load: d1Load);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyPartialLoad(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load, bool lots,
-        bool field, CancellationToken ct)
+        bool field, bool settlement, CancellationToken ct)
     {
         if (lines.Select(l => l.RightId).Distinct().Count() != lines.Length
             || lines.Any(l => l.RightId == Guid.Empty || !ValidQuantity(l.Quantity)
@@ -85,7 +85,7 @@ public sealed partial class App01a2CommandService
 
         Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
         var rights = (d1Load
-                ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, ct)
+                ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, settlement, ct)
                 : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct))
             .ToDictionary(right => right.Id);
         if (rights.Count != lines.Length)

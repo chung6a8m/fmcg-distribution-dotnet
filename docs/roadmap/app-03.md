@@ -60,7 +60,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | [DEV_VERIFIED_LOCAL](app-03-3-workspace.md#kết-quả-local-ngày-24112026) |
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | [DEV_VERIFIED_LOCAL](app-03-4-handoff.md#kết-quả-local-ngày-24112026) |
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | [DEV_VERIFIED_LOCAL](app-03-5-field.md#kết-quả-local-ngày-24112026) |
-| APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | NOT_STARTED |
+| APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | [DEV_VERIFIED_LOCAL](app-03-6-settlement.md#kết-quả-local-ngày-24112026) |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn, quà/waiver, credit/refund theo vai | NOT_STARTED |
 | APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | NOT_STARTED |
 | APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | NOT_STARTED |
@@ -152,12 +152,14 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** danh sách đề nghị nộp tiền, kiểm đếm/nhận tiền, trả hàng còn trên xe, đối soát chuyến; tái sử dụng D.3. Nối F02 cho tạm ứng/hoàn ứng và F05/F07 cho công việc nhận trả/QA/quà từ đúng nguồn. Các bước Finance thuộc cùng hồ sơ mở qua .7, không tạo bản sao hồ sơ cho mỗi vai.
 
+[Cách bàn giao Hiện trường–Thủ quỹ/Kho và chạy kiểm chứng APP-03.6](app-03-6-settlement.md).
+
 **Hoàn tất:**
 
-- [ ] Người đề nghị và người nhận tiền độc lập; Offer chưa chuyển quỹ, Accept mới ghi đúng các chân custody/fund.
-- [ ] Phân biệt nộp tiền khách, hoàn ứng nhân viên, trả tồn xe và khách trả hàng qua QA; không dùng một command hoặc một số dư thay cho các nguồn khác nhau.
-- [ ] Hàng trả, quarantine/QA, quyền A còn giữ và quota B được xử lý theo nghiệp vụ; giữ Mixed `RECONCILING` khi còn phần chờ.
-- [ ] Chạy tạm ứng/hoàn ứng khi sổ khách hàng đã có dữ liệu, đối chiếu chúng không bị tác động bởi luồng tạm ứng.
+- [x] Người đề nghị và người nhận tiền độc lập; Offer chưa chuyển quỹ, Accept mới ghi đúng các chân custody/fund.
+- [x] Phân biệt nộp tiền khách, hoàn ứng nhân viên, trả tồn xe và khách trả hàng qua QA; không dùng một command hoặc một số dư thay cho các nguồn khác nhau.
+- [x] Hàng trả, quarantine/QA, quyền A còn giữ và quota B được xử lý theo nghiệp vụ; giữ Mixed `RECONCILING` khi còn phần chờ.
+- [x] Chạy tạm ứng/hoàn ứng khi sổ khách hàng đã có dữ liệu, đối chiếu chúng không bị tác động bởi luồng tạm ứng.
 
 ### APP-03.7 — Bàn làm việc Kế toán/Finance
 

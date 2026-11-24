@@ -246,3 +246,112 @@ test('APP-03 publishes the restored pending trip and the allowed fallback', asyn
   await expect(page).not.toHaveURL(/trip=/)
   await expect(nav(page, 'Nạp hàng lên xe')).toHaveAttribute('href', '/work/load')
 })
+test('APP-03 opens cashier handoff using the shared session', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**/health/live', route => route.fulfill({ json: {
+    status: 'live', scope: 'APP-00A', businessWrites: false, workspaceProfile: 'APP-03.6-v1',
+  } }))
+  await page.route('**/api/synthetic/app03/session', route => route.fulfill({ json: {
+    tenantId: 'tenant-a', actorId: 'cashier', sessionId: 'test-run', sales: false, warehouse: false,
+    handoffRoles: ['cashier'], returnRole: null, expiresAt: Math.floor(Date.now() / 1000) + 60,
+  } }))
+  let reads = 0
+  await page.route('**/api/synthetic/app02d3/trips', route => {
+    reads++
+    return route.fulfill({ json: [] })
+  })
+  await page.goto('/work/settlement')
+  await login(page, 'cashier')
+  await expect(nav(page, 'Đối soát chuyến và nộp tiền')).toBeVisible()
+  await expect(page.getByText('Phiên này chưa được phân công chuyến.')).toBeVisible()
+  await expect(page.getByLabel('Mã truy cập DEV')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Tải lại danh sách chuyến' }).click()
+  await expect.poll(() => reads).toBe(2)
+})
+
+test('APP-03 blocks fresh unload until a reconnect refreshes the trip report', async ({ page, context }) => {
+  const d3 = '/api/synthetic/app02d3'
+  await mockWorkspace(page)
+  await page.route('**/health/live', route => route.fulfill({ json: {
+    status: 'live', scope: 'APP-00A', businessWrites: false, workspaceProfile: 'APP-03.6-v1',
+  } }))
+  await page.route('**/api/synthetic/app03/session', route => route.fulfill({ json: {
+    tenantId: 'tenant-a', actorId: 'receiver', sessionId: 'test-run', sales: false, warehouse: true,
+    handoffRoles: ['warehouse'], returnRole: null, expiresAt: Math.floor(Date.now() / 1000) + 120,
+  } }))
+  let failList = false
+  let failReport = false
+  let tripQty = 1
+  const postedIds: string[] = []
+  const lookedUpIds: string[] = []
+  let releaseList!: () => void
+  const listGate = new Promise<void>(resolve => { releaseList = resolve })
+  let listStarted = false
+  await page.route('**' + d3 + '/trips', async route => {
+    if (failList) {
+      listStarted = true
+      await listGate
+      return route.fulfill({ status: 503 })
+    }
+    return route.fulfill({ json: [{ tripId: tripA, label: 'Chuyến A' }] })
+  })
+  await page.route('**' + d3 + '/trips/' + tripA, route => failReport
+    ? route.fulfill({ status: 503 })
+    : route.fulfill({ json: {
+      tripId: tripA, label: 'Chuyến A', tripStatus: 'PREPARED', canUnload: true,
+      custody: 0, fund: 0, arA: 0, arB: 0, mainQty: 5, mainCost: 20000, tripQty, tripCost: 4000 * tripQty,
+      aHold: tripQty, bQuota: 0, soldQty: 1, cogs: 4000, customerCredit: 0, totalAllocated: 0,
+    } }))
+  await page.route('**' + d3 + '/unload', route => {
+    postedIds.push(route.request().postDataJSON().commandId)
+    return route.abort()
+  })
+  await page.route('**' + d3 + '/trips/' + tripA + '/commands/receiver/*', route => {
+    lookedUpIds.push(new URL(route.request().url()).pathname.split('/').at(-1)!)
+    return route.fulfill({ status: 404 })
+  })
+  await page.goto('/work/settlement?trip=' + tripA)
+  await login(page, 'receiver')
+  const unload = page.getByRole('button', { name: 'Trả hàng tồn xe' })
+  const refresh = page.getByRole('button', { name: /Tải lại (danh sách )?chuyến/ })
+  await expect(unload).toBeEnabled()
+  await expect(page.getByText('1 EA / 4.000 VND')).toBeVisible()
+
+  failList = true
+  await context.setOffline(true)
+  await expect(unload).toBeDisabled()
+  await context.setOffline(false)
+  try {
+    await expect.poll(() => listStarted).toBe(true)
+    await expect(unload).toBeDisabled()
+    await unload.evaluate(button => button.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(postedIds).toHaveLength(0)
+  } finally {
+    releaseList()
+  }
+  await expect(page.getByText('Không tải được dữ liệu chuyến.')).toBeVisible()
+  await expect(unload).toBeDisabled()
+
+  failList = false
+  failReport = true
+  await refresh.click()
+  await expect(page.getByText('Không tải được dữ liệu chuyến.')).toBeVisible()
+  await expect(unload).toBeDisabled()
+
+  failReport = false
+  tripQty = 2
+  await refresh.click()
+  await expect(page.getByText('2 EA / 8.000 VND')).toBeVisible()
+  await expect(unload).toBeEnabled()
+  expect(postedIds).toHaveLength(0)
+  await unload.click()
+  await expect(page.getByText(/Chưa rõ kết quả/)).toBeVisible()
+  expect(postedIds).toHaveLength(1)
+
+  failReport = true
+  await refresh.click()
+  await expect(page.getByText('Không tải được dữ liệu chuyến.')).toBeVisible()
+  await page.getByRole('button', { name: 'Tra cứu yêu cầu' }).click()
+  await expect.poll(() => lookedUpIds).toEqual(postedIds)
+  await expect(unload).toBeDisabled()
+})

@@ -51,11 +51,15 @@ public sealed partial class App01a2CommandService
                     ON l.TenantId=t.TenantId AND l.Id=t.VehicleLocationId AND l.Kind='VEHICLE' AND l.IsActive=1
                 WHERE t.TenantId=@Tenant AND t.Status='PREPARED'
                     AND (@CurrentDayOnly=0 OR t.BusinessDate={LotBusinessDate}) ORDER BY t.Code;
-                SELECT Id,CAST(Code+N' · '+Name AS nvarchar(300)) AS Label
-                FROM dbo.Sku WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code;
-                SELECT Id,Code AS Label FROM dbo.StockLocation
-                WHERE TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1 ORDER BY Code;
-                """, new { Tenant = tenant, CurrentDayOnly = connections.UsesApp03BusinessDay }, tx, ct));
+                SELECT k.Id,CAST(k.Code+N' · '+k.Name AS nvarchar(300)) AS Label
+                FROM dbo.Sku k WHERE k.TenantId=@Tenant AND k.IsActive=1
+                    {C2SaleSkuFilter} ORDER BY k.Code;
+                SELECT l.Id,l.Code AS Label FROM dbo.StockLocation l
+                WHERE l.TenantId=@Tenant AND l.Kind='WAREHOUSE' AND l.IsActive=1
+                    AND (@Settlement=0 OR EXISTS (SELECT 1 FROM dbo.StockPool p
+                        WHERE p.TenantId=l.TenantId AND p.StockLocationId=l.Id))
+                ORDER BY l.Code;
+                """, new { Tenant = tenant, CurrentDayOnly = connections.UsesApp03BusinessDay, Settlement = connections.UsesApp03Settlement }, tx, ct));
             var customers = (await grid.ReadAsync<C2Option>()).AsList();
             var trips = (await grid.ReadAsync<C2Option>()).AsList();
             var skus = (await grid.ReadAsync<C2Option>()).AsList();
@@ -87,7 +91,7 @@ public sealed partial class App01a2CommandService
         ReadC2<IReadOnlyList<C2OrderView>>(principal, async (db, tx, tenant, actor) =>
         {
             var access = handoff ? await ReadHandoffAccess(db, tx, tenant, actor, principal, ct) : null;
-            using var grid = await db.QueryMultipleAsync(Sql("""
+            using var grid = await db.QueryMultipleAsync(Sql($"""
                 DECLARE @visible TABLE (Id uniqueidentifier PRIMARY KEY);
                 INSERT @visible SELECT d.Id FROM dbo.C2OrderDraft d
                 WHERE d.TenantId=@Tenant AND (@ShowDrafts=1 OR EXISTS (
@@ -122,9 +126,13 @@ public sealed partial class App01a2CommandService
                     WHERE TenantId=ol.TenantId AND AOrderLineId=ol.Id AND RightKind='A') qty
                 CROSS APPLY (
                     SELECT COALESCE(SUM(l.LoadedBaseQuantity),0) AS Loaded,
-                        COALESCE(SUM(l.LoadedBaseQuantity-used.Delivered),0) AS HeldOnTrip
+                        COALESCE(SUM(l.LoadedBaseQuantity-used.Delivered
+                            {(connections.UsesApp03Settlement ? "-COALESCE(back.BaseQuantity,0)" : "")}),0) AS HeldOnTrip
                     FROM dbo.AReservation r JOIN dbo.TripManifestLine l
                       ON l.TenantId=r.TenantId AND l.StockRightId=r.StockRightId AND l.IsC3=1
+                    {(connections.UsesApp03Settlement ? """
+                        LEFT JOIN dbo.D3TripUnloadLine back ON back.TenantId=l.TenantId AND back.TripManifestLineId=l.Id
+                        """ : "")}
                     CROSS APPLY (SELECT CONVERT(decimal(18,3),COALESCE(SUM(BaseQuantity),0)) AS Delivered FROM dbo.SaleDelivery
                         WHERE TenantId=l.TenantId AND TripManifestLineId=l.Id) used
                     WHERE r.TenantId=ol.TenantId AND r.AOrderLineId=ol.Id

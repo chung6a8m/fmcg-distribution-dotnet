@@ -8,7 +8,13 @@ internal static class App03FieldB
     internal static readonly string BusinessDate = $"CAST(({App02c6Clock.SqlUtcNow} AT TIME ZONE 'UTC') AT TIME ZONE 'SE Asia Standard Time' AS date)";
 
     // Used only in the guarded profile where F03 is installed.
-    internal const string EligibleSku = """
+    internal const string NonGiftSku = """
+        NOT EXISTS (SELECT 1 FROM dbo.F07Program WHERE TenantId=k.TenantId AND GiftSkuId=k.Id)
+        """;
+
+    internal static string EligibleSku(bool settlement) => BaseEligibleSku + (settlement ? " AND " + NonGiftSku : "");
+
+    private const string BaseEligibleSku = """
         k.BaseUom='EA'
         AND NOT EXISTS (SELECT 1 FROM dbo.F03Lot WITH (HOLDLOCK) WHERE TenantId=k.TenantId AND SkuId=k.Id)
         AND NOT EXISTS (SELECT 1 FROM dbo.F03Unit WITH (HOLDLOCK) WHERE TenantId=k.TenantId AND SkuId=k.Id)
