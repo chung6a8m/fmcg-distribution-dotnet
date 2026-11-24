@@ -63,7 +63,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | [DEV_VERIFIED_LOCAL](app-03-6-settlement.md#kết-quả-local-ngày-24112026) |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn và credit/refund theo vai trên cùng hồ sơ .6 | [DEV_VERIFIED_LOCAL](app-03-7-finance.md#kết-quả-local-ngày-24112026) |
 | APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | [DEV_VERIFIED_LOCAL](app-03-8-owner.md#kết-quả-local-ngày-24112026) |
-| APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | [Tự động đã kiểm chứng, lượt trực tiếp còn mở](app-03-9-acceptance.md#kết-quả-local-ngày-24112026) |
+| APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | [Tự động đã kiểm chứng, lượt trực tiếp còn mở](app-03-9-acceptance.md) |
 
 Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8 → .9**. .2 và .3 có thể tiến hành độc lập khi hợp đồng phiên/bootstrap đã rõ; không phát sinh PR tài liệu trung gian chỉ để xin bắt đầu các hàng đã được chốt.
 

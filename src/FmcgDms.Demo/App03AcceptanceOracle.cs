@@ -9,6 +9,7 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
 {
     private readonly List<Comparison> comparisons = [];
     private readonly List<SqlSnapshot> snapshots = [];
+    private readonly List<CashReplayImage> cashReplay = [];
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     internal async Task<SqlSnapshot> Capture(string stage, string tenant)
@@ -33,11 +34,19 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
         SameHistory(before, after);
     }
 
-    internal void SameHistory(SqlSnapshot before, SqlSnapshot after)
+    internal void SameHistory(SqlSnapshot before, SqlSnapshot after, bool allowNewLoads = false)
     {
-        Check(after.Stage, after.Tenant, "opening digest", "SHA-256", before.History.Openings, after.History.Openings);
+        Check(after.Stage, after.Tenant, "physical opening digest", "SHA-256", before.History.Openings, after.History.Openings);
+        Check(after.Stage, after.Tenant, "warehouse / SKU / lot opening digest", "SHA-256", before.History.LotOpenings, after.History.LotOpenings);
         Check(after.Stage, after.Tenant, "price, terms and delivery snapshot digest", "SHA-256",
             before.History.DayOneSources, after.History.DayOneSources);
+        Check(after.Stage, after.Tenant, "order unit conversion digest", "SHA-256", before.History.Conversions, after.History.Conversions);
+        Check(after.Stage, after.Tenant, "ShipTo payload digest", "SHA-256", before.History.ShipTo, after.History.ShipTo);
+        Check(after.Stage, after.Tenant, "lot hold and issue digest", "SHA-256", before.History.LotAllocations, after.History.LotAllocations);
+        Check(after.Stage, after.Tenant, "delivered lot load digest", "SHA-256",
+            before.History.DeliveredLotLoads, after.History.DeliveredLotLoads);
+        if (!allowNewLoads)
+            Check(after.Stage, after.Tenant, "lot load digest", "SHA-256", before.History.LotLoads, after.History.LotLoads);
     }
 
     internal async Task LinkedSources(SqlSnapshot snapshot)
@@ -96,15 +105,85 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
               AND (SELECT COUNT(DISTINCT actor.Id) FROM (VALUES(r.ActorId),(a.ActorId),(w.ActorId),(p.ActorId)) actor(Id))=4;
             """, new { sale, saleSource, order, trip, pendingOrder, pendingTrip, saleB, visit, cash, offer, cashCommand, caseId, creditId, refundId }, cancellationToken: ct));
         foreach (var row in links) Check(snapshot.Stage, snapshot.Tenant, row.Metric, row.Unit, 1m, row.Value);
-        const string rejected = "SELECT COUNT(*) FROM dbo.BusinessCommand WHERE ProducerId='app03-cashier' AND CommandId IN @Ids";
-        var peerWriteCommand = owner.GetProperty("peerWriteCommand").GetString();
-        var foreignWrite = await db.ExecuteScalarAsync<int>(new CommandDefinition(rejected, new { Ids = new[] { peerWriteCommand } }, cancellationToken: ct));
-        Check(snapshot.Stage, snapshot.Tenant, "foreign write command rows", "rows", 0, foreignWrite);
-        await run.Verify("tenant-b", app03Session: true);
-        await using var peer = new SqlConnection(run.Connection("tenant-b"));
-        var peerCommands = await peer.ExecuteScalarAsync<int>(new CommandDefinition(rejected,
-            new { Ids = new[] { cashCommand, peerWriteCommand } }, cancellationToken: ct));
-        Check(snapshot.Stage, "tenant-b", "foreign write/replay command rows", "rows", 0, peerCommands);
+    }
+
+    internal async Task<CashReplayImage> CaptureCashReplay(string stage)
+    {
+        var sources = await ReadJson("day-one-sources.json");
+        var command = sources.GetProperty("command");
+        var cash = sources.GetProperty("cash").GetProperty("sourceId").GetGuid();
+        var offer = sources.GetProperty("offer").GetGuid();
+        var trip = sources.GetProperty("trip").GetGuid();
+        var key = command.GetProperty("commandId").GetString();
+        var producer = command.GetProperty("producerId").GetString();
+        var number = command.GetProperty("sourceNumber").GetString();
+        var primary = await CaptureCashTenant("tenant-a");
+        var peer = await CaptureCashTenant("tenant-b");
+        var image = new CashReplayImage(stage, primary, peer);
+        cashReplay.Add(image);
+        Check(stage, "tenant-a", "applied cash command, source and line", "rows", 1, primary.Sources.Length);
+        Check(stage, "tenant-a", "cash custody/fund legs", "rows", 2, primary.Effects.Length);
+        Check(stage, "tenant-a", "cash custody leg", "rows", 1, primary.Effects.Count(
+            e => e is { EffectKey: "CUSTODY-OUT", LedgerKind: "CUSTODY", AmountDelta: -20000, QuantityDelta: 0 }));
+        Check(stage, "tenant-a", "cash fund leg", "rows", 1, primary.Effects.Count(
+            e => e is { EffectKey: "FUND-IN", LedgerKind: "FUND", AmountDelta: 20000, QuantityDelta: 0 }));
+        Check(stage, "tenant-b", "foreign cash source", "rows", 0, peer.Sources.Length);
+        Check(stage, "tenant-b", "foreign cash effects", "rows", 0, peer.Effects.Length);
+        return image;
+
+        async Task<CashTenant> CaptureCashTenant(string tenant)
+        {
+            await run.Verify(tenant, app03Session: true);
+            await using var db = new SqlConnection(run.Connection(tenant));
+            using var rows = await db.QueryMultipleAsync(new CommandDefinition("""
+                SELECT c.Id AS CommandRowId,c.CommandId,s.Id AS SourceId,l.Id AS LineId,a.OfferId
+                FROM dbo.BusinessCommand c
+                JOIN dbo.BusinessSource s ON s.TenantId=c.TenantId AND s.BusinessCommandId=c.Id
+                JOIN dbo.BusinessSourceLine l ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
+                JOIN dbo.CashHandoverAcceptance a ON a.TenantId=l.TenantId AND a.SourceLineId=l.Id AND a.Id=s.Id
+                WHERE c.TenantId=@tenant AND c.CommandId=@key AND c.ProducerId=@producer AND c.Status='APPLIED'
+                    AND s.Id=@cash AND s.TripId=@trip AND s.SourceNumber=@number AND s.SourceKind='CASH_HANDOVER_ACCEPT'
+                    AND a.OfferId=@offer AND l.Amount=20000 AND a.AcceptedAmount=20000
+                ORDER BY c.Id,s.Id,l.Id;
+
+                SELECT e.Id,e.BusinessSourceLineId,e.EffectKey,e.LedgerKind,e.AmountDelta,e.QuantityDelta
+                FROM dbo.BusinessSourceLine l JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
+                WHERE l.TenantId=@tenant AND l.BusinessSourceId=@cash ORDER BY e.Id;
+
+                SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                    SELECT
+                        JSON_QUERY((SELECT c.* FROM dbo.BusinessCommand c WHERE c.TenantId=@tenant ORDER BY c.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Commands,
+                        JSON_QUERY((SELECT s.* FROM dbo.BusinessSource s WHERE s.TenantId=@tenant ORDER BY s.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Sources,
+                        JSON_QUERY((SELECT l.* FROM dbo.BusinessSourceLine l WHERE l.TenantId=@tenant ORDER BY l.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Lines,
+                        JSON_QUERY((SELECT e.* FROM dbo.LedgerEffect e WHERE e.TenantId=@tenant ORDER BY e.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Effects,
+                        JSON_QUERY((SELECT a.* FROM dbo.CashHandoverAcceptance a WHERE a.TenantId=@tenant ORDER BY a.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Acceptances,
+                        JSON_QUERY((SELECT k.* FROM dbo.CashierCountEvidence k WHERE k.TenantId=@tenant ORDER BY k.EvidenceRef FOR JSON PATH,INCLUDE_NULL_VALUES)) AS CashCounts,
+                        JSON_QUERY((SELECT q.* FROM dbo.D3CommandScope q WHERE q.TenantId=@tenant ORDER BY q.CommandRowId FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Scopes,
+                        JSON_QUERY((SELECT o.* FROM dbo.CashHandoverOffer o WHERE o.TenantId=@tenant ORDER BY o.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Offers,
+                        JSON_QUERY((SELECT r.* FROM dbo.ReceivableOpenItem r WHERE r.TenantId=@tenant ORDER BY r.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Receivables,
+                        JSON_QUERY((SELECT t.* FROM dbo.Trip t WHERE t.TenantId=@tenant ORDER BY t.Id FOR JSON PATH,INCLUDE_NULL_VALUES)) AS Trips
+                    FOR JSON PATH,WITHOUT_ARRAY_WRAPPER
+                )),2);
+                """, new { tenant, key, producer, number, cash, offer, trip }, cancellationToken: ct));
+            return new((await rows.ReadAsync<CashSource>()).ToArray(), (await rows.ReadAsync<CashEffect>()).ToArray(),
+                await rows.ReadSingleAsync<string>());
+        }
+    }
+
+    internal async Task VerifyCashReplay(CashReplayImage before)
+    {
+        var after = await CaptureCashReplay("after-replay");
+        Compare("tenant-a", before.Primary, after.Primary);
+        Compare("tenant-b", before.Peer, after.Peer);
+
+        void Compare(string tenant, CashTenant expected, CashTenant actual)
+        {
+            Check(after.Stage, tenant, "cash command/source/line identity", "row image",
+                JsonSerializer.Serialize(expected.Sources), JsonSerializer.Serialize(actual.Sources));
+            Check(after.Stage, tenant, "cash ledger effect IDs, legs and amounts", "row image",
+                JsonSerializer.Serialize(expected.Effects), JsonSerializer.Serialize(actual.Effects));
+            Check(after.Stage, tenant, "command, source, ledger and cash row digest", "SHA-256", expected.Digest, actual.Digest);
+        }
     }
 
     internal async Task DayTwoSource(SqlSnapshot snapshot)
@@ -174,7 +253,7 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
     internal async Task Write(string source)
     {
         await File.WriteAllTextAsync(Path.Combine(folder, "sql-review.json"),
-            JsonSerializer.Serialize(new { source, runId = run.Id, snapshots, comparisons }, Json), CancellationToken.None);
+            JsonSerializer.Serialize(new { source, runId = run.Id, snapshots, cashReplay, comparisons }, Json), CancellationToken.None);
         var failed = comparisons.Where(row => !row.Match).ToArray();
         if (failed.Length != 0)
             throw new InvalidOperationException("APP-03.9 SQL differences: " + JsonSerializer.Serialize(failed, Json));
@@ -196,8 +275,14 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
             Measures.Single(row => row.Metric == metric && row.Unit == unit).Value;
     }
 
+    internal sealed record CashReplayImage(string Stage, CashTenant Primary, CashTenant Peer);
+    internal sealed record CashTenant(CashSource[] Sources, CashEffect[] Effects, string Digest);
+    internal sealed record CashSource(Guid CommandRowId, string CommandId, Guid SourceId, Guid LineId, Guid OfferId);
+    internal sealed record CashEffect(Guid Id, Guid BusinessSourceLineId, string EffectKey, string LedgerKind,
+        decimal AmountDelta, decimal QuantityDelta);
     internal sealed record Measure(string Metric, string Unit, decimal Value);
-    internal sealed record History(string Openings, string DayOneSources);
+    internal sealed record History(string Openings, string DayOneSources, string LotOpenings, string Conversions,
+        string ShipTo, string LotAllocations, string LotLoads, string DeliveredLotLoads);
     private sealed record DirectReceipt(Guid Id, Guid CommandId, string ActorId, string Outcome, string Reason);
     private sealed record Comparison(string Stage, string Tenant, string Metric, string Unit, object Expected,
         object Actual, decimal? Diff, bool Match);
@@ -254,6 +339,13 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
             JOIN dbo.AOrder a ON a.Id=l.AOrderId JOIN dbo.Trip t ON t.Id=a.TripId
             WHERE p.TenantId=@tenant AND t.BusinessDate=DATEADD(day,1,@DayOne);
 
+        WITH DayOrders AS (
+            SELECT a.TenantId,a.Id,a.ShipToSnapshotId FROM dbo.AOrder a
+            JOIN dbo.Trip t ON t.TenantId=a.TenantId AND t.Id=a.TripId
+            WHERE a.TenantId=@tenant AND t.BusinessDate=@DayOne
+        ), DayDeliveries AS (
+            SELECT d.* FROM dbo.SaleDelivery d WHERE d.TenantId=@tenant AND d.BusinessDate=@DayOne
+        )
         SELECT
             CONVERT(varchar(64),HASHBYTES('SHA2_256',(
                 SELECT o.* FROM dbo.PhysicalStockOpening o WHERE o.TenantId=@tenant
@@ -268,9 +360,54 @@ internal sealed class App03AcceptanceOracle(DemoRun run, string folder, Cancella
                 (SELECT d.Id,d.ShipToSnapshotId,d.PayableAmount,d.BaseQuantity,d.CostAmount,d.BusinessSourceLineId,d.BusinessDate
                     FROM dbo.SaleDelivery d WHERE d.TenantId=@tenant AND d.BusinessDate=@DayOne
                     ORDER BY d.Id FOR JSON PATH),
+                (SELECT p.* FROM DayDeliveries d
+                    JOIN dbo.F04DeliveryPricing p ON p.TenantId=d.TenantId AND p.DeliveryId=d.Id
+                    ORDER BY p.DeliveryId FOR JSON PATH),
                 (SELECT r.SaleDeliveryId,r.DueBusinessDate,r.OriginalAmount FROM dbo.ReceivableOpenItem r
                     JOIN dbo.SaleDelivery d ON d.Id=r.SaleDeliveryId WHERE r.TenantId=@tenant AND d.BusinessDate=@DayOne
                     ORDER BY d.Id FOR JSON PATH)
-            )),2) AS DayOneSources;
+            )),2) AS DayOneSources,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT o.*,l.SkuId,l.Code,l.ExpiresOn FROM dbo.F03LotOpening o
+                JOIN dbo.F03Lot l ON l.TenantId=o.TenantId AND l.Id=o.LotId WHERE o.TenantId=@tenant
+                ORDER BY o.LotId,o.LocationId FOR JSON PATH,INCLUDE_NULL_VALUES
+            )),2) AS LotOpenings,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT q.*,l.Id AS ConfirmedLineId,l.BaseQuantity,l.UomCode AS ConfirmedUom,l.UomToBaseFactor
+                FROM DayOrders a JOIN dbo.AOrderLine l ON l.TenantId=a.TenantId AND l.AOrderId=a.Id
+                JOIN dbo.F03DraftQuantity q ON q.TenantId=a.TenantId AND q.DraftId=a.Id AND q.LineNumber=l.LineNumber
+                ORDER BY q.DraftId,q.LineNumber FOR JSON PATH,INCLUDE_NULL_VALUES
+            )),2) AS Conversions,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT s.* FROM dbo.ShipToSnapshot s WHERE s.TenantId=@tenant AND s.Id IN (
+                    SELECT ShipToSnapshotId FROM DayOrders UNION SELECT ShipToSnapshotId FROM DayDeliveries
+                ) ORDER BY s.Id FOR JSON PATH,INCLUDE_NULL_VALUES
+            )),2) AS ShipTo,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',CONCAT(
+                (SELECT h.*,l.SkuId,l.Code,l.ExpiresOn FROM dbo.F03LotHold h
+                    JOIN dbo.F03Lot l ON l.TenantId=h.TenantId AND l.Id=h.LotId
+                    JOIN dbo.StockRight r ON r.TenantId=h.TenantId AND r.Id=h.StockRightId
+                    JOIN dbo.Trip t ON t.TenantId=r.TenantId AND t.Id=r.TripId
+                    WHERE h.TenantId=@tenant AND t.BusinessDate=@DayOne
+                    ORDER BY h.StockRightId,h.LotId FOR JSON PATH,INCLUDE_NULL_VALUES),
+                (SELECT i.*,l.SkuId,l.Code,l.ExpiresOn FROM DayDeliveries d
+                    JOIN dbo.F03LotIssue i ON i.TenantId=d.TenantId AND i.DeliveryId=d.Id
+                    JOIN dbo.F03Lot l ON l.TenantId=i.TenantId AND l.Id=i.LotId
+                    ORDER BY i.DeliveryId,i.LotId FOR JSON PATH,INCLUDE_NULL_VALUES)
+            )),2) AS LotAllocations,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT a.*,l.SkuId,l.Code,l.ExpiresOn FROM dbo.F03LotLoad a
+                JOIN dbo.F03Lot l ON l.TenantId=a.TenantId AND l.Id=a.LotId
+                JOIN dbo.TripManifestLine m ON m.TenantId=a.TenantId AND m.Id=a.ManifestLineId
+                JOIN dbo.Trip t ON t.TenantId=m.TenantId AND t.Id=m.TripId
+                WHERE a.TenantId=@tenant AND t.BusinessDate=@DayOne
+                ORDER BY a.ManifestLineId,a.LotId FOR JSON PATH,INCLUDE_NULL_VALUES
+            )),2) AS LotLoads,
+            CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT a.*,l.SkuId,l.Code,l.ExpiresOn FROM dbo.F03LotLoad a
+                JOIN dbo.F03Lot l ON l.TenantId=a.TenantId AND l.Id=a.LotId
+                WHERE a.TenantId=@tenant AND a.ManifestLineId IN (SELECT TripManifestLineId FROM DayDeliveries)
+                ORDER BY a.ManifestLineId,a.LotId FOR JSON PATH,INCLUDE_NULL_VALUES
+            )),2) AS DeliveredLotLoads;
         """;
 }

@@ -1,5 +1,6 @@
-import { access, readFile, unlink, writeFile } from 'node:fs/promises'
+import { access, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createConnection } from 'node:net'
 import { expect, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test'
 import { auth, open, signIn, verifyReturnRefund } from '../e2e-app03-7/return-refund'
 
@@ -10,13 +11,10 @@ const d3 = '/api/synthetic/app02d3'
 const app = '/api/synthetic/app03'
 const folder = process.env.APP03_EVIDENCE_DIR!
 const checkpoint = join(folder, 'day-one-sources.json')
-const pendingKey = 'app02d3.pending.v1.' + JSON.stringify([process.env.APP02C1_RUN_ID, 'tenant-a', 'app03-cashier'])
 type Option = { id: string; label: string }
 type Catalog = { customers: Option[]; trips: Option[]; skus: Option[]; warehouses: Option[] }
 type Reply = { id?: string; sourceId: string; status?: string; replayed?: boolean }
 type CashCommand = { commandId: string; sourceNumber: string; producerId: string; tripId: string; offerId: string }
-type Sources = { trip: string; pendingTrip: string; order: string; pendingOrder: string; delivery: string;
-  saleB: string; cash: Reply; command: CashCommand; offer: string; visit: string; browserPending: string }
 
 async function read<T>(request: APIRequestContext, path: string, role = 'SOURCE'): Promise<T> {
   const response = await request.get(path, { headers: auth(role) })
@@ -32,15 +30,28 @@ async function clickCommand(page: Page, path: string, button: string): Promise<R
   return result.json()
 }
 
-async function sqlCheckpoint(name: string) {
+async function sqlCheckpoint(name: string, timeout = 15_000) {
   const ready = join(folder, name + '.ready')
   const checked = join(folder, name + '.checked')
   await writeFile(ready, '')
   await expect.poll(async () => access(checked).then(() => true, () => false), {
-    timeout: 15_000, message: 'Wait for the SQL snapshot ' + name,
+    timeout, message: 'Wait for the SQL snapshot ' + name,
   }).toBe(true)
   await unlink(ready)
   await unlink(checked)
+}
+
+async function refreshCredentials() {
+  const path = '\\\\.\\pipe\\' + process.env.APP03_ACCEPTANCE_PIPE
+  const socket = createConnection(path)
+  try {
+    const chunks: Buffer[] = []
+    for await (const chunk of socket) chunks.push(chunk)
+    const tokens: Record<string, string> = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    for (const [role, token] of Object.entries(tokens)) process.env['APP03_' + role + '_TOKEN'] = token
+  } finally {
+    socket.destroy()
+  }
 }
 
 async function draft(page: Page, catalog: Catalog, trip: string, quantity: number) {
@@ -70,7 +81,8 @@ async function load(page: Page, trip: string, order: string, quantity: number) {
   await expect(page.getByText('Đã nạp hàng lên xe.')).toBeVisible()
 }
 
-test('day-one hands A and B across roles and leaves a committed cash ACK unknown', async ({ context, request }, info) => {
+test('day-one hands A and B across roles and recovers cash in the same tab after restart', async ({ context, request }, info) => {
+  test.setTimeout(180_000)
   const catalog = await read<Catalog>(request, c2 + '/catalog')
   const trip = catalog.trips.find(row => row.label === 'DEV-20261123-A')!.id
   const pendingTrip = catalog.trips.find(row => row.label === 'DEV-20261123-B')!.id
@@ -149,34 +161,41 @@ test('day-one hands A and B across roles and leaves a committed cash ACK unknown
   const offer = (await clickCommand(sales, d3 + '/offer', 'Gửi đề nghị nộp tiền')).sourceId
   const cashier = await open(context, 'CASHIER', 'settlement?trip=' + trip)
   await expect(cashier.getByText('Mã đề nghị ' + offer)).toBeVisible()
-  let command: CashCommand | undefined
-  let cash: Reply | undefined
+  let submittedCommand: CashCommand | undefined
+  let committedCash: Reply | undefined
   await cashier.route('**' + d3 + '/accept', async route => {
-    command = route.request().postDataJSON()
+    submittedCommand = route.request().postDataJSON()
     const result = await route.fetch({ maxRetries: 0 })
-    cash = await result.json()
-    expect(cash).toMatchObject({ status: 'APPLIED', sourceId: expect.any(String) })
+    committedCash = await result.json()
+    expect(committedCash).toMatchObject({ status: 'APPLIED', sourceId: expect.any(String) })
     await route.abort()
   }, { times: 1 })
   await cashier.getByLabel('Số tiền kiểm đếm (VND)').fill('20000')
   await cashier.getByRole('button', { name: 'Xác nhận đã nhận tiền' }).click()
   await expect(cashier.getByText(/Chưa rõ kết quả/)).toBeVisible()
-  expect(command?.offerId).toBe(offer)
+  if (!submittedCommand || !committedCash) throw new Error('The lost cash ACK was not exercised')
+  const command = submittedCommand
+  const cash = committedCash
+  expect(command.offerId).toBe(offer)
   expect(visit).toBeTruthy()
   expect(saleB).toBeTruthy()
-  const browserPending = await cashier.evaluate(key => sessionStorage.getItem(key), pendingKey)
-  expect(JSON.parse(browserPending!).commandId).toBe(command?.commandId)
+  const pending = cashier.getByRole('region', { name: 'Khôi phục yêu cầu' })
+  await expect(pending).toContainText(command.commandId)
   await writeFile(checkpoint, JSON.stringify({
-    trip, pendingTrip, order, pendingOrder, delivery, deliverySource, saleB, cash, command, offer, visit, browserPending,
+    trip, pendingTrip, order, pendingOrder, delivery, deliverySource, saleB, cash, command, offer, visit,
   }, null, 2))
   await cashier.screenshot({ path: info.outputPath('cash-unknown.png') })
-})
 
-test('resume restores the cash source with current rights and completes the waiting work', async ({ context, request }, info) => {
-  const sources: Sources = JSON.parse(await readFile(checkpoint, 'utf8'))
-  const { trip, pendingTrip, pendingOrder, delivery, command, cash } = sources
+  const oldCashier = auth('CASHIER')
+  await sqlCheckpoint('restart', 60_000)
+  await refreshCredentials()
+  await cashier.reload()
+  await expect(cashier.getByLabel('Mã truy cập DEV')).toBeVisible()
+  await signIn(cashier, 'CASHIER')
+  await expect(pending).toContainText(command.commandId)
+
   const accepted = d3 + `/trips/${trip}/commands/${command.producerId}/${command.commandId}`
-  expect((await request.get(accepted, { headers: auth('OLD_CASHIER') })).status()).toBe(401)
+  expect((await request.get(accepted, { headers: oldCashier })).status()).toBe(401)
   expect((await request.get(accepted, { headers: auth('SOURCE') })).status()).toBe(404)
   const peerTrips = await read<{ tripId: string }[]>(request, d3 + '/trips', 'PEER_CASHIER')
   expect(peerTrips).toHaveLength(2)
@@ -190,10 +209,6 @@ test('resume restores the cash source with current rights and completes the wait
   })).status()).toBe(403)
   expect((await request.post(d3 + '/accept', { headers: auth('PEER_CASHIER'), data: command })).status()).toBe(403)
 
-  const cashier = await context.newPage()
-  await cashier.goto('/work/settlement?trip=' + trip)
-  await cashier.evaluate(([key, value]) => sessionStorage.setItem(key, value), [pendingKey, sources.browserPending])
-  await signIn(cashier, 'CASHIER')
   await cashier.getByRole('button', { name: 'Tra cứu yêu cầu' }).click()
   await expect(cashier.getByText('Đã ghi nhận thủ quỹ nhận tiền.')).toBeVisible()
   expect(await read(request, accepted, 'CASHIER')).toMatchObject({ sourceId: cash.sourceId })
@@ -202,8 +217,10 @@ test('resume restores the cash source with current rights and completes the wait
   expect(await replay.json()).toMatchObject({ sourceId: cash.sourceId, replayed: true })
   expect(await read(request, d3 + '/trips/' + trip)).toMatchObject({ custody: 0, fund: 20000, pendingOfferId: null })
   await cashier.screenshot({ path: info.outputPath('cash-recovered.png') })
-  const warehouse = await open(context, 'RECEIVER', `load?trip=${pendingTrip}&order=${pendingOrder}`)
-  await load(warehouse, pendingTrip, pendingOrder, 2)
+  await writeFile(join(folder, 'replay-probes.json'), JSON.stringify({ peerWriteCommand }))
+  await sqlCheckpoint('after-cash-replay')
+  const resumedWarehouse = await open(context, 'RECEIVER', `load?trip=${pendingTrip}&order=${pendingOrder}`)
+  await load(resumedWarehouse, pendingTrip, pendingOrder, 2)
   const refund = await verifyReturnRefund(context, request, delivery, 'APP03-9')
   const owner = await open(context, 'OWNER', 'owner')
   await expect(owner.getByRole('heading', { name: 'Tổng quan Chủ NPP' })).toBeVisible()
@@ -214,7 +231,7 @@ test('resume restores the cash source with current rights and completes the wait
   await owner.screenshot({ path: info.outputPath('owner-credit.png'), fullPage: true })
   const report = await read(request, app + '/owner-overview', 'OWNER')
   const peer = await read(request, app + '/owner-overview', 'PEER_OWNER')
-  await writeFile(join(folder, 'owner.json'), JSON.stringify({ report, peer, refund, peerWriteCommand }, null, 2))
+  await writeFile(join(folder, 'owner.json'), JSON.stringify({ report, peer, refund }, null, 2))
 })
 
 test('day-two confirms new pricing on the prepared trip', async ({ context, request }) => {

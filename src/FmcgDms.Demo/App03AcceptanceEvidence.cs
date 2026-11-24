@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -16,6 +17,8 @@ internal static class App03AcceptanceEvidence
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(8));
         var ct = deadline.Token;
         Task? session = null;
+        App03AcceptanceOracle.SqlSnapshot? stopped = null;
+        string pipeName = "FmcgDms.APP03.9." + run.Id;
         var hosts = new List<HostReceipt>();
         var oracle = new App03AcceptanceOracle(run, folder, ct);
         bool direct = Environment.GetEnvironmentVariable("APP03_ACCEPTANCE_DIRECT") == "1";
@@ -27,31 +30,14 @@ internal static class App03AcceptanceEvidence
             oracle.Expected(initial, "refund-sku-main", "EA", 6);
             oracle.Expected(peer, "refund-sku-main", "EA", 6);
             oracle.Expected(peer, "refund-treasury", "VND", 100000);
-            await Browser(first, "day-one");
+            await Browser(first, "day-one", CoordinateDayOne);
             await Stop();
-            var before = await oracle.Capture("stopped", "tenant-a");
-            oracle.Expected(before, "refund-sku-main", "EA", 4);
-            oracle.Expected(before, "refund-sku-truck-b", "EA", 0);
-            oracle.Expected(before, "refund-sku-b-reservation", "EA", 2);
-            oracle.Expected(before, "orders", "rows", 2);
-            oracle.Expected(before, "deliveries", "rows", 2);
-            oracle.Expected(before, "visits", "rows", 1);
-            oracle.Expected(before, "ar-a", "VND", 20000);
-            oracle.Expected(before, "ar-b", "VND", 0);
-            oracle.Expected(before, "custody", "VND", 0);
-            oracle.Expected(before, "fund", "VND", 20000);
-            oracle.Expected(before, "advance", "VND", 500000);
-            oracle.Expected(before, "acceptances", "rows", 1);
-            oracle.Expected(before, "cash-counts", "rows", 1);
-            var resumed = await Open("Resume");
-            oracle.SameMeasures(before, await oracle.Capture("resumed", "tenant-a"));
-            await Browser(resumed, "resume", first.CashierToken);
-            await Stop();
+            var before = stopped ?? throw new InvalidOperationException("The restart checkpoint was not captured.");
 
             var close = await oracle.Capture("day-one-close", "tenant-a");
             var peerClose = await oracle.Capture("day-one-close", "tenant-b");
             oracle.SameMeasures(peer, peerClose);
-            oracle.SameHistory(before, close);
+            oracle.SameHistory(before, close, allowNewLoads: true);
             oracle.Expected(close, "refund-sku-main", "EA", 3);
             oracle.Expected(close, "refund-sku-main-value", "VND", 9000);
             oracle.Expected(close, "refund-sku-truck-b", "EA", 2);
@@ -164,33 +150,79 @@ internal static class App03AcceptanceEvidence
             throw new InvalidOperationException("The DEV browser origin still responds after Stop.");
         }
 
-        async Task CheckAdvance(Task exited)
+        async Task CoordinateDayOne(Task exited)
         {
-            var unpaid = await Checkpoint("before-advance");
-            if (unpaid is null) return;
-            var issued = await Checkpoint("after-advance");
-            if (issued is null) return;
+            if (!await WaitForBrowser("before-advance", exited)) return;
+            var unpaid = await oracle.Capture("before-advance", "tenant-a");
+            await Acknowledge("before-advance");
+            if (!await WaitForBrowser("after-advance", exited)) return;
+            var issued = await oracle.Capture("after-advance", "tenant-a");
             oracle.SameMeasures(unpaid, issued, "advance");
             oracle.Expected(unpaid, "ar-a", "VND", 20000);
             oracle.Expected(unpaid, "custody", "VND", 20000);
             oracle.Expected(unpaid, "fund", "VND", 0);
             oracle.Expected(unpaid, "advance", "VND", 0);
             oracle.Expected(issued, "advance", "VND", 500000);
+            await Acknowledge("after-advance");
 
-            async Task<App03AcceptanceOracle.SqlSnapshot?> Checkpoint(string name)
+            if (!await WaitForBrowser("restart", exited)) return;
+            await Stop();
+            var before = await oracle.Capture("stopped", "tenant-a");
+            stopped = before;
+            oracle.Expected(before, "refund-sku-main", "EA", 4);
+            oracle.Expected(before, "refund-sku-truck-b", "EA", 0);
+            oracle.Expected(before, "refund-sku-b-reservation", "EA", 2);
+            oracle.Expected(before, "orders", "rows", 2);
+            oracle.Expected(before, "deliveries", "rows", 2);
+            oracle.Expected(before, "visits", "rows", 1);
+            oracle.Expected(before, "ar-a", "VND", 20000);
+            oracle.Expected(before, "ar-b", "VND", 0);
+            oracle.Expected(before, "custody", "VND", 0);
+            oracle.Expected(before, "fund", "VND", 20000);
+            oracle.Expected(before, "advance", "VND", 500000);
+            oracle.Expected(before, "acceptances", "rows", 1);
+            oracle.Expected(before, "cash-counts", "rows", 1);
+            var peerBefore = await oracle.Capture("stopped", "tenant-b");
+            var cashBefore = await oracle.CaptureCashReplay("before-replay");
+            var resumed = await Open("Resume");
+            oracle.SameMeasures(before, await oracle.Capture("resumed", "tenant-a"));
+            using (var pipe = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
             {
-                while (!File.Exists(Path.Combine(folder, name + ".ready")))
-                {
-                    if (exited.IsCompleted) return null;
-                    await Task.Delay(100, ct);
-                }
-                var snapshot = await oracle.Capture(name, "tenant-a");
-                await File.WriteAllTextAsync(Path.Combine(folder, name + ".checked"), "", ct);
-                return snapshot;
+                await Acknowledge("restart");
+                await pipe.WaitForConnectionAsync(ct).WaitAsync(TimeSpan.FromSeconds(15), ct);
+                await JsonSerializer.SerializeAsync(pipe, Credentials(resumed), cancellationToken: ct);
             }
+
+            if (!await WaitForBrowser("after-cash-replay", exited)) return;
+            oracle.SameMeasures(before, await oracle.Capture("after-replay", "tenant-a"));
+            oracle.SameMeasures(peerBefore, await oracle.Capture("after-replay", "tenant-b"));
+            await oracle.VerifyCashReplay(cashBefore);
+            await Acknowledge("after-cash-replay");
         }
 
-        async Task Browser(App03DevHost active, string stage, string? oldToken = null)
+        async Task<bool> WaitForBrowser(string name, Task exited)
+        {
+            while (!File.Exists(Path.Combine(folder, name + ".ready")))
+            {
+                if (exited.IsCompleted) return false;
+                await Task.Delay(100, ct);
+            }
+            return true;
+        }
+
+        Task Acknowledge(string name) => File.WriteAllTextAsync(Path.Combine(folder, name + ".checked"), "", ct);
+
+        static Dictionary<string, string> Credentials(App03DevHost host) => new(host.FinanceCredentials!)
+        {
+            ["SOURCE"] = host.SourceToken,
+            ["RECEIVER"] = host.ReceiverToken,
+            ["FINANCE"] = host.FinanceToken,
+            ["QA"] = host.QaToken,
+            ["CASHIER"] = host.CashierToken
+        };
+
+        async Task Browser(App03DevHost active, string stage, Func<Task, Task>? coordinate = null)
         {
             var start = new ProcessStartInfo("node")
             {
@@ -203,13 +235,8 @@ internal static class App03AcceptanceEvidence
             start.Environment["APP02C1_RUN_ID"] = run.Id;
             start.Environment["APP03_ACCEPTANCE_STAGE"] = stage;
             start.Environment["APP03_EVIDENCE_DIR"] = folder;
-            start.Environment["APP03_SOURCE_TOKEN"] = active.SourceToken;
-            start.Environment["APP03_RECEIVER_TOKEN"] = active.ReceiverToken;
-            start.Environment["APP03_FINANCE_TOKEN"] = active.FinanceToken;
-            start.Environment["APP03_QA_TOKEN"] = active.QaToken;
-            start.Environment["APP03_CASHIER_TOKEN"] = active.CashierToken;
-            if (oldToken is not null) start.Environment["APP03_OLD_CASHIER_TOKEN"] = oldToken;
-            foreach (var (role, token) in active.FinanceCredentials!)
+            start.Environment["APP03_ACCEPTANCE_PIPE"] = pipeName;
+            foreach (var (role, token) in Credentials(active))
                 start.Environment["APP03_" + role + "_TOKEN"] = token;
             using var browser = Process.Start(start) ?? throw new InvalidOperationException("Cannot start APP-03.9 Chromium.");
             try
@@ -217,7 +244,7 @@ internal static class App03AcceptanceEvidence
                 var stdout = browser.StandardOutput.ReadToEndAsync(ct);
                 var stderr = browser.StandardError.ReadToEndAsync(ct);
                 var exited = browser.WaitForExitAsync(ct);
-                if (stage == "day-one") await CheckAdvance(exited);
+                if (coordinate is not null) await coordinate(exited);
                 await exited;
                 await File.WriteAllTextAsync(Path.Combine(folder, stage + ".log"),
                     await stdout + Environment.NewLine + await stderr, ct);
