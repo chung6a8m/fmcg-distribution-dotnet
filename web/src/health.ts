@@ -1,14 +1,19 @@
-/** Validate the API's own liveness contract, not merely an HTTP 200 from SPA fallback. */
-export async function isLiveApiResponse(response: Response): Promise<boolean> {
+/** Validate the API's own liveness contract and read the optional integrated workspace. */
+export async function readApiHealth(response: Response): Promise<{ workspaceProfile?: string } | null> {
   const contentType = response.headers.get('content-type') ?? ''
-  if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(contentType)) return false
+  if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(contentType)) return null
 
   try {
     const payload: unknown = await response.json()
-    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null
     const body = payload as Record<string, unknown>
-    return body.status === 'live' && body.scope === 'APP-00A' && body.businessWrites === false
+    if (body.status !== 'live' || body.scope !== 'APP-00A' || body.businessWrites !== false) return null
+    return typeof body.workspaceProfile === 'string' ? { workspaceProfile: body.workspaceProfile } : {}
   } catch {
-    return false
+    return null
   }
+}
+
+export async function isLiveApiResponse(response: Response): Promise<boolean> {
+  return (await readApiHealth(response)) !== null
 }

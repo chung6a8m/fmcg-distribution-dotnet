@@ -137,10 +137,16 @@ function DraftLineFields({ row, index, catalog, onRemove }: {
   </fieldset>
 }
 
-function DraftForm({ session, catalog, disabled, save }: {
+type DraftContext = {
+  customer: string; trip: string
+  onCustomerChange: (id: string) => void; onTripChange: (id: string) => void
+}
+
+function DraftForm({ session, catalog, disabled, save, context }: {
   session: Session; catalog: Catalog; disabled: boolean; save: (path: Command['path'], fields: object) => void
+  context?: DraftContext
 }) {
-  const [customer, setCustomer] = useState('')
+  const [customer, setCustomer] = useState(() => catalog.customers.find(row => row.id === context?.customer)?.id ?? '')
   const [detail, setDetail] = useState<Detail | null>(null)
   const [selectionError, setSelectionError] = useState('')
   const [rows, setRows] = useState(() => [crypto.randomUUID()])
@@ -168,7 +174,11 @@ function DraftForm({ session, catalog, disabled, save }: {
   }}>
     <h2>Tạo đơn A nháp</h2>
     <label className="field">Khách hàng
-      <select required value={customer} onChange={event => { setCustomer(event.target.value); setSelectionError('') }}>
+      <select required value={customer} onChange={event => {
+        setCustomer(event.target.value)
+        context?.onCustomerChange(event.target.value)
+        setSelectionError('')
+      }}>
         <option value="">Chọn khách hàng</option>
         {catalog.customers.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
       </select>
@@ -182,9 +192,12 @@ function DraftForm({ session, catalog, disabled, save }: {
       </select>
     </label>
     {selectionError && <p role="alert">{selectionError}</p>}
-    {current?.selections.length === 0 && <a className="page-link" href="/sales/customers">Chọn địa chỉ trong hồ sơ khách hàng</a>}
+    {current?.selections.length === 0 && <a className="page-link" href={context ? '/work/customers?customer=' + customer : '/sales/customers'}>
+      Chọn địa chỉ trong hồ sơ khách hàng
+    </a>}
     <label className="field">Chuyến
-      <select name="trip" defaultValue="" required>
+      <select name="trip" defaultValue={catalog.trips.find(row => row.id === context?.trip)?.id ?? ''} required
+        onChange={event => context?.onTripChange(event.target.value)}>
         <option value="">Chọn chuyến</option>
         {catalog.trips.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
       </select>
@@ -198,7 +211,9 @@ function DraftForm({ session, catalog, disabled, save }: {
   </form>
 }
 
-export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: string; onOpenAr?: (orderId: string) => void }) {
+export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrder }: {
+  workspaceToken?: string; onOpenAr?: (orderId: string) => void; context?: DraftContext; selectedOrder?: string
+}) {
   const [session, setSession] = useState<Session | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [orders, setOrders] = useState<Order[]>([])
@@ -328,7 +343,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
           <Button disabled={busy || offline} onClick={() => void resolve(pending, false)}>Gửi lại yêu cầu</Button>
         </div>
       </section>}
-      {session.identity.sales && <DraftForm session={session} catalog={catalog} disabled={disabled} save={save} />}
+      {session.identity.sales && <DraftForm session={session} catalog={catalog} disabled={disabled} save={save} context={context} />}
       <section className="panel panel-content" aria-labelledby="c2-orders">
         <h2 id="c2-orders">Đơn A</h2>
         {orders.length === 0 && <p>Chưa có đơn A.</p>}
@@ -336,7 +351,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr }: { workspaceToken?: 
           <h3>{order.customer} · {order.trip}</h3>
           <p>{order.shipTo}</p>
           <p><strong>{labels[order.status] ?? order.status}</strong>{order.businessDate && ' · ' + order.businessDate.slice(0, 10)}</p>
-          {workspaceToken && order.confirmSourceId && <details>
+          {workspaceToken && order.confirmSourceId && <details open={selectedOrder === order.id || undefined}>
             <summary>Nguồn và địa chỉ đã Confirm</summary>
             <p className="c3-source">Nguồn Confirm {order.confirmSourceId}</p>
             <p className="c3-source">Mã đơn {order.id}</p>

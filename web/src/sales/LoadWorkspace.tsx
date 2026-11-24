@@ -47,7 +47,9 @@ async function get<T>(token: string, path: string, service = api): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function LoadWorkspace({ workspaceToken }: { workspaceToken?: string }) {
+export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
+  workspaceToken?: string; startTrip?: string; onTripChange?: (trip: string) => void
+}) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
   const [trip, setTrip] = useState('')
@@ -112,7 +114,10 @@ export function LoadWorkspace({ workspaceToken }: { workspaceToken?: string }) {
       setTrips(available)
       setPending(saved)
       setSource('')
-      await refresh(token, available.find(t => t.id === saved?.tripId)?.id ?? available[0]?.id ?? '')
+      const selected = available.find(t => t.id === saved?.tripId) ?? available.find(t => t.id === startTrip)
+      const effectiveTrip = selected?.id ?? available[0]?.id ?? ''
+      onTripChange?.(effectiveTrip)
+      await refresh(token, effectiveTrip)
     })
   }
 
@@ -201,7 +206,7 @@ export function LoadWorkspace({ workspaceToken }: { workspaceToken?: string }) {
       {trips.length === 0 ? <p>Chưa có chuyến được phân công.</p> : <>
         <label className="field">Chuyến
           <select value={trip} disabled={off || !!pending}
-            onChange={event => { const id = event.target.value; void work(() => refresh(session.token, id)) }}>
+            onChange={event => { const id = event.target.value; onTripChange?.(id); void work(() => refresh(session.token, id)) }}>
             {trips.map(t => <option key={t.id} value={t.id}>{t.code}</option>)}
           </select>
         </label>

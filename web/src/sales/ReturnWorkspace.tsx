@@ -3,8 +3,8 @@ import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
-type Role = 'sales' | 'warehouse' | 'finance' | 'case_checker'
-type Session = { token: string; identity: Identity & { role: Role } }
+export type ReturnRole = 'sales' | 'warehouse' | 'finance' | 'case_checker'
+type Session = { token: string; identity: Identity & { role: ReturnRole } }
 type Delivery = { deliveryId: string; lotId: string; lotCode: string; customer: string; sku: string
   issued: number; available: number }
 type ReturnCase = { id: string; deliveryId: string; lotId: string; lotCode: string; customer: string; sku: string
@@ -46,7 +46,9 @@ function sourceKey(delivery: Delivery) {
   return delivery.deliveryId + ':' + delivery.lotId
 }
 
-export function ReturnWorkspace() {
+export function ReturnWorkspace({ workspaceSession, startSource, startDelivery, onSourceChange }: {
+  workspaceSession?: Session; startSource?: string; startDelivery?: string; onSourceChange?: (source: string) => void
+} = {}) {
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -79,6 +81,10 @@ export function ReturnWorkspace() {
     }
   }
 
+  if (workspaceSession)
+    return <ReturnPanel session={workspaceSession} offline={offline}
+      startSource={startSource} startDelivery={startDelivery} onSourceChange={onSourceChange} />
+
   return <main className="page c1-page">
     <header className="page-heading c1-header">
       <div><h1>Trả hàng</h1><p>DEV{session && ' · ' + session.identity.tenantId + ' · ' + session.identity.actorId}</p></div>
@@ -96,13 +102,16 @@ export function ReturnWorkspace() {
   </main>
 }
 
-function ReturnPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
+function ReturnPanel({ session: { token, identity }, offline, startSource = '', startDelivery, onSourceChange }: {
+  session: Session; offline: boolean; startSource?: string; startDelivery?: string; onSourceChange?: (source: string) => void
+}) {
   const phase = phases[identity.role]
   const request = phase.action === 'REQUEST'
   const receive = phase.action === 'RECEIVE'
   const key = 'dev-f05.return.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
   const [ledger, setLedger] = useState<Ledger | null>(null)
-  const [selection, setSelection] = useState('')
+  const [pickedSource, setSelection] = useState<string | null>(null)
+  const [linkedDelivery, setLinkedDelivery] = useState(startDelivery)
   const [receivedQuantity, setReceivedQuantity] = useState('')
   const [pending, setPending] = useState(() => restore(key))
   const [busy, setBusy] = useState(false)
@@ -112,8 +121,11 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
   const operation = useRef(false)
   const form = useRef<HTMLFormElement>(null)
   const id = useId()
-  const deliveries = ledger?.deliveries.filter(row => row.available > 0) ?? []
+  const deliveries = ledger?.deliveries.filter(row => row.available > 0
+    && (!linkedDelivery || row.deliveryId === linkedDelivery)) ?? []
   const cases = ledger?.cases.filter(row => row.state === phase.state) ?? []
+  const linkedSource = deliveries.length === 1 ? sourceKey(deliveries[0]) : ''
+  const selection = pickedSource ?? (linkedDelivery ? linkedSource : startSource)
   const delivery = deliveries.find(row => sourceKey(row) === selection)
   const returnCase = cases.find(row => row.id === selection)
   const formDisabled = offline || busy || pending !== null || loadError !== '' || ledger?.refresh !== refresh
@@ -166,6 +178,7 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
       if (outcome.status === 'APPLIED') {
         form.current?.reset()
         setSelection('')
+        onSourceChange?.('')
         setReceivedQuantity('')
         setMessage('Đã ghi hồ sơ trả hàng.')
       } else if (outcome.reasonCode === 'F05_COUNT_MISMATCH') {
@@ -212,7 +225,16 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
       <h2>{phase.label}</h2>
       {loadError && <p role="alert">{loadError}</p>}
       <div className="button-row"><Button disabled={offline || busy || pending !== null}
-        onClick={() => setRefresh(value => value + 1)}>Tải lại danh sách</Button></div>
+        onClick={() => setRefresh(value => value + 1)}>Tải lại danh sách</Button>
+        {request && linkedDelivery && <Button onClick={() => {
+          setLinkedDelivery(undefined)
+          setSelection('')
+          onSourceChange?.('')
+        }}>Xem tất cả lần giao</Button>}
+      </div>
+      {request && linkedDelivery && ledger && !loadError && <p role="status">{deliveries.length
+        ? 'Đang xem các lô của lần giao đã chọn.'
+        : 'Không có lô còn được trả trong phạm vi của lần giao này.'}</p>}
       <form ref={form} onSubmit={submit}>
         <fieldset className="c1-fields" disabled={formDisabled}>
           <div className="field">
@@ -220,6 +242,7 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
             <select id={id + '-selection'} required value={delivery || returnCase ? selection : ''}
               onChange={event => {
                 setSelection(event.currentTarget.value)
+                onSourceChange?.(event.currentTarget.value)
                 setReceivedQuantity('')
               }}>
               <option value="">{request ? 'Chọn nguồn giao' : 'Chọn hồ sơ'}</option>
@@ -261,6 +284,12 @@ function ReturnPanel({ session: { token, identity }, offline }: { session: Sessi
           {row.releasedCost != null && <p>Giá vốn hoàn {amounts.format(row.releasedCost)} VND</p>}
           <p>Mã lần giao {row.deliveryId}</p>
           <p>Mã hồ sơ {row.id}</p>
+          {onSourceChange && row.state === phase.state && <Button disabled={formDisabled} onClick={() => {
+            setSelection(row.id)
+            onSourceChange(row.id)
+            setReceivedQuantity('')
+            document.getElementById(id + '-selection')?.focus()
+          }}>Mở hồ sơ</Button>}
         </div></li>)}
       </ul>}
     </section>

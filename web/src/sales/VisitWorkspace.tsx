@@ -19,11 +19,14 @@ function restore(key: string): Pending | null {
   } catch { return null }
 }
 
-export function VisitWorkspace({ token, identity }: { token: string; identity: Identity }) {
+export function VisitWorkspace({ token, identity, startCustomer, onCustomerChange }: {
+  token: string; identity: Identity; startCustomer?: string; onCustomerChange?: (id: string) => void
+}) {
   const key = 'dev-f01.visit.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
   const [pending, setPending] = useState(() => restore(key))
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [customerId, setCustomerId] = useState(() => pending?.customerId ?? '')
+  const [selectedCustomer, setCustomerId] = useState(() => pending?.customerId ?? startCustomer ?? '')
+  const customerId = customers.some(row => row.id === selectedCustomer) ? selectedCustomer : ''
   const [loaded, setLoaded] = useState<{ customerId: string; detail: Detail; visits: Visit[] }>()
   const [refresh, setRefresh] = useState(0)
   const [offline, setOffline] = useState(() => !navigator.onLine)
@@ -140,6 +143,7 @@ export function VisitWorkspace({ token, identity }: { token: string; identity: I
         onChange={event => {
           setLoaded(undefined)
           setCustomerId(event.currentTarget.value)
+          onCustomerChange?.(event.currentTarget.value)
           setVisitError('')
           setMessage('')
         }}>

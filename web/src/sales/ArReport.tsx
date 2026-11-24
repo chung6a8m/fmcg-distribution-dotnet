@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useEffectEvent, useState } from 'react'
 import { Button, Field } from '../ui/controls'
 import { HttpError, read, readError, requestSalesApi, type Customer } from './customer-api'
 
@@ -15,6 +15,7 @@ type CustomerTotal = {
   knownBalance: string | null; knownOverdue: string | null
 }
 type Report = {
+  currency?: 'VND'
   asOf: string; expected: number | null; reconciled: number; knownBalance: string | null
   knownOverdue: string | null; customers: CustomerTotal[]; sources: Source[]
 }
@@ -36,7 +37,7 @@ function queryFor(filter: Filter) {
   return query
 }
 
-function SourceDetail({ source }: { source: Source }) {
+function SourceDetail({ source, returnUrl }: { source: Source; returnUrl?: string }) {
   return <details className="panel panel-content">
     <summary>{source.customer} · {source.trip} · {statusText[source.status]}</summary>
     <dl className="sales-facts">
@@ -64,10 +65,45 @@ function SourceDetail({ source }: { source: Source }) {
       {source.deliveryId && <><dt>Mã lần giao</dt><dd>{source.deliveryId}</dd></>}
       {source.shipToSnapshotId && <><dt>Bản chụp địa chỉ</dt><dd>{source.shipToSnapshotId}</dd></>}
     </dl>
+    {returnUrl && source.deliveryId && <a className="page-link" href={returnUrl + '?delivery=' + source.deliveryId}>Trả hàng từ lần giao này</a>}
   </details>
 }
 
-export function ArReport({ token, orderId }: { token: string; orderId: string }) {
+type ReportProps = { token: string; orderId: string; returnUrl?: string }
+
+export function ScopedArReport({ onCheckOrder, ...props }: ReportProps & { onCheckOrder: (id: string) => void }) {
+  const { orderId, token } = props
+  const [checked, setChecked] = useState('')
+  const [error, setError] = useState('')
+  const publish = useEffectEvent((id: string) => onCheckOrder(id))
+
+  useEffect(() => {
+    if (!orderId) return
+    let active = true
+    async function load<T>(api: string, path: string): Promise<T[]> {
+      const response = await requestSalesApi(api, token, path)
+      if (!response.ok) throw new HttpError(response.status)
+      return response.json() as Promise<T[]>
+    }
+    void Promise.all([
+      load<{ id: string; trip: string }>('/api/synthetic/app02c2', '/orders'),
+      load<{ code: string }>('/api/synthetic/app02c4', '/trips'),
+    ]).then(([orders, trips]) => {
+      if (!active) return
+      const order = orders.find(row => row.id === orderId)
+      const allowed = order && trips.some(trip => trip.code === order.trip)
+      publish(allowed ? orderId : '')
+      if (allowed) setChecked(orderId)
+    }).catch(error => { if (active) setError(readError(error)) })
+    return () => { active = false }
+  }, [token, orderId])
+
+  if (!orderId || checked === orderId) return <ArReport {...props} />
+  if (error) return <p role="alert">{error}</p>
+  return <p role="status">Đang kiểm tra phạm vi của đơn…</p>
+}
+
+export function ArReport({ token, orderId, returnUrl }: ReportProps) {
   const [filter, setFilter] = useState<Filter>({ asOf: '', customerId: '', orderId, deliveryId: '', due: '', overdue: '' })
   const [report, setReport] = useState<Report | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -145,7 +181,7 @@ export function ArReport({ token, orderId }: { token: string; orderId: string })
     {error && <p role="alert">{error}</p>}
     {report && <section className="panel panel-content" aria-label="Kết quả báo cáo AR">
       <p>Mốc UTC <time dateTime={report.asOf}>{report.asOf}</time></p>
-      <p>Phạm vi chuyến được phân công · SYNTHETIC_UNITLESS</p>
+      <p>Phạm vi chuyến được phân công · {report.currency ?? 'SYNTHETIC_UNITLESS'}</p>
       <Button disabled={exporting} onClick={() => void download(report.asOf)}>Xuất JSON</Button>
       {report.expected === null ? <p>Chưa có bằng chứng giao hàng trong phạm vi này.</p> : <>
         <p>Nguồn đã đối soát {report.reconciled}/{report.expected} lần giao đã ghi nhận</p>
@@ -157,7 +193,7 @@ export function ArReport({ token, orderId }: { token: string; orderId: string })
             <span>{c.reconciled}/{c.expected} · Còn nợ {decimal(c.knownBalance)} · Quá hạn {decimal(c.knownOverdue)}</span>
           </li>)}
         </ul>
-        {report.sources.map(source => <SourceDetail key={JSON.stringify([source.owner, source.commandId])} source={source} />)}
+        {report.sources.map(source => <SourceDetail key={JSON.stringify([source.owner, source.commandId])} source={source} returnUrl={returnUrl} />)}
       </>}
     </section>}
   </section>

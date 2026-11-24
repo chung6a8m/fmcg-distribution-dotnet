@@ -22,6 +22,8 @@ export class HttpError extends Error {
   constructor(readonly status: number) { super('HTTP ' + status) }
 }
 
+export const salesAuthorizationChanged = 'sales-authorization-changed'
+
 export async function request(token: string, path: string, body?: string) {
   return requestSalesApi(base, token, path, body)
 }
@@ -29,10 +31,13 @@ export async function request(token: string, path: string, body?: string) {
 export async function requestSalesApi(api: string, token: string, path: string, body?: string) {
   const headers = new Headers({ Authorization: 'Bearer ' + token, Accept: 'application/json' })
   if (body !== undefined) headers.set('Content-Type', 'application/json')
-  return fetch(api + path, {
+  const response = await fetch(api + path, {
     method: body === undefined ? 'GET' : 'POST', headers, body, cache: 'no-store',
     signal: AbortSignal.timeout(15_000), redirect: 'error',
   })
+  if (response.status === 401 || response.status === 403)
+    window.dispatchEvent(new Event(salesAuthorizationChanged))
+  return response
 }
 
 export async function read<T>(token: string, path: string): Promise<T> {

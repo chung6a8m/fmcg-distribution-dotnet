@@ -41,7 +41,7 @@ public static class SyntheticAuth
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(enabled ? key! : new string('X', 64))),
-                    ClockSkew = TimeSpan.FromSeconds(5)
+                    ClockSkew = cfg.GetValue<bool>("App03:Workspace") ? TimeSpan.Zero : TimeSpan.FromSeconds(5)
                 };
                 options.Events = enabled
                     ? new JwtBearerEvents
