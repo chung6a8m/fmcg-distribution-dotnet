@@ -10,6 +10,7 @@ internal sealed class App03DevSession
 {
     private const string ManifestVersion = "APP-03-session-v1";
     private const string SchemaVersion = "C5+F01+F03+F04+F05/v1";
+    private const string FieldSchemaVersion = "C5+F01+F03+F04+F05+D1+D2+Field/v1";
     private const string LegacySeedVersion = "APP-03-C2-F05-v1";
     private readonly string folder;
     private readonly string manifestPath;
@@ -21,15 +22,18 @@ internal sealed class App03DevSession
     internal DemoRun RunId { get; }
     internal bool Resume { get; }
     internal bool VerifyHandoff { get; private init; }
+    internal bool VerifyField { get; private init; }
     internal bool UsesBusinessDay { get; private set; } = true;
+    internal bool UsesField { get; private set; }
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
     internal CancellationToken StopToken { get; private set; }
 
-    private App03DevSession(string id, string source, bool resume)
+    private App03DevSession(string id, string source, bool resume, bool startBeforeField)
     {
         this.source = source;
         Resume = resume;
+        UsesField = !startBeforeField;
         RunId = new DemoRun(id);
         string home = Directory.CreateDirectory(Home).FullName;
         folder = Path.Combine(home, id);
@@ -38,7 +42,8 @@ internal sealed class App03DevSession
         signalName = $@"Local\FmcgDms.APP03.{id}";
         expected = new Manifest(ManifestVersion, id, DemoRun.Instance,
             new Binding("tenant-a", RunId.Name("tenant-a"), id), new Binding("tenant-b", RunId.Name("tenant-b"), id),
-            App03A1Profile.Name, SchemaVersion, App03DayBootstrap.Version,
+            UsesField ? App03A1Profile.FieldName : App03A1Profile.Name,
+            UsesField ? FieldSchemaVersion : SchemaVersion, App03DayBootstrap.Version,
             App03DayBootstrap.Clock(App03DayBootstrap.FirstDay), source, WebPort: 0, Ready: false);
     }
 
@@ -48,17 +53,20 @@ internal sealed class App03DevSession
     internal static bool HasManifest(string id) => File.Exists(Path.Combine(Home, new DemoRun(id).Id, "session.json"));
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
-        Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false)
+        Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
+        bool verifyField = false, bool startBeforeField = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
+        if (operation == "VerifyField") { await App03WorkspaceEvidence.Run(root, source, field: true); return; }
         if (operation == "VerifyHandoff") { await App03WorkspaceEvidence.Run(root, source, handoff: true); return; }
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
-        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume")
+        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField)
         {
-            VerifyHandoff = verifyHandoff
+            VerifyHandoff = verifyHandoff,
+            VerifyField = verifyField
         };
 
         using var sessionLock = session.Acquire();
@@ -128,12 +136,14 @@ internal sealed class App03DevSession
         UsesBusinessDay = metadata.Seed == App03DayBootstrap.Version;
         if (!UsesBusinessDay)
         {
+            UsesField = false;
             if (await File.ReadAllTextAsync(ClockPath) != metadata.ClockUtc.ToString("O"))
                 throw new InvalidOperationException("APP-03 session clock does not match its manifest.");
         }
         else
         {
-            await PrepareDay(metadata.ClockUtc);
+            await PrepareFieldDay(metadata.ClockUtc);
+            await PublishFieldUpgrade(metadata);
         }
         WebPort = metadata.WebPort;
         Console.WriteLine($"APP-03 DEV resuming {RunId.Id} from {metadata.CreatedSource}, runtime {source}.");
@@ -154,10 +164,11 @@ internal sealed class App03DevSession
         // prepared; NextDay and Resume both finish the same date before a host can serve it.
         if (target != current)
         {
-            await PrepareDay(metadata.ClockUtc);
-            await Write(metadata with { ClockUtc = clock });
+            await PrepareFieldDay(metadata.ClockUtc);
+            await Write(WithFieldProfile(metadata) with { ClockUtc = clock });
         }
-        await PrepareDay(clock);
+        await PrepareFieldDay(clock);
+        if (target == current) await PublishFieldUpgrade(metadata);
         Console.WriteLine($"APP-03 DEV {RunId.Id} prepared {target:yyyy-MM-dd} at 09:00 ICT.");
     }
 
@@ -166,10 +177,21 @@ internal sealed class App03DevSession
         foreach (string tenant in DemoRun.Tenants) await RunId.Verify(tenant, app03Session: true);
     }
 
-    private async Task PrepareDay(DateTime clock)
+    private static Manifest WithFieldProfile(Manifest value) =>
+        value with { Profile = App03A1Profile.FieldName, Schema = FieldSchemaVersion };
+
+    private Task PublishFieldUpgrade(Manifest value) =>
+        value.Profile == App03A1Profile.FieldName ? Task.CompletedTask : Write(WithFieldProfile(value));
+
+    private async Task PrepareFieldDay(DateTime clock)
     {
         foreach (string tenant in DemoRun.Tenants)
-            await App03DayBootstrap.PrepareDay(RunId, tenant, DateOnly.FromDateTime(clock), StopToken);
+        {
+            var day = DateOnly.FromDateTime(clock);
+            ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true);
+            await App03DayBootstrap.PrepareDay(RunId, tenant, day, StopToken);
+            await App03FieldBootstrap.Prepare(RunId, tenant, day, StopToken);
+        }
         string value = clock.ToString("O");
         if (!File.Exists(ClockPath) || await File.ReadAllTextAsync(ClockPath) != value)
         {
@@ -188,11 +210,17 @@ internal sealed class App03DevSession
         if (loaded is null || string.IsNullOrWhiteSpace(loaded.CreatedSource)
             || loaded.WebPort is < 1024 or > 65535 or App02c1Dev.ApiPort
             || !ValidClock(loaded)
+            || !ValidProfile(loaded)
             || loaded != expected with { CreatedSource = loaded.CreatedSource, Ready = loaded.Ready,
-                WebPort = loaded.WebPort, Seed = loaded.Seed, ClockUtc = loaded.ClockUtc })
+                WebPort = loaded.WebPort, Seed = loaded.Seed, ClockUtc = loaded.ClockUtc,
+                Profile = loaded.Profile, Schema = loaded.Schema })
             throw new InvalidOperationException("APP-03 session manifest does not match its run, bindings, profile, schema, seed or clock.");
         return loaded;
     }
+
+    private static bool ValidProfile(Manifest value) =>
+        value is { Profile: App03A1Profile.Name, Schema: SchemaVersion }
+        or { Profile: App03A1Profile.FieldName, Schema: FieldSchemaVersion, Seed: App03DayBootstrap.Version };
 
     private static bool ValidClock(Manifest metadata)
     {

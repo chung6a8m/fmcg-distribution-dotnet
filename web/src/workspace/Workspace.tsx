@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { readApiHealth } from '../health'
-import { salesAuthorizationChanged, type Identity } from '../sales/customer-api'
+import { requestSalesApi, salesAuthorizationChanged, type Identity } from '../sales/customer-api'
 import type { ReturnRole } from '../sales/ReturnWorkspace'
 import './workspace.css'
 
@@ -10,6 +10,8 @@ const Order = lazy(() => import('../sales/OrderWorkspace').then(m => ({ default:
 const Load = lazy(() => import('../sales/LoadWorkspace').then(m => ({ default: m.LoadWorkspace })))
 const Delivery = lazy(() => import('../sales/DeliveryWorkspace').then(m => ({ default: m.DeliveryWorkspace })))
 const Visit = lazy(() => import('../sales/VisitWorkspace').then(m => ({ default: m.VisitWorkspace })))
+const BStock = lazy(() => import('../sales/BStockWorkspace').then(m => ({ default: m.BStockWorkspace })))
+const BSale = lazy(() => import('../sales/BSaleWorkspace').then(m => ({ default: m.BSaleWorkspace })))
 const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ScopedArReport })))
 const Returns = lazy(() => import('../sales/ReturnWorkspace').then(m => ({ default: m.ReturnWorkspace })))
 
@@ -18,7 +20,7 @@ const tokenKey = 'app03.workspace.token.v1'
 const lastIdentityKey = 'app03.workspace.identity.v1'
 const guid = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
 type Access = Identity & {
-  sales: boolean; warehouse: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
+  sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
 type Selection = 'customer' | 'order' | 'trip' | 'source'
@@ -27,7 +29,10 @@ const routes = [
   { id: 'orders', label: 'Đơn A và giữ hàng', group: 'Bán hàng', show: (a: Access) => a.sales || a.warehouse },
   { id: 'ar', label: 'Báo cáo AR', group: 'Bán hàng', show: (a: Access) => a.sales },
   { id: 'load', label: 'Nạp hàng lên xe', group: 'Kho', show: (a: Access) => a.warehouse },
+  { id: 'b-stock', label: 'Quota và nạp hàng B', group: 'Kho', show: (a: Access) => !!a.fieldB && a.warehouse },
+  { id: 'field', label: 'Chuyến và công việc', group: 'Hiện trường', show: (a: Access) => !!a.fieldB && a.sales },
   { id: 'delivery', label: 'Giao hàng A', group: 'Hiện trường', show: (a: Access) => a.sales },
+  { id: 'b-sale', label: 'Bán và giao hàng B', group: 'Hiện trường', show: (a: Access) => !!a.fieldB && a.sales },
   { id: 'visits', label: 'Viếng thăm', group: 'Hiện trường', show: (a: Access) => a.sales },
   { id: 'returns', label: 'Trả hàng', group: '', show: (a: Access) => a.returnRole !== null },
 ] as const
@@ -64,19 +69,24 @@ function valid(key: Selection, value: string) {
   return key === 'source' ? value.split(':').length <= 2 && value.split(':').every(part => guid.test(part)) : guid.test(value)
 }
 
-export function WorkspaceEntry({ fallback }: { fallback: (live: boolean) => ReactNode }) {
+export function WorkspaceEntry({ fallback, fieldRoute }: { fallback: (live: boolean) => ReactNode; fieldRoute?: string }) {
   const [profile, setProfile] = useState<'checking' | 'available' | 'foundation' | 'offline'>('checking')
   useEffect(() => {
     const request = new AbortController()
     void fetch('/health/live', { cache: 'no-store', signal: AbortSignal.any([request.signal, AbortSignal.timeout(5_000)]) })
       .then(readApiHealth)
       .then(health => {
-        if (!request.signal.aborted)
-          setProfile(health?.workspaceProfile === 'APP-03.1a-v1' ? 'available' : health ? 'foundation' : 'offline')
+        if (request.signal.aborted) return
+        if (fieldRoute && health?.workspaceProfile === 'APP-03.5-v1') {
+          location.replace(fieldRoute)
+          return
+        }
+        setProfile(!fieldRoute && (health?.workspaceProfile === 'APP-03.1a-v1' || health?.workspaceProfile === 'APP-03.5-v1')
+          ? 'available' : health ? 'foundation' : 'offline')
       })
       .catch(() => { if (!request.signal.aborted) setProfile('offline') })
     return () => request.abort()
-  }, [])
+  }, [fieldRoute])
   if (profile === 'checking') return <main className="page"><p role="status">Đang tải FMCG DMS…</p></main>
   if (profile === 'available') return <Workspace />
   return fallback(profile === 'foundation')
@@ -132,7 +142,7 @@ function Workspace() {
       setToken('')
     }
     async function validate() {
-      if (inFlight || stale()) return
+      if (inFlight || stale() || !navigator.onLine) return
       inFlight = true
       try {
         const response = await fetch(api + '/session', {
@@ -155,7 +165,7 @@ function Workspace() {
         window.clearTimeout(expiry)
         expiry = window.setTimeout(() => reject('Phiên DEV đã hết hạn.'), access.expiresAt * 1000 - Date.now())
       } catch {
-        if (!stale()) {
+        if (!stale() && navigator.onLine) {
           setSession(null)
           setError('Chưa xác minh được phiên DEV. Kiểm tra kết nối rồi thử lại.')
         }
@@ -216,7 +226,7 @@ function Workspace() {
     <header className="page-heading app03-header">
       <div>
         <h1>FMCG DMS · APP-03 DEV</h1>
-        <p>Dữ liệu giả lập · A/F01/F03/F04/F05</p>
+        <p>Dữ liệu giả lập{authorized?.access.fieldB ? ' · A/B/Mixed · VND' : ' · A/F01/F03/F04/F05'}</p>
         {authorized && <p>{authorized.access.tenantId} · {authorized.access.actorId}</p>}
         {authorized?.access.businessDate && <p>Ngày nghiệp vụ <time dateTime={authorized.access.businessDate}>
           {authorized.access.businessDate.split('-').reverse().join('/')}
@@ -239,7 +249,7 @@ function Workspace() {
       setAttempt(n => n + 1)
     }}>Thử lại</Button>}
     {authorized && <WorkArea key={JSON.stringify([identityKey(authorized.access), authorized.access.sales,
-      authorized.access.warehouse, authorized.access.returnRole])} {...authorized} />}
+      authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB])} {...authorized} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -310,17 +320,19 @@ function WorkArea({ access, token }: Session) {
   const requestedTrip = query.get('trip') ?? ''
   const loadOrder = guid.test(requestedOrder) ? requestedOrder : ''
   const returnUrl = access.returnRole === 'sales' ? '/work/returns' : undefined
+  const field = current?.group === 'Hiện trường'
   return <div id="workspace-data" className="sales-layout">
     <nav className="panel panel-content sales-nav" aria-label="Công việc DEV">
       {groups.map(group => <div key={group} className="app03-nav-group">
         <strong>{group}</strong>
         {allowed.filter(route => groupOf(route) === group).map(route => <a
           key={route.id} className="button button-secondary" href={'/work/' + route.id
-            + (trip && (route.id === 'delivery' || route.id === 'load') ? '?trip=' + trip : '')}
+            + (trip && ['delivery', 'load', 'b-sale', 'b-stock'].includes(route.id) ? '?trip=' + trip : '')}
           aria-current={route.id === current?.id ? 'page' : undefined}>{route.label}</a>)}
       </div>)}
     </nav>
-    <div className="sales-pane app03-area" ref={area} tabIndex={-1} role="region" aria-label={current?.label ?? 'Tổng quan'}>
+    <div className={'sales-pane app03-area' + (field ? ' app03-field' : '')} ref={area} tabIndex={-1}
+      role="region" aria-label={current?.label ?? 'Tổng quan'}>
       {!current && <h2>{location.pathname === '/' ? 'Công việc của bạn' : 'Không mở được màn hình'}</h2>}
       {!current && <p>{location.pathname === '/'
         ? 'Chọn công việc trong menu để tiếp tục.'
@@ -337,6 +349,10 @@ function WorkArea({ access, token }: Session) {
           startTrip={loadOrder ? (guid.test(requestedTrip) ? requestedTrip : '') : trip} startOrder={loadOrder}
           onOrderChange={id => remember('order', id)} />}
         {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'field' && <FieldTrips token={token} />}
+        {current?.id === 'b-stock' && <BStock workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} requestedTrip={query.get('trip')}
+          onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'returns' && access.returnRole && <Returns
           workspaceSession={{ token, identity: { ...access, role: access.returnRole } }}
@@ -345,4 +361,44 @@ function WorkArea({ access, token }: Session) {
       </Suspense>
     </div>
   </div>
+}
+
+function FieldTrips({ token }: { token: string }) {
+  const [trips, setTrips] = useState<{ id: string; code: string; b?: { canSell: boolean } }[] | null>(null)
+  const [error, setError] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let current = true
+    void Promise.all([
+      requestSalesApi('/api/synthetic/app02c4', token, '/trips'),
+      requestSalesApi('/api/synthetic/app02d2', token, '/trips'),
+    ]).then(async ([a, b]) => {
+      if (!a.ok || !b.ok) throw new Error('Trip list unavailable')
+      const [aRows, bRows] = await Promise.all([
+        a.json() as Promise<{ id: string; code: string }[]>,
+        b.json() as Promise<{ tripId: string; canSell: boolean }[]>,
+      ])
+      const bTrips = new Map(bRows.map(trip => [trip.tripId, trip]))
+      if (current) setTrips(aRows.map(trip => ({ ...trip, b: bTrips.get(trip.id) })))
+    }).catch(() => { if (current) setError(true) })
+    return () => { current = false }
+  }, [token, attempt])
+  return <section className="panel panel-content">
+    <h2>Chuyến và công việc</h2>
+    {error ? <><p role="alert">Chưa tải được chuyến được phân công.</p>
+      <Button onClick={() => { setError(false); setAttempt(n => n + 1) }}>Tải lại danh sách</Button></>
+      : trips === null ? <p role="status">Đang tải chuyến…</p>
+        : trips.length === 0 ? <p>Chưa có chuyến được phân công.</p>
+          : <ul className="c1-rows">{trips.map(trip => <li key={trip.id}>
+            <div><h3>{trip.code}</h3>
+              <div className="button-row">
+                <a className="button button-secondary" href={'/work/delivery?trip=' + trip.id}>Giao A</a>
+                {trip.b && <a className="button button-secondary" href={'/work/b-sale?trip=' + trip.id}>
+                  {trip.b.canSell ? 'Bán B' : 'Lịch sử B'}
+                </a>}
+              </div>
+            </div>
+          </li>)}</ul>}
+    <a className="button button-secondary" href="/work/visits">Viếng thăm khách hàng</a>
+  </section>
 }

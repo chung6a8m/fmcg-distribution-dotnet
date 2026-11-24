@@ -7,7 +7,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App02d1GrantRoutes
 {
-    internal static void Map(WebApplication app)
+    internal static void Map(WebApplication app, bool credit)
     {
         var routes = app.MapGroup("/api/synthetic/app02d1").RequireAuthorization();
         routes.AddEndpointFilter(async (context, next) =>
@@ -19,7 +19,7 @@ internal static class App02d1GrantRoutes
             GrantBQuotaCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
             App02c2Routes.Response(await service.GrantD1Quota(user, input, ct)))
             .RequireAuthorization("SyntheticWarehouse");
-        routes.MapPost("/credit", async (
+        if (credit) routes.MapPost("/credit", async (
             GrantBCreditCommand input, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
             App02c2Routes.Response(await service.GrantD1Credit(user, input, ct)))
             .RequireAuthorization("SyntheticFinance");

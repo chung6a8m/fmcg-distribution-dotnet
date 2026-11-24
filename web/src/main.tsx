@@ -132,11 +132,14 @@ function App() {
           : location.pathname === '/sales/partner-rehearsal'
             ? <Suspense fallback={<p className="page" role="status">Đang tải mô phỏng…</p>}><PartnerRehearsalWorkspace /></Suspense>
           : location.pathname === '/sales/mixed-trip'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải chuyến Mixed…</p>}><MixedTripWorkspace /></Suspense>
+            ? <WorkspaceEntry fieldRoute="/work/field" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải chuyến Mixed…</p>}><MixedTripWorkspace /></Suspense>} />
           : location.pathname === '/sales/b-sale'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình bán B…</p>}><BSaleWorkspace /></Suspense>
+            ? <WorkspaceEntry fieldRoute="/work/b-sale" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải màn hình bán B…</p>}><BSaleWorkspace /></Suspense>} />
           : location.pathname === '/sales/b-stock'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải nghiệp vụ B…</p>}><BStockWorkspace /></Suspense>
+            ? <WorkspaceEntry fieldRoute="/work/b-stock" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải nghiệp vụ B…</p>}><BStockWorkspace /></Suspense>} />
           : location.pathname === '/sales/customers'
             ? <Suspense fallback={<p className="page" role="status">Đang tải màn hình khách hàng…</p>}><CustomerWorkspace /></Suspense>
             : location.pathname === '/sales/orders'

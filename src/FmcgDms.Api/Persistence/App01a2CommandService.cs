@@ -173,7 +173,8 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
             if (deliveryTrip is Guid c4Trip)
                 await RequireC4Authority(principal, db, tx, tenant, actor, c4Trip, amendment, ct);
             await LockCommand(db, tx, tenant, request, ct);
-            if (connections.UsesApp02d3 && (loadTrip ?? deliveryTrip ?? d1GrantTrip) is Guid mixedTrip)
+            if ((connections.UsesApp02d3 || connections.UsesApp03Field)
+                && (loadTrip ?? deliveryTrip ?? d1GrantTrip) is Guid mixedTrip)
                 await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + mixedTrip.ToString("N"), ct);
 
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
@@ -653,6 +654,16 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
                 if (d1 && await HasLegacyManifest(db, tx, tenant, request.TripId, token))
                     return BusinessCommandOutcome.Rejected("LEGACY_MANIFEST_EXISTS");
+                if (d1 && connections.UsesApp03Field && trip!.BusinessDate.Date !=
+                    await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {App03FieldB.BusinessDate}", null, tx, token)))
+                    return BusinessCommandOutcome.Rejected("APP03_B_TRIP_DAY_CLOSED");
+                if (d1 && connections.UsesApp03Field && (request.BaseQuantity != decimal.Truncate(request.BaseQuantity)
+                    || !await db.ExecuteScalarAsync<bool>(Sql($"""
+                        SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku k WITH (HOLDLOCK)
+                            WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku})
+                            THEN 1 ELSE 0 END);
+                        """, new { Tenant = tenant, request.SkuId }, tx, token))))
+                    return BusinessCommandOutcome.Rejected("APP03_B_SKU_OR_QUANTITY_UNSUPPORTED");
                 string? stockError = await AllocateStock(db, tx, tenant, request.StockLocationId,
                     request.SkuId, request.BaseQuantity, token);
                 if (stockError is not null) return BusinessCommandOutcome.Rejected(stockError);

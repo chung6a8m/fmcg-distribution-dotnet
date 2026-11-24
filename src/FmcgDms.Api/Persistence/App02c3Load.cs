@@ -60,14 +60,14 @@ public sealed partial class App01a2CommandService
             (db, tx, tenant, actor, command, token) =>
                 validShape
                     ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load,
-                        connections.UsesDevF03, token)
+                        connections.UsesDevF03, connections.UsesApp03Field, token)
                     : Task.FromResult(BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES")),
             ct, "warehouse", input.TripId, d1Load: d1Load);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyPartialLoad(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load, bool lots,
-        CancellationToken ct)
+        bool field, CancellationToken ct)
     {
         if (lines.Select(l => l.RightId).Distinct().Count() != lines.Length
             || lines.Any(l => l.RightId == Guid.Empty || !ValidQuantity(l.Quantity)
@@ -75,6 +75,9 @@ public sealed partial class App01a2CommandService
             return BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES");
         var trip = await FindTrip(db, tx, tenant, tripId, ct);
         if (!IsPreparedTrip(trip)) return BusinessCommandOutcome.Rejected("TRIP_NOT_PREPARED");
+        if (d1Load && field && trip!.BusinessDate.Date !=
+            await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {App03FieldB.BusinessDate}", null, tx, ct)))
+            return BusinessCommandOutcome.Rejected("APP03_B_TRIP_DAY_CLOSED");
         if (await HasLegacyManifest(db, tx, tenant, tripId, ct))
             return BusinessCommandOutcome.Rejected("LEGACY_MANIFEST_EXISTS");
         if (await SourceUsed(db, tx, tenant, ManifestLoadSource, number, ct))
@@ -82,11 +85,13 @@ public sealed partial class App01a2CommandService
 
         Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
         var rights = (d1Load
-                ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, ct)
+                ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, ct)
                 : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct))
             .ToDictionary(right => right.Id);
         if (rights.Count != lines.Length)
             return BusinessCommandOutcome.Rejected(d1Load ? "D1_QUOTA_NOT_ELIGIBLE" : "C3_RESERVATION_NOT_ELIGIBLE");
+        if (d1Load && field && lines.Any(l => l.Quantity != decimal.Truncate(l.Quantity)))
+            return BusinessCommandOutcome.Rejected("APP03_B_SKU_OR_QUANTITY_UNSUPPORTED");
         if (lines.Any(l => l.ExpectedWarehouseHeld != rights[l.RightId].WarehouseHeld))
             return BusinessCommandOutcome.Rejected("C3_STALE_WAREHOUSE_HELD");
         Guid warehouse = rights[lines[0].RightId].WarehouseId;

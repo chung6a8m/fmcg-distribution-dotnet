@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
@@ -86,7 +86,9 @@ function Choices({ name, label, items, value, onChange }: {
   </div>
 }
 
-export function BStockWorkspace() {
+export function BStockWorkspace({ workspaceToken, startTrip, onTripChange }: {
+  workspaceToken?: string; startTrip?: string; onTripChange?: (id: string) => void
+} = {}) {
   const [session, setSession] = useState<Session | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [offline, setOffline] = useState(!navigator.onLine)
@@ -124,19 +126,32 @@ export function BStockWorkspace() {
     event.preventDefault()
     const token = fieldValue(new FormData(event.currentTarget), 'token')
     event.currentTarget.reset()
+    connectToken(token)
+  }
+
+  function connectToken(token: string) {
     void work(async () => {
       const catalog = await read<Catalog>(token, '/catalog')
       const saved = restore(catalog)
-      setSession(await open(token, catalog, saved?.tripId))
+      const selected = await open(token, catalog, saved?.tripId ?? startTrip)
+      setSession(selected)
+      if (selected.tripId) onTripChange?.(selected.tripId)
       setPending(saved)
       setCustomer(catalog.customers[0]?.id ?? '')
       setSource('')
     })
   }
 
+  const openWorkspace = useEffectEvent(connectToken)
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
+
   async function refresh(previous: Session, tripId = previous.tripId) {
     const catalog = await read<Catalog>(previous.token, '/catalog')
-    setSession(await open(previous.token, catalog, tripId))
+    const selected = await open(previous.token, catalog, tripId)
+    setSession(selected)
+    if (selected.tripId) onTripChange?.(selected.tripId)
     setCustomer(id => catalog.customers.some(item => item.id === id) ? id : catalog.customers[0]?.id ?? '')
     setFormVersion(version => version + 1)
   }
@@ -191,7 +206,7 @@ export function BStockWorkspace() {
     if (!trip || (kind === 'credit' ? !trip.canGrantCredit : !trip.canLoad)) return
     const data = new FormData(event.currentTarget)
     const amount = fieldValue(data, 'amount')
-    if (!positive(amount, kind === 'credit' ? 4 : 3)) {
+    if (!positive(amount, kind === 'credit' ? 4 : 3) || (workspaceToken && !Number.isInteger(Number(amount)))) {
       setNotice('Nhập số lượng hoặc số tiền dương với đúng đơn vị.')
       return
     }
@@ -220,13 +235,15 @@ export function BStockWorkspace() {
   const off = busy || offline
   const trip = session?.catalog.trips.find(item => item.id === session.tripId)
   const eligible = session?.rights.filter(right => Number(right.warehouseHeld) > 0) ?? []
-  return <main className="page c1-page sales-pane">
-    <header className="page-heading c1-header">
+  const Page = workspaceToken ? 'section' : 'main'
+  return <Page className={workspaceToken ? 'sales-pane' : 'page c1-page sales-pane'}>
+    {!workspaceToken ? <header className="page-heading c1-header">
       <div><h1>Quota, hạn mức và nạp hàng B</h1><p>DEV tổng hợp{session && ' · ' + session.catalog.tenantId}</p></div>
       <div className="button-row"><ThemeSelect /><a className="page-link" href="/sales">Workspace Sales A</a>
         {session && <Button disabled={busy} onClick={() => { setSession(null); setPending(null); setNotice(''); setSource('') }}>Đổi phiên DEV</Button>}</div>
-    </header>
-    {!session ? <form className="panel panel-content c1-sign-in" onSubmit={connect}>
+    </header> : <h2>Quota và nạp hàng B</h2>}
+    {!session ? workspaceToken ? <Button disabled={off} onClick={() => connectToken(workspaceToken)}>Tải dữ liệu kho B</Button>
+      : <form className="panel panel-content c1-sign-in" onSubmit={connect}>
       <Field name="token" label="Mã truy cập DEV" type="password" autoComplete="off" required />
       <Button variant="primary" type="submit" disabled={off}>Kết nối</Button>
     </form> : <>
@@ -249,7 +266,7 @@ export function BStockWorkspace() {
             <fieldset className="sales-filter" disabled={off || !!pending}>
               <Choices name="warehouse" label="Kho cấp quota" items={session.catalog.warehouses} />
               <Choices name="sku" label="SKU" items={session.catalog.skus} />
-              <Field name="amount" label="Số lượng quota" type="number" min="0.001" step="0.001" required />
+              <Field name="amount" label="Số lượng quota" type="number" min={workspaceToken ? '1' : '0.001'} step={workspaceToken ? '1' : '0.001'} required />
               <Button variant="primary" type="submit">Cấp quota B</Button>
             </fieldset>
           </form>
@@ -267,7 +284,7 @@ export function BStockWorkspace() {
               <Choices name="right" label="Quota nạp" items={eligible.map(right => ({
                 id: right.id, label: `${right.warehouseCode} · ${right.skuCode} · ${displayAmount(right.warehouseHeld)} ${right.baseUom}`,
               }))} />
-              <Field name="amount" label="Số lượng nạp B" type="number" min="0.001" step="0.001" required />
+              <Field name="amount" label="Số lượng nạp B" type="number" min={workspaceToken ? '1' : '0.001'} step={workspaceToken ? '1' : '0.001'} required />
               <Button variant="primary" type="submit">Nạp hàng B</Button>
             </fieldset>
           </form>}
@@ -293,5 +310,5 @@ export function BStockWorkspace() {
     {offline && <p role="status">Cần kết nối để ghi nghiệp vụ.</p>}
     {notice && <p role="status">{notice}</p>}
     {source && <p className="c3-source">Mã nguồn {source}</p>}
-  </main>
+  </Page>
 }

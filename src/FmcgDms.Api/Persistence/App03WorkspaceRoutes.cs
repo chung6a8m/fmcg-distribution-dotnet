@@ -5,7 +5,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App03WorkspaceRoutes
 {
-    internal static void Map(WebApplication app, string clock)
+    internal static void Map(WebApplication app, string clock, bool field)
     {
         var routes = app.MapGroup("/api/synthetic/app03");
         routes.MapGet("/handoff", async (HttpContext context, App01a2CommandService service, CancellationToken ct) =>
@@ -36,6 +36,7 @@ internal static class App03WorkspaceRoutes
                 SessionId = orders?.SessionId ?? returns!.SessionId,
                 Sales = orders?.Sales ?? false,
                 Warehouse = orders?.Warehouse ?? false,
+                FieldB = field,
                 ReturnRole = returns?.Role,
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt

@@ -7,6 +7,16 @@ namespace FmcgDms.Api.Persistence;
 
 public sealed partial class App01c2BPostingService
 {
+    private const string D2ActiveTrip = "t.Status IN ('PREPARED','IN_PROGRESS') AND v.Id IS NOT NULL";
+    private const string FieldBHistory = """
+        EXISTS (SELECT 1 FROM dbo.SaleDelivery d
+            JOIN dbo.App03BSalePricing p ON p.TenantId=d.TenantId AND p.SaleDeliveryId=d.Id
+            JOIN dbo.BusinessSource s ON s.TenantId=d.TenantId AND s.Id=d.BusinessSourceId
+            JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId AND c.Id=s.BusinessCommandId
+            WHERE d.TenantId=t.TenantId AND d.TripId=t.Id AND c.Status='APPLIED'
+                AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor)
+        """;
+
     private async Task<T> ReadD2<T>(ClaimsPrincipal user, Guid? trip,
         Func<SqlConnection, SqlTransaction, string, string, Task<T>> read, CancellationToken ct)
     {
@@ -17,7 +27,7 @@ public sealed partial class App01c2BPostingService
         if (trip is Guid tripId)
         {
             await RequireD2Writer(db, tx, tenant, actor, tripId, ct);
-            if (connections.UsesApp02d3)
+            if (connections.UsesApp02d3 || connections.UsesApp03Field)
                 await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
         }
         else await App02a3Sql.RequireRole(db, tx, tenant, actor, "sales", ct);
@@ -28,21 +38,25 @@ public sealed partial class App01c2BPostingService
 
     internal Task<D2TripOption[]> ListD2Trips(ClaimsPrincipal user, CancellationToken ct) =>
         ReadD2(user, null, async (db, tx, tenant, actor) =>
-            (await db.QueryAsync<D2TripOption>(Sql("""
-                SELECT t.Id AS TripId,t.Code AS Label
+            (await db.QueryAsync<D2TripOption>(Sql($"""
+                SELECT t.Id AS TripId,t.Code AS Label,
+                    {(connections.UsesApp03Field
+                        ? $"CONVERT(bit, CASE WHEN {D2ActiveTrip} AND t.BusinessDate={App03FieldB.BusinessDate} THEN 1 ELSE 0 END)"
+                        : "CAST(NULL AS bit)")} AS CanSell
                 FROM dbo.Trip t
                 JOIN dbo.C4DeliveryWriter w ON w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor
-                JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
+                LEFT JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
                     AND v.Kind='VEHICLE' AND v.IsActive=1
-                WHERE t.TenantId=@Tenant AND t.Status IN ('PREPARED','IN_PROGRESS')
-                ORDER BY t.Code
+                WHERE t.TenantId=@Tenant AND (({D2ActiveTrip})
+                    {(connections.UsesApp03Field ? "OR " + FieldBHistory : "")})
+                ORDER BY CanSell DESC,t.Code
                 """, new { Tenant = tenant, Actor = actor }, tx, ct))).ToArray(), ct);
 
     private sealed record D2CustomerSelection(Guid CustomerId, string CustomerLabel,
         Guid SelectionId, Guid ShipToSnapshotId, Guid? OutletId, string Label);
 
     internal Task<D2Workspace> GetD2Workspace(ClaimsPrincipal user, Guid tripId, CancellationToken ct) =>
-        ReadD2(user, tripId, async (db, tx, tenant, _) =>
+        ReadD2(user, tripId, async (db, tx, tenant, actor) =>
         {
             var lines = await db.QueryAsync<D2LineOption>(Sql($"""
                 SELECT l.Id AS TripManifestLineId,l.SkuId,CAST(k.Code+N' · '+k.Name AS nvarchar(300)) AS SkuLabel,
@@ -72,9 +86,14 @@ public sealed partial class App01c2BPostingService
                 CROSS APPLY (SELECT r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Qty) rightRemaining
                 WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.RightKind='B' AND l.IsC3=1
                     AND lineRemaining.Qty>0 AND rightRemaining.Qty>0
+                    {(connections.UsesApp03Field ? $"""
+                        AND t.BusinessDate={App03FieldB.BusinessDate} AND {App03FieldB.EligibleSku}
+                        AND EXISTS (SELECT 1 FROM dbo.StockLocation v WHERE v.TenantId=t.TenantId
+                            AND v.Id=t.VehicleLocationId AND v.Kind='VEHICLE' AND v.IsActive=1)
+                        """ : "")}
                     {D2ManifestProof}
                 ORDER BY k.Code,l.Id
-                """, new { Tenant = tenant, Trip = tripId, Price = D2FixtureUnitPrice }, tx, ct));
+                """, new { Tenant = tenant, Trip = tripId, Price = connections.UsesApp03Field ? (decimal?)null : D2FixtureUnitPrice }, tx, ct));
             var selections = await db.QueryAsync<D2CustomerSelection>(Sql("""
                 SELECT c.Id AS CustomerId,CAST(c.Code+N' · '+c.Name AS nvarchar(300)) AS CustomerLabel,
                     s.Id AS SelectionId,sh.Id AS ShipToSnapshotId,s.OutletId,
@@ -96,10 +115,34 @@ public sealed partial class App01c2BPostingService
                 presentedLines = presentedLines.Where(l => prices[l.SkuId] is not null)
                     .Select(l => l with { UnitPrice = prices[l.SkuId]!.UnitPrice }).ToArray();
             }
+            bool? currentDay = connections.UsesApp03Field ? await db.ExecuteScalarAsync<bool>(Sql($"""
+                SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Trip WHERE TenantId=@Tenant AND Id=@Trip
+                    AND BusinessDate={App03FieldB.BusinessDate}) THEN 1 ELSE 0 END);
+                """, new { Tenant = tenant, Trip = tripId }, tx, ct)) : null;
+            D2CashOption[]? cash = currentDay == true ? (await db.QueryAsync<D2CashOption>(Sql($"""
+                SELECT e.EvidenceRef,e.CustomerId,e.ShipToSnapshotId,e.VerifiedAmount AS Amount
+                FROM dbo.VerifiedCashEvidence e
+                WHERE e.TenantId=@Tenant AND e.TripId=@Trip AND e.VerificationStatus='VERIFIED'
+                    AND e.PaymentMethod='CASH' AND e.VerifiedBy<>@Actor AND e.VerifiedAtUtc<={App02c6Clock.SqlUtcNow}
+                    AND NOT EXISTS (SELECT 1 FROM dbo.CashReceipt r
+                        WHERE r.TenantId=e.TenantId AND r.VerificationEvidenceRef=e.EvidenceRef)
+                ORDER BY e.VerifiedAmount,e.EvidenceRef
+                """, new { Tenant = tenant, Trip = tripId, Actor = actor }, tx, ct))).ToArray() : null;
+            FieldBSaleSource[]? recent = connections.UsesApp03Field ? (await db.QueryAsync<FieldBSaleSource>(Sql("""
+                SELECT TOP (50) s.Id AS SourceId,c.CommandId,d.BaseQuantity AS Quantity,d.PayableAmount AS Payable
+                FROM dbo.App03BSalePricing p
+                JOIN dbo.SaleDelivery d ON d.TenantId=p.TenantId AND d.Id=p.SaleDeliveryId
+                JOIN dbo.BusinessSourceLine l ON l.TenantId=d.TenantId AND l.Id=d.BusinessSourceLineId
+                JOIN dbo.BusinessSource s ON s.TenantId=l.TenantId AND s.Id=l.BusinessSourceId
+                JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId AND c.Id=s.BusinessCommandId
+                WHERE d.TenantId=@Tenant AND d.TripId=@Trip AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor
+                    AND c.Status='APPLIED'
+                ORDER BY c.CompletedAtUtc DESC,c.Id DESC
+                """, new { Tenant = tenant, Trip = tripId, Actor = actor }, tx, ct))).ToArray() : null;
             return new D2Workspace(tripId, presentedLines, selections.GroupBy(s => (s.CustomerId, s.CustomerLabel))
                 .Select(c => new D2CustomerOption(c.Key.CustomerId, c.Key.CustomerLabel, c
                     .Select(s => new D2SelectionOption(s.SelectionId, s.ShipToSnapshotId, s.OutletId, s.Label)).ToArray()))
-                .ToArray());
+                .ToArray(), cash, recent, currentDay);
         }, ct);
 
     private sealed record D2StoredOutcome(string Status, string OutcomeCode, string? ReasonCode, Guid? SourceId);

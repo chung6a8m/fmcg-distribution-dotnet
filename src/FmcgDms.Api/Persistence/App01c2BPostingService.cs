@@ -124,6 +124,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         if (!ValidKey(actor, 128) || !string.Equals(actor, principal.FindFirst("sub")?.Value,
                 StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Invalid actor identity.");
+        if (d2 is { Field: true } && !string.Equals(request.ProducerId, actor, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("The field command producer must match the current actor.");
 
         var fields = new List<(string Key, string Value)>
         {
@@ -155,7 +157,7 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         {
             string key = "APP01A2:" + Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(tenant + "\0" + request.ProducerId + "\0" + request.CommandId)));
-            bool mixedRuntime = d2 is not null && connections.UsesApp02d3;
+            bool mixedRuntime = d2 is not null && (connections.UsesApp02d3 || d2.Field);
             if (mixedRuntime)
                 await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
             await LockAsync(db, tx, key, ct);
@@ -165,10 +167,11 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
                     await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + request.TripId.ToString("N"), ct);
                 else
                     await RequireD2Writer(db, tx, tenant, actor, request.TripId, ct);
-                d2 = d2 with { D3Mode = await IsD3Trip(db, tx, tenant, request.TripId, ct), D3Runtime = mixedRuntime };
+                d2 = d2 with { D3Mode = await IsD3Trip(db, tx, tenant, request.TripId, ct), D3Runtime = connections.UsesApp02d3 };
             }
 
-            string commandKind = d2 is null ? Kind : d2.D3Mode ? "APP02D3_B_SALE_DELIVERY" : "APP02D2_B_SALE_DELIVERY";
+            string commandKind = d2 is null ? Kind : d2.Field ? "APP03_B_SALE_DELIVERY"
+                : d2.D3Mode ? "APP02D3_B_SALE_DELIVERY" : "APP02D2_B_SALE_DELIVERY";
             byte[] hash = CommandPayloadHash.Compute(commandKind, tenant, actor, request.SourceNumber, fields.ToArray());
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
@@ -245,6 +248,31 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
             return BusinessCommandOutcome.Rejected("BANK_PENDING_INPUT_INVALID");
         if (request.PendingBankEvidenceRef is null && !ValidKey(request.VerificationEvidenceRef, 128))
             return BusinessCommandOutcome.Rejected("CASH_EVIDENCE_INVALID");
+        if (d2 is { Field: true })
+        {
+            if (!string.Equals(request.ProducerId, actor, StringComparison.Ordinal))
+                throw new UnauthorizedAccessException("The field command producer must match the current actor.");
+            if (!await db.ExecuteScalarAsync<bool>(Sql($"""
+                SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Trip WITH (HOLDLOCK)
+                    WHERE TenantId=@Tenant AND Id=@TripId AND BusinessDate={App03FieldB.BusinessDate})
+                    THEN 1 ELSE 0 END);
+                """, new { Tenant = tenant, request.TripId }, tx, ct)))
+                return BusinessCommandOutcome.Rejected("APP03_B_TRIP_DAY_CLOSED");
+            if (request.PendingBankEvidenceRef is not null || request.CustomerCreditReservationId is not null
+                || request.BaseQuantity != decimal.Truncate(request.BaseQuantity))
+                return BusinessCommandOutcome.Rejected("APP03_B_UNSUPPORTED_INPUT");
+            if (!await db.ExecuteScalarAsync<bool>(Sql($"""
+                SELECT CONVERT(bit, CASE WHEN EXISTS (SELECT 1 FROM dbo.Sku k WITH (HOLDLOCK)
+                    WHERE k.TenantId=@Tenant AND k.Id=@SkuId AND k.IsActive=1 AND {App03FieldB.EligibleSku})
+                    THEN 1 ELSE 0 END);
+                """, new { Tenant = tenant, request.SkuId }, tx, ct)))
+                return BusinessCommandOutcome.Rejected("APP03_B_SKU_UNSUPPORTED");
+            var price = await App01a2CommandService.ReadFieldBPrice(db, tx, tenant, actor,
+                request.CustomerId, request.SkuId, ct);
+            if (price is null) return BusinessCommandOutcome.Rejected("APP03_B_PRICE_PLAN_REQUIRED");
+            d2 = d2 with { FieldPrice = price };
+            request = request with { UnitPrice = price.UnitPrice };
+        }
         if (d2 is { D3Mode: true })
         {
             var price = await EffectiveD3Price(db, tx, tenant, request.TripId, request.SkuId, ct);
@@ -263,6 +291,8 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
         catch (OverflowException) { return BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID"); }
         if (!ValidMoney(payable))
             return BusinessCommandOutcome.Rejected("PAYABLE_OR_RECEIPT_INVALID");
+        if (d2 is { Field: true } && request.ReceivedCashAmount != payable)
+            return BusinessCommandOutcome.Rejected("APP03_B_EXACT_CASH_REQUIRED");
 
         await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + request.TripId.ToString("N"), ct);
         return await PostAsync(db, tx, tenant, actor, commandId, request, payable, d2, ct);
@@ -570,6 +600,12 @@ public sealed partial class App01c2BPostingService(TenantConnections connections
 
         if (d2?.Price is { } price)
             await RecordD3Price(db, tx, tenant, deliveryId, request, price, ct);
+        if (d2?.FieldPrice is { } fieldPrice)
+            await db.ExecuteAsync(Sql("""
+                INSERT dbo.App03BSalePricing(TenantId,SaleDeliveryId,PlanId,QuotePolicyId,Currency,UnitPrice,TaxAmount)
+                VALUES(@Tenant,@Delivery,@PlanId,@QuotePolicyId,'VND',@UnitPrice,0)
+                """, new { Tenant = tenant, Delivery = deliveryId, fieldPrice.PlanId, fieldPrice.QuotePolicyId,
+                    fieldPrice.UnitPrice }, tx, ct));
 
         if (payment.CashReceived > 0)
         {

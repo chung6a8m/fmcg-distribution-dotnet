@@ -150,7 +150,7 @@ internal sealed class App03A1Evidence(DemoRun run, string root, string actor)
             await stdout;
             if (process.ExitCode == 0 || !error.Contains(reason, StringComparison.Ordinal))
                 throw new InvalidOperationException($"API did not reject profile with the expected reason: {reason}.");
-            Console.WriteLine($"APP-03.1a startup rejection verified: {reason}");
+            Console.WriteLine($"APP-03 startup rejection verified: {reason}");
         }
         finally
         {

@@ -68,8 +68,10 @@ internal static class App03HandoffEvidence
                     (SELECT COALESCE(SUM(Quantity),0) FROM dbo.F03LotHold WHERE TenantId=@Tenant) AS LotHeld,
                     (SELECT COALESCE(SUM(Quantity),0) FROM dbo.F03LotLoad WHERE TenantId=@Tenant) AS LotLoaded,
                     (SELECT COALESCE(SUM(Quantity),0) FROM dbo.F03LotIssue WHERE TenantId=@Tenant) AS LotIssued,
-                    (SELECT SUM(OnHandBaseQuantity) FROM dbo.StockPool WHERE TenantId=@Tenant) AS MainOnHand,
-                    (SELECT SUM(AllocatedBaseQuantity) FROM dbo.StockPool WHERE TenantId=@Tenant) AS MainAllocated,
+                    (SELECT SUM(OnHandBaseQuantity) FROM dbo.StockPool p JOIN dbo.Sku k
+                        ON k.TenantId=p.TenantId AND k.Id=p.SkuId WHERE p.TenantId=@Tenant AND k.Code=N'R-05') AS MainOnHand,
+                    (SELECT SUM(AllocatedBaseQuantity) FROM dbo.StockPool p JOIN dbo.Sku k
+                        ON k.TenantId=p.TenantId AND k.Id=p.SkuId WHERE p.TenantId=@Tenant AND k.Code=N'R-05') AS MainAllocated,
                     (SELECT SUM(b.OnHandBaseQuantity) FROM dbo.PhysicalStockBalance b JOIN dbo.StockLocation l
                         ON l.TenantId=b.TenantId AND l.Id=b.StockLocationId WHERE b.TenantId=@Tenant AND l.Kind=N'VEHICLE') AS VehicleOnHand,
                     (SELECT COALESCE(SUM(GrossAmount),0) FROM dbo.F04PriceLine WHERE TenantId=@Tenant) AS ConfirmedVnd,
