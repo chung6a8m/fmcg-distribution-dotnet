@@ -23,13 +23,13 @@ internal static partial class App03FieldEvidence
         "BusinessSource", "BusinessSourceLine", "LedgerEffect"
     ];
 
-    internal static async Task<Predecessor> CheckPredecessor(DemoRun run, App03DevHost host, CancellationToken ct, bool withRemainder = false)
+    internal static async Task<Predecessor> CheckPredecessor(DemoRun run, App03DevHost host, CancellationToken ct, bool withRemainder = false, bool beforeField = true)
     {
         int loaded = withRemainder ? 3 : 2;
         using var health = await host.Client.GetFromJsonAsync<JsonDocument>(host.WebUrl + "/health/live", ct);
         using var noD2 = await Send(host, B + "/trips", ct);
-        if (health?.RootElement.GetProperty("workspaceProfile").GetString() != App03A1Profile.Name
-            || noD2.StatusCode != HttpStatusCode.NotFound)
+        if (beforeField && (health?.RootElement.GetProperty("workspaceProfile").GetString() != App03A1Profile.Name
+            || noD2.StatusCode != HttpStatusCode.NotFound))
             throw new InvalidOperationException("The predecessor must serve its A/F profile before the upgrade.");
 
         var catalog = await Read<C2Catalog>(host, C2 + "/catalog", ct);

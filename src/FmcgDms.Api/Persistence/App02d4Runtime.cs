@@ -19,6 +19,7 @@ internal sealed class App02d4Runtime(TenantConnections connections, IConfigurati
 {
     private static readonly SocketsHttpHandler Handler = new() { AllowAutoRedirect = false, UseProxy = false };
     private Uri Origin => new(configuration["App02D4:Origin"]!);
+    internal bool UsesFinance => connections.UsesApp03Finance;
     internal DateTimeOffset UtcNow => new(App02c6Clock.Read(App02c6Clock.GetConfiguredPath(configuration, environment)!));
 
     internal static bool Enabled(IConfiguration config, IHostEnvironment environment)
@@ -84,9 +85,70 @@ internal sealed class App02d4Runtime(TenantConnections connections, IConfigurati
         });
         App02d4Invoice.Map(group);
         App02d4Accounting.Map(group);
+        if (connections.UsesApp03Finance)
+        {
+            group.MapGet("/accounting/queue", FinanceQueue);
+            group.MapGet("/accounting/{deliveryId:guid}/transfers/{operation}/{transportId:guid}", FinanceTransfer);
+        }
         App02d4Invoice.MapStub(app.MapGroup("/stub/invoice"));
         App02d4Accounting.MapStub(app.MapGroup("/stub/accounting"));
     }
+
+    internal async Task<string[]> FinanceRoles(ClaimsPrincipal user, CancellationToken ct)
+    {
+        await using var db = await Open(user, "", ct);
+        return await Roles(db, user, ct);
+    }
+
+    private async Task<IResult> FinanceTransfer(Guid deliveryId, string operation, Guid transportId,
+        ClaimsPrincipal user, CancellationToken ct)
+    {
+        await using var db = await Open(user, "accountant", ct);
+        if (operation is not ("receive" or "post")) return Results.NotFound();
+        var outcome = await db.QuerySingleOrDefaultAsync<FinanceTransferView>(new CommandDefinition("""
+            SELECT TOP(1) Id,SourceLineId
+            FROM d4app.FinanceTransferOutcome
+            WHERE DeliveryId=@deliveryId AND Operation=@operation AND TransportId=@transport
+            ORDER BY RecordedAt DESC
+            """, new { deliveryId, operation = operation.ToUpperInvariant(), transport = transportId.ToString("D") },
+            cancellationToken: ct));
+        return outcome is null ? Results.NotFound() : Results.Ok(outcome);
+    }
+
+    private sealed record FinanceTransferView(Guid Id, Guid SourceLineId);
+
+    private async Task<IResult> FinanceQueue(ClaimsPrincipal user, CancellationToken ct)
+    {
+        await using var db = await Open(user, "", ct);
+        using var rows = await db.QueryMultipleAsync(new CommandDefinition("""
+            SELECT DeliveryId,SourceLineId,Seller,Channel,OccurredAt,Quantity,Gross,Ar,Cost,ReceiptId,PostingId,
+                ReportId,ReconciliationStatus,Customer,Sku,Trip,ReportFromUtc,ReportCutoff,ReportAsOf,ReconciliationStale
+            FROM d4app.FinanceQueueProvenance ORDER BY OccurredAt DESC,DeliveryId;
+            SELECT Id,FromUtc,Cutoff,AsOf,Status FROM d4app.AccountingReport ORDER BY FinanceSequence DESC;
+            SELECT Id,ReportId,DeliveryId,SourceLineId,ClosedReportId,Reason,ClosedBy,CanonicalCaseId
+            FROM d4app.FinanceCaseLinks ORDER BY OccurredAt DESC,Id;
+            SELECT c.Id,c.CaseId,q.DeliveryId,c.Period,c.PostingId,c.ApprovalId,c.Maker
+            FROM d4app.AccountingCorrection c
+            JOIN d4app.FinanceQueue q ON q.SourceLineId=c.SourceLineId
+            ORDER BY q.OccurredAt DESC,c.Id;
+            """, cancellationToken: ct));
+        return Results.Ok(new
+        {
+            asOf = UtcNow,
+            sources = await rows.ReadAsync<FinanceSource>(),
+            reports = await rows.ReadAsync<FinanceReport>(),
+            cases = await rows.ReadAsync<FinanceCase>(),
+            corrections = await rows.ReadAsync<FinanceCorrection>()
+        });
+    }
+
+    private sealed record FinanceSource(Guid DeliveryId, Guid SourceLineId, string Seller, string Channel,
+        DateTimeOffset OccurredAt, decimal Quantity, decimal Gross, decimal Ar, decimal Cost,
+        Guid? ReceiptId, Guid? PostingId, Guid? ReportId, string? ReconciliationStatus, string Customer, string Sku, string Trip,
+        DateTimeOffset? ReportFromUtc, DateTimeOffset? ReportCutoff, DateTimeOffset? ReportAsOf, bool ReconciliationStale);
+    private sealed record FinanceReport(Guid Id, DateTimeOffset FromUtc, DateTimeOffset Cutoff, DateTimeOffset AsOf, string Status);
+    private sealed record FinanceCase(Guid Id, Guid ReportId, Guid DeliveryId, Guid SourceLineId, Guid? ClosedReportId, string? Reason, string? ClosedBy, Guid CanonicalCaseId);
+    private sealed record FinanceCorrection(Guid Id, Guid CaseId, Guid DeliveryId, string Period, Guid? PostingId, Guid? ApprovalId, string Maker);
 
     internal async Task<SqlConnection> Open(ClaimsPrincipal user, string role, CancellationToken ct)
     {

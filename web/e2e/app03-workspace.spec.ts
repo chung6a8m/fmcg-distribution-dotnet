@@ -355,3 +355,26 @@ test('APP-03 blocks fresh unload until a reconnect refreshes the trip report', a
   await expect.poll(() => lookedUpIds).toEqual(postedIds)
   await expect(unload).toBeDisabled()
 })
+
+test('APP-03 Finance joins the shared session and keeps settlement cases in their existing workspace', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**/health/live', route => route.fulfill({ json: {
+    status: 'live', scope: 'APP-00A', businessWrites: false, workspaceProfile: 'APP-03.7-v1',
+  } }))
+  await page.route('**' + app03 + '/session', route => route.fulfill({ json: {
+    tenantId: 'tenant-a', actorId: 'finance', sessionId: 'finance-run', sales: false, warehouse: false,
+    returnRole: 'finance', advanceRole: 'finance', giftRole: 'finance', adjustmentRole: 'finance',
+    refundRole: 'finance', accountingRoles: ['accountant'], expiresAt: Math.floor(Date.now() / 1000) + 60,
+  } }))
+  await page.route('**/app02d4/accounting/queue', route => route.fulfill({ json: { sources: [], reports: [], cases: [], corrections: [] } }))
+  await page.goto('/')
+  await login(page, 'finance')
+  await nav(page, 'Hàng đợi kế toán').click()
+  await expect(page.getByRole('heading', { name: 'Hàng đợi kế toán' })).toBeVisible()
+  await nav(page, 'Điều chỉnh giá vốn').click()
+  await expect(page.getByLabel('Mã truy cập DEV')).toHaveCount(0)
+  await nav(page, 'Credit và hoàn tiền').click()
+  await expect(page.getByLabel('Mã truy cập DEV')).toHaveCount(0)
+  await nav(page, 'Trả hàng').click()
+  await expect(page).toHaveURL(/\/work\/returns/)
+})

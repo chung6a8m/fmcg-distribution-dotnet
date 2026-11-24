@@ -5,7 +5,7 @@ namespace FmcgDms.Api.Persistence;
 
 public sealed partial class App01a2CommandService
 {
-    private static async Task<BusinessCommandOutcome> WitnessSalePayment(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> WitnessSalePayment(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, F08Command input, CancellationToken ct)
     {
         var sale = await FindRefundableSale(db, tx, tenant, input.DeliveryId!.Value, ct);

@@ -5,7 +5,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static class App03WorkspaceRoutes
 {
-    internal static void Map(WebApplication app, string clock, bool field, bool settlement)
+    internal static void Map(WebApplication app, string clock, bool field, bool settlement, bool finance)
     {
         var routes = app.MapGroup("/api/synthetic/app03");
         routes.MapGet("/handoff", async (HttpContext context, App01a2CommandService service, CancellationToken ct) =>
@@ -14,7 +14,7 @@ internal static class App03WorkspaceRoutes
             return Results.Ok(await service.OrdersC2(context.User, ct, handoff: true));
         }).RequireAuthorization();
         routes.MapGet("/session", async (HttpContext context, App01a2CommandService service,
-            App01dCashierUnloadService handoffService, App02c1Service advancesService, CancellationToken ct) =>
+            App01dCashierUnloadService handoffService, App02c1Service advancesService, App02d4Runtime accountingService, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             ClaimsPrincipal user = context.User;
@@ -27,20 +27,28 @@ internal static class App03WorkspaceRoutes
             var handoffAccess = settlement ? WhenGranted(() => handoffService.D3Identity(user, ct)) : Task.FromResult<D3Session?>(null);
             var advanceAccess = settlement ? WhenGranted(() => advancesService.AdvanceIdentity(user, ct)) : Task.FromResult<F02Session?>(null);
             var giftAccess = settlement ? WhenGranted(() => service.GiftIdentity(user, ct)) : Task.FromResult<F05Identity?>(null);
-            await Task.WhenAll(orderAccess, returnAccess, handoffAccess, advanceAccess, giftAccess);
+            var adjustmentAccess = finance ? WhenGranted(() => service.AdjustmentIdentity(user, ct)) : Task.FromResult<F05Identity?>(null);
+            var refundAccess = finance ? WhenGranted(() => service.RefundIdentity(user, ct)) : Task.FromResult<F05Identity?>(null);
+            var accountingAccess = finance ? WhenGranted(() => accountingService.FinanceRoles(user, ct)) : Task.FromResult<string[]?>(null);
+            await Task.WhenAll(orderAccess, returnAccess, handoffAccess, advanceAccess, giftAccess, adjustmentAccess, refundAccess, accountingAccess);
             var orders = await orderAccess;
             var returns = await returnAccess;
             var handoff = await handoffAccess;
             var advance = await advanceAccess;
             var gifts = await giftAccess;
-            if (orders is null && returns is null && handoff is null && advance is null && gifts is null)
+            var adjustment = await adjustmentAccess;
+            var refund = await refundAccess;
+            var accounting = await accountingAccess;
+            if (orders is null && returns is null && handoff is null && advance is null && gifts is null
+                && adjustment is null && refund is null && accounting is null)
                 return Results.Forbid();
 
             return Results.Ok(new
             {
-                TenantId = orders?.TenantId ?? returns?.TenantId ?? handoff?.TenantId ?? advance?.TenantId ?? gifts!.TenantId,
-                ActorId = orders?.ActorId ?? returns?.ActorId ?? handoff?.ActorId ?? advance?.ActorId ?? gifts!.ActorId,
-                SessionId = orders?.SessionId ?? returns?.SessionId ?? handoff?.SessionId ?? advance?.SessionId ?? gifts!.SessionId,
+                TenantId = App02a3Sql.Tenant(user),
+                ActorId = App02a3Sql.Actor(user),
+                SessionId = orders?.SessionId ?? returns?.SessionId ?? handoff?.SessionId ?? advance?.SessionId ?? gifts?.SessionId
+                    ?? adjustment?.SessionId ?? refund?.SessionId ?? app.Configuration["App02D4:Nonce"],
                 Sales = orders?.Sales ?? false,
                 Warehouse = orders?.Warehouse ?? false,
                 FieldB = field,
@@ -48,6 +56,9 @@ internal static class App03WorkspaceRoutes
                 AdvanceRole = advance?.Role,
                 GiftRole = gifts?.Role,
                 ReturnRole = returns?.Role,
+                AdjustmentRole = adjustment?.Role,
+                RefundRole = refund?.Role,
+                AccountingRoles = accounting ?? [],
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt
             });

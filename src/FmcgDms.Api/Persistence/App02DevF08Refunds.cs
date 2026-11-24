@@ -8,10 +8,10 @@ namespace FmcgDms.Api.Persistence;
 
 public sealed record F08Command(Guid CommandId, string? Action, Guid? DeliveryId, Guid? CaseId, Guid? CreditId,
     Guid? RefundId, long? Amount, string? Reason, string? Evidence);
-public sealed record F08DeliveryView(Guid Id, string Customer, string Sku, long Gross, decimal Outstanding);
-public sealed record F08ReturnView(Guid Id, Guid DeliveryId, string Customer, string Sku, decimal Quantity, Guid? CreditId);
+public sealed record F08DeliveryView(Guid Id, string Customer, string Sku, long Gross, decimal Outstanding, bool PaymentWitnessed);
+public sealed record F08ReturnView(Guid Id, Guid DeliveryId, string Customer, string Sku, decimal Quantity, Guid? CreditId, string? Eligibility = null);
 public sealed record F08CreditView(Guid Id, Guid CaseId, string Customer, long Net, long Tax, long Gross, long Discount, long Available);
-public sealed record F08RefundView(Guid Id, Guid CreditId, string Customer, long Amount, string Status);
+public sealed record F08RefundView(Guid Id, Guid CreditId, string Customer, long Amount, string Status, bool PayoutWitnessed);
 
 public sealed partial class App01a2CommandService
 {
@@ -35,30 +35,62 @@ public sealed partial class App01a2CommandService
             AND p.NetAmount=f.NetAmount AND p.TaxAmount=f.TaxAmount AND p.GrossAmount=f.GrossAmount AND d.InvoiceEligible=0
         """;
 
+    private string RefundGiftFilter => connections.UsesApp03Finance ? """
+        AND NOT EXISTS (
+            SELECT 1 FROM dbo.AOrderLine line
+            JOIN dbo.F07Program gift ON gift.TenantId=line.TenantId AND gift.PurchaseSkuId=line.SkuId
+            WHERE line.TenantId=o.TenantId AND line.AOrderId=o.AOrderId
+        )
+        """ : "";
+
     public Task<F05Identity> RefundIdentity(ClaimsPrincipal user, CancellationToken ct) =>
         ReadF08(user, async (db, tx, tenant, actor, role) => new F05Identity(tenant, actor,
             await db.QuerySingleAsync<string>(Sql("SELECT Nonce FROM dbo.App00ScratchMarker", null, tx, ct)), role), ct);
 
     public Task<IEnumerable<F08DeliveryView>> RefundDeliveries(ClaimsPrincipal user, CancellationToken ct) =>
         ReadF08(user, (db, tx, tenant, _, _) => db.QueryAsync<F08DeliveryView>(Sql($"""
-            SELECT d.Id,c.Name AS Customer,k.Code AS Sku,p.GrossAmount AS Gross,a.OutstandingAmount AS Outstanding
+            SELECT d.Id,c.Name AS Customer,k.Code AS Sku,p.GrossAmount AS Gross,a.OutstandingAmount AS Outstanding,
+                CONVERT(bit,IIF(EXISTS(SELECT 1 FROM dbo.F08PaymentWitness w
+                    WHERE w.TenantId=d.TenantId AND w.DeliveryId=d.Id),1,0)) AS PaymentWitnessed
             {RefundableSaleSql}
             JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
             JOIN dbo.Sku k ON k.TenantId=d.TenantId AND k.Id=d.SkuId
-            WHERE {RefundableSaleFilter}
+            WHERE {RefundableSaleFilter} {RefundGiftFilter}
             ORDER BY c.Name,k.Code,d.Id
             """, new { Tenant = tenant }, tx, ct)), ct);
 
     public Task<IEnumerable<F08ReturnView>> RefundReturns(ClaimsPrincipal user, CancellationToken ct) =>
-        ReadF08(user, (db, tx, tenant, _, _) => db.QueryAsync<F08ReturnView>(Sql($"""
-            SELECT r.Id,d.Id AS DeliveryId,c.Name AS Customer,k.Code AS Sku,r.Quantity,x.Id AS CreditId
+        ReadF08(user, (db, tx, tenant, _, _) => db.QueryAsync<F08ReturnView>(Sql(connections.UsesApp03Finance ? $"""
+            WITH Supported AS (
+                SELECT d.Id,a.OutstandingAmount
+                {RefundableSaleSql}
+                WHERE {RefundableSaleFilter} {RefundGiftFilter}
+            )
+            SELECT r.Id,r.DeliveryId,c.Name AS Customer,k.Code AS Sku,r.Quantity,x.Id AS CreditId,
+                CASE WHEN a.Id IS NULL THEN 'UNSUPPORTED_SOURCE'
+                     WHEN stage.SourceId IS NULL THEN 'AWAITING_QA'
+                     WHEN a.OutstandingAmount<>0 OR payment.Id IS NULL THEN 'AWAITING_PAYMENT'
+                     ELSE 'ELIGIBLE' END AS Eligibility
+            FROM dbo.F05ReturnCase r
+            JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.DeliveryId
+            JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
+            JOIN dbo.Sku k ON k.TenantId=d.TenantId AND k.Id=d.SkuId
+            LEFT JOIN dbo.F05ReturnStage stage ON stage.TenantId=r.TenantId AND stage.CaseId=r.Id AND stage.Stage='RELEASE'
+            LEFT JOIN dbo.F08ReturnCredit x ON x.TenantId=r.TenantId AND x.CaseId=r.Id
+            LEFT JOIN dbo.F08Settlement payment ON payment.TenantId=r.TenantId AND payment.DeliveryId=r.DeliveryId
+            LEFT JOIN Supported a ON a.Id=r.DeliveryId
+            WHERE r.TenantId=@Tenant
+            ORDER BY c.Name,k.Code,r.Id
+            """ : $"""
+            SELECT r.Id,d.Id AS DeliveryId,c.Name AS Customer,k.Code AS Sku,r.Quantity,x.Id AS CreditId,
+                CAST(NULL AS nvarchar(32)) AS Eligibility
             {RefundableSaleSql}
             JOIN dbo.F05ReturnCase r ON r.TenantId=d.TenantId AND r.DeliveryId=d.Id
             JOIN dbo.F05ReturnStage s ON s.TenantId=r.TenantId AND s.CaseId=r.Id AND s.Stage='RELEASE'
             JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
             JOIN dbo.Sku k ON k.TenantId=d.TenantId AND k.Id=d.SkuId
             LEFT JOIN dbo.F08ReturnCredit x ON x.TenantId=r.TenantId AND x.CaseId=r.Id
-            WHERE {RefundableSaleFilter}
+            WHERE {RefundableSaleFilter} {RefundGiftFilter}
             ORDER BY c.Name,k.Code,r.Id
             """, new { Tenant = tenant }, tx, ct)), ct);
 
@@ -77,11 +109,13 @@ public sealed partial class App01a2CommandService
     public Task<IEnumerable<F08RefundView>> RefundRequests(ClaimsPrincipal user, CancellationToken ct) =>
         ReadF08(user, (db, tx, tenant, _, _) => db.QueryAsync<F08RefundView>(Sql("""
             SELECT r.Id,r.CreditId,c.Name AS Customer,r.Amount,
-                CASE WHEN s.Id IS NOT NULL THEN 'DISBURSED' WHEN a.Id IS NOT NULL THEN 'APPROVED' ELSE 'PROPOSED' END AS Status
+                CASE WHEN s.Id IS NOT NULL THEN 'DISBURSED' WHEN a.Id IS NOT NULL THEN 'APPROVED' ELSE 'PROPOSED' END AS Status,
+                CONVERT(bit,IIF(w.Id IS NOT NULL,1,0)) AS PayoutWitnessed
             FROM dbo.F08Refund r JOIN dbo.F08ReturnCredit x ON x.TenantId=r.TenantId AND x.Id=r.CreditId
             JOIN dbo.SaleDelivery d ON d.TenantId=x.TenantId AND d.Id=x.DeliveryId
             JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
             LEFT JOIN dbo.F08RefundApproval a ON a.TenantId=r.TenantId AND a.RefundId=r.Id
+            LEFT JOIN dbo.F08PayoutWitness w ON w.TenantId=r.TenantId AND w.RefundId=r.Id
             LEFT JOIN dbo.F08Disbursement s ON s.TenantId=r.TenantId AND s.RefundId=r.Id
             WHERE r.TenantId=@Tenant
             ORDER BY c.Name,r.Id
@@ -152,15 +186,15 @@ public sealed partial class App01a2CommandService
             return new BusinessCommandOutcome(stored.Status, stored.OutcomeCode, stored.ReasonCode, true, stored.SourceId);
         }, ct);
 
-    private static Task<F08Sale?> FindRefundableSale(SqlConnection db, SqlTransaction tx, string tenant,
+    private Task<F08Sale?> FindRefundableSale(SqlConnection db, SqlTransaction tx, string tenant,
         Guid delivery, CancellationToken ct) => db.QuerySingleOrDefaultAsync<F08Sale>(Sql($"""
             SELECT d.Id,d.CustomerId,d.SkuId,d.TripId,a.Id AS ArId,d.BaseQuantity AS Quantity,a.OutstandingAmount AS Outstanding,
                 p.NetAmount,p.GrossAmount,f.AllocatedDiscount
             {RefundableSaleSql}
-            WHERE {RefundableSaleFilter} AND d.Id=@Delivery
+            WHERE {RefundableSaleFilter} {RefundGiftFilter} AND d.Id=@Delivery
             """, new { Tenant = tenant, Delivery = delivery }, tx, ct));
 
-    private static async Task<BusinessCommandOutcome> ApplyRefund(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> ApplyRefund(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, F08Command input,
         bool enforcePeriod, CancellationToken ct)
     {
@@ -202,7 +236,7 @@ public sealed partial class App01a2CommandService
         return await ApplyCreditRefund(db, tx, tenant, actor, command, number, input, ct);
     }
 
-    private static async Task<BusinessCommandOutcome> SettleRefundSale(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> SettleRefundSale(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, F08Command input, CancellationToken ct)
     {
         var sale = await FindRefundableSale(db, tx, tenant, input.DeliveryId!.Value, ct);
@@ -233,7 +267,7 @@ public sealed partial class App01a2CommandService
         return BusinessCommandOutcome.Applied("F08_SETTLE", id);
     }
 
-    private static async Task<BusinessCommandOutcome> PostReturnCredit(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> PostReturnCredit(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, F08Command input, CancellationToken ct)
     {
         var origin = await db.QuerySingleOrDefaultAsync<F08Case>(Sql("""
@@ -270,7 +304,7 @@ public sealed partial class App01a2CommandService
         return BusinessCommandOutcome.Applied("F08_CREDIT", id);
     }
 
-    private static async Task<BusinessCommandOutcome> ApplyCreditRefund(SqlConnection db, SqlTransaction tx,
+    private async Task<BusinessCommandOutcome> ApplyCreditRefund(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, F08Command input, CancellationToken ct)
     {
         F08Refund? refund = null;

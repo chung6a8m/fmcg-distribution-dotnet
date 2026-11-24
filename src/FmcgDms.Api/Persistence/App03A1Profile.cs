@@ -8,6 +8,7 @@ public static class App03A1Profile
 {
     public const string Name = "APP-03.1a-v1";
     public const string SettlementName = "APP-03.6-v1";
+    public const string FinanceName = "APP-03.7-v1";
     public const string FieldName = "APP-03.5-v1";
     public const string DayBootstrapVersion = "APP-03.2-VND-v1";
     internal const string DayBootstrapKey = "App03:DayBootstrap";
@@ -26,7 +27,7 @@ public static class App03A1Profile
     {
         var profile = config[ConfigurationKey];
         var bootstrap = config[DayBootstrapKey];
-        if (bootstrap is not null && (bootstrap != DayBootstrapVersion || profile is not (Name or FieldName or SettlementName)
+        if (bootstrap is not null && (bootstrap != DayBootstrapVersion || profile is not (Name or FieldName or SettlementName or FinanceName)
             || App02c6Clock.GetConfiguredPath(config, host) is null))
             throw new InvalidOperationException("APP-03.2 requires its supported bootstrap version and a dedicated APP-03 clock.");
         bool visit = config.GetValue<bool>("DevF01:Enabled");
@@ -37,23 +38,28 @@ public static class App03A1Profile
                 throw new InvalidOperationException($"Combining DEV-F01 with other F features requires the {Name} profile.");
             return false;
         }
-        if (profile is not (Name or FieldName or SettlementName) || (!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest")))
+        if (profile is not (Name or FieldName or SettlementName or FinanceName) || (!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest")))
             throw new InvalidOperationException("Unsupported APP-03 DEV profile or hosting environment.");
         if (!config.GetValue<bool>("SyntheticAuth:Enabled") || !config.GetValue<bool>("App02C2:DedicatedRuntime")
             || Enumerable.Range(1, 5).Any(i => !config.GetValue<bool>($"App02C{i}:Enabled"))
             || Features.Any(f => !config.GetValue<bool>($"{f.Tag}:Enabled")))
             throw new InvalidOperationException($"{Name} requires synthetic auth, dedicated C.1–C.5 and DEV-F01/F03/F04/F05.");
-        bool settlement = profile == SettlementName;
-        bool field = profile is FieldName or SettlementName;
+        bool finance = profile == FinanceName;
+        bool settlement = profile is SettlementName or FinanceName;
+        bool field = profile is FieldName or SettlementName or FinanceName;
         if (field && (bootstrap != DayBootstrapVersion || !config.GetValue<bool>("App03:Workspace")
             || !config.GetValue<bool>("App02D1:Enabled") || !config.GetValue<bool>("App02D2:Enabled")))
             throw new InvalidOperationException($"{FieldName} requires the dedicated workspace, business day, D.1 and D.2.");
         string[] settlementFlags = ["DevF02:Enabled", "DevF07:Enabled", "App02D3:Enabled"];
         if (settlement && settlementFlags.Any(key => !config.GetValue<bool>(key)))
             throw new InvalidOperationException($"{SettlementName} requires D.3, DEV-F02 and DEV-F07.");
+        string[] financeFlags = ["DevF06:Enabled", "DevF08:Enabled", "App02D4:Enabled"];
+        if (finance && (!host.IsEnvironment("IntegrationTest") ||
+            financeFlags.Any(key => !config.GetValue<bool>(key)) || config["App02D4:Profile"] != "D4-v0.1"))
+            throw new InvalidOperationException($"{FinanceName} requires guarded D.4 and DEV-F06/F08.");
         if ((!settlement && settlementFlags.Any(key => config.GetValue<bool>(key))) || (!field && (config.GetValue<bool>("App02D1:Enabled") || config.GetValue<bool>("App02D2:Enabled"))) ||
-            new[] { "DevF06:Enabled", "DevF08:Enabled", "App02D4:Enabled", "App02Worker:Enabled" }
-            .Any(key => config.GetValue<bool>(key)) || !string.IsNullOrEmpty(config["App02D4:Profile"]))
+            config.GetValue<bool>("App02Worker:Enabled") || (!finance &&
+            (financeFlags.Any(key => config.GetValue<bool>(key)) || !string.IsNullOrEmpty(config["App02D4:Profile"]))))
             throw new InvalidOperationException($"{Name} does not support D, the worker or DEV-F02/F06/F07/F08.");
         return true;
     }
@@ -66,8 +72,17 @@ public static class App03A1Profile
         {
             await using var db = await connections.OpenApp02c4Async(App02a3Sql.WorkerPrincipal(tenant), ct);
             var state = await ReadSchema(db, nonce, ct);
-            RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement);
+            RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement, finance: connections.UsesApp03Finance);
             if (connections.UsesApp03Settlement) await VerifySettlementSchema(db, ct);
+            if (connections.UsesApp03Finance && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'd4app.FinanceQueueProvenance',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'd4app.FinanceCases',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'd4app.FinanceCaseLinks',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'd4app.FinanceCorrectionPosting',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.F06Period',N'U') IS NOT NULL AND OBJECT_ID(N'dbo.F08Treasury',N'U') IS NOT NULL
+                    THEN 1 ELSE 0 END);
+                """, cancellationToken: ct)))
+                throw new InvalidOperationException($"{FinanceName} requires the complete Finance schema in both tenants.");
             if (connections.UsesApp03Field && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
                 SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'dbo.App03BSalePricing',N'U') IS NOT NULL THEN 1 ELSE 0 END);
                 """, cancellationToken: ct)))
@@ -94,7 +109,7 @@ public static class App03A1Profile
             throw new InvalidOperationException($"{SettlementName} requires the complete handoff schema in both tenants.");
     }
 
-    internal static IEnumerable<(string Tag, long Version)> MigrationSteps(bool field, bool settlement)
+    internal static IEnumerable<(string? Tag, long Version)> MigrationSteps(bool field, bool settlement, bool finance)
     {
         foreach (var feature in Features) yield return feature;
         if (field) yield return (FieldName, App03FieldSchema.Version);
@@ -103,6 +118,15 @@ public static class App03A1Profile
             yield return (App02DevF02Schema.Profile, 202611230003);
             yield return (App02DevF07Schema.Profile, 202611230008);
             yield return (SettlementName, App03SettlementSchema.Version);
+        }
+        if (finance)
+        {
+            yield return (null, 202611230001);
+            yield return (App02DevF06Schema.Profile, 202611230007);
+            yield return (App02DevF08Schema.Profile, 202611230009);
+            yield return (FinanceName, App03FinanceSchema.Version);
+            yield return (FinanceName, App03FinanceReviewSchema.Version);
+            yield return (FinanceName, App03FinanceCaseLinksSchema.Version);
         }
     }
 
@@ -131,10 +155,10 @@ public static class App03A1Profile
                            AND OBJECT_ID(N'dbo.BQuota',N'U') IS NOT NULL THEN 1 ELSE 0 END AS bit) AS HasD1D2;
             """, new { nonce, BaseVersion }, cancellationToken: ct));
 
-    internal static void RequireSchema(SchemaState state, bool complete, bool field = false, bool settlement = false)
+    internal static void RequireSchema(SchemaState state, bool complete, bool field = false, bool settlement = false, bool finance = false)
     {
         var installed = state.FeatureVersions.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(long.Parse).ToHashSet();
-        var versions = MigrationSteps(field, settlement);
+        var versions = MigrationSteps(field, settlement, finance);
         if (!state.Owned || !state.HasBase || (field && !state.HasD1D2) || (complete && !state.HasFeatureTables) ||
             !installed.SetEquals((complete ? versions : versions.Take(installed.Count)).Select(f => f.Version)))
             throw new InvalidOperationException(complete

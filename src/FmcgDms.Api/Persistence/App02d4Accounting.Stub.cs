@@ -122,12 +122,14 @@ internal static partial class App02d4Accounting
     }
 
     private sealed record CorrectionMessage(Guid Id, Guid OriginalId, Guid ReceiptId, Guid ReportId, Guid SourceLineId,
-        string Period, decimal Quantity, decimal Gross, decimal Ar, decimal Cost, Guid ApprovalId);
+        string Period, decimal Quantity, decimal Gross, decimal Ar, decimal Cost, Guid ApprovalId, string? Fault);
 
     private static async Task<IResult> StoreCorrection(CorrectionMessage message, HttpContext http,
         App02d4Runtime runtime, CancellationToken ct)
     {
         await using var db = await runtime.OpenStub(http, Partner, ct);
+        if (message.Fault is not (null or "after-commit") || (!runtime.UsesFinance && message.Fault is not null))
+            return Results.BadRequest(new Error("INVALID_CORRECTION_REQUEST"));
         await using var tx = await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var original = await db.QuerySingleOrDefaultAsync<Posting>(new CommandDefinition($"""
             SELECT {PostingColumns} FROM d4accounting.Posting WITH (UPDLOCK,HOLDLOCK)
@@ -145,6 +147,8 @@ internal static partial class App02d4Accounting
             return Results.Conflict(new Error("CORRECTION_PAYLOAD_CONFLICT"));
         var id = posting?.Id ?? Guid.NewGuid();
         var now = runtime.UtcNow;
+        if (posting is null && runtime.UsesFinance && message.Period != Period(now))
+            return Results.Conflict(new Error("PERIOD_LOCKED"));
         if (posting is null)
             await db.ExecuteAsync(new CommandDefinition("""
                 INSERT d4accounting.Posting
@@ -159,9 +163,10 @@ internal static partial class App02d4Accounting
                 message.Gross, message.Ar, message.Cost, Mapping, Now = now
             }, tx, cancellationToken: ct));
         await Audit(db, tx, "CORRECTION", message.SourceLineId, message.Id.ToString("D"),
-            posting is null ? "COMMITTED" : "REPLAY", now, ct);
+            message.Fault == "after-commit" ? "COMMITTED_NO_ACK" : posting is null ? "COMMITTED" : "REPLAY", now, ct);
         await tx.CommitAsync(ct);
-        return Results.Ok(new Ack("CORRECTION_POSTED", id, message.SourceLineId));
+        return message.Fault == "after-commit" ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable)
+            : Results.Ok(new Ack("CORRECTION_POSTED", id, message.SourceLineId));
     }
 
     private static Task<int> Audit(SqlConnection db, IDbTransaction? tx, string operation, Guid sourceLineId,

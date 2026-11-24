@@ -6,11 +6,11 @@ import './customers.css'
 type Role = 'finance' | 'cashier' | 'case_checker'
 type Action = 'SETTLE' | 'CREDIT' | 'PROPOSE' | 'APPROVE' | 'DISBURSE' | 'WITNESS_PAYMENT' | 'WITNESS_PAYOUT'
 type Session = { token: string; identity: Identity & { role: Role } }
-type Delivery = { id: string; customer: string; sku: string; gross: number; outstanding: number }
-type Returned = { id: string; deliveryId: string; customer: string; sku: string; quantity: number; creditId: string | null }
+type Delivery = { id: string; customer: string; sku: string; gross: number; outstanding: number; paymentWitnessed?: boolean }
+type Returned = { id: string; deliveryId: string; customer: string; sku: string; quantity: number; creditId: string | null; eligibility?: 'UNSUPPORTED_SOURCE' | 'AWAITING_QA' | 'AWAITING_PAYMENT' | 'ELIGIBLE' }
 type Credit = { id: string; caseId: string; customer: string; net: number; tax: number
   gross: number; discount: number; available: number }
-type Refund = { id: string; creditId: string; customer: string; amount: number; status: 'PROPOSED' | 'APPROVED' | 'DISBURSED' }
+type Refund = { id: string; creditId: string; customer: string; amount: number; status: 'PROPOSED' | 'APPROVED' | 'DISBURSED'; payoutWitnessed?: boolean }
 type Ledger = { deliveries: Delivery[]; returns: Returned[]; credits: Credit[]; refunds: Refund[]; refresh: number }
 type Choice = { id: string; label: string; amount?: number; max?: number }
 type Pending = { commandId: string; body: string; conflict?: boolean }
@@ -101,7 +101,9 @@ export function RefundWorkspace() {
   </main>
 }
 
-function RefundPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
+export function RefundPanel({ session: { token, identity }, offline, integrated = false, canOpenReturn = false }: {
+  session: Session; offline: boolean; integrated?: boolean; canOpenReturn?: boolean
+}) {
   const roleActions = actions[identity.role]
   const key = 'dev-f08.refund.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
   const [action, setAction] = useState<Action>(roleActions[0])
@@ -117,7 +119,7 @@ function RefundPanel({ session: { token, identity }, offline }: { session: Sessi
   const id = useId()
   const descriptor = descriptors[action]
   const payout = action === 'DISBURSE' || action === 'WITNESS_PAYOUT'
-  const options = choices(action, ledger)
+  const options = choices(action, ledger, integrated)
   const selected = options.find(option => option.id === selection)
   const formDisabled = offline || busy || pending !== null || loadError !== ''
     || ledger?.refresh !== refresh || options.length === 0
@@ -253,7 +255,7 @@ function RefundPanel({ session: { token, identity }, offline }: { session: Sessi
         <Button disabled={busy || offline} onClick={() => void resolve(pending, false)}>Gửi lại yêu cầu</Button>
       </div>}
     </section>
-    {ledger && <RefundHistory ledger={ledger} />}
+    {ledger && <RefundHistory ledger={ledger} integrated={integrated} canOpenReturn={canOpenReturn} />}
   </>
 }
 
@@ -269,26 +271,33 @@ function commandSource(action: Action, id: string, amount: number) {
   }
 }
 
-function choices(action: Action, ledger: Ledger | null): Choice[] {
+function choices(action: Action, ledger: Ledger | null, integrated: boolean): Choice[] {
   if (!ledger) return []
-  if (action === 'SETTLE' || action === 'WITNESS_PAYMENT') return ledger.deliveries.filter(row => row.outstanding > 0)
+  if (action === 'SETTLE' || action === 'WITNESS_PAYMENT') return ledger.deliveries.filter(row => row.outstanding > 0 && (!integrated || (action === 'SETTLE' ? row.paymentWitnessed : !row.paymentWitnessed)))
     .map(row => ({ id: row.id, label: `${row.customer} · ${row.sku} · ${row.id}`, max: row.outstanding }))
   if (action === 'CREDIT') {
     const outstanding = new Map(ledger.deliveries.map(row => [row.id, row.outstanding]))
     return ledger.returns.filter(row => {
       const receivable = outstanding.get(row.deliveryId)
-      return row.creditId == null && (receivable === undefined || receivable === 0)
+      return row.creditId == null && (integrated ? row.eligibility === 'ELIGIBLE' : (receivable === undefined || receivable === 0))
     })
       .map(row => ({ id: row.id, label: `${row.customer} · ${row.sku} · ${quantities.format(row.quantity)} EA · ${row.id}` }))
   }
   if (action === 'PROPOSE') return ledger.credits.filter(row => row.available > 0)
     .map(row => ({ id: row.id, label: `${row.customer} · ${vnd.format(row.available)} VND · ${row.id}`, max: row.available }))
   const status = action === 'APPROVE' ? 'PROPOSED' : 'APPROVED'
-  return ledger.refunds.filter(row => row.status === status)
+  return ledger.refunds.filter(row => row.status === status && (!integrated || action === 'APPROVE' || (action === 'DISBURSE' ? row.payoutWitnessed : !row.payoutWitnessed)))
     .map(row => ({ id: row.id, label: `${row.customer} · ${vnd.format(row.amount)} VND · ${row.id}`, amount: row.amount }))
 }
 
-function RefundHistory({ ledger }: { ledger: Ledger }) {
+const caseStatus = {
+  UNSUPPORTED_SOURCE: 'Nguồn ngoài phạm vi F08 v1',
+  AWAITING_QA: 'Chờ giải phóng hàng qua QA',
+  AWAITING_PAYMENT: 'Chờ đối soát đủ tiền',
+  ELIGIBLE: 'Chờ ghi credit',
+} as const
+
+function RefundHistory({ ledger, integrated, canOpenReturn }: { ledger: Ledger; integrated: boolean; canOpenReturn: boolean }) {
   return <>
     <section className="panel panel-content sales-pane" aria-label="Công nợ theo lần giao">
       <h2>Công nợ theo lần giao</h2>
@@ -303,14 +312,17 @@ function RefundHistory({ ledger }: { ledger: Ledger }) {
         </div></li>)}
       </ul>}
     </section>
-    <section className="panel panel-content sales-pane" aria-label="Hồ sơ trả đã giải phóng">
-      <h2>Hồ sơ trả đã giải phóng</h2>
+    <section className="panel panel-content sales-pane" aria-label={integrated ? "Hồ sơ trả hàng" : "Hồ sơ trả đã giải phóng"}>
+      <h2>{integrated ? "Hồ sơ trả hàng" : "Hồ sơ trả đã giải phóng"}</h2>
       {ledger.returns.length === 0 ? <p>Chưa có hồ sơ trả đã giải phóng.</p> : <ul className="c1-rows">
         {ledger.returns.map(row => <li key={row.id}><div className="c3-source">
           <strong>{row.customer} · {row.sku}</strong>
-          <p>{quantities.format(row.quantity)} EA · {row.creditId ? 'Đã ghi credit' : 'Chờ ghi credit'}</p>
+          <p>{quantities.format(row.quantity)} EA · {row.creditId ? 'Đã ghi credit' : caseStatus[row.eligibility ?? 'ELIGIBLE']}</p>
           <p>Mã hồ sơ trả {row.id}</p>
           <p>Mã lần giao {row.deliveryId}</p>
+          {canOpenReturn && <a className="page-link" href={'/work/returns?source=' + row.id + '#return-' + row.id}>
+            Mở hồ sơ trả hàng
+          </a>}
           {row.creditId && <p>Mã credit {row.creditId}</p>}
         </div></li>)}
       </ul>}
@@ -337,6 +349,7 @@ function RefundHistory({ ledger }: { ledger: Ledger }) {
       {ledger.refunds.length === 0 ? <p>Chưa có đề nghị chi hoàn tiền.</p> : <ul className="c1-rows">
         {ledger.refunds.map(row => <li key={row.id}><div className="c3-source">
           <strong>{row.customer} · {statuses[row.status]}</strong>
+          {integrated && row.status === 'APPROVED' && <p>{row.payoutWitnessed ? 'Đã xác minh chứng từ thực chi' : 'Chờ xác minh chứng từ thực chi'}</p>}
           <p>{vnd.format(row.amount)} VND</p>
           <p>Mã credit {row.creditId}</p>
           <p>Mã đề nghị chi {row.id}</p>

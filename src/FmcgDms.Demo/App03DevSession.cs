@@ -4,7 +4,7 @@ using FmcgDms.Api.Persistence;
 namespace FmcgDms.Demo;
 
 internal sealed record App03DevHost(HttpClient Client, string WebUrl, string SourceToken, int ApiPid, int VitePid,
-    string PeerToken, string FinanceToken, string ExpiredToken, string ReceiverToken, string CashierToken, string QaToken);
+    string PeerToken, string FinanceToken, string ExpiredToken, string ReceiverToken, string CashierToken, string QaToken, IReadOnlyDictionary<string, string>? FinanceCredentials = null);
 
 internal sealed class App03DevSession
 {
@@ -12,6 +12,8 @@ internal sealed class App03DevSession
     private const string SchemaVersion = "C5+F01+F03+F04+F05/v1";
     private const string FieldSchemaVersion = "C5+F01+F03+F04+F05+D1+D2+Field/v1";
     private const string SettlementSchemaVersion = "C5+F01-F05+F07+D1-D3+Field+Settlement/v1";
+    private const string FinanceSchemaVersion = "APP-03.6+D4+F06+F08/v1";
+    internal static readonly DateOnly FinanceRollover = new(2026, 12, 1);
     private const string LegacySeedVersion = "APP-03-C2-F05-v1";
     private readonly string folder;
     private readonly string manifestPath;
@@ -27,16 +29,18 @@ internal sealed class App03DevSession
     internal bool UsesBusinessDay { get; private set; } = true;
     internal bool UsesField { get; private set; }
     internal bool UsesSettlement { get; private set; }
+    internal bool UsesFinance { get; private set; }
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
     internal CancellationToken StopToken { get; private set; }
 
-    private App03DevSession(string id, string source, bool resume, bool startBeforeField, bool settlement)
+    private App03DevSession(string id, string source, bool resume, bool startBeforeField, bool settlement, bool finance)
     {
         this.source = source;
         Resume = resume;
         UsesField = !startBeforeField;
         UsesSettlement = UsesField && settlement;
+        UsesFinance = UsesSettlement && finance;
         RunId = new DemoRun(id);
         string home = Directory.CreateDirectory(Home).FullName;
         folder = Path.Combine(home, id);
@@ -45,8 +49,8 @@ internal sealed class App03DevSession
         signalName = $@"Local\FmcgDms.APP03.{id}";
         expected = new Manifest(ManifestVersion, id, DemoRun.Instance,
             new Binding("tenant-a", RunId.Name("tenant-a"), id), new Binding("tenant-b", RunId.Name("tenant-b"), id),
-            UsesSettlement ? App03A1Profile.SettlementName : UsesField ? App03A1Profile.FieldName : App03A1Profile.Name,
-            UsesSettlement ? SettlementSchemaVersion : UsesField ? FieldSchemaVersion : SchemaVersion, App03DayBootstrap.Version,
+            UsesFinance ? App03A1Profile.FinanceName : UsesSettlement ? App03A1Profile.SettlementName : UsesField ? App03A1Profile.FieldName : App03A1Profile.Name,
+            UsesFinance ? FinanceSchemaVersion : UsesSettlement ? SettlementSchemaVersion : UsesField ? FieldSchemaVersion : SchemaVersion, App03DayBootstrap.Version,
             App03DayBootstrap.Clock(App03DayBootstrap.FirstDay), source, WebPort: 0, Ready: false);
     }
 
@@ -57,17 +61,18 @@ internal sealed class App03DevSession
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
-        bool verifyField = false, bool startBeforeField = false, bool settlement = false)
+        bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
+        if (operation == "VerifyFinance") { await App03FinanceEvidence.Run(root, source); return; }
         if (operation == "VerifySettlement") { await App03WorkspaceEvidence.Run(root, source, settlement: true); return; }
         if (operation == "VerifyField") { await App03WorkspaceEvidence.Run(root, source, field: true); return; }
         if (operation == "VerifyHandoff") { await App03WorkspaceEvidence.Run(root, source, handoff: true); return; }
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
-        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField, settlement)
+        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField, settlement, finance)
         {
             VerifyHandoff = verifyHandoff,
             VerifyField = verifyField
@@ -142,12 +147,14 @@ internal sealed class App03DevSession
         {
             UsesField = false;
             UsesSettlement = false;
+            UsesFinance = false;
             if (await File.ReadAllTextAsync(ClockPath) != metadata.ClockUtc.ToString("O"))
                 throw new InvalidOperationException("APP-03 session clock does not match its manifest.");
         }
         else
         {
-            UsesSettlement |= metadata.Profile == App03A1Profile.SettlementName;
+            UsesFinance |= metadata.Profile == App03A1Profile.FinanceName;
+            UsesSettlement |= metadata.Profile is App03A1Profile.SettlementName or App03A1Profile.FinanceName;
             await PrepareFieldDay(metadata.ClockUtc);
             await PublishFieldUpgrade(metadata);
         }
@@ -161,10 +168,12 @@ internal sealed class App03DevSession
         if (!metadata.Ready || metadata.Seed != App03DayBootstrap.Version)
             throw new InvalidOperationException("NextDay requires a ready APP-03.2 bootstrap session.");
         var current = DateOnly.FromDateTime(metadata.ClockUtc);
-        if (target < current || target > App03DayBootstrap.LastDay || target.DayNumber > current.DayNumber + 1)
+        var last = UsesFinance || metadata.Profile == App03A1Profile.FinanceName ? FinanceRollover : App03DayBootstrap.LastDay;
+        if (target < current || target > last || target.DayNumber > current.DayNumber + 1)
             throw new InvalidOperationException("NextDay must name the current date (retry) or the next date in the bootstrap period.");
         await VerifyBindings();
-        UsesSettlement |= metadata.Profile == App03A1Profile.SettlementName;
+        UsesFinance |= metadata.Profile == App03A1Profile.FinanceName;
+        UsesSettlement |= metadata.Profile is App03A1Profile.SettlementName or App03A1Profile.FinanceName;
         DateTime clock = App03DayBootstrap.Clock(target);
 
         // Publish the requested date before preparing either tenant. A crash can leave one tenant
@@ -184,7 +193,9 @@ internal sealed class App03DevSession
         foreach (string tenant in DemoRun.Tenants) await RunId.Verify(tenant, app03Session: true);
     }
 
-    private Manifest WithFieldProfile(Manifest value) => UsesSettlement
+    private Manifest WithFieldProfile(Manifest value) => UsesFinance
+        ? value with { Profile = App03A1Profile.FinanceName, Schema = FinanceSchemaVersion }
+        : UsesSettlement
         ? value with { Profile = App03A1Profile.SettlementName, Schema = SettlementSchemaVersion }
         : value with { Profile = App03A1Profile.FieldName, Schema = FieldSchemaVersion };
 
@@ -196,10 +207,14 @@ internal sealed class App03DevSession
         foreach (string tenant in DemoRun.Tenants)
         {
             var day = DateOnly.FromDateTime(clock);
-            ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true, settlement: UsesSettlement);
-            await App03DayBootstrap.PrepareDay(RunId, tenant, day, StopToken);
-            await App03FieldBootstrap.Prepare(RunId, tenant, day, StopToken);
+            ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true, settlement: UsesSettlement, finance: UsesFinance);
+            if (day <= App03DayBootstrap.LastDay)
+            {
+                await App03DayBootstrap.PrepareDay(RunId, tenant, day, StopToken);
+                await App03FieldBootstrap.Prepare(RunId, tenant, day, StopToken);
+            }
             if (UsesSettlement) await App03SettlementBootstrap.Prepare(RunId, tenant, StopToken);
+            if (UsesFinance) await App03FinanceBootstrap.Prepare(RunId, tenant, day, StopToken);
         }
         string value = clock.ToString("O");
         if (!File.Exists(ClockPath) || await File.ReadAllTextAsync(ClockPath) != value)
@@ -230,7 +245,8 @@ internal sealed class App03DevSession
     private static bool ValidProfile(Manifest value) =>
         value is { Profile: App03A1Profile.Name, Schema: SchemaVersion }
         or { Profile: App03A1Profile.FieldName, Schema: FieldSchemaVersion, Seed: App03DayBootstrap.Version }
-        or { Profile: App03A1Profile.SettlementName, Schema: SettlementSchemaVersion, Seed: App03DayBootstrap.Version };
+        or { Profile: App03A1Profile.SettlementName, Schema: SettlementSchemaVersion, Seed: App03DayBootstrap.Version }
+        or { Profile: App03A1Profile.FinanceName, Schema: FinanceSchemaVersion, Seed: App03DayBootstrap.Version };
 
     private static bool ValidClock(Manifest metadata)
     {
@@ -238,7 +254,7 @@ internal sealed class App03DevSession
         if (metadata.Seed == LegacySeedVersion) return metadata.ClockUtc == DevF05Evidence.FixtureUtc;
         var date = DateOnly.FromDateTime(metadata.ClockUtc);
         return metadata.Seed == App03DayBootstrap.Version
-            && date >= App03DayBootstrap.FirstDay && date <= App03DayBootstrap.LastDay
+            && date >= App03DayBootstrap.FirstDay && date <= (metadata.Profile == App03A1Profile.FinanceName ? FinanceRollover : App03DayBootstrap.LastDay)
             && (metadata.Ready || date == App03DayBootstrap.FirstDay)
             && metadata.ClockUtc == App03DayBootstrap.Clock(date);
     }

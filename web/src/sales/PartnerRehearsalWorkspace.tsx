@@ -25,7 +25,7 @@ type Line = {
   actualQuantity: number | null; actualGross: number | null; actualAr: number | null; actualCost: number | null
   diffQuantity: number | null; diffGross: number | null; diffAr: number | null; diffCost: number | null
 }
-type Reconciliation = {
+export type Reconciliation = {
   report: {
     id: string; status: string; expectedCount: number | null; receivedCount: number; postedCount: number
     okCount: number; diffCount: number; pendingCount: number; outsideCount: number
@@ -68,7 +68,9 @@ function values(quantity: number | null, gross: number | null, ar: number | null
   return [quantity, gross, ar, cost].map(item => item == null ? '—' : formatter.format(item)).join(' / ')
 }
 
-function ReconciliationResult({ result, sources }: { result: Reconciliation; sources: Source[] }) {
+export function ReconciliationResult({ result, sources, vnd = false }: {
+  result: Reconciliation; sources: Pick<Source, 'deliveryId' | 'seller'>[]; vnd?: boolean
+}) {
   const { report, lines } = result
   const sourceById = new Map(sources.map(source => [source.deliveryId, source]))
   return <section className="panel panel-content" aria-label="Kết quả đối soát">
@@ -89,7 +91,7 @@ function ReconciliationResult({ result, sources }: { result: Reconciliation; sou
     </dl>
     {lines.length > 0 && <div className="d4-table" role="region" aria-label="Dòng đối soát" tabIndex={0}>
       <table className="sample-table">
-        <caption>Số lượng / Tiền hàng / Công nợ / Giá vốn</caption>
+        <caption>{vnd ? "Số lượng (EA) / Tiền hàng, công nợ và giá vốn (VND)" : "Số lượng / Tiền hàng / Công nợ / Giá vốn"}</caption>
         <thead><tr><th scope="col">Nguồn</th><th scope="col">Trạng thái</th><th scope="col">Dự kiến</th>
           <th scope="col">Thực tế</th><th scope="col">Chênh lệch</th><th scope="col">Hồ sơ</th></tr></thead>
         <tbody>{lines.map(line => {

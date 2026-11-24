@@ -43,6 +43,7 @@ internal static class App02c1Dev
         bool integrated = increment == "App03A1";
         bool field = persistent?.UsesField == true;
         bool settlement = persistent?.UsesSettlement == true;
+        bool finance = persistent?.UsesFinance == true;
         bool verifyUpgrade = integrated && mode == "Verify";
         bool visit = integrated || increment == "DevF01";
         bool advance = increment == "DevF02";
@@ -65,7 +66,7 @@ internal static class App02c1Dev
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
         string feature = advance ? "DEV-F02" : refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
-        if (integrated) feature = settlement ? App03A1Profile.SettlementName : field ? App03A1Profile.FieldName : App03A1Profile.Name;
+        if (integrated) feature = finance ? App03A1Profile.FinanceName : settlement ? App03A1Profile.SettlementName : field ? App03A1Profile.FieldName : App03A1Profile.Name;
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -112,11 +113,12 @@ internal static class App02c1Dev
                 await run.Verify(tenant, app03Session: persistent is not null);
                 if (persistent is not null)
                 {
-                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field, settlement);
+                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field, settlement, finance);
                     await App03DayBootstrap.Seed(run, tenant, lifetime.Token, persistent.VerifyHandoff && tenant == "tenant-a");
                     await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (settlement) await App03SettlementBootstrap.Prepare(run, tenant, lifetime.Token);
+                    if (finance) await App03FinanceBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     continue;
                 }
                 if (d1Run is not null)
@@ -205,7 +207,7 @@ internal static class App02c1Dev
             if (persistent is { Resume: false }) await persistent.MarkReady();
             string apiUrl = $"http://127.0.0.1:{ApiPort}";
             var apiStart = StartInfo("dotnet", Path.Combine(root, "src", "FmcgDms.Api"), apiPath,
-                "--urls", d4 ? apiUrl : $"http://localhost:{ApiPort}");
+                "--urls", d4 || finance ? apiUrl : $"http://localhost:{ApiPort}");
             // Only the child API receives the signing key and SQL credentials.
             foreach (string name in apiStart.Environment.Keys.Where(n =>
                 n.StartsWith("App03__", StringComparison.OrdinalIgnoreCase)
@@ -234,9 +236,9 @@ internal static class App02c1Dev
             apiStart.Environment["DevF03__Enabled"] = fefo || returnLane ? "true" : "false";
             apiStart.Environment["DevF04__Enabled"] = pricing || returnLane ? "true" : "false";
             apiStart.Environment["DevF05__Enabled"] = returnLane ? "true" : "false";
-            apiStart.Environment["DevF06__Enabled"] = adjustments ? "true" : "false";
+            apiStart.Environment["DevF06__Enabled"] = adjustments || finance ? "true" : "false";
             apiStart.Environment["DevF07__Enabled"] = gifts || settlement ? "true" : "false";
-            apiStart.Environment["DevF08__Enabled"] = refunds ? "true" : "false";
+            apiStart.Environment["DevF08__Enabled"] = refunds || finance ? "true" : "false";
             apiStart.Environment["App02C1__Nonce"] = run.Id;
             apiStart.Environment["App02C2__Enabled"] = c2 ? "true" : "false";
             apiStart.Environment["App02C2__DedicatedRuntime"] = c2 ? "true" : "false";
@@ -289,8 +291,9 @@ internal static class App02c1Dev
                 }
             }
             if (settlement) apiStart.Environment["App02D3__Enabled"] = "true";
-            if (d4)
+            if (d4 || finance)
             {
+                if (finance) apiStart.Environment["App02D4__Enabled"] = "true";
                 apiStart.Environment["App02D3__Enabled"] = "true";
                 apiStart.Environment["App02D4__Origin"] = apiUrl;
                 apiStart.Environment["App02D4__Profile"] = "D4-v0.1";
@@ -327,12 +330,21 @@ internal static class App02c1Dev
             if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);
             if (observe is not null)
             {
+                Dictionary<string, string>? financeCredentials = finance ? new()
+                {
+                    ["ACCOUNTANT"] = Sign("tenant-a", "accountant", App03FinanceBootstrap.AccountingActor("accountant")),
+                    ["RECONCILER"] = Sign("tenant-a", "reconciler", App03FinanceBootstrap.AccountingActor("reconciler")),
+                    ["MAKER"] = Sign("tenant-a", "maker", App03FinanceBootstrap.AccountingActor("maker")),
+                    ["CHECKER"] = Sign("tenant-a", "checker", App03FinanceBootstrap.AccountingActor("checker")),
+                    ["PEER_ACCOUNTANT"] = Sign("tenant-b", "accountant", App03FinanceBootstrap.AccountingActor("accountant")),
+                    ["REFUND_CHECKER"] = Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker)
+                } : null;
                 await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id, tokenB,
                     Sign("tenant-a", "finance", DevF05Evidence.Finance),
                     Token(key, "tenant-a", roles, validitySeconds: -60),
                     Sign("tenant-a", "warehouse", DevF05Evidence.Receiver),
                     Sign("tenant-a", "cashier", App03SettlementBootstrap.Cashier),
-                    Sign("tenant-a", "case_checker", DevF05Evidence.Qa)));
+                    Sign("tenant-a", "case_checker", DevF05Evidence.Qa), financeCredentials));
                 await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
                 return;
             }
@@ -346,6 +358,7 @@ internal static class App02c1Dev
                 {
                     Console.WriteLine($"Open {webUrl}/ and paste the DEV credential once per browser tab.");
                     Console.WriteLine("Enter source, receiver, finance, qa or peer to copy a fresh credential.");
+                    if (finance) Console.WriteLine("Finance roles: accountant, reconciler, maker, checker, refund-checker.");
                     if (settlement) Console.WriteLine("Enter cashier for trip custody and employee advance returns.");
                     Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
                     while (!Console.IsInputRedirected)
@@ -360,6 +373,9 @@ internal static class App02c1Dev
                             "finance" => Sign("tenant-a", "finance", DevF05Evidence.Finance),
                             "cashier" when settlement => Sign("tenant-a", "cashier", App03SettlementBootstrap.Cashier),
                             "qa" => Sign("tenant-a", "case_checker", DevF05Evidence.Qa),
+                            "refund-checker" when finance => Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker),
+                            "accountant" or "reconciler" or "maker" or "checker" when finance =>
+                                Sign("tenant-a", choice, App03FinanceBootstrap.AccountingActor(choice)),
                             _ => null
                         };
                         if (credential is null)

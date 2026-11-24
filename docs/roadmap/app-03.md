@@ -61,7 +61,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | [DEV_VERIFIED_LOCAL](app-03-4-handoff.md#kết-quả-local-ngày-24112026) |
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | [DEV_VERIFIED_LOCAL](app-03-5-field.md#kết-quả-local-ngày-24112026) |
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | [DEV_VERIFIED_LOCAL](app-03-6-settlement.md#kết-quả-local-ngày-24112026) |
-| APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn, quà/waiver, credit/refund theo vai | NOT_STARTED |
+| APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn và credit/refund theo vai trên cùng hồ sơ .6 | [DEV_VERIFIED_LOCAL](app-03-7-finance.md#kết-quả-local-ngày-24112026) |
 | APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | NOT_STARTED |
 | APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | NOT_STARTED |
 
@@ -165,12 +165,14 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** hàng đợi nguồn chưa tiếp nhận/chưa ghi sổ/sai lệch, correction D.4; điều chỉnh giá vốn F06 và credit/refund F08. Các bước Finance của tạm ứng, trả hàng/QA và quà/waiver mở đúng hồ sơ F02/F05/F07 do .6 chủ trì; .7 không tạo thêm một workspace hoặc bản sao hồ sơ cho các bước đó. Dùng đối tác giả lập hiện có; chọn nguồn từ danh sách thay thao tác sao chép UUID. F08 v1 giữ điều kiện nguồn A/VND đã thanh toán đủ, delivery hoàn thành riêng một dòng hàng; các hồ sơ khác hiển thị đúng tình trạng chưa hỗ trợ/chưa đủ điều kiện.
 
+[Cách vận hành bàn Kế toán và chạy kiểm chứng APP-03.7](app-03-7-finance.md).
+
 **Hoàn tất:**
 
-- [ ] Receipt, posted và reconciled riêng; UNKNOWN tra nguồn và phục hồi cùng định danh.
-- [ ] Correction và giá vốn có nguồn, kỳ khóa giữ nguyên; maker/checker/QA theo phân công hiện hành.
-- [ ] Credit, đề nghị chi, duyệt, xác minh chứng từ và thủ quỹ thực chi giữ các actor độc lập và tác động số dư đúng thời điểm.
-- [ ] Hồ sơ từ delivery tạo trong phiên chung đi được hết nhánh F08 được hỗ trợ. Nếu hành trình cam kết cần refund nguồn giao nhiều đợt hoặc đơn có quà, triển khai và kiểm nhánh đó trước khi đưa vào acceptance; không đánh dấu đã phủ bằng fixture F08 v1.
+- [x] Receipt, posted và reconciled riêng; UNKNOWN tra nguồn và phục hồi cùng định danh.
+- [x] Correction và giá vốn có nguồn, kỳ khóa giữ nguyên; maker/checker/QA theo phân công hiện hành.
+- [x] Credit, đề nghị chi, duyệt, xác minh chứng từ và thủ quỹ thực chi giữ các actor độc lập và tác động số dư đúng thời điểm.
+- [x] Hồ sơ từ delivery tạo trong phiên chung đi được hết nhánh F08 được hỗ trợ. Nếu hành trình cam kết cần refund nguồn giao nhiều đợt hoặc đơn có quà, triển khai và kiểm nhánh đó trước khi đưa vào acceptance; không đánh dấu đã phủ bằng fixture F08 v1.
 
 ### APP-03.8 — Tổng quan Chủ NPP
 

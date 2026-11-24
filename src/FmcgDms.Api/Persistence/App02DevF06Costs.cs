@@ -8,9 +8,9 @@ namespace FmcgDms.Api.Persistence;
 public sealed record F06Command(Guid CommandId, string? Action, Guid? DeliveryId, Guid? ProposalId,
     long? AdjustedCost, string? Reason, string? Evidence);
 public sealed record F06SourceView(Guid DeliveryId, string Sku, long OriginalCost, decimal PriorReturned,
-    long PreviousRefund, DateTime Period, long? AdjustedCost);
+    long PreviousRefund, DateTime Period, long? AdjustedCost, string ReturnHandling);
 public sealed record F06ProposalView(Guid Id, Guid DeliveryId, string Sku, long OriginalCost, long AdjustedCost,
-    long PreviousRefund, long? PriorAdjustment, string Status);
+    long PreviousRefund, long? PriorAdjustment, string Status, string ReturnHandling);
 
 public sealed partial class App01a2CommandService
 {
@@ -24,9 +24,22 @@ public sealed partial class App01a2CommandService
         JOIN dbo.Sku k ON k.TenantId=d.TenantId AND k.Id=d.SkuId
         JOIN dbo.StockRight rightScope ON rightScope.TenantId=d.TenantId AND rightScope.Id=d.StockRightId
         JOIN dbo.F06Period pe ON pe.TenantId=d.TenantId AND pe.MonthStart=DATEFROMPARTS(YEAR(d.BusinessDate),MONTH(d.BusinessDate),1)
-        CROSS APPLY (SELECT COALESCE(SUM(r.Quantity),0) AS Quantity,CONVERT(bigint,COALESCE(SUM(s.AcceptedCost),0)) AS Refund
+        CROSS APPLY (SELECT COALESCE(SUM(r.Quantity),0) AS Quantity,CONVERT(bigint,COALESCE(SUM(s.AcceptedCost),0)) AS Refund,
+            COUNT(*) AS Releases,COUNT(w.ReturnSourceId) AS CurrentWitnesses
             FROM dbo.F05ReturnCase r JOIN dbo.F05ReturnStage s ON s.TenantId=r.TenantId AND s.CaseId=r.Id AND s.Stage='RELEASE'
+            LEFT JOIN dbo.PhysicalStockBalance b ON b.TenantId=r.TenantId AND b.SkuId=d.SkuId
+                AND b.StockLocationId=rightScope.StockLocationId
+            LEFT JOIN dbo.F06ReturnWarehouseWitness w ON w.TenantId=s.TenantId AND w.ReturnSourceId=s.SourceId
+                AND w.WarehouseVersion=b.RowVersion
             WHERE r.TenantId=d.TenantId AND r.DeliveryId=d.Id) receipts
+        """;
+
+    private const string AdjustmentHandling = """
+        CASE WHEN NOT EXISTS(SELECT 1 FROM dbo.F03LotIssue i WHERE i.TenantId=d.TenantId AND i.DeliveryId=d.Id)
+                THEN 'NO_LOT_SOURCE'
+             WHEN receipts.Releases>1 THEN 'MULTIPLE_RELEASES'
+             WHEN receipts.Releases=1 AND receipts.CurrentWitnesses=0 THEN 'WAREHOUSE_WITNESS_MISSING'
+             ELSE 'SUPPORTED' END AS ReturnHandling
         """;
 
     public Task<F05Identity> AdjustmentIdentity(ClaimsPrincipal principal, CancellationToken ct) =>
@@ -37,7 +50,7 @@ public sealed partial class App01a2CommandService
         ReadF06(principal, (db, tx, tenant, actor, role) => db.QueryAsync<F06SourceView>(Sql($"""
             SELECT d.Id AS DeliveryId,k.Code AS Sku,CONVERT(bigint,d.CostAmount) AS OriginalCost,
                    receipts.Quantity AS PriorReturned,receipts.Refund AS PreviousRefund,pe.MonthStart AS Period,
-                   a.AdjustedCost
+                   a.AdjustedCost,{AdjustmentHandling}
             {AdjustmentSourceSql}
             LEFT JOIN dbo.F06CostAdjustment a ON a.TenantId=d.TenantId AND a.DeliveryId=d.Id
             WHERE d.TenantId=@Tenant AND pe.State='LOCKED' AND p.Currency='VND'
@@ -51,7 +64,8 @@ public sealed partial class App01a2CommandService
         ReadF06(principal, (db, tx, tenant, actor, role) => db.QueryAsync<F06ProposalView>(Sql($"""
             SELECT q.Id,q.DeliveryId,k.Code AS Sku,CONVERT(bigint,d.CostAmount) AS OriginalCost,
                    q.NewCost AS AdjustedCost,COALESCE(a.PriorRefund,receipts.Refund) AS PreviousRefund,
-                   a.PriorAdjustment,CASE WHEN a.Id IS NULL THEN 'PROPOSED' ELSE 'APPROVED' END AS Status
+                   a.PriorAdjustment,CASE WHEN a.Id IS NULL THEN 'PROPOSED' ELSE 'APPROVED' END AS Status,
+                   {AdjustmentHandling}
             {AdjustmentSourceSql}
             JOIN dbo.F06CostProposal q ON q.TenantId=d.TenantId AND q.DeliveryId=d.Id
             LEFT JOIN dbo.F06CostAdjustment a ON a.TenantId=q.TenantId AND a.ProposalId=q.Id
