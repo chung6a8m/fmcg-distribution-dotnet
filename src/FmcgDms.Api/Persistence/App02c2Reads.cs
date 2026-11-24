@@ -21,15 +21,23 @@ public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, d
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public F04PriceView? Pricing { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public C2LineHandoff? Handoff { get; init; }
 }
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
-    Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin);
+    Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? TripId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public C2HandoffActions? Actions { get; init; }
+}
 
 public sealed partial class App01a2CommandService
 {
-    private sealed record C2Header(Guid Id, string Customer, string Trip, string ShipTo,
-        DateTime? BusinessDate, Guid? ConfirmSourceId, Guid? ShipToSnapshotId, string ShipToOrigin);
-    private sealed record C2LineRow(Guid OrderId, Guid? LineId, string Sku, string BaseUom, decimal Ordered,
+    private sealed record C2Header(Guid Id, string Customer, string Trip, Guid TripId, string TripStatus,
+        DateTime TripDate, string ShipTo, DateTime? BusinessDate, Guid? ConfirmSourceId, Guid? ShipToSnapshotId, string ShipToOrigin);
+    private sealed record C2LineRow(Guid OrderId, int LineNumber, Guid? LineId, string Sku, string BaseUom, decimal Ordered,
         decimal Reserved, decimal? UnitPrice, int? PolicyVersion, int? TermsDays, decimal Delivered,
         decimal Loaded, decimal HeldOnTrip, string? PolicySourceHash);
 
@@ -75,14 +83,20 @@ public sealed partial class App01a2CommandService
                 roles.Contains("warehouse") && principal.HasClaim("synthetic_role", "warehouse"));
         }, ct);
 
-    public Task<IReadOnlyList<C2OrderView>> OrdersC2(ClaimsPrincipal principal, CancellationToken ct) =>
-        ReadC2<IReadOnlyList<C2OrderView>>(principal, async (db, tx, tenant, _) =>
+    public Task<IReadOnlyList<C2OrderView>> OrdersC2(ClaimsPrincipal principal, CancellationToken ct, bool handoff = false) =>
+        ReadC2<IReadOnlyList<C2OrderView>>(principal, async (db, tx, tenant, actor) =>
         {
+            var access = handoff ? await ReadHandoffAccess(db, tx, tenant, actor, principal, ct) : null;
             using var grid = await db.QueryMultipleAsync(Sql("""
-                SELECT d.Id,c.Name AS Customer,t.Code AS Trip,
+                DECLARE @visible TABLE (Id uniqueidentifier PRIMARY KEY);
+                INSERT @visible SELECT d.Id FROM dbo.C2OrderDraft d
+                WHERE d.TenantId=@Tenant AND (@ShowDrafts=1 OR EXISTS (
+                    SELECT 1 FROM dbo.C2Confirmation x WHERE x.TenantId=d.TenantId AND x.OrderId=d.Id));
+                SELECT d.Id,c.Name AS Customer,t.Code AS Trip,t.Id AS TripId,t.Status AS TripStatus,t.BusinessDate AS TripDate,
                     COALESCE(s.Address,JSON_VALUE(sel.Payload,'$.line')) AS ShipTo,o.BusinessDate,x.ConfirmSourceId,
                     x.ShipToSnapshotId,sel.Origin AS ShipToOrigin
                 FROM dbo.C2OrderDraft d
+                JOIN @visible v ON v.Id=d.Id
                 JOIN dbo.Customer c ON c.TenantId=d.TenantId AND c.Id=d.CustomerId
                 JOIN dbo.Trip t ON t.TenantId=d.TenantId AND t.Id=d.TripId
                 JOIN dbo.C1ShipToSelection sel ON sel.TenantId=d.TenantId AND sel.Id=d.SelectionId
@@ -90,11 +104,12 @@ public sealed partial class App01a2CommandService
                 LEFT JOIN dbo.AOrder o ON o.TenantId=x.TenantId AND o.Id=x.OrderId
                 LEFT JOIN dbo.ShipToSnapshot s ON s.TenantId=x.TenantId AND s.Id=x.ShipToSnapshotId
                 WHERE d.TenantId=@Tenant ORDER BY d.Id;
-                SELECT d.DraftId AS OrderId,ol.Id AS LineId,s.Code AS Sku,COALESCE(p.BaseUom,d.BaseUom) AS BaseUom,
+                SELECT d.DraftId AS OrderId,d.LineNumber,ol.Id AS LineId,s.Code AS Sku,COALESCE(p.BaseUom,d.BaseUom) AS BaseUom,
                     d.BaseQuantity AS Ordered,COALESCE(h.Reserved,0) AS Reserved,
                     a.UnitPriceSnapshot AS UnitPrice,p.PolicyVersion,a.TermsDaysSnapshot AS TermsDays,
                     qty.Delivered,load.Loaded,load.HeldOnTrip,CONVERT(varchar(64),p.SourceHash,2) AS PolicySourceHash
                 FROM dbo.C2OrderDraftLine d JOIN dbo.Sku s ON s.TenantId=d.TenantId AND s.Id=d.SkuId
+                JOIN @visible v ON v.Id=d.DraftId
                 LEFT JOIN dbo.AOrderLine ol ON ol.TenantId=d.TenantId AND ol.AOrderId=d.DraftId AND ol.LineNumber=d.LineNumber
                 LEFT JOIN dbo.AConfirmedLineSnapshot a ON a.TenantId=ol.TenantId AND a.AOrderLineId=ol.Id
                 LEFT JOIN dbo.C2LinePolicy p ON p.TenantId=ol.TenantId AND p.OrderLineId=ol.Id
@@ -115,21 +130,29 @@ public sealed partial class App01a2CommandService
                     WHERE r.TenantId=ol.TenantId AND r.AOrderLineId=ol.Id
                 ) load
                 WHERE d.TenantId=@Tenant ORDER BY d.DraftId,d.LineNumber;
-                """, new { Tenant = tenant }, tx, ct));
+                """, new { Tenant = tenant, ShowDrafts = access?.Sales ?? true }, tx, ct));
             var headers = (await grid.ReadAsync<C2Header>()).AsList();
             var lines = (await grid.ReadAsync<C2LineRow>()).ToLookup(l => l.OrderId);
             var confirmed = lines.SelectMany(group => group).Where(line => line.LineId.HasValue)
                 .Select(line => line.LineId!.Value).ToArray();
-            var pricing = connections.UsesDevF04 && confirmed.Length > 0
-                ? (await ReadPrices(db, tx, tenant, confirmed, ct)).ToDictionary(row => row.OrderLineId)
+            var pricing = new Dictionary<Guid, F04Snapshot>();
+            if (connections.UsesDevF04)
+                foreach (var batch in confirmed.Chunk(500))
+                    foreach (var price in await ReadPrices(db, tx, tenant, batch, ct))
+                        pricing.Add(price.OrderLineId, price);
+            var handoffLines = handoff && headers.Count > 0
+                ? await ReadHandoffLines(db, tx, tenant, headers.Select(h => h.Id).ToArray(), ct)
                 : null;
+            var readyToLoad = access is null || confirmed.Length == 0 ? [] :
+                await OrdersReadyToLoad(db, tx, tenant, access.LoadTrips, ct);
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
                     l.LineId, l.Sku, l.BaseUom, l.Ordered, l.Reserved, l.UnitPrice, l.PolicyVersion, l.TermsDays,
                     l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)
                 {
-                    Pricing = l.LineId is Guid id ? pricing?.GetValueOrDefault(id)?.ToView() : null
+                    Pricing = l.LineId is Guid id ? pricing.GetValueOrDefault(id)?.ToView() : null,
+                    Handoff = handoffLines?.View(l)
                 }).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
                     orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
@@ -137,7 +160,11 @@ public sealed partial class App01a2CommandService
                     orderLines.All(l => l.Reserved == l.Ordered) ? "CONFIRMED_FULLY_RESERVED" :
                     orderLines.Any(l => l.Reserved > 0) ? "CONFIRMED_PARTIALLY_RESERVED" : "CONFIRMED_UNRESERVED";
                 return new C2OrderView(h.Id, h.Customer, h.Trip, h.ShipTo, h.BusinessDate, h.ConfirmSourceId, status,
-                    orderLines, h.ShipToSnapshotId, h.ShipToOrigin);
+                    orderLines, h.ShipToSnapshotId, h.ShipToOrigin)
+                {
+                    TripId = handoff ? h.TripId : null,
+                    Actions = access?.Actions(h, orderLines, connections.UsesApp03BusinessDay, readyToLoad.Contains(h.Id))
+                };
             }).ToArray();
         }, ct);
 

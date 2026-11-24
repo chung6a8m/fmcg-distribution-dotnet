@@ -58,7 +58,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.1b — Phiên DEV dùng lại được | .1a | Start/Stop/Resume/Remove giữ đúng dữ liệu và ownership | [DEV_VERIFIED_LOCAL](app-03-1b-dev-session.md#kết-quả-local-ngày-23112026) |
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | [DEV_VERIFIED_LOCAL](app-03-2-day-bootstrap.md#kết-quả-local-ngày-23112026) |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | [DEV_VERIFIED_LOCAL](app-03-3-workspace.md#kết-quả-local-ngày-24112026) |
-| APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | NOT_STARTED |
+| APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | [DEV_VERIFIED_LOCAL](app-03-4-handoff.md#kết-quả-local-ngày-24112026) |
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | NOT_STARTED |
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | NOT_STARTED |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn, quà/waiver, credit/refund theo vai | NOT_STARTED |
@@ -125,12 +125,14 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** hàng đợi đơn/chuyến cần Confirm/Reserve/Load; dùng counters, UoM/lô/giá và command C.2/C.3/F03/F04 đã có. Mở đúng đơn, chuyến và nguồn từ danh sách; giữ ngữ cảnh khi chuyển bước. Xử lý migration/read model còn thiếu cho nguồn dùng chung, không dựng lại màn đơn.
 
+[Cách bàn giao Sales–Kho và chạy kiểm chứng APP-03.4](app-03-4-handoff.md).
+
 **Hoàn tất:**
 
-- [ ] Kho thấy lượng yêu cầu/đã giữ/đã nạp/còn lại và lot trail trên cùng đơn/chuyến.
-- [ ] Hai chuyến cạnh tranh cùng SKU/lô không giữ hoặc nạp vượt lượng khả dụng; đơn vị cơ sở và snapshot bảo toàn.
-- [ ] Những đường reserve/pricing được mở mới kiểm thiếu/hết hạn plan và quyền phê duyệt liên quan; tự duyệt bị chặn khi hợp đồng yêu cầu phân nhiệm.
-- [ ] Kết quả bị từ chối không thêm nguồn hoặc hiệu ứng ngoài hợp đồng; tenant khác không đọc/ghi được.
+- [x] Kho thấy lượng yêu cầu/đã giữ/đã nạp/còn lại và lot trail trên cùng đơn/chuyến.
+- [x] Hai chuyến cạnh tranh cùng SKU/lô không giữ hoặc nạp vượt lượng khả dụng; đơn vị cơ sở và snapshot bảo toàn.
+- [x] Những đường reserve/pricing được mở mới kiểm thiếu/hết hạn plan và quyền phê duyệt liên quan; tự duyệt bị chặn khi hợp đồng yêu cầu phân nhiệm.
+- [x] Kết quả bị từ chối không thêm nguồn hoặc hiệu ứng ngoài hợp đồng; tenant khác không đọc/ghi được.
 
 ### APP-03.5 — Kho bàn giao Hiện trường
 
@@ -227,8 +229,8 @@ Hai lệnh DevF05 giữ profile riêng. [Launcher App03A1](app-03-1a-runtime-sch
 
 | Mục còn lại | Trách nhiệm/ưu tiên | Điều kiện hoàn tất |
 | --- | --- | --- |
-| F03: ca cạnh tranh mới cùng SKU/lô chưa chạy riêng | APP-03.4 khi nhiều chuyến dùng tồn chung | Không over-reserve/load/issue; nguồn, số dư và tenant đối chứng khớp khi cạnh tranh |
-| F04: thiếu/hết hạn plan và tự duyệt chưa có ca riêng | APP-03.4/.5 trước khi mở đường pricing tương ứng | Từ chối đúng điều kiện, không thêm nguồn/effect; snapshot của nguồn cũ giữ nguyên |
+| F03: cạnh tranh cùng SKU/lô giữa hai chuyến A | [Đã kiểm chứng DEV cục bộ ở APP-03.4](app-03-4-handoff.md#kết-quả-local-ngày-24112026) | Không over-reserve/load/issue; nguồn, số dư và tenant đối chứng khớp khi cạnh tranh |
+| F04: thiếu/hết hạn plan và tự duyệt | [Đã kiểm chứng cho Confirm A ở APP-03.4](app-03-4-handoff.md#kết-quả-local-ngày-24112026). APP-03.5 kiểm các đường giá mới trước khi mở. | Từ chối đúng điều kiện, không thêm nguồn/effect; snapshot của nguồn cũ giữ nguyên |
 | Lô/FEFO/giá/thuế của B và tổ hợp Mixed với A/F | APP-03.5, một PR con có thể được tách nếu cần giữ review nhỏ | Runtime/schema và policy của tổ hợp được hỗ trợ; kiểm A/B trên cùng nguồn tồn, đúng currency và quyền |
 | Refund nguồn giao nhiều đợt hoặc đơn có nghĩa vụ quà | Backlog mở rộng AC-19/07; APP-03.7 sở hữu nếu hành trình .9 yêu cầu | Credit/refund/residual và nghĩa vụ quà đúng theo từng nguồn, không vượt lượng/tiền hợp lệ; F08 v1 không được coi là bằng chứng cho nhánh này |
 | Dùng customer credit cho hóa đơn/chứng từ mới | Backlog mở rộng AC-19/21 sau phạm vi APP-03 v1 | Allocation có nguồn, đúng quyền/số dư, không dùng trùng credit và đối chiếu AR/credit độc lập |

@@ -849,6 +849,9 @@ jobs:
       - name: APP-03.3 DEV workspace identity, navigation and recovery through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyWorkspace
+      - name: APP-03.4 Sales to Warehouse handoff and competing lot operations
+        shell: pwsh
+        run: ./scripts/Run-App03Dev.ps1 -Action VerifyHandoff
       - name: APP-02C.6 approved DEV matrix on two synthetic LocalDB tenants
         shell: pwsh
         run: ./scripts/Run-App02C6.ps1
@@ -882,6 +885,7 @@ jobs:
             TestResults/app03-1a/
             TestResults/app03-2/
             TestResults/app03-3/
+            TestResults/app03-4/
           if-no-files-found: warn
       - name: Verify generated PWA artifacts and user-confirmed update hook
         working-directory: web

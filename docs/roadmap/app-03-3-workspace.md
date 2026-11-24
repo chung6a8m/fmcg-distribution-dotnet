@@ -13,7 +13,7 @@ Lưu `RunId`. Mở URL gốc mà launcher in ra và dán mã DEV từ clipboard 
 | Lệnh trong terminal | Phạm vi |
 | --- | --- |
 | `source` | Tenant A, actor nguồn đã được cấp Sales và Warehouse trong fixture A/F. |
-| `receiver` | Tenant A, actor kho nhận hàng trả. |
+| `receiver` | Tenant A, actor kho nhận hàng trả và phụ trách nạp cho các chuyến mới từ [APP-03.4](app-03-4-handoff.md). |
 | `finance` | Tenant A, actor duyệt trả hàng. |
 | `qa` | Tenant A, actor kiểm tra và giải phóng hàng. |
 | `peer` | Actor nguồn của tenant B đối chứng. |

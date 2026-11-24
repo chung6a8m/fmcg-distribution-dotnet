@@ -4,7 +4,7 @@ using FmcgDms.Api.Persistence;
 namespace FmcgDms.Demo;
 
 internal sealed record App03DevHost(HttpClient Client, string WebUrl, string SourceToken, int ApiPid, int VitePid,
-    string PeerToken, string FinanceToken, string ExpiredToken);
+    string PeerToken, string FinanceToken, string ExpiredToken, string ReceiverToken);
 
 internal sealed class App03DevSession
 {
@@ -51,6 +51,7 @@ internal sealed class App03DevSession
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
+        if (operation == "VerifyHandoff") { await App03WorkspaceEvidence.Run(root, source, handoff: true); return; }
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");

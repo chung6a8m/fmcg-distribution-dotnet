@@ -47,17 +47,19 @@ async function get<T>(token: string, path: string, service = api): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
+export function LoadWorkspace({ workspaceToken, startTrip, onTripChange, startOrder, onOrderChange }: {
   workspaceToken?: string; startTrip?: string; onTripChange?: (trip: string) => void
+  startOrder?: string; onOrderChange?: (order: string) => void
 }) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
   const [trip, setTrip] = useState('')
+  const [order, setOrder] = useState('')
   const [rights, setRights] = useState<Right[]>([])
   const [warehouse, setWarehouse] = useState('')
   const [pending, setPending] = useState<Command | null>(null)
   const [notice, setNotice] = useState('')
-  const [source, setSource] = useState('')
+  const [source, setSource] = useState<{ id: string; order: string } | null>(null)
   const [formVersion, setFormVersion] = useState(0)
   const [busy, setBusy] = useState(false)
   const [offline, setOffline] = useState(!navigator.onLine)
@@ -83,14 +85,15 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
     finally { active.current = false; setBusy(false) }
   }
 
-  async function refresh(token: string, tripId: string, warehouseId = '') {
+  async function refresh(token: string, tripId: string, warehouseId = '', orderId = '') {
     setRights([])
     setTrip(tripId)
     setWarehouse('')
-    if (!tripId) return
-    const rows = await get<Right[]>(token, '/trips/' + tripId + '/rights')
+    setOrder(orderId)
+    const rows = tripId ? await get<Right[]>(token, '/trips/' + tripId + '/rights') : []
+    const scoped = orderId ? rows.filter(row => row.orderId === orderId) : rows
     setRights(rows)
-    setWarehouse(rows.some(r => r.warehouseId === warehouseId) ? warehouseId : rows[0]?.warehouseId ?? '')
+    setWarehouse(scoped.some(r => r.warehouseId === warehouseId) ? warehouseId : scoped[0]?.warehouseId ?? '')
     setFormVersion(version => version + 1)
   }
 
@@ -113,11 +116,12 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
       setSession({ token, identity })
       setTrips(available)
       setPending(saved)
-      setSource('')
-      const selected = available.find(t => t.id === saved?.tripId) ?? available.find(t => t.id === startTrip)
-      const effectiveTrip = selected?.id ?? available[0]?.id ?? ''
-      onTripChange?.(effectiveTrip)
-      await refresh(token, effectiveTrip)
+      setSource(null)
+      const requested = available.find(t => t.id === startTrip)
+      const effectiveTrip = startOrder ? requested?.id ?? ''
+        : (available.find(t => t.id === saved?.tripId) ?? requested ?? available[0])?.id ?? ''
+      if (effectiveTrip || !startOrder) onTripChange?.(effectiveTrip)
+      await refresh(token, effectiveTrip, '', startOrder)
     })
   }
 
@@ -131,7 +135,7 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
       }
       let message: string
       try {
-        setSource('')
+        setSource(null)
         const response = lookup
           ? await requestSalesApi(api, token, `/trips/${command.tripId}/commands/${command.commandId}`)
           : await requestSalesApi(api, token, '/load', JSON.stringify(command))
@@ -145,7 +149,11 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
           setNotice('Mã yêu cầu đã được dùng cho nội dung khác. Hãy tra cứu kết quả nạp.')
           return
         }
-        if (outcome.status === 'APPLIED' && outcome.sourceId) setSource(outcome.sourceId)
+        if (outcome.status === 'APPLIED' && outcome.sourceId) {
+          const matches = command.tripId === trip && rights.some(right => right.orderId === order
+            && command.lines.some(line => line.rightId === right.id))
+          setSource({ id: outcome.sourceId, order: matches ? order : '' })
+        }
         message = outcome.status === 'APPLIED' && outcome.sourceId ? 'Đã nạp hàng lên xe.'
           : outcome.status === 'REJECTED' ? rejections[outcome.reasonCode ?? ''] ?? 'Đợt nạp bị từ chối.'
             : ''
@@ -158,14 +166,17 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
       }
       setPending(null)
       forgetPending(pendingKey(identity), command.commandId)
-      try { await refresh(token, trip, warehouse) }
+      try { await refresh(token, trip, warehouse, order) }
       catch { message += ' Hãy tải lại số lượng trước khi nạp tiếp.' }
       setNotice(message)
     })
   }
 
-  const warehouseOptions = [...new Map(rights.map(r => [r.warehouseId, r.warehouseCode]))]
-  const shown = rights.filter(r => r.warehouseId === warehouse)
+  const scoped = order ? rights.filter(r => r.orderId === order) : rights
+  const warehouseOptions = [...new Map(scoped.map(r => [r.warehouseId, r.warehouseCode]))]
+  const shown = scoped.filter(r => r.warehouseId === warehouse)
+  const canRecoverHere = pending && (!order || (pending.tripId === trip && pending.lines.length > 0
+    && pending.lines.every(line => scoped.some(right => right.id === line?.rightId))))
   const off = busy || offline
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -200,20 +211,38 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
       <Field name="token" type="password" label="Mã truy cập DEV" autoComplete="off" required />
       <Button type="submit" variant="primary" disabled={off}>Kết nối</Button>
     </form> : <section className="panel panel-content" aria-label="Lập đợt nạp">
-      {!workspaceToken && <Button disabled={busy} onClick={() => { setSession(null); setRights([]); setPending(null); setNotice(''); setSource('') }}>
+      {!workspaceToken && <Button disabled={busy} onClick={() => { setSession(null); setRights([]); setPending(null); setNotice(''); setSource(null) }}>
         Đổi phiên DEV
       </Button>}
-      {trips.length === 0 ? <p>Chưa có chuyến được phân công.</p> : <>
+      {order && <div className="button-row">
+        <a className="page-link" href={`/work/orders?trip=${trip || startTrip || ''}&order=${order}`
+          + (source?.order === order ? '&handoffSource=' + source.id : '')}>Xem đơn và lịch sử lô</a>
+        {trip && <Button disabled={off || !!pending} onClick={() => {
+          setSource(null)
+          onOrderChange?.('')
+          void work(() => refresh(session.token, trip, warehouse))
+        }}>Tất cả đơn trên chuyến</Button>}
+      </div>}
+      {!trip ? order ? <div>
+        <p>Chuyến trong liên kết không còn mở được với phân công hiện hành.</p>
+        <a className="page-link" href="/work/load">Mở danh sách chuyến</a>
+      </div> : <p>Chưa có chuyến được phân công.</p> : <>
         <label className="field">Chuyến
-          <select value={trip} disabled={off || !!pending}
-            onChange={event => { const id = event.target.value; onTripChange?.(id); void work(() => refresh(session.token, id)) }}>
+          <select value={trip} disabled={off || !!pending || !!order}
+            onChange={event => {
+              const id = event.target.value
+              setSource(null)
+              onTripChange?.(id)
+              void work(() => refresh(session.token, id))
+            }}>
             {trips.map(t => <option key={t.id} value={t.id}>{t.code}</option>)}
           </select>
         </label>
-        <Button disabled={off || !!pending} onClick={() => { void work(() => refresh(session.token, trip, warehouse)) }}>
+        <Button disabled={off || !!pending} onClick={() => { void work(() => refresh(session.token, trip, warehouse, order)) }}>
           Tải lại số lượng
         </Button>
-        {warehouseOptions.length === 0 ? <p>Chưa có dòng giữ hàng đủ điều kiện.</p> : <label className="field">Kho nạp
+        {warehouseOptions.length === 0 ? <p>{order ? 'Đơn này không có dòng giữ hàng để nạp trên chuyến đã chọn.'
+          : 'Chưa có dòng giữ hàng đủ điều kiện.'}</p> : <label className="field">Kho nạp
           <select value={warehouse} disabled={off || !!pending} onChange={event => setWarehouse(event.target.value)}>
             {warehouseOptions.map(([id, code]) => <option key={id} value={id}>{code}</option>)}
           </select>
@@ -222,6 +251,9 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
           {shown.map((r, i) => <fieldset key={r.id} className="c1-fields">
             <legend>Dòng {i + 1} · {r.skuCode}</legend>
             <p className="c3-source">Mã đơn {r.orderId}</p>
+            {workspaceToken && !order && <a className="page-link" href={`/work/orders?trip=${trip}&order=${r.orderId}`}>
+              Mở đơn và lịch sử lô
+            </a>}
             <p>Đã giữ {displayQuantity(r.granted)} {r.baseUom} · Đã nạp {displayQuantity(r.loaded)} {r.baseUom} · Còn giữ tại kho {displayQuantity(r.warehouseHeld)} {r.baseUom}</p>
             {r.lots && r.lots.length > 0 && <div>
               <p id={'c3-held-lots-' + r.id}>Lô giữ tại kho</p>
@@ -244,13 +276,16 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange }: {
           </Button>
         </form>}
       </>}
-      {pending && <div className="button-row">
-        <Button disabled={off} onClick={() => { void resolve(pending, true) }}>Tra cứu kết quả nạp</Button>
-        <Button disabled={off} onClick={() => { void resolve(pending, false) }}>Gửi lại cùng yêu cầu</Button>
-      </div>}
+      {pending && (canRecoverHere ? <>
+        <p className="c3-source">Chuyến của lệnh nạp {trips.find(item => item.id === pending.tripId)?.code ?? pending.tripId}</p>
+        <div className="button-row">
+          <Button disabled={off} onClick={() => { void resolve(pending, true) }}>Tra cứu kết quả nạp</Button>
+          <Button disabled={off} onClick={() => { void resolve(pending, false) }}>Gửi lại cùng yêu cầu</Button>
+        </div>
+      </> : <a className="page-link" href={'/work/load?trip=' + pending.tripId}>Mở chuyến của lệnh nạp đang chờ</a>)}
     </section>}
     {offline && <p role="status">Cần kết nối để nạp hàng.</p>}
     {notice && <p role="status">{notice}</p>}
-    {source && <p className="c3-source">Mã nguồn nạp {source}</p>}
+    {source && <p className="c3-source">Mã nguồn nạp {source.id}</p>}
   </Container>
 }

@@ -25,10 +25,30 @@
     outline: var(--fmcg-focus-width) solid var(--fmcg-color-focus-ring);
     outline-offset: var(--fmcg-focus-offset);
   }
+  .app03-table-scroll { max-width: 100%; overflow: auto; }
+  .app03-handoff-table { border-collapse: collapse; width: 100%; }
+  .app03-handoff-table :is(caption, th, td) { text-align: start; padding: 0.5rem; }
+  .app03-handoff-table tbody tr { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
+  .app03-lot-label { display: none; }
   @media (max-width: 680px) {
     .app03-nav-group .button { min-height: var(--fmcg-density-field-control-min); }
   }
   @container (width < 620px) {
     .app03-area .c1-layout { grid-template-columns: minmax(0, 1fr); }
+    .app03-handoff-table :is(tbody, tr, caption), .app03-handoff-table { display: block; }
+    .app03-handoff-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+    .app03-handoff-table td {
+      display: grid;
+      grid-template-columns: 4.25rem minmax(0, 1fr);
+      gap: 0.25rem;
+      overflow-wrap: anywhere;
+    }
+    .app03-lot-label { display: inline; font-weight: 700; }
   }
 }

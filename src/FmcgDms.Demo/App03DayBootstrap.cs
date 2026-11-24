@@ -145,9 +145,10 @@ internal static class App03DayBootstrap
             IF @vehicle IS NULL THROW 51702, 'APP-03 trip vehicle is unavailable.', 1;
             SET @id=NEWID();
             INSERT dbo.Trip(Id,TenantId,Code,BusinessDate,VehicleLocationId) VALUES(@id,@tenant,@Code,@Day,@vehicle);
-            INSERT dbo.C3TripWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Actor);
+            INSERT dbo.C3TripWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Warehouse);
             INSERT dbo.C4DeliveryWriter(TenantId,TripId,ActorId) VALUES(@tenant,@id,@Actor);
-            """, new { tenant, args.Day, Actor, Code = prefix + "-" + slot, Truck = "DEV-TRUCK-" + slot },
+            """, new { tenant, args.Day, Actor, Warehouse = tenant == "tenant-a" ? DevF05Evidence.Receiver : Actor,
+                Code = prefix + "-" + slot, Truck = "DEV-TRUCK-" + slot },
             tx, cancellationToken: ct));
     }
 }

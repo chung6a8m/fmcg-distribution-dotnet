@@ -265,9 +265,9 @@ function WorkArea({ access, token }: Session) {
     if (location.pathname !== '/') area.current?.focus()
   }, [])
 
-  function remember(key: Selection, value: string) {
+  function remember(key: Selection, value: string, persist = true) {
     if (!area.current?.isConnected) return
-    store(contextKey(key), value)
+    if (persist) store(contextKey(key), value)
     const params = new URLSearchParams(location.search)
     if (value) params.set(key, value)
     else params.delete(key)
@@ -278,13 +278,22 @@ function WorkArea({ access, token }: Session) {
     setTrip(id)
     remember('trip', id)
   }
+  function saveLoadTrip(id: string) {
+    if (id) saveTrip(id)
+    else {
+      const previous = stored(contextKey('trip'))
+      setTrip(guid.test(previous) ? previous : '')
+      remember('trip', '', false)
+    }
+  }
   function saveCustomer(id: string) {
     setCustomer(id)
     remember('customer', id)
   }
-  function openAr(id: string) {
+  function openAr(id: string, tripId?: string) {
     store(contextKey('order'), id)
-    location.assign('/work/ar?order=' + id)
+    if (tripId) store(contextKey('trip'), tripId)
+    location.assign('/work/ar?order=' + id + (tripId ? '&trip=' + tripId : ''))
   }
   function saveArOrder(id: string) {
     setOrder(id)
@@ -295,6 +304,10 @@ function WorkArea({ access, token }: Session) {
     : route.group || (access.returnRole ? returnGroup[access.returnRole] : '')
   const groups = [...new Set(allowed.map(groupOf))]
   const delivery = query.get('delivery') ?? ''
+  const requestedOrder = query.get('order') ?? ''
+  const requestedSource = query.get('handoffSource') ?? ''
+  const requestedTrip = query.get('trip') ?? ''
+  const loadOrder = guid.test(requestedOrder) ? requestedOrder : ''
   const returnUrl = access.returnRole === 'sales' ? '/work/returns' : undefined
   return <div id="workspace-data" className="sales-layout">
     <nav className="panel panel-content sales-nav" aria-label="Công việc DEV">
@@ -313,10 +326,14 @@ function WorkArea({ access, token }: Session) {
         : 'Màn hình này cần quyền phù hợp và profile DEV có hỗ trợ.'}</p>}
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
-        {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr} selectedOrder={order}
+        {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr}
+          selectedOrder={requestedOrder} selectedSource={guid.test(requestedSource) ? requestedSource : ''}
+          onSelectOrder={(id, tripId) => { if (tripId) saveTrip(tripId); saveArOrder(id) }}
           context={{ trip, customer, onCustomerChange: saveCustomer, onTripChange: saveTrip }} />}
         {current?.id === 'ar' && <Ar orderId={order} token={token} returnUrl={returnUrl} onCheckOrder={saveArOrder} />}
-        {current?.id === 'load' && <Load workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'load' && <Load workspaceToken={token} onTripChange={saveLoadTrip}
+          startTrip={loadOrder ? (guid.test(requestedTrip) ? requestedTrip : '') : trip} startOrder={loadOrder}
+          onOrderChange={id => remember('order', id)} />}
         {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'returns' && access.returnRole && <Returns

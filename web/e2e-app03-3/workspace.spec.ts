@@ -18,8 +18,8 @@ async function signIn(page: Page, token: string) {
 
 test('one session moves through real A workspaces and isolates a lost return ACK by actor and tenant', async ({ page, request }, info) => {
   const { APP03_SOURCE_TOKEN: source, APP03_PEER_TOKEN: peer, APP03_EXPIRED_TOKEN: expired,
-    APP03_FINANCE_TOKEN: finance, APP03_EVIDENCE_DIR: directory, APP02C1_RUN_ID: run } = process.env
-  if (!source || !peer || !expired || !finance || !directory || !run) throw new Error('Missing APP-03.3 runner configuration')
+    APP03_FINANCE_TOKEN: finance, APP03_RECEIVER_TOKEN: warehouse, APP03_EVIDENCE_DIR: directory, APP02C1_RUN_ID: run } = process.env
+  if (!source || !peer || !expired || !finance || !warehouse || !directory || !run) throw new Error('Missing APP-03.3 runner configuration')
   const get = async (path: string, token = source) => {
     const response = await request.get(path, { headers: headers(token) })
     expect(response.status()).toBe(200)
@@ -62,14 +62,18 @@ test('one session moves through real A workspaces and isolates a lost return ACK
   await page.getByRole('combobox', { name: 'Kho', exact: true }).selectOption(catalog.warehouses[0].id)
   await page.getByLabel('Số lượng giữ').fill('2')
   await page.getByRole('button', { name: 'Reserve hàng' }).click()
-  await expect(page.getByText('Đã giữ đủ')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Đơn A', exact: true }).getByText('Đã giữ đủ')).toBeVisible()
   const [order] = await get(c2 + '/orders')
 
-  await nav(page, 'Nạp hàng lên xe').click()
+  await page.getByRole('button', { name: 'Đổi danh tính' }).click()
+  await signIn(page, warehouse)
+  await page.getByRole('link', { name: 'Nạp đơn lên xe' }).click()
   await expect(page.getByRole('combobox', { name: 'Chuyến', exact: true })).toHaveValue(trip)
   await page.getByLabel('Số lượng nạp dòng 1').fill('2')
   await page.getByRole('region', { name: 'Lập đợt nạp' }).getByRole('button', { name: 'Nạp hàng', exact: true }).click()
   await expect(page.getByText(/Đã nạp 2 EA/)).toBeVisible()
+  await page.getByRole('button', { name: 'Đổi danh tính' }).click()
+  await signIn(page, source)
   await nav(page, 'Giao hàng A').click()
   await expect(page.getByLabel('Chuyến giao')).toHaveValue(trip)
   await page.reload()
