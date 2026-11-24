@@ -75,7 +75,7 @@ export function AdvanceWorkspace() {
   </main>
 }
 
-function AdvancePanel({ session: { token, identity } }: { session: Session }) {
+export function AdvancePanel({ session: { token, identity } }: { session: Session }) {
   const key = 'dev-f02.advance.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
   const [entries, setEntries] = useState<Advance[]>([])
   const [employees, setEmployees] = useState<string[]>([])

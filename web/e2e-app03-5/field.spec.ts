@@ -1,4 +1,5 @@
 import { expect, test, type APIResponse, type Page } from '@playwright/test'
+import { verifySettlement } from './settlement'
 
 const c1 = '/api/synthetic/app02c1'
 const c2 = '/api/synthetic/app02c2'
@@ -9,7 +10,7 @@ const d2 = '/api/synthetic/app02d2'
 const auth = (token: string) => ({ Authorization: 'Bearer ' + token })
 type Option = { id: string; label: string }
 type Order = { id: string; confirmSourceId: string; lines: { lineId: string }[] }
-type Right = { id: string; warehouseHeld: string }
+type Right = { id: string; skuId: string; warehouseHeld: string }
 type SaleCatalog = {
   customers: { selections: { selectionId: string; shipToSnapshotId: string; outletId: string | null }[] }[]
   lines: { tripManifestLineId: string; availableQuantity: number }[]
@@ -47,7 +48,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   const catalog = await get<{ customers: Option[]; trips: Option[]; skus: Option[]; warehouses: Option[] }>(c2 + '/catalog')
   const customerId = catalog.customers.find(row => row.label.startsWith('C2-FIXTURE'))!.id
   const [mixed, bOnly] = catalog.trips.map(row => row.id)
-  const locationId = catalog.warehouses[0].id
+  const locationId = catalog.warehouses.find(row => row.label === 'C2-MAIN')!.id
   const skuId = catalog.skus.find(row => row.label.startsWith('Z-FIELD-EA'))!.id
   const lotSku = catalog.skus.find(row => row.label.startsWith('R-05'))!.id
   const selection = await accepted(await post(c1 + '/ship-to-selections', {
@@ -65,7 +66,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
     commandId: crypto.randomUUID(), orderId, lineId: order.lines[0].lineId,
     confirmSourceId: order.confirmSourceId, locationId, quantity: 4,
   }, warehouse))
-  const [aRight] = await get<Right[]>(c3 + '/trips/' + mixed + '/rights', warehouse)
+  const aRight = (await get<Right[]>(c3 + '/trips/' + mixed + '/rights', warehouse)).find(right => right.skuId === skuId)!
   await accepted(await post(c3 + '/load', {
     commandId: crypto.randomUUID(), tripId: mixed,
     lines: [{ rightId: aRight.id, expectedWarehouseHeld: aRight.warehouseHeld, quantity: '4' }],
@@ -130,7 +131,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
     expect(response.ok()).toBeTruthy()
     await route.abort()
   }, { times: 1 })
-  await page.getByRole('button', { name: 'Xác nhận đã giao' }).click()
+  await aForm.getByRole('button', { name: 'Xác nhận đã giao' }).click()
   await expect(page.getByText(/Chưa rõ kết quả ghi sổ/)).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: 'Gửi lại cùng yêu cầu' }).click()
@@ -213,7 +214,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await page.getByRole('link', { name: 'Giao hàng A', exact: true }).click()
   await expect(page.getByLabel('Chuyến giao')).toHaveValue(mixed)
   await aInput.fill('1')
-  await page.getByRole('button', { name: 'Xác nhận đã giao' }).click()
+  await aForm.getByRole('button', { name: 'Xác nhận đã giao' }).click()
   await expect(aForm.getByText(/Đã giao 2 EA/)).toBeVisible()
   expect((await get<SaleCatalog>(d2 + '/trips/' + mixed)).lines[0].availableQuantity).toBe(1)
 
@@ -238,7 +239,8 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await tripSelect.selectOption(bOnly)
   await expect(lastResult).toHaveCount(0)
   await expect(page.getByText(bReplay.sourceId, { exact: false })).toHaveCount(0)
-  await prepareSale(bOnly, 1, 10000)
+  const settle = !!process.env.APP03_CASHIER_TOKEN
+  await prepareSale(bOnly, settle ? 2 : 1, settle ? 20000 : 10000)
   await commit.click()
   await expect(page.getByText('Đã ghi bán và giao.', { exact: true })).toBeVisible()
 
@@ -254,5 +256,6 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await page.getByLabel('Lý do').fill('Điểm bán chưa cần đặt thêm')
   await page.getByRole('button', { name: 'Hoàn tất viếng thăm' }).click()
   await expect(page.getByText(/Không có đơn.*Điểm bán chưa cần/)).toBeVisible()
+  if (settle) await verifySettlement(page, request, info, sales, warehouse, peer, mixed, bOnly, customerId, signIn)
   expect(errors).toEqual([])
 })

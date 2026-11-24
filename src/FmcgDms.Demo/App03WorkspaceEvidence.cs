@@ -7,11 +7,11 @@ namespace FmcgDms.Demo;
 
 internal static class App03WorkspaceEvidence
 {
-    internal static async Task Run(string root, string source, bool handoff = false, bool field = false)
+    internal static async Task Run(string root, string source, bool handoff = false, bool field = false, bool settlement = false)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-03 requires Windows LocalDB.");
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        string profile = field ? "app03-5" : handoff ? "app03-4" : "app03-3";
+        string profile = settlement ? "app03-6" : field ? "app03-5" : handoff ? "app03-4" : "app03-3";
         var evidence = Directory.CreateDirectory(Path.Combine(root, "TestResults", profile, run.Id));
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var ct = deadline.Token;
@@ -22,14 +22,23 @@ internal static class App03WorkspaceEvidence
             // same predecessor, while .4 exercises its A handoff on the current profile.
             var active = await Open("Start", startBeforeField: !handoff);
             App03FieldEvidence.UpgradeReview? upgrade = null;
-            if (field)
+            if (settlement)
+            {
+                var predecessor = await App03FieldEvidence.CheckPredecessor(run, active, ct, withRemainder: true);
+                await Stop();
+                active = await Open("Resume");
+                await Stop();
+                active = await Open("Resume", enableSettlement: true);
+                upgrade = await App03FieldEvidence.CheckUpgrade(run, active, predecessor, ct);
+            }
+            else if (field)
             {
                 var predecessor = await App03FieldEvidence.CheckPredecessor(run, active, ct);
                 await Stop();
                 active = await Open("Resume", verifyField: true);
                 upgrade = await App03FieldEvidence.CheckUpgrade(run, active, predecessor, ct);
             }
-            if (handoff || field) await App03HandoffEvidence.Prepare(run, ct);
+            if (handoff || field || settlement) await App03HandoffEvidence.Prepare(run, ct);
             var start = new ProcessStartInfo("node")
             {
                 WorkingDirectory = Path.Combine(root, "web"), UseShellExecute = false, CreateNoWindow = true
@@ -43,14 +52,40 @@ internal static class App03WorkspaceEvidence
             start.Environment["APP03_FINANCE_TOKEN"] = active.FinanceToken;
             start.Environment["APP03_EXPIRED_TOKEN"] = active.ExpiredToken;
             start.Environment["APP03_RECEIVER_TOKEN"] = active.ReceiverToken;
+            if (settlement)
+            {
+                start.Environment["APP03_CASHIER_TOKEN"] = active.CashierToken;
+                start.Environment["APP03_QA_TOKEN"] = active.QaToken;
+            }
             start.Environment["APP03_EVIDENCE_DIR"] = evidence.FullName;
             using var browser = Process.Start(start) ?? throw new InvalidOperationException("Cannot start APP-03 browser verification.");
             try
             {
-                if (!handoff && !field) await RevokeSales(browser);
+                if (!handoff && !field && !settlement) await RevokeSales(browser);
                 await browser.WaitForExitAsync(ct);
                 if (browser.ExitCode != 0) throw new InvalidOperationException($"APP-03 Chromium exited {browser.ExitCode}.");
-                if (field)
+                if (settlement)
+                {
+                    await Stop();
+                    await App03DevSession.Run("NextDay", root, source, run.Id,
+                        businessDate: App03DayBootstrap.FirstDay.AddDays(1), settlement: true);
+                    active = await Open("Resume", enableSettlement: true);
+                    await App03SettlementEvidence.Review(run, active, evidence.FullName, source, upgrade!, ct);
+                    var secondTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261124-A", load: true, ct);
+                    await Stop();
+                    await App03DevSession.Run("NextDay", root, source, run.Id,
+                        businessDate: App03DayBootstrap.FirstDay.AddDays(2), settlement: true);
+                    active = await Open("Resume", enableSettlement: true);
+                    var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct);
+                    await App03SettlementEvidence.VerifyVehicleReuse(run, active, secondTrip, thirdTrip, evidence.FullName, ct);
+                    await Stop();
+                    await App03DevSession.Run("NextDay", root, source, run.Id,
+                        businessDate: App03DayBootstrap.FirstDay.AddDays(3), settlement: true);
+                    active = await Open("Resume", enableSettlement: true);
+                    var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
+                    await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
+                }
+                else if (field)
                 {
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
@@ -79,16 +114,16 @@ internal static class App03WorkspaceEvidence
                 if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
             }
         }
-        Console.WriteLine($"{(field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
+        Console.WriteLine($"{(settlement ? "APP-03.6" : field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
 
-        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false)
+        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false, bool enableSettlement = false)
         {
             var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
             host = App03DevSession.Run(operation, root, source, run.Id, active =>
             {
                 ready.SetResult(active);
                 return Task.CompletedTask;
-            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField);
+            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField, settlement: enableSettlement);
             if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
             return await ready.Task.WaitAsync(ct);
         }

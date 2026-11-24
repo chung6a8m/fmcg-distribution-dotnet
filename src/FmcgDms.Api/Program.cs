@@ -28,7 +28,9 @@ builder.Services.AddHostedService<App02a3HostedWorker>();
 
 var app = builder.Build();
 bool app03A1 = App03A1Profile.Enabled(app.Configuration, app.Environment);
-bool app03Field = app03A1 && app.Configuration["App03:Profile"] == App03A1Profile.FieldName;
+var tenantCatalog = app.Services.GetRequiredService<TenantConnections>();
+bool app03Field = app03A1 && tenantCatalog.UsesApp03Field;
+bool app03Settlement = app03A1 && tenantCatalog.UsesApp03Settlement;
 if (app03A1)
     await App03A1Profile.VerifyTenantCatalog(app.Services.GetRequiredService<TenantConnections>(),
         app.Configuration["App02C1:Nonce"], CancellationToken.None);
@@ -50,7 +52,7 @@ if (devF08 && !devF05) throw new InvalidOperationException("DEV-F08 requires sou
 bool devF06 = app.Services.GetRequiredService<TenantConnections>().UsesDevF06;
 if (devF06 && !devF05) throw new InvalidOperationException("DEV-F06 requires source returns.");
 if (devF05 && (!devF03 || !devF04)) throw new InvalidOperationException("DEV-F05 requires lot and price snapshots.");
-if ((devF03 || devF04) && ((!app03Field && (app02d1 || app02d2)) || app02d3 || app02d4
+if ((devF03 || devF04) && ((!app03Field && (app02d1 || app02d2)) || (!app03Settlement && app02d3) || app02d4
     || !app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
     || !app.Configuration.GetValue<bool>("App02C2:DedicatedRuntime")
     || app.Configuration.GetValue<bool>("App02Worker:Enabled")
@@ -77,14 +79,14 @@ app.MapGet("/health/live", (HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return app03Workspace
         ? Results.Ok(new { status = "live", scope = "APP-00A", businessWrites = false,
-            workspaceProfile = app03Field ? App03A1Profile.FieldName : App03A1Profile.Name })
+            workspaceProfile = app.Configuration["App03:Profile"] })
         : Results.Ok(new { status = "live", scope = "APP-00A", businessWrites = false });
 });
 if (app03Workspace)
 {
     if (!app03A1 || App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not string workspaceClock)
         throw new InvalidOperationException("APP-03 workspace requires the supported DEV profile and its run clock.");
-    App03WorkspaceRoutes.Map(app, workspaceClock, app03Field);
+    App03WorkspaceRoutes.Map(app, workspaceClock, app03Field, app03Settlement);
 }
 
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))
@@ -125,7 +127,7 @@ else if (app02d1)
     App02d2Routes.MapChannelBlocked(app);
 
 if (app02d3)
-    App02d3Routes.Map(app);
+    App02d3Routes.Map(app, app03Settlement);
 if (app02d4)
     app.Services.GetRequiredService<App02d4Runtime>().Map(app);
 

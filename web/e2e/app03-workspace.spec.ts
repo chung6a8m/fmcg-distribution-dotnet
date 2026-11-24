@@ -246,3 +246,19 @@ test('APP-03 publishes the restored pending trip and the allowed fallback', asyn
   await expect(page).not.toHaveURL(/trip=/)
   await expect(nav(page, 'Nạp hàng lên xe')).toHaveAttribute('href', '/work/load')
 })
+test('APP-03 opens cashier handoff using the shared session', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**/health/live', route => route.fulfill({ json: {
+    status: 'live', scope: 'APP-00A', businessWrites: false, workspaceProfile: 'APP-03.6-v1',
+  } }))
+  await page.route('**/api/synthetic/app03/session', route => route.fulfill({ json: {
+    tenantId: 'tenant-a', actorId: 'cashier', sessionId: 'test-run', sales: false, warehouse: false,
+    handoffRoles: ['cashier'], returnRole: null, expiresAt: Math.floor(Date.now() / 1000) + 60,
+  } }))
+  await page.route('**/api/synthetic/app02d3/trips', route => route.fulfill({ json: [] }))
+  await page.goto('/work/settlement')
+  await login(page, 'cashier')
+  await expect(nav(page, 'Đối soát chuyến và nộp tiền')).toBeVisible()
+  await expect(page.getByText('Phiên này chưa được phân công chuyến.')).toBeVisible()
+  await expect(page.getByLabel('Mã truy cập DEV')).toHaveCount(0)
+})

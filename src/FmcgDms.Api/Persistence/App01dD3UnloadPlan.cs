@@ -5,7 +5,7 @@ namespace FmcgDms.Api.Persistence;
 
 public sealed partial class App01dCashierUnloadService
 {
-    private static async Task<(D3ReturnPlan? Plan, string? Rejection)> PlanD3Return(SqlConnection db,
+    private async Task<(D3ReturnPlan[]? Plans, string? Rejection)> PlanD3Return(SqlConnection db,
         SqlTransaction tx, string tenant, Guid trip, Guid vehicle, CancellationToken ct)
     {
         var scope = new { Tenant = tenant, Trip = trip };
@@ -16,29 +16,54 @@ public sealed partial class App01dCashierUnloadService
             JOIN dbo.StockLocation w WITH (HOLDLOCK) ON w.TenantId=m.TenantId AND w.Id=m.WarehouseLocationId
             WHERE m.TenantId=@Tenant AND m.TripId=@Trip;
             """, scope, tx, ct))).ToArray();
-        if (manifests.Length == 0) return (null, "LOADED_MANIFEST_NOT_ELIGIBLE");
-        Guid warehouse = manifests[0].WarehouseLocationId;
+        var rights = await ReadD3Rights(db, tx, tenant, trip, ct);
+        if (manifests.Length == 0 && (!connections.UsesApp03Settlement || !rights.Any(r => r.Kind == "B")))
+            return (null, "LOADED_MANIFEST_NOT_ELIGIBLE");
+        Guid warehouse = manifests.FirstOrDefault()?.WarehouseLocationId ?? rights[0].Warehouse;
         if (manifests.Any(m => !m.IsC3 || m.Status != "LOADED" || !m.WarehouseActive ||
                 m.WarehouseKind != "WAREHOUSE" || m.WarehouseLocationId != warehouse || m.VehicleLocationId != vehicle))
             return (null, "LOADED_MANIFEST_NOT_ELIGIBLE");
 
-        var rights = await ReadD3Rights(db, tx, tenant, trip, ct);
         if (rights.Length == 0) return (null, "REMAINDER_RIGHT_SOURCE_DRIFT");
-        Guid sku = rights[0].Sku;
-        if (rights.Any(r => r.Warehouse != warehouse || r.Sku != sku || !r.HasAllocationProof ||
+        if ((!connections.UsesApp03Settlement && rights.Any(r => r.Sku != rights[0].Sku)) ||
+            rights.Any(r => r.Warehouse != warehouse || !r.HasAllocationProof ||
                 r.Released != 0 || r.Consumed > r.Granted ||
                 r.Status != (r.Consumed == r.Granted ? "CONSUMED" : "HELD")))
             return (null, "REMAINDER_RIGHT_SOURCE_DRIFT");
 
         var lines = await ReadD3LoadedLines(db, tx, tenant, trip, ct);
         var manifestIds = manifests.Select(m => m.Id).ToHashSet();
-        var rightKinds = rights.ToDictionary(r => r.Id, r => r.Kind);
+        var rightKeys = rights.ToDictionary(r => r.Id, r => (r.Kind, r.Sku));
         if (!manifestIds.SetEquals(lines.Select(l => l.TripManifestId)) ||
             lines.Any(l => !l.HasMovementProof || !l.HasValidIssues || l.SourceLine is null ||
-                l.Loaded <= 0 || l.Issued < 0 || l.Remaining < 0 || l.Sku != sku ||
-                rightKinds.GetValueOrDefault(l.RightId) != l.Kind))
+                l.Loaded <= 0 || l.Issued < 0 || l.Remaining < 0 ||
+                rightKeys.GetValueOrDefault(l.RightId) != (l.Kind, l.Sku)))
             return (null, "MANIFEST_SOURCE_DRIFT");
 
+        if (!connections.UsesApp03Settlement && await db.ExecuteScalarAsync<int>(Sql("""
+            SELECT COUNT(*) FROM dbo.PhysicalStockBalance WITH (UPDLOCK,HOLDLOCK)
+            WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId NOT IN @Skus
+                AND (OnHandBaseQuantity<>0 OR OnHandCostAmount<>0);
+            """, new { Tenant = tenant, Vehicle = vehicle, Skus = rights.Select(r => r.Sku).Distinct().ToArray() }, tx, ct)) != 0)
+            return (null, "VEHICLE_REMAINDER_MISMATCH");
+
+        var plans = new List<D3ReturnPlan>();
+        var bySku = lines.ToLookup(l => l.Sku);
+        foreach (var group in rights.GroupBy(r => r.Sku).OrderBy(group => group.Key))
+        {
+            var (plan, rejection) = await PlanD3Sku(db, tx, tenant, warehouse, vehicle, group.Key,
+                group, bySku[group.Key].ToArray(), ct);
+            if (plan is null) return (null, rejection);
+            plans.Add(plan);
+        }
+        return !connections.UsesApp03Settlement && plans.All(plan => plan.Returns.Count == 0 && plan.Releases.Count == 0)
+            ? (null, "NOTHING_TO_UNLOAD") : (plans.ToArray(), null);
+    }
+
+    private async Task<(D3ReturnPlan? Plan, string? Rejection)> PlanD3Sku(SqlConnection db, SqlTransaction tx,
+        string tenant, Guid warehouse, Guid vehicle, Guid sku, IEnumerable<D3Right> rights,
+        D3LoadedLine[] lines, CancellationToken ct)
+    {
         var byRight = lines.ToLookup(l => l.RightId);
         var releases = new List<D3Release>();
         decimal neverLoadedA = 0;
@@ -55,23 +80,24 @@ public sealed partial class App01dCashierUnloadService
         }
 
         decimal quantity = lines.Sum(l => l.Remaining);
-        var truckBalance = await ReadD3Physical(db, tx, tenant, vehicle, sku, ct);
         var mainBalance = await ReadD3Physical(db, tx, tenant, warehouse, sku, ct);
+        var truckBalance = await ReadD3Physical(db, tx, tenant, vehicle, sku, ct);
         if (truckBalance is null || mainBalance is null ||
             truckBalance.OnHandBaseQuantity != truckBalance.SourceBaseQuantity ||
             truckBalance.OnHandCostAmount != truckBalance.SourceCostAmount ||
             mainBalance.OnHandBaseQuantity != mainBalance.SourceBaseQuantity ||
             mainBalance.OnHandCostAmount != mainBalance.SourceCostAmount)
             return (null, "PHYSICAL_SOURCE_DRIFT");
-        decimal value = truckBalance.OnHandCostAmount;
-        if (quantity != truckBalance.OnHandBaseQuantity || (quantity == 0 && value != 0)
-            || mainBalance.OnHandBaseQuantity + quantity > MaximumQuantity
-            || mainBalance.OnHandCostAmount + value > MaximumAmount
-            || await db.ExecuteScalarAsync<int>(Sql("""
-                SELECT COUNT(*) FROM dbo.PhysicalStockBalance WITH (UPDLOCK,HOLDLOCK)
-                WHERE TenantId=@Tenant AND StockLocationId=@Vehicle AND SkuId<>@Sku
-                    AND (OnHandBaseQuantity<>0 OR OnHandCostAmount<>0);
-                """, new { Tenant = tenant, Vehicle = vehicle, Sku = sku }, tx, ct)) != 0)
+        if (quantity > truckBalance.OnHandBaseQuantity ||
+            (!connections.UsesApp03Settlement && quantity != truckBalance.OnHandBaseQuantity) ||
+            (truckBalance.OnHandBaseQuantity == 0 && truckBalance.OnHandCostAmount != 0))
+            return (null, "VEHICLE_REMAINDER_MISMATCH");
+
+        // A successor trip can already occupy the same physical vehicle. Move only
+        // the original trip's source quantity at the vehicle's carrying unit cost.
+        decimal value = D3CarryingCost(truckBalance.OnHandCostAmount, truckBalance.OnHandBaseQuantity, quantity);
+        if (mainBalance.OnHandBaseQuantity + quantity > MaximumQuantity ||
+            mainBalance.OnHandCostAmount + value > MaximumAmount)
             return (null, "VEHICLE_REMAINDER_MISMATCH");
 
         var pool = await db.QuerySingleOrDefaultAsync<D3Pool>(Sql("""
@@ -87,7 +113,7 @@ public sealed partial class App01dCashierUnloadService
         if (allocated > pool.OnHand + quantity) return (null, "ALLOCATION_POOL_SOURCE_DRIFT");
 
         var returned = lines.Where(l => l.Remaining > 0).ToArray();
-        if (returned.Length == 0 && releases.Count == 0) return (null, "NOTHING_TO_UNLOAD");
+
         var returns = new List<D3Return>(returned.Length);
         decimal assigned = 0;
         // SQL orders immutable load source lines first. The last return receives
@@ -99,11 +125,37 @@ public sealed partial class App01dCashierUnloadService
                 ? remainingValue
                 : Math.Min(remainingValue, decimal.Round(value * returned[i].Remaining / quantity,
                     4, MidpointRounding.AwayFromZero));
-            returns.Add(new(returned[i], lineValue));
+            var line = returned[i];
+            IReadOnlyList<D3LotRemainder> lots = connections.UsesApp03Settlement
+                ? (await ReadD3LotRemainder(db, tx, tenant, line.Id, ct)).AsList() : [];
+            if (lots.Count != 0 && (lots.Any(lot => lot.Issued > lot.Loaded) ||
+                lots.Sum(lot => lot.Loaded) != line.Loaded || lots.Sum(lot => lot.Issued) != line.Issued))
+                return (null, "LOT_REMAINDER_SOURCE_DRIFT");
+            returns.Add(new(line, lineValue, lots));
             assigned += lineValue;
         }
         return (new(warehouse, vehicle, sku, quantity, value, allocated, returns, releases), null);
     }
+
+    private static decimal D3CarryingCost(decimal cost, decimal total, decimal quantity) =>
+        quantity == 0 || total == 0 ? 0 : quantity == total ? cost
+            : decimal.Round(cost * (quantity / total), 4, MidpointRounding.AwayFromZero);
+
+    private static Task<IEnumerable<D3LotRemainder>> ReadD3LotRemainder(SqlConnection db, SqlTransaction tx,
+        string tenant, Guid manifestLine, CancellationToken ct) =>
+        db.QueryAsync<D3LotRemainder>(Sql("""
+            WITH Issued AS (
+                SELECT i.LotId,SUM(i.Quantity) AS Quantity FROM dbo.F03LotIssue i WITH (HOLDLOCK)
+                JOIN dbo.SaleDelivery d WITH (HOLDLOCK) ON d.TenantId=i.TenantId AND d.Id=i.DeliveryId
+                WHERE d.TenantId=@Tenant AND d.TripManifestLineId=@ManifestLine GROUP BY i.LotId
+            ), Loaded AS (
+                SELECT LotId,Quantity FROM dbo.F03LotLoad WITH (HOLDLOCK)
+                WHERE TenantId=@Tenant AND ManifestLineId=@ManifestLine
+            )
+            SELECT COALESCE(l.LotId,i.LotId) AS LotId,COALESCE(l.Quantity,0) AS Loaded,
+                COALESCE(i.Quantity,0) AS Issued
+            FROM Loaded l FULL OUTER JOIN Issued i ON i.LotId=l.LotId;
+            """, new { Tenant = tenant, ManifestLine = manifestLine }, tx, ct));
 
     private static async Task<D3Right[]> ReadD3Rights(SqlConnection db, SqlTransaction tx,
         string tenant, Guid trip, CancellationToken ct) =>

@@ -10,12 +10,17 @@ namespace FmcgDms.Api.Persistence;
 public sealed record D3UnloadInput(string ProducerId, string CommandId, string SourceNumber,
     Guid TripId) : IApp01aCommand;
 
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record App03CashCount(string ProducerId, string CommandId, string SourceNumber,
+    Guid TripId, Guid OfferId, decimal CountedAmount) : IApp01aCommand;
+
 internal sealed record D3Session(string TenantId, string ActorId, string SessionId, string[] Roles);
-internal sealed record D3TripOption(Guid TripId, string Label);
+internal sealed record D3TripOption(Guid TripId, string Label, Guid? PendingOfferId, decimal? PendingOfferAmount);
 internal sealed record D3TripReport(Guid TripId, string Label, string TripStatus, decimal Custody, decimal Fund,
     decimal ArA, decimal ArB, decimal MainQty, decimal MainCost, decimal TripQty, decimal TripCost,
     decimal AHold, decimal BQuota, Guid? PendingOfferId, decimal PendingOfferAmount,
-    decimal CustomerCredit, decimal Advance, decimal TotalAllocated, decimal SoldQty, decimal Cogs, DateTimeOffset AsOfUtc);
+    decimal CustomerCredit, decimal Advance, decimal TotalAllocated, decimal SoldQty, decimal Cogs, DateTimeOffset AsOfUtc,
+    bool CanOffer, bool CanAccept, bool CanUnload);
 
 public sealed partial class App01dCashierUnloadService
 {
@@ -35,6 +40,16 @@ public sealed partial class App01dCashierUnloadService
              ("CountEvidenceRef", request.CountEvidenceRef ?? "")],
             (db, tx, tenant, actor, command, input, token) => AcceptCore(db, tx, tenant, actor, command, input, true, token),
             ct, d3: true);
+
+    internal Task<BusinessCommandOutcome> AcceptApp03CashAsync(ClaimsPrincipal principal,
+        App03CashCount request, CancellationToken ct) =>
+        ExecuteAsync(principal, request, "APP03_CASH_HANDOVER_ACCEPT", "cashier", request.TripId,
+            [("TripId", request.TripId.ToString("N")), ("OfferId", request.OfferId.ToString("N")),
+             ("CountedAmount", CommandPayloadHash.Decimal(request.CountedAmount))],
+            (db, tx, tenant, actor, command, input, token) => AcceptCore(db, tx, tenant, actor, command,
+                new AcceptCashHandoverCommand(input.ProducerId, input.CommandId, input.SourceNumber,
+                    input.TripId, input.OfferId, "APP03-COUNT-" + command.ToString("N")),
+                true, token, input.CountedAmount), ct, d3: true);
 
     private Task<SqlConnection> OpenD3(ClaimsPrincipal user, CancellationToken ct)
     {
@@ -109,9 +124,16 @@ public sealed partial class App01dCashierUnloadService
     internal Task<D3TripOption[]> D3Trips(ClaimsPrincipal user, CancellationToken ct) =>
         ReadD3(user, async (db, tx, tenant, actor, roles) =>
             (await db.QueryAsync<D3TripOption>(Sql($"""
-                SELECT t.Id AS TripId,t.Code AS Label FROM dbo.Trip t
+                SELECT t.Id AS TripId,t.Code AS Label,
+                    o.Id AS PendingOfferId,o.OfferedAmount AS PendingOfferAmount FROM dbo.Trip t
+                OUTER APPLY (
+                    SELECT TOP(1) h.Id,h.OfferedAmount FROM dbo.CashHandoverOffer h
+                    WHERE h.TenantId=t.TenantId AND h.TripId=t.Id AND NOT EXISTS
+                        (SELECT 1 FROM dbo.CashHandoverAcceptance a WHERE a.TenantId=h.TenantId AND a.OfferId=h.Id)
+                    ORDER BY h.OfferedAtUtc,h.Id
+                ) o
                 WHERE t.TenantId=@Tenant AND {D3TripAssignment}
-                ORDER BY t.Code,t.Id;
+                ORDER BY CASE WHEN o.Id IS NULL THEN 1 ELSE 0 END,t.BusinessDate DESC,t.Code,t.Id;
                 """, new { Tenant = tenant, Actor = actor, Roles = roles }, tx, ct))).ToArray(), ct);
 
     internal Task<D3TripReport> D3Report(ClaimsPrincipal user, Guid tripId, CancellationToken ct) =>
@@ -119,7 +141,7 @@ public sealed partial class App01dCashierUnloadService
         {
             await LockAsync(db, tx, "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
             await RequireD3Trip(db, tx, tenant, actor, tripId, roles, ct);
-            return await db.QuerySingleAsync<D3TripReport>(Sql($"""
+            var report = await db.QuerySingleAsync<D3TripReport>(Sql($"""
                 WITH TripPool AS (
                     SELECT DISTINCT TenantId,StockLocationId,SkuId
                     FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip
@@ -141,7 +163,16 @@ public sealed partial class App01dCashierUnloadService
                     COALESCE((SELECT SUM(a.AppliedAmount) FROM dbo.ReceiptAllocation a
                         JOIN dbo.CashReceipt c ON c.TenantId=a.TenantId AND c.Id=a.CashReceiptId
                         WHERE c.TenantId=t.TenantId AND c.TripId=t.Id),0) AS TotalAllocated,
-                    d.SoldQty,d.Cogs,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00') AS AsOfUtc
+                    d.SoldQty,d.Cogs,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00') AS AsOfUtc,
+                    CONVERT(bit, CASE WHEN 'sales' IN @Roles AND EXISTS (SELECT 1 FROM dbo.C4DeliveryWriter w
+                        WHERE w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId COLLATE Latin1_General_100_BIN2=@Actor)
+                        THEN 1 ELSE 0 END) AS CanOffer,
+                    CONVERT(bit, CASE WHEN 'cashier' IN @Roles AND EXISTS (SELECT 1 FROM dbo.D3CashierTrip c
+                        WHERE c.TenantId=t.TenantId AND c.TripId=t.Id AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor)
+                        THEN 1 ELSE 0 END) AS CanAccept,
+                    CONVERT(bit, CASE WHEN 'warehouse' IN @Roles AND EXISTS (SELECT 1 FROM dbo.C3TripWriter w
+                        WHERE w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId COLLATE Latin1_General_100_BIN2=@Actor)
+                        THEN 1 ELSE 0 END) AS CanUnload
                 FROM dbo.Trip t
                 CROSS APPLY (
                     SELECT COALESCE(SUM(b.OnHandBaseQuantity),0) Qty,COALESCE(SUM(b.OnHandCostAmount),0) Cost
@@ -175,8 +206,29 @@ public sealed partial class App01dCashierUnloadService
                     ORDER BY h.OfferedAtUtc,h.Id
                 ) o
                 WHERE t.TenantId=@Tenant AND t.Id=@Trip;
+                """, new { Tenant = tenant, Trip = tripId, Actor = actor, Roles = roles }, tx, ct));
+            if (!connections.UsesApp03Settlement) return report;
+            var stock = await db.QueryAsync<D3TripStock>(Sql("""
+                SELECT SUM(e.QuantityDelta) AS TripQuantity,b.OnHandBaseQuantity AS VehicleQuantity,
+                    b.OnHandCostAmount AS VehicleCost
+                FROM dbo.Trip t
+                JOIN dbo.BusinessSource s ON s.TenantId=t.TenantId AND s.TripId=t.Id
+                JOIN dbo.BusinessSourceLine l ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
+                JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
+                    AND e.StockLocationId=t.VehicleLocationId AND e.LedgerKind='PHYSICAL_STOCK'
+                JOIN dbo.PhysicalStockBalance b ON b.TenantId=t.TenantId
+                    AND b.StockLocationId=t.VehicleLocationId AND b.SkuId=e.SkuId
+                WHERE t.TenantId=@Tenant AND t.Id=@Trip
+                GROUP BY b.SkuId,b.OnHandBaseQuantity,b.OnHandCostAmount;
                 """, new { Tenant = tenant, Trip = tripId }, tx, ct));
+            return report with
+            {
+                TripQty = stock.Sum(row => row.TripQuantity),
+                TripCost = stock.Sum(row => D3CarryingCost(row.VehicleCost, row.VehicleQuantity, row.TripQuantity))
+            };
         }, ct);
+
+    private sealed record D3TripStock(decimal TripQuantity, decimal VehicleQuantity, decimal VehicleCost);
 
     private sealed record D3StoredOutcome(string Status, string OutcomeCode, string? ReasonCode, Guid? SourceId,
         string RoleCode);

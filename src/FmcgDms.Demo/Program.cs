@@ -17,13 +17,13 @@ using Microsoft.AspNetCore.Hosting.Server.Features;
 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The demo requires Windows LocalDB.");
 if (args is ["App03Session", var sessionAction, var sessionRoot, var sessionSource, var sessionId])
 {
-    await App03DevSession.Run(sessionAction, sessionRoot, sessionSource, sessionId == "-" ? null : sessionId);
+    await App03DevSession.Run(sessionAction, sessionRoot, sessionSource, sessionId == "-" ? null : sessionId, settlement: true);
     return;
 }
 if (args is ["App03Session", "NextDay", var dayRoot, var daySource, var dayId, var day])
 {
     var target = DateOnly.ParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture);
-    await App03DevSession.Run("NextDay", dayRoot, daySource, dayId, businessDate: target);
+    await App03DevSession.Run("NextDay", dayRoot, daySource, dayId, businessDate: target, settlement: true);
     return;
 }
 if (args is ["App03SessionProbe", var probeRoot, var probeSource, var probeId])

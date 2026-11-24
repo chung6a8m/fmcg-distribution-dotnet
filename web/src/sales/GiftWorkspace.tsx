@@ -88,7 +88,7 @@ export function GiftWorkspace() {
   </main>
 }
 
-function GiftPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
+export function GiftPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
   const roleActions = actions[identity.role]
   const key = 'dev-f07.gift.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
   const [action, setAction] = useState<Action>(roleActions[0])

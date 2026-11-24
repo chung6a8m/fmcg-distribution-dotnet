@@ -80,9 +80,11 @@ public sealed partial class App01a2CommandService
             var lines = (await db.QueryAsync<C4WorkspaceLine>(Sql("""
             SELECT l.Id,o.Id AS OrderId,k.Code AS Sku,p.BaseUom,c.Name AS Customer,adr.Address AS ShipTo,
                 COALESCE(am.Version,1) AS ShipToVersion,l.LoadedBaseQuantity AS Loaded,d.Delivered,
-                l.LoadedBaseQuantity-d.Delivered AS Available,
+                CASE WHEN @Settlement=1 AND t.Status NOT IN ('PREPARED','IN_PROGRESS') THEN 0
+                    ELSE l.LoadedBaseQuantity-d.Delivered END AS Available,
                 r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held
             FROM dbo.TripManifestLine l
+            JOIN dbo.Trip t ON t.TenantId=l.TenantId AND t.Id=l.TripId
             JOIN dbo.PhysicalStockMovement mv ON mv.TenantId=l.TenantId AND mv.TripManifestLineId=l.Id
             JOIN dbo.StockRight r ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
             JOIN dbo.AReservation a ON a.TenantId=r.TenantId AND a.StockRightId=r.Id
@@ -99,13 +101,13 @@ public sealed partial class App01a2CommandService
                 WHERE TenantId=l.TenantId AND TripManifestLineId=l.Id) d
             WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.IsC3=1
             ORDER BY c.Name,k.Code,l.Id
-            """, new { Tenant = tenant, Trip = trip }, tx, ct))).AsList();
+            """, new { Tenant = tenant, Trip = trip, Settlement = connections.UsesApp03Settlement }, tx, ct))).AsList();
             if (!connections.UsesDevF03 || lines.Count == 0) return lines;
             var ids = lines.Select(line => line.Id).ToArray();
             var lots = (await ReadLoadedLots(db, tx, tenant, ids, null, ct)).ToLookup(lot => lot.SourceId, lot => lot.ToView());
             var tracked = await GetTrackedSources(db, tx, tenant, ids, "F03LotLoad", "ManifestLineId", ct);
             return lines.Select(line => tracked.Contains(line.Id)
-                ? line with { Lots = lots[line.Id].ToArray(), Available = Math.Min(line.Available, lots[line.Id].Sum(lot => lot.Quantity)) }
+                ? line with { Lots = line.Available == 0 && connections.UsesApp03Settlement ? [] : lots[line.Id].ToArray(), Available = Math.Min(line.Available, lots[line.Id].Sum(lot => lot.Quantity)) }
                 : line).ToArray();
         }, ct);
 

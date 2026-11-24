@@ -10,7 +10,7 @@ public sealed partial class App01c2BPostingService
     private async Task<bool> IsD3Trip(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, CancellationToken ct)
     {
-        if (!connections.UsesApp02d3) return false;
+        if (!connections.UsesApp02d3 || connections.UsesApp03Settlement) return false;
         return await db.ExecuteScalarAsync<int>(Sql("""
             SELECT COUNT(*) FROM dbo.D3CashierTrip WITH (HOLDLOCK)
             WHERE TenantId=@Tenant AND TripId=@Trip;

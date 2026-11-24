@@ -120,19 +120,22 @@ function App() {
           : location.pathname === '/sales'
             ? <Suspense fallback={<p className="page" role="status">Đang tải Sales A…</p>}><SalesWorkspace /></Suspense>
           : location.pathname === '/sales/advances'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải tạm ứng…</p>}><AdvanceWorkspace /></Suspense>
+            ? <WorkspaceEntry settlementRoute="/work/advances" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải tạm ứng…</p>}><AdvanceWorkspace /></Suspense>} />
           : location.pathname === '/sales/returns'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải trả hàng…</p>}><ReturnWorkspace /></Suspense>
+            ? <WorkspaceEntry settlementRoute="/work/returns" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải trả hàng…</p>}><ReturnWorkspace /></Suspense>} />
           : location.pathname === '/sales/cost-adjustments'
             ? <Suspense fallback={<p className="page" role="status">Đang tải điều chỉnh giá vốn…</p>}><CostAdjustmentWorkspace /></Suspense>
           : location.pathname === '/sales/gifts'
-            ? <Suspense fallback={<p className="page" role="status">Đang tải quà khuyến mại…</p>}><GiftWorkspace /></Suspense>
+            ? <WorkspaceEntry settlementRoute="/work/gifts" fallback={() =>
+              <Suspense fallback={<p className="page" role="status">Đang tải quà khuyến mại…</p>}><GiftWorkspace /></Suspense>} />
           : location.pathname === '/sales/refunds'
             ? <Suspense fallback={<p className="page" role="status">Đang tải credit và hoàn tiền…</p>}><RefundWorkspace /></Suspense>
           : location.pathname === '/sales/partner-rehearsal'
             ? <Suspense fallback={<p className="page" role="status">Đang tải mô phỏng…</p>}><PartnerRehearsalWorkspace /></Suspense>
           : location.pathname === '/sales/mixed-trip'
-            ? <WorkspaceEntry fieldRoute="/work/field" fallback={() =>
+            ? <WorkspaceEntry fieldRoute="/work/field" settlementRoute="/work/settlement" fallback={() =>
               <Suspense fallback={<p className="page" role="status">Đang tải chuyến Mixed…</p>}><MixedTripWorkspace /></Suspense>} />
           : location.pathname === '/sales/b-sale'
             ? <WorkspaceEntry fieldRoute="/work/b-sale" fallback={() =>

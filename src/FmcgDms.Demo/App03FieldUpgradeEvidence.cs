@@ -23,8 +23,9 @@ internal static partial class App03FieldEvidence
         "BusinessSource", "BusinessSourceLine", "LedgerEffect"
     ];
 
-    internal static async Task<Predecessor> CheckPredecessor(DemoRun run, App03DevHost host, CancellationToken ct)
+    internal static async Task<Predecessor> CheckPredecessor(DemoRun run, App03DevHost host, CancellationToken ct, bool withRemainder = false)
     {
+        int loaded = withRemainder ? 3 : 2;
         using var health = await host.Client.GetFromJsonAsync<JsonDocument>(host.WebUrl + "/health/live", ct);
         using var noD2 = await Send(host, B + "/trips", ct);
         if (health?.RootElement.GetProperty("workspaceProfile").GetString() != App03A1Profile.Name
@@ -41,17 +42,17 @@ internal static partial class App03FieldEvidence
         var address = await Read<C1Outcome>(host, C1 + "/ship-to-selections", ct,
             new C1SelectionInput(Guid.NewGuid(), customer.Id, null, shipTo.Id, shipTo.Revision, null));
         var draft = await Read<BusinessCommandOutcome>(host, C2 + "/drafts", ct,
-            new C2DraftInput(Guid.NewGuid(), customer.Id, trip.Id, address.Id!.Value, [new(sku.Id, 2)]));
+            new C2DraftInput(Guid.NewGuid(), customer.Id, trip.Id, address.Id!.Value, [new(sku.Id, loaded)]));
         Guid orderId = draft.SourceId!.Value;
         var confirmation = await Read<BusinessCommandOutcome>(host, C2 + "/confirm", ct,
             new C2ConfirmInput(Guid.NewGuid(), orderId));
         var order = (await Read<C2OrderView[]>(host, C2 + "/orders", ct)).Single(row => row.Id == orderId);
         var reservation = await Read<BusinessCommandOutcome>(host, C2 + "/reserve", ct,
-            new C2ReserveInput(Guid.NewGuid(), orderId, order.Lines.Single().LineId!.Value, warehouse.Id, 2,
+            new C2ReserveInput(Guid.NewGuid(), orderId, order.Lines.Single().LineId!.Value, warehouse.Id, loaded,
                 confirmation.SourceId!.Value), host.ReceiverToken);
         var right = (await Read<RightId[]>(host, C3 + $"/trips/{trip.Id}/rights", ct, token: host.ReceiverToken)).Single();
         var load = await Read<BusinessCommandOutcome>(host, C3 + "/load", ct,
-            new C3LoadInput(Guid.NewGuid(), trip.Id, [new(right.Id, 2, 2)]), host.ReceiverToken);
+            new C3LoadInput(Guid.NewGuid(), trip.Id, [new(right.Id, loaded, loaded)]), host.ReceiverToken);
         var line = (await Read<DeliveryLine[]>(host, C4 + $"/trips/{trip.Id}/lines", ct)).Single();
         var delivery = new C4DeliveryInput(Guid.NewGuid(), trip.Id, line.Id, line.ShipToVersion, 2);
         // Drop the response body. SQL independently identifies the posted source.
@@ -75,7 +76,7 @@ internal static partial class App03FieldEvidence
         if (reservation.Status != "APPLIED" || load.Status != "APPLIED" || posted.Quantity != 2
             || posted.Outstanding != 20000 || posted.Cost != 6667 || posted.Currency != "VND"
             || sql.SourceId != posted.SourceId || sql.OrderId != orderId || sql.StockRightId != right.Id
-            || sql is not { Delivered: 2, OutstandingAmount: 20000, GrossAmount: 20000, Consumed: 2, Loaded: 2 })
+            || sql is not { Delivered: 2, OutstandingAmount: 20000, GrossAmount: 20000, Consumed: 2 } || sql.Loaded != loaded)
             throw new InvalidOperationException("The predecessor delivery, rights or AR fixture was not posted.");
 
         return new(orderId, confirmation.SourceId.Value, reservation.SourceId!.Value, load.SourceId!.Value,

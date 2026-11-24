@@ -4,13 +4,14 @@ using FmcgDms.Api.Persistence;
 namespace FmcgDms.Demo;
 
 internal sealed record App03DevHost(HttpClient Client, string WebUrl, string SourceToken, int ApiPid, int VitePid,
-    string PeerToken, string FinanceToken, string ExpiredToken, string ReceiverToken);
+    string PeerToken, string FinanceToken, string ExpiredToken, string ReceiverToken, string CashierToken, string QaToken);
 
 internal sealed class App03DevSession
 {
     private const string ManifestVersion = "APP-03-session-v1";
     private const string SchemaVersion = "C5+F01+F03+F04+F05/v1";
     private const string FieldSchemaVersion = "C5+F01+F03+F04+F05+D1+D2+Field/v1";
+    private const string SettlementSchemaVersion = "C5+F01-F05+F07+D1-D3+Field+Settlement/v1";
     private const string LegacySeedVersion = "APP-03-C2-F05-v1";
     private readonly string folder;
     private readonly string manifestPath;
@@ -25,15 +26,17 @@ internal sealed class App03DevSession
     internal bool VerifyField { get; private init; }
     internal bool UsesBusinessDay { get; private set; } = true;
     internal bool UsesField { get; private set; }
+    internal bool UsesSettlement { get; private set; }
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
     internal CancellationToken StopToken { get; private set; }
 
-    private App03DevSession(string id, string source, bool resume, bool startBeforeField)
+    private App03DevSession(string id, string source, bool resume, bool startBeforeField, bool settlement)
     {
         this.source = source;
         Resume = resume;
         UsesField = !startBeforeField;
+        UsesSettlement = UsesField && settlement;
         RunId = new DemoRun(id);
         string home = Directory.CreateDirectory(Home).FullName;
         folder = Path.Combine(home, id);
@@ -42,8 +45,8 @@ internal sealed class App03DevSession
         signalName = $@"Local\FmcgDms.APP03.{id}";
         expected = new Manifest(ManifestVersion, id, DemoRun.Instance,
             new Binding("tenant-a", RunId.Name("tenant-a"), id), new Binding("tenant-b", RunId.Name("tenant-b"), id),
-            UsesField ? App03A1Profile.FieldName : App03A1Profile.Name,
-            UsesField ? FieldSchemaVersion : SchemaVersion, App03DayBootstrap.Version,
+            UsesSettlement ? App03A1Profile.SettlementName : UsesField ? App03A1Profile.FieldName : App03A1Profile.Name,
+            UsesSettlement ? SettlementSchemaVersion : UsesField ? FieldSchemaVersion : SchemaVersion, App03DayBootstrap.Version,
             App03DayBootstrap.Clock(App03DayBootstrap.FirstDay), source, WebPort: 0, Ready: false);
     }
 
@@ -54,16 +57,17 @@ internal sealed class App03DevSession
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
-        bool verifyField = false, bool startBeforeField = false)
+        bool verifyField = false, bool startBeforeField = false, bool settlement = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
+        if (operation == "VerifySettlement") { await App03WorkspaceEvidence.Run(root, source, settlement: true); return; }
         if (operation == "VerifyField") { await App03WorkspaceEvidence.Run(root, source, field: true); return; }
         if (operation == "VerifyHandoff") { await App03WorkspaceEvidence.Run(root, source, handoff: true); return; }
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
-        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField)
+        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField, settlement)
         {
             VerifyHandoff = verifyHandoff,
             VerifyField = verifyField
@@ -137,11 +141,13 @@ internal sealed class App03DevSession
         if (!UsesBusinessDay)
         {
             UsesField = false;
+            UsesSettlement = false;
             if (await File.ReadAllTextAsync(ClockPath) != metadata.ClockUtc.ToString("O"))
                 throw new InvalidOperationException("APP-03 session clock does not match its manifest.");
         }
         else
         {
+            UsesSettlement |= metadata.Profile == App03A1Profile.SettlementName;
             await PrepareFieldDay(metadata.ClockUtc);
             await PublishFieldUpgrade(metadata);
         }
@@ -158,6 +164,7 @@ internal sealed class App03DevSession
         if (target < current || target > App03DayBootstrap.LastDay || target.DayNumber > current.DayNumber + 1)
             throw new InvalidOperationException("NextDay must name the current date (retry) or the next date in the bootstrap period.");
         await VerifyBindings();
+        UsesSettlement |= metadata.Profile == App03A1Profile.SettlementName;
         DateTime clock = App03DayBootstrap.Clock(target);
 
         // Publish the requested date before preparing either tenant. A crash can leave one tenant
@@ -177,20 +184,22 @@ internal sealed class App03DevSession
         foreach (string tenant in DemoRun.Tenants) await RunId.Verify(tenant, app03Session: true);
     }
 
-    private static Manifest WithFieldProfile(Manifest value) =>
-        value with { Profile = App03A1Profile.FieldName, Schema = FieldSchemaVersion };
+    private Manifest WithFieldProfile(Manifest value) => UsesSettlement
+        ? value with { Profile = App03A1Profile.SettlementName, Schema = SettlementSchemaVersion }
+        : value with { Profile = App03A1Profile.FieldName, Schema = FieldSchemaVersion };
 
     private Task PublishFieldUpgrade(Manifest value) =>
-        value.Profile == App03A1Profile.FieldName ? Task.CompletedTask : Write(WithFieldProfile(value));
+        value == WithFieldProfile(value) ? Task.CompletedTask : Write(WithFieldProfile(value));
 
     private async Task PrepareFieldDay(DateTime clock)
     {
         foreach (string tenant in DemoRun.Tenants)
         {
             var day = DateOnly.FromDateTime(clock);
-            ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true);
+            ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true, settlement: UsesSettlement);
             await App03DayBootstrap.PrepareDay(RunId, tenant, day, StopToken);
             await App03FieldBootstrap.Prepare(RunId, tenant, day, StopToken);
+            if (UsesSettlement) await App03SettlementBootstrap.Prepare(RunId, tenant, StopToken);
         }
         string value = clock.ToString("O");
         if (!File.Exists(ClockPath) || await File.ReadAllTextAsync(ClockPath) != value)
@@ -220,7 +229,8 @@ internal sealed class App03DevSession
 
     private static bool ValidProfile(Manifest value) =>
         value is { Profile: App03A1Profile.Name, Schema: SchemaVersion }
-        or { Profile: App03A1Profile.FieldName, Schema: FieldSchemaVersion, Seed: App03DayBootstrap.Version };
+        or { Profile: App03A1Profile.FieldName, Schema: FieldSchemaVersion, Seed: App03DayBootstrap.Version }
+        or { Profile: App03A1Profile.SettlementName, Schema: SettlementSchemaVersion, Seed: App03DayBootstrap.Version };
 
     private static bool ValidClock(Manifest metadata)
     {
