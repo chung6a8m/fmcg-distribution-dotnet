@@ -62,7 +62,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | [DEV_VERIFIED_LOCAL](app-03-5-field.md#kết-quả-local-ngày-24112026) |
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | [DEV_VERIFIED_LOCAL](app-03-6-settlement.md#kết-quả-local-ngày-24112026) |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn và credit/refund theo vai trên cùng hồ sơ .6 | [DEV_VERIFIED_LOCAL](app-03-7-finance.md#kết-quả-local-ngày-24112026) |
-| APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | NOT_STARTED |
+| APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | [DEV_VERIFIED_LOCAL](app-03-8-owner.md#kết-quả-local-ngày-24112026) |
 | APP-03.9 — Integrated DEV Acceptance | .1a–.8 | Bằng chứng cùng dữ liệu, liên vai, restart và ngày hai | NOT_STARTED |
 
 Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8 → .9**. .2 và .3 có thể tiến hành độc lập khi hợp đồng phiên/bootstrap đã rõ; không phát sinh PR tài liệu trung gian chỉ để xin bắt đầu các hàng đã được chốt.
@@ -178,12 +178,14 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** read model chỉ đọc về đơn/chuyến, số lượng và giá trị tồn MAIN/TRIP, giá vốn, AR/credit, tiền ngoài thị trường, quỹ, tạm ứng và công việc chờ. Tái sử dụng C.5/D.3 cùng nguồn F phù hợp; tổng hợp theo đúng nguồn, đơn vị và cấp dữ liệu, không cộng các báo cáo chuyến một cách cơ học.
 
+[Cách mở Tổng quan Chủ NPP và chạy kiểm chứng APP-03.8](app-03-8-owner.md).
+
 **Hoàn tất:**
 
-- [ ] Mỗi chỉ số có asOf/cutoff, phạm vi, đơn vị và mức đầy đủ/chưa đủ; dùng n/N theo nguồn khi có mẫu số xác định. Thiếu mẫu số ghi chưa đủ dữ liệu, không biểu diễn dữ liệu chưa có thành 0 hoặc tỷ lệ hoàn tất.
-- [ ] Hai chuyến cùng SKU không làm số lượng hoặc giá trị MAIN bị cộng hai lần; quantity cơ sở, lot/QA và quyền giữ được phân biệt; giá vốn đối chiếu về nguồn.
-- [ ] Tạm ứng F02 lấy từ sổ F02, không suy ra từ giá trị 0 của một báo cáo chuyến D.3. AR/credit/custody/quỹ/refund giữ đúng nguồn và đơn vị.
-- [ ] Drill-down về nguồn/case; Owner không có quyền ghi chỉ vì được xem tổng hợp; tenant khác không nhìn thấy dữ liệu.
+- [x] Mỗi chỉ số có asOf/cutoff, phạm vi, đơn vị và mức đầy đủ/chưa đủ; dùng n/N theo nguồn khi có mẫu số xác định. Thiếu mẫu số ghi chưa đủ dữ liệu, không biểu diễn dữ liệu chưa có thành 0 hoặc tỷ lệ hoàn tất.
+- [x] Hai chuyến cùng SKU không làm số lượng hoặc giá trị MAIN bị cộng hai lần; quantity cơ sở, lot/QA và quyền giữ được phân biệt; giá vốn đối chiếu về nguồn.
+- [x] Tạm ứng F02 lấy từ sổ F02, không suy ra từ giá trị 0 của một báo cáo chuyến D.3. AR/credit/custody/quỹ/refund giữ đúng nguồn và đơn vị.
+- [x] Drill-down về nguồn/case; Owner không có quyền ghi chỉ vì được xem tổng hợp; tenant khác không nhìn thấy dữ liệu.
 
 ### APP-03.9 — Integrated DEV Acceptance
 

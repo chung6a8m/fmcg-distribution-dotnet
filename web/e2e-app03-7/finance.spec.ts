@@ -24,6 +24,54 @@ async function submit(page: Page, action: string, document: string, quantity?: [
   await page.getByRole('button', { name: action, exact: true }).click()
 }
 
+test('owner-overview reads the shared sources with a distinct tenant grant', async ({ context, request }) => {
+  const endpoint = '/api/synthetic/app03/owner-overview'
+  const advances = '/api/synthetic/dev-f02/commands'
+  const employee = await request.get('/api/synthetic/app03/session', { headers: auth('SOURCE') })
+  const { actorId } = await employee.json()
+  const advance = async (role: string, action: string, fields: object) => {
+    const result = await request.post(advances, { headers: auth(role), data: {
+      commandId: crypto.randomUUID(), action, evidence: 'APP03-8-' + action, ...fields,
+    } })
+    expect(result.ok(), await result.text()).toBe(true)
+    return (await result.json()).id as string
+  }
+  const advanceId = await advance('FINANCE', 'ISSUE', { employeeId: actorId, amount: 500000 })
+  const offer = await advance('SOURCE', 'RETURN_OFFER', { advanceId, amount: 200000 })
+  await advance('CASHIER', 'RETURN_ACCEPT', { advanceId, referenceId: offer, amount: 200000, decisionReason: 'Đã kiểm đếm DEV' })
+
+  expect((await request.get(endpoint)).status()).toBe(401)
+  expect((await request.get(endpoint, { headers: auth('SOURCE') })).status()).toBe(403)
+
+  const owner = await open(context, 'OWNER', 'owner')
+  await expect(owner.getByRole('heading', { name: 'Tổng quan Chủ NPP' })).toBeVisible()
+  await expect(owner.getByRole('link', { name: 'Hàng đợi kế toán' })).toHaveCount(0)
+  await owner.getByRole('button', { name: /Credit còn lại F08/ }).focus()
+  await owner.keyboard.press('Enter')
+  await expect(owner.getByRole('region', { name: 'Nguồn Credit còn lại F08' })).toBeFocused()
+  await expect(owner.getByRole('table', { name: 'Nguồn Credit còn lại F08' })).toContainText('6.000')
+  await expect(owner.getByRole('table', { name: 'Nguồn Credit còn lại F08' })).toContainText(sale)
+  await owner.getByRole('button', { name: 'Đóng chi tiết' }).click()
+  await expect(owner.getByRole('button', { name: /Credit còn lại F08/ })).toBeFocused()
+  await owner.getByRole('button', { name: /Tạm ứng còn lại F02/ }).click()
+  await expect(owner.getByRole('table', { name: 'Nguồn Tạm ứng còn lại F02' })).toContainText('300.000')
+  await expect(owner.getByRole('table', { name: 'Nguồn Tạm ứng còn lại F02' })).toContainText(advanceId)
+  await expect(owner.getByText('Chưa đủ dữ liệu', { exact: false }).first()).toBeVisible()
+  await owner.setViewportSize({ width: 390, height: 844 })
+  expect(await owner.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+
+  const peer = await request.get(endpoint, { headers: auth('PEER_OWNER') })
+  expect(peer.status()).toBe(200)
+  const body = await peer.text()
+  expect(body).not.toContain(sale)
+  expect(body).not.toContain(advanceId)
+  expect(JSON.parse(body)).toMatchObject({ tenantId: 'tenant-b' })
+  expect((await request.post(endpoint, { headers: auth('OWNER'), data: {} })).status()).toBe(405)
+  expect((await request.post(advances, { headers: auth('OWNER'), data: {
+    commandId: crypto.randomUUID(), action: 'ISSUE', employeeId: actorId, amount: 1, evidence: 'BLOCK-OWNER',
+  } })).status()).toBe(403)
+})
+
 test('refund from a shared delivery goes through QA, credit, verification and cashier payout', async ({ context, request }, info) => {
   const source = await open(context, 'SOURCE', 'returns?delivery=' + sale)
   await expect(source.getByLabel('Nguồn giao và lô')).toHaveValue(new RegExp('^' + sale + ':'))

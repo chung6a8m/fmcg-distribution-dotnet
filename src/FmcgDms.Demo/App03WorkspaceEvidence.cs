@@ -85,6 +85,9 @@ internal static class App03WorkspaceEvidence
                     active = await Open("Resume", enableSettlement: true);
                     var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
                     await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
+                    await Stop();
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
+                    await App03OwnerEvidence.ReviewSettlement(run, active, evidence.FullName, source, ct);
                 }
                 else if (field)
                 {
@@ -117,14 +120,16 @@ internal static class App03WorkspaceEvidence
         }
         Console.WriteLine($"{(settlement ? "APP-03.6" : field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
 
-        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false, bool enableSettlement = false)
+        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false,
+            bool enableSettlement = false, bool enableFinance = false)
         {
             var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
             host = App03DevSession.Run(operation, root, source, run.Id, active =>
             {
                 ready.SetResult(active);
                 return Task.CompletedTask;
-            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField, settlement: enableSettlement);
+            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField,
+                settlement: enableSettlement, finance: enableFinance);
             if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
             return await ready.Task.WaitAsync(ct);
         }

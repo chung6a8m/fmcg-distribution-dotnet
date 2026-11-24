@@ -8,6 +8,7 @@ namespace FmcgDms.Demo;
 internal static class App03FinanceBootstrap
 {
     internal const string RefundChecker = "app03-refund-checker";
+    internal const string Owner = "app03-owner";
     internal static string AccountingActor(string role) => "app03-d4-" + role;
 
     internal static async Task Prepare(DemoRun run, string tenant, DateOnly day, CancellationToken ct)
@@ -17,6 +18,11 @@ internal static class App03FinanceBootstrap
         await db.OpenAsync(ct);
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         await db.ExecuteAsync(new CommandDefinition("""
+            IF NOT EXISTS (SELECT 1 FROM dbo.App02ActorRoleGrant WITH (UPDLOCK,HOLDLOCK)
+                WHERE TenantId=@tenant AND ActorId=@Owner AND RoleCode='owner')
+                INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                VALUES(@tenant,@Owner,'owner',1,N'app03-owner-bootstrap');
+
             IF NOT EXISTS (SELECT 1 FROM dbo.F08Treasury WITH (UPDLOCK,HOLDLOCK) WHERE TenantId=@tenant)
             BEGIN
                 INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
@@ -71,7 +77,7 @@ internal static class App03FinanceBootstrap
                 AND NOT EXISTS(SELECT 1 FROM d4app.TripProfile p WHERE p.TripId=t.Id);
             """, new
         {
-            tenant, RefundChecker, DevF05Evidence.Finance, DevF05Evidence.Qa, App03SettlementBootstrap.Cashier,
+            tenant, RefundChecker, Owner, DevF05Evidence.Finance, DevF05Evidence.Qa, App03SettlementBootstrap.Cashier,
             Accountant = AccountingActor("accountant"), Reconciler = AccountingActor("reconciler"),
             Maker = AccountingActor("maker"), Checker = AccountingActor("checker"),
             Profile = App03A1Profile.FinanceName, DayBootstrap = App03DayBootstrap.Version,

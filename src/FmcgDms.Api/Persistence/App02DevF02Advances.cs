@@ -18,7 +18,7 @@ public sealed record F02Session(string TenantId, string ActorId, string SessionI
 internal sealed partial class App02c1Service
 {
     private const string AdvancePrefix = "F02_";
-    private const string AdvanceSummarySql = """
+    internal const string AdvanceSummarySql = """
         SELECT a.Id,a.EmployeeId,a.Issued,a.Currency,a.Evidence,
                totals.Expenses AS ApprovedExpenses,totals.Accepted AS AcceptedReturns,
                totals.Offered-totals.Accepted AS PendingReturns,

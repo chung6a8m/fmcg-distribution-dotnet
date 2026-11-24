@@ -127,6 +127,7 @@ public static class App03A1Profile
             yield return (FinanceName, App03FinanceSchema.Version);
             yield return (FinanceName, App03FinanceReviewSchema.Version);
             yield return (FinanceName, App03FinanceCaseLinksSchema.Version);
+            yield return (FinanceName, App03OwnerSchema.Version);
         }
     }
 

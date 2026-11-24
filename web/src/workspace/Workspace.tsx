@@ -22,6 +22,7 @@ const Gifts = lazy(() => import('../sales/GiftWorkspace').then(m => ({ default: 
 const Adjustment = lazy(() => import('../sales/CostAdjustmentWorkspace').then(m => ({ default: m.AdjustmentPanel })))
 const Refunds = lazy(() => import('../sales/RefundWorkspace').then(m => ({ default: m.RefundPanel })))
 const Accounting = lazy(() => import('./FinanceQueue').then(m => ({ default: m.FinanceQueue })))
+const Owner = lazy(() => import('./OwnerOverview').then(m => ({ default: m.OwnerOverview })))
 
 type HandoffRole = 'sales' | 'warehouse' | 'cashier'
 type AdvanceRole = 'sales' | 'finance' | 'cashier'
@@ -36,6 +37,7 @@ type Access = Identity & {
   adjustmentRole?: 'finance' | 'case_checker' | null
   refundRole?: 'finance' | 'cashier' | 'case_checker' | null
   accountingRoles?: string[]
+  owner?: boolean
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -57,6 +59,7 @@ const routes = [
   { id: 'cost-adjustments', label: 'Điều chỉnh giá vốn', group: '', show: (a: Access) => !!a.adjustmentRole },
   { id: 'refunds', label: 'Credit và hoàn tiền', group: '', show: (a: Access) => !!a.refundRole },
   { id: 'returns', label: 'Trả hàng', group: '', show: (a: Access) => a.returnRole !== null },
+  { id: 'owner', label: 'Tổng quan Chủ NPP', group: 'Chủ NPP', show: (a: Access) => a.owner === true },
 ] as const
 const handoffGroup = { sales: 'Hiện trường', warehouse: 'Kho', finance: 'Kế toán', cashier: 'Thủ quỹ' }
 const returnGroup = { sales: 'Bán hàng', warehouse: 'Kho', finance: 'Kế toán', case_checker: 'Kiểm tra chất lượng' }
@@ -282,7 +285,7 @@ function Workspace() {
     {authorized && <WorkArea key={JSON.stringify([identityKey(authorized.access), authorized.access.sales,
       authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
       authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole,
-      authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole])} {...authorized} offline={offline} />}
+      authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole, authorized.access.owner])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -388,6 +391,7 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         ? 'Chọn công việc trong menu để tiếp tục.'
         : 'Màn hình này cần quyền phù hợp và profile DEV có hỗ trợ.'}</p>}
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
+        {current?.id === 'owner' && (offline ? <p role="status">Kết nối lại để đọc số liệu Chủ NPP.</p> : <Owner key={token} token={token} />)}
         {current?.id === 'finance' && <Accounting token={token} identity={access}
           roles={access.accountingRoles ?? []} offline={offline} />}
         {current?.id === 'cost-adjustments' && access.adjustmentRole && <Adjustment offline={offline}

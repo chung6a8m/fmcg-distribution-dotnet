@@ -65,3 +65,28 @@
     .app03-lot-label { display: inline; font-weight: 700; }
   }
 }
+
+@layer components {
+  .app03-owner-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+    gap: 0.75rem;
+    list-style: none;
+    padding: 0;
+  }
+  .app03-owner-metrics li, .app03-owner-detail {
+    border: 1px solid var(--fmcg-color-border-subtle);
+    padding: 0.75rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .app03-owner-metrics li > small { margin-block-end: 0.25rem; }
+  .app03-owner-metrics small, .app03-owner-detail small {
+    display: block;
+    color: var(--fmcg-color-text-secondary);
+  }
+  .app03-owner-detail:focus {
+    outline: var(--fmcg-focus-width) solid var(--fmcg-color-focus-ring);
+    outline-offset: var(--fmcg-focus-offset);
+  }
+}
