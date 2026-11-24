@@ -43,3 +43,12 @@ Môi trường Windows với LocalDB `MSSQLLocalDB` 2019 `15.0.4382.1`, .NET SDK
 - `VerifyFinance` run `c9599d89082b435b954082149c00b741` đạt 6/6 bài Chromium và đối chiếu SQL. SHA-256 của `sql-review.json` là `F17627B2E08946E8CADD58D6E398CEC8753A31E6DFD7D03C577D72C522035244`. Kiểm nghiệp vụ khóa, dependency, theme, token và Tailwind đạt. Hai lượt audit npm qua HTTPS ghi nhận 0 lỗ hổng. `npm --prefix web run test:e2e` đạt 58 bài và bỏ qua một ca PWA standalone yêu cầu profile CI dùng một lần. SHA-256 của JUnit web là `6FAA8590AF0A66D48B26391EEE4374836DB5DE1B8157159A3C4CF1CC6AEF85EA`.
 
 Lượt thao tác trực tiếp dừng ở màn kết nối trên Edge khi công cụ điều khiển Windows không xác minh được URL để tiếp tục dán mã DEV. Chưa có bản ghi visit trực tiếp. Lượt tự động cuối ghi `directBrowser: NOT_RUN`. Tiêu chí thao tác trực tiếp của APP-03.9 vẫn mở.
+
+## Kiểm chứng sau review PR #143
+
+Source chạy kiểm chứng `d48d17dbca3b338aaf7ef09922b842a57eaacc4b`, tree `975bfc38f560fcf416cd0fc0f7d4762fccaa3612`. Môi trường Windows LocalDB 2019 `MSSQLLocalDB`, .NET SDK `10.0.404`, Node `26.13.1` và Chromium của Playwright. Commit biên nhận sau đó chỉ thêm tài liệu và artifact.
+
+- `VerifyAcceptance` run `2a67975b56174d92a2f7e6951e987e50` đạt **2/2 Chromium và 414/414 đối chiếu SQL**. Một bài Chromium giữ cùng tab Thủ quỹ qua restart, tải lại và đăng nhập lại. Bài còn lại xác nhận đơn ngày hai. Trước lần restart và ngay sau tra cứu/replay, SQL ghi cùng command, source, line và ID của hai dòng sổ, với custody −20.000 VND và fund +20.000 VND. Ảnh dòng của hai tenant khớp trước khi Kho ghi lệnh tiếp theo. Các digest opening theo lô, phân bổ lô, ShipTo và quy đổi ngày một khớp ở đầu ngày hai và sau Confirm ngày hai.
+- `Run-DevFunctionalRegression.ps1` run `15039bd6e91f4feeb268928c00209a5c` đạt E-SIM-01, **.NET 355/355, đối chiếu nền 175/175, Chromium 29/29 và profile F 8/8**. Danh mục LocalDB trước/sau khớp. `Verify-Business.ps1` và kiểm dependency cũng đạt.
+- [Gói bằng chứng sau review](app-03-9-evidence/pr143-review-d48d17db.zip) chứa hai manifest run, đối chiếu SQL, JUnit, TRX, log và `SHA256SUMS` cho 90 artifact. SHA-256 của ZIP là `52C96772B31892A3824D55EFC3210FBCA25E92C49B82508E47DA89CF6F2E0D2C`. SHA-256 của `sql-review.json` APP-03.9 là `FBAD654288ED3E690BAE2C12824B043B651D079EE1BE1C14BDD8515CA2935E23`. SHA-256 của manifest F09 là `3146C1DFA693B12AB4AD2E3E1D2D700A0F2B0F8D37CB56905FF4407767F3BD33`.
+- Lượt thao tác trực tiếp của operator vẫn `NOT_RUN`.
