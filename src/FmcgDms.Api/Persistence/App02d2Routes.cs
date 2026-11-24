@@ -10,7 +10,8 @@ internal sealed record D2SaleInput(
     Guid SkuId, decimal BaseQuantity, decimal ReceivedCashAmount, string? VerificationEvidenceRef,
     string? PendingBankEvidenceRef = null, Guid? CustomerCreditReservationId = null);
 
-internal sealed record D2TripOption(Guid TripId, string Label);
+internal sealed record D2TripOption(Guid TripId, string Label,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? CanSell);
 internal sealed record D2LineOption(Guid TripManifestLineId, Guid SkuId, string SkuLabel,
     decimal AvailableQuantity, decimal? UnitPrice);
 internal sealed record D2SelectionOption(Guid SelectionId, Guid ShipToSnapshotId, Guid? OutletId, string Label);

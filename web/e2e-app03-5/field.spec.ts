@@ -19,6 +19,7 @@ type SaleCatalog = {
 async function signIn(page: Page, token: string) {
   await page.getByLabel('Mã truy cập DEV').evaluate((input: HTMLInputElement, value) => { input.value = value }, token)
   await page.getByRole('button', { name: 'Kết nối', exact: true }).click()
+  await expect(page.getByRole('navigation', { name: 'Công việc DEV' })).toBeVisible()
 }
 
 test('Warehouse hands Mixed and B-only trips to Field with source recovery', async ({ page, context, request }, info) => {
@@ -59,7 +60,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   }))
   const orderId = draft.sourceId
   await accepted(await post(c2 + '/confirm', { commandId: crypto.randomUUID(), orderId }))
-  const [order] = await get<Order[]>('/api/synthetic/app03/handoff')
+  const order = (await get<Order[]>('/api/synthetic/app03/handoff')).find(row => row.id === orderId)!
   await accepted(await post(c2 + '/reserve', {
     commandId: crypto.randomUUID(), orderId, lineId: order.lines[0].lineId,
     confirmSourceId: order.confirmSourceId, locationId, quantity: 4,
@@ -94,14 +95,33 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await page.getByRole('button', { name: 'Đổi danh tính' }).click()
   await signIn(page, sales)
   await page.setViewportSize({ width: 320, height: 850 })
+  const missingTrip = crypto.randomUUID()
+  await page.goto('/work/b-sale?trip=' + missingTrip)
+  const tripSelect = page.getByLabel('Chuyến', { exact: true })
+  await expect(tripSelect.locator('option', { hasText: 'DEV-20261123-A' })).toHaveCount(1)
+  await expect(page.getByRole('alert')).toContainText('Hãy chọn chuyến khác')
+  await expect(tripSelect).toHaveValue('')
+  await expect(page).toHaveURL(new RegExp('trip=' + missingTrip))
+  await expect(page.getByRole('button', { name: 'Xem trước giao dịch' })).toHaveCount(0)
+  const bTripsUrl = '**' + d2 + '/trips'
+  await page.route(bTripsUrl, async route => {
+    const response = await route.fetch()
+    const trips = await response.json() as { tripId: string }[]
+    await route.fulfill({ response, json: trips.filter(trip => trip.tripId !== bOnly) })
+  })
   await page.getByRole('link', { name: 'Chuyến và công việc', exact: true }).focus()
   await page.keyboard.press('Enter')
   const field = page.getByRole('region', { name: 'Chuyến và công việc' })
   await expect(field).toBeFocused()
   await expect(field.getByRole('heading', { name: 'DEV-20261123-A' })).toBeVisible()
+  const bOnlyRow = field.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'DEV-20261123-B' }) })
+  await expect(bOnlyRow.getByRole('link', { name: 'Giao A' })).toBeVisible()
+  await expect(bOnlyRow.getByRole('link', { name: /Bán B|Lịch sử B/ })).toHaveCount(0)
+  await page.unroute(bTripsUrl)
   await field.getByRole('link', { name: 'Giao A', exact: true }).first().click()
   await expect(page.getByLabel('Chuyến giao')).toHaveValue(mixed)
-  const aInput = page.getByLabel('Số lượng đã giao dòng 1')
+  const aForm = page.locator('form').filter({ has: page.getByRole('heading', { name: /Z-FIELD-EA/ }) })
+  const aInput = aForm.getByLabel(/Số lượng đã giao dòng/)
   await aInput.fill('1')
   let aCommand: object | undefined
   await page.route('**' + c4 + '/deliver', async route => {
@@ -114,7 +134,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await expect(page.getByText(/Chưa rõ kết quả ghi sổ/)).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: 'Gửi lại cùng yêu cầu' }).click()
-  await expect(page.getByText(/Đã giao 1 EA/)).toBeVisible()
+  await expect(aForm.getByText(/Đã giao 1 EA/)).toBeVisible()
   const aReplay = await accepted(await post(c4 + '/deliver', aCommand!))
   expect(aReplay.replayed).toBe(true)
 
@@ -194,7 +214,7 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await expect(page.getByLabel('Chuyến giao')).toHaveValue(mixed)
   await aInput.fill('1')
   await page.getByRole('button', { name: 'Xác nhận đã giao' }).click()
-  await expect(page.getByText(/Đã giao 2 EA/)).toBeVisible()
+  await expect(aForm.getByText(/Đã giao 2 EA/)).toBeVisible()
   expect((await get<SaleCatalog>(d2 + '/trips/' + mixed)).lines[0].availableQuantity).toBe(1)
 
   await accepted(await post(d1 + '/quota', quota(bOnly, skuId, 2), warehouse))
@@ -204,6 +224,20 @@ test('Warehouse hands Mixed and B-only trips to Field with source recovery', asy
   await page.getByRole('link', { name: 'Chuyến và công việc', exact: true }).click()
   await field.getByRole('link', { name: 'Bán B', exact: true }).last().click()
   await expect(page.getByLabel('Chuyến', { exact: true })).toHaveValue(bOnly)
+  const lastResult = page.getByRole('button', { name: 'Mở lại kết quả', exact: true })
+  await expect(lastResult).toHaveCount(0)
+  await page.reload()
+  await expect(tripSelect).toHaveValue(bOnly)
+  await expect(lastResult).toHaveCount(0)
+  await expect(page.getByText(bReplay.sourceId, { exact: false })).toHaveCount(0)
+  await tripSelect.selectOption(mixed)
+  await expect(lastResult).toBeVisible()
+  await lastResult.click()
+  await expect(page.getByText('Đã ghi bán và giao.', { exact: true })).toBeVisible()
+  await expect(tripSelect).toHaveValue(mixed)
+  await tripSelect.selectOption(bOnly)
+  await expect(lastResult).toHaveCount(0)
+  await expect(page.getByText(bReplay.sourceId, { exact: false })).toHaveCount(0)
   await prepareSale(bOnly, 1, 10000)
   await commit.click()
   await expect(page.getByText('Đã ghi bán và giao.', { exact: true })).toBeVisible()

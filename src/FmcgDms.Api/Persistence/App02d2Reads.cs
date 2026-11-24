@@ -7,6 +7,16 @@ namespace FmcgDms.Api.Persistence;
 
 public sealed partial class App01c2BPostingService
 {
+    private const string D2ActiveTrip = "t.Status IN ('PREPARED','IN_PROGRESS') AND v.Id IS NOT NULL";
+    private const string FieldBHistory = """
+        EXISTS (SELECT 1 FROM dbo.SaleDelivery d
+            JOIN dbo.App03BSalePricing p ON p.TenantId=d.TenantId AND p.SaleDeliveryId=d.Id
+            JOIN dbo.BusinessSource s ON s.TenantId=d.TenantId AND s.Id=d.BusinessSourceId
+            JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId AND c.Id=s.BusinessCommandId
+            WHERE d.TenantId=t.TenantId AND d.TripId=t.Id AND c.Status='APPLIED'
+                AND c.ActorId COLLATE Latin1_General_100_BIN2=@Actor)
+        """;
+
     private async Task<T> ReadD2<T>(ClaimsPrincipal user, Guid? trip,
         Func<SqlConnection, SqlTransaction, string, string, Task<T>> read, CancellationToken ct)
     {
@@ -29,13 +39,17 @@ public sealed partial class App01c2BPostingService
     internal Task<D2TripOption[]> ListD2Trips(ClaimsPrincipal user, CancellationToken ct) =>
         ReadD2(user, null, async (db, tx, tenant, actor) =>
             (await db.QueryAsync<D2TripOption>(Sql($"""
-                SELECT t.Id AS TripId,t.Code AS Label
+                SELECT t.Id AS TripId,t.Code AS Label,
+                    {(connections.UsesApp03Field
+                        ? $"CONVERT(bit, CASE WHEN {D2ActiveTrip} AND t.BusinessDate={App03FieldB.BusinessDate} THEN 1 ELSE 0 END)"
+                        : "CAST(NULL AS bit)")} AS CanSell
                 FROM dbo.Trip t
                 JOIN dbo.C4DeliveryWriter w ON w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor
-                JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
+                LEFT JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId
                     AND v.Kind='VEHICLE' AND v.IsActive=1
-                WHERE t.TenantId=@Tenant AND t.Status IN ('PREPARED','IN_PROGRESS')
-                ORDER BY {(connections.UsesApp03Field ? $"CASE WHEN t.BusinessDate={App03FieldB.BusinessDate} THEN 0 ELSE 1 END, " : "")}t.Code
+                WHERE t.TenantId=@Tenant AND (({D2ActiveTrip})
+                    {(connections.UsesApp03Field ? "OR " + FieldBHistory : "")})
+                ORDER BY CanSell DESC,t.Code
                 """, new { Tenant = tenant, Actor = actor }, tx, ct))).ToArray(), ct);
 
     private sealed record D2CustomerSelection(Guid CustomerId, string CustomerLabel,
@@ -72,7 +86,11 @@ public sealed partial class App01c2BPostingService
                 CROSS APPLY (SELECT r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Qty) rightRemaining
                 WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.RightKind='B' AND l.IsC3=1
                     AND lineRemaining.Qty>0 AND rightRemaining.Qty>0
-                    {(connections.UsesApp03Field ? $" AND t.BusinessDate={App03FieldB.BusinessDate} AND " + App03FieldB.EligibleSku : "")}
+                    {(connections.UsesApp03Field ? $"""
+                        AND t.BusinessDate={App03FieldB.BusinessDate} AND {App03FieldB.EligibleSku}
+                        AND EXISTS (SELECT 1 FROM dbo.StockLocation v WHERE v.TenantId=t.TenantId
+                            AND v.Id=t.VehicleLocationId AND v.Kind='VEHICLE' AND v.IsActive=1)
+                        """ : "")}
                     {D2ManifestProof}
                 ORDER BY k.Code,l.Id
                 """, new { Tenant = tenant, Trip = tripId, Price = connections.UsesApp03Field ? (decimal?)null : D2FixtureUnitPrice }, tx, ct));

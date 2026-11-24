@@ -349,9 +349,10 @@ function WorkArea({ access, token }: Session) {
           startTrip={loadOrder ? (guid.test(requestedTrip) ? requestedTrip : '') : trip} startOrder={loadOrder}
           onOrderChange={id => remember('order', id)} />}
         {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
-        {current?.id === 'field' && <FieldTrips token={token} businessDate={access.businessDate} />}
+        {current?.id === 'field' && <FieldTrips token={token} />}
         {current?.id === 'b-stock' && <BStock workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
-        {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} requestedTrip={query.get('trip')}
+          onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'returns' && access.returnRole && <Returns
           workspaceSession={{ token, identity: { ...access, role: access.returnRole } }}
@@ -362,16 +363,23 @@ function WorkArea({ access, token }: Session) {
   </div>
 }
 
-function FieldTrips({ token, businessDate }: { token: string; businessDate: string }) {
-  const [trips, setTrips] = useState<{ id: string; code: string; businessDate: string }[] | null>(null)
+function FieldTrips({ token }: { token: string }) {
+  const [trips, setTrips] = useState<{ id: string; code: string; b?: { canSell: boolean } }[] | null>(null)
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let current = true
-    void requestSalesApi('/api/synthetic/app02c4', token, '/trips').then(async response => {
-      if (!response.ok) throw new Error('Trip list unavailable')
-      const rows = await response.json()
-      if (current) setTrips(rows)
+    void Promise.all([
+      requestSalesApi('/api/synthetic/app02c4', token, '/trips'),
+      requestSalesApi('/api/synthetic/app02d2', token, '/trips'),
+    ]).then(async ([a, b]) => {
+      if (!a.ok || !b.ok) throw new Error('Trip list unavailable')
+      const [aRows, bRows] = await Promise.all([
+        a.json() as Promise<{ id: string; code: string }[]>,
+        b.json() as Promise<{ tripId: string; canSell: boolean }[]>,
+      ])
+      const bTrips = new Map(bRows.map(trip => [trip.tripId, trip]))
+      if (current) setTrips(aRows.map(trip => ({ ...trip, b: bTrips.get(trip.id) })))
     }).catch(() => { if (current) setError(true) })
     return () => { current = false }
   }, [token, attempt])
@@ -385,9 +393,9 @@ function FieldTrips({ token, businessDate }: { token: string; businessDate: stri
             <div><h3>{trip.code}</h3>
               <div className="button-row">
                 <a className="button button-secondary" href={'/work/delivery?trip=' + trip.id}>Giao A</a>
-                <a className="button button-secondary" href={'/work/b-sale?trip=' + trip.id}>
-                  {trip.businessDate?.slice(0, 10) === businessDate ? 'Bán B' : 'Lịch sử B'}
-                </a>
+                {trip.b && <a className="button button-secondary" href={'/work/b-sale?trip=' + trip.id}>
+                  {trip.b.canSell ? 'Bán B' : 'Lịch sử B'}
+                </a>}
               </div>
             </div>
           </li>)}</ul>}

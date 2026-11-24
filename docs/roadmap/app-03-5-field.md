@@ -15,6 +15,8 @@ pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Start
 
 Nếu mạng ngắt trong lúc ghi, dùng **Tra cứu yêu cầu** hoặc gửi lại đúng yêu cầu đã lưu. Màn hình A truy xuất nguồn giao và AR đã ghi. Màn hình B hiển thị mã nguồn và mã lệnh gần nhất trên chuyến theo quyền hiện hành, kể cả khi đăng nhập lại. Sau **NextDay**, chuyến B ngày trước tiếp tục hỗ trợ đọc và phục hồi lệnh cũ. Ghi B mới chỉ mở trên ngày nghiệp vụ hiện tại.
 
+Khi chuyến trong liên kết hết khả dụng, màn hình yêu cầu chọn chuyến khác. **Mở lại kết quả** dùng kết quả của chuyến đang xem. Yêu cầu mất ACK có nhãn chuyến nguồn, và tra cứu yêu cầu của chuyến khác giữ nguyên chuyến đang xem.
+
 ## Tổ hợp và quy tắc DEV
 
 | Tổ hợp | Hợp đồng |
@@ -50,3 +52,14 @@ Artifact nằm trong `TestResults/app03-5/<RunId>/`. Workflow Windows chạy `Ve
 | --- | --- |
 | `sql-review.json` | `1597E86E83226932D2B19C35E3247B1ABCB35AFB6CD3A31EBD1FCBC9EA46B0A9` |
 | `junit.xml` | `6E530CC9355EFB302B2C93151D22614AD51515FDC5E3C598CA473A86B135F89E` |
+
+### Kiểm chứng sau review PR #139
+
+- Run `96732f37d5df4e788b552a5cc91353da` qua Chromium và đối chiếu SQL. Liên kết đến chuyến ngoài danh mục giữ nguyên URL và để trống chuyến bán. Màn công việc chỉ đưa liên kết B cho chuyến có trong danh mục D.2. Khi đổi chuyến rồi tải lại, kết quả B vẫn gắn với chuyến nguồn.
+- Trước khi nâng phiên, Sales và Kho ghi đơn A, giữ, nạp và giao 2 EA có lô. SQL đối chiếu ảnh dòng ở hai tenant trước và sau khi nâng, gồm mã nguồn, quyền giữ, tồn, giá và AR 20.000 VND. Tra cứu và gửi lại cùng lệnh giao trả nguồn cũ. Ảnh dòng giữ nguyên sau replay.
+- Sau NextDay, API từ chối cả ba lệnh ghi mới gồm bán B, cấp quota và nạp B trên chuyến ngày cũ. Ảnh dòng nghiệp vụ ở hai tenant giữ nguyên. Với chuyến đã đóng trong fixture, danh mục B vẫn giữ lịch sử giao dịch và chỉ cho đọc.
+
+| Artifact trong thư mục run | SHA-256 |
+| --- | --- |
+| `sql-review.json` | `A73D2F32EC40503FCA1E8048AA7AD6FBFED923651CA25BD7CDC005BEE8594EB8` |
+| `junit.xml` | `85264268611F241DC24E3FC743375B4DD8CB5C935E87D99AE372D16F4E7F84BB` |

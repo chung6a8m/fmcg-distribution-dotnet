@@ -4,7 +4,7 @@ import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi
 import './customers.css'
 
 const d2Api = '/api/synthetic/app02d2'
-type Trip = { tripId: string; label: string }
+type Trip = { tripId: string; label: string; canSell?: boolean }
 type Line = {
   tripManifestLineId: string; skuId: string; availableQuantity: number | string; unitPrice: number | string | null
   skuLabel: string
@@ -49,13 +49,17 @@ function pendingKey(identity: Identity) {
   return 'app02d2.pending.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
 }
 
-function restore(identity: Identity, last = false): SaleInput | null {
+function resultKey(identity: Identity, tripId: string) {
+  return pendingKey(identity) + '.result.' + tripId
+}
+
+function restore(identity: Identity, resultTrip?: string): SaleInput | null {
   try {
-    const stored = pendingJson(pendingKey(identity) + (last ? '.result' : ''))
+    const stored = pendingJson(resultTrip ? resultKey(identity, resultTrip) : pendingKey(identity))
     if (!stored) return null
     const command = JSON.parse(stored) as SaleInput
     return command.producerId === identity.actorId && guidPattern.test(command.commandId) &&
-      guidPattern.test(command.tripId) ? command : null
+      guidPattern.test(command.tripId) && (!resultTrip || command.tripId === resultTrip) ? command : null
   } catch { return null }
 }
 
@@ -85,8 +89,8 @@ async function read<T>(token: string, path: string, base = d2Api) {
   return response.json() as Promise<T>
 }
 
-export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
-  workspaceToken?: string; startTrip?: string; onTripChange?: (id: string) => void
+export function BSaleWorkspace({ workspaceToken, startTrip, requestedTrip, onTripChange }: {
+  workspaceToken?: string; startTrip?: string; requestedTrip?: string | null; onTripChange?: (id: string) => void
 } = {}) {
   const field = !!workspaceToken
   const money = (amount: number) => field ? amount.toLocaleString('vi-VN') + ' VND' : String(amount)
@@ -100,6 +104,7 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
   const [pending, setPending] = useState<SaleInput | null>(null)
   const [latest, setLatest] = useState<SaleInput | null>(null)
   const [source, setSource] = useState('')
+  const [tripError, setTripError] = useState(false)
   const [notice, setNotice] = useState('')
   const [offline, setOffline] = useState(!navigator.onLine)
   const [busy, setBusy] = useState(false)
@@ -142,13 +147,10 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
       setSession({ identity, token, trips })
       setPending(unresolved)
       if (!field) return
-      setLatest(restore(identity, true))
-      const tripId = [unresolved?.tripId, startTrip, trips[0]?.tripId]
-        .find(id => trips.some(trip => trip.tripId === id))
-      if (tripId) {
-        setCatalog(await read<Catalog>(token, `/trips/${tripId}`))
-        onTripChange?.(tripId)
-      }
+      const candidates = requestedTrip != null ? [requestedTrip.toLowerCase()] : [unresolved?.tripId, startTrip, trips[0]?.tripId]
+      const tripId = candidates.find(id => trips.some(trip => trip.tripId === id))
+      setTripError(requestedTrip != null && !tripId)
+      if (tripId) await loadTrip({ identity, token, trips }, tripId)
     })
   }
 
@@ -157,19 +159,30 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
     if (workspaceToken) openWorkspace(workspaceToken)
   }, [workspaceToken])
 
+  async function loadTrip(current: Session, tripId: string) {
+    try {
+      setCatalog(await read<Catalog>(current.token, `/trips/${encodeURIComponent(tripId)}`))
+    } catch (error) {
+      if (!field || !(error instanceof HttpError) || ![403, 404].includes(error.status)) throw error
+      setTripError(true)
+      return
+    }
+    setLatest(field ? restore(current.identity, tripId) : null)
+    setTripError(false)
+    onTripChange?.(tripId)
+  }
+
   function openTrip(tripId: string) {
     if (!session || !tripId) return
-    const token = session.token
-    setCatalog(null)
-    setSource('')
-    if (!field) setLatest(null)
-    setCustomerId('')
-    setSelectionId('')
-    setCashRef('')
-    setPaymentMode('cash')
     void work(async () => {
-      setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(tripId)}`))
-      onTripChange?.(tripId)
+      setCatalog(null)
+      setSource('')
+      setLatest(null)
+      setCustomerId('')
+      setSelectionId('')
+      setCashRef('')
+      setPaymentMode('cash')
+      await loadTrip(session, tripId)
     })
   }
 
@@ -251,12 +264,17 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
         setPending(null)
         if (field) setCashRef('')
         forgetPending(pendingKey(identity), command.commandId)
+        const activeTrip = !field || catalog?.tripId === command.tripId
         if (result.status === 'APPLIED') {
-          setLatest(command)
-          if (field) rememberPending(pendingKey(identity) + '.result', command)
+          if (activeTrip) setLatest(command)
+          if (field) rememberPending(resultKey(identity, command.tripId), command)
         }
         const disposition = result.outcomeCode === 'D2_BANK_PENDING_POSTED' ? ' Ngân hàng chờ xác minh.' : ''
         const message = result.status === 'APPLIED' ? 'Đã ghi bán và giao.' + disposition : reasonMessage(result.reasonCode)
+        if (!activeTrip) {
+          setNotice(`${message} Chuyến nguồn: ${tripLabel(command.tripId)}.${result.sourceId ? ' Mã nguồn ' + result.sourceId : ''}`)
+          return
+        }
         setSource(result.sourceId ?? '')
         try {
           setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(command.tripId)}`))
@@ -271,6 +289,7 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
   }
 
   const blocked = busy || offline
+  const tripLabel = (id: string) => session?.trips.find(trip => trip.tripId === id)?.label ?? id
   const customer = catalog?.customers.find(item => item.customerId === customerId)
   const selection = customer?.selections.find(item => item.selectionId === selectionId)
   const cashOptions = catalog?.verifiedCash?.filter(item => item.customerId === customerId
@@ -301,8 +320,10 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
           <Choices name="trip" label="Chuyến" value={catalog?.tripId ?? ''}
             options={session.trips.map(trip => ({ id: trip.tripId, label: trip.label }))} onChange={openTrip} />
         </fieldset>
+        {tripError && <p role="alert">Chuyến được yêu cầu không còn khả dụng. Hãy chọn chuyến khác.</p>}
         {!session.trips.length && <p>Chưa có chuyến được phân công bán.</p>}
-        {latest && !pending && !review && <Button disabled={blocked} onClick={() => resolve(latest, true)}>Mở lại kết quả</Button>}
+        {latest && catalog?.tripId === latest.tripId && !pending && !review &&
+          <Button disabled={blocked} onClick={() => resolve(latest, true)}>Mở lại kết quả</Button>}
       </section>
       {catalog && <section className="panel panel-content" aria-label="Thông tin giao dịch">
         {catalog.lines.length ? <form key={catalog.tripId} onSubmit={showPreview}>
@@ -334,8 +355,8 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
             </> : <Field name="bankRef" label="Chứng cứ ngân hàng chờ xác minh" maxLength={128} required />)}
             <Button type="submit" disabled={offline}>Xem trước giao dịch</Button>
           </fieldset>
-        </form> : <p>{catalog.currentDay === false
-          ? 'Chuyến thuộc ngày trước. Có thể tra cứu giao dịch đã ghi.'
+        </form> : <p>{session.trips.find(trip => trip.tripId === catalog.tripId)?.canSell === false || catalog.currentDay === false
+          ? 'Chuyến chỉ mở để tra cứu giao dịch đã ghi.'
           : 'Chuyến chưa có dòng hàng B khả dụng.'}</p>}
       </section>}
       {review && <section className="panel panel-content" aria-labelledby="b-sale-review">
@@ -355,6 +376,7 @@ export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
       </section>}
       {pending && <section className="panel panel-content" aria-labelledby="b-sale-recovery">
         <h2 id="b-sale-recovery">Khôi phục yêu cầu</h2>
+        {field && <p>Chuyến nguồn: {tripLabel(pending.tripId)}</p>}
         <p className="c3-source">Mã yêu cầu {pending.commandId}</p>
         <div className="button-row">
           <Button disabled={blocked} onClick={() => resolve(pending, true)}>Tra cứu yêu cầu</Button>

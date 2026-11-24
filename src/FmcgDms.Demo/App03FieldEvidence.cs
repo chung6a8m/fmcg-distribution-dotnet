@@ -3,22 +3,22 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Dapper;
+using FmcgDms.Api.Persistence;
 using Microsoft.Data.SqlClient;
 
 namespace FmcgDms.Demo;
 
-internal static class App03FieldEvidence
+internal static partial class App03FieldEvidence
 {
     private const string B = "/api/synthetic/app02d2";
-
-    internal static async Task CheckPredecessor(App03DevHost host, CancellationToken ct)
-    {
-        using var health = await host.Client.GetFromJsonAsync<JsonDocument>(host.WebUrl + "/health/live", ct);
-        using var noD2 = await Send(host, B + "/trips", ct);
-        if (health?.RootElement.GetProperty("workspaceProfile").GetString() != "APP-03.1a-v1"
-            || noD2.StatusCode != HttpStatusCode.NotFound)
-            throw new InvalidOperationException("The predecessor must serve its A/F profile before the upgrade.");
-    }
+    private const string BStock = "/api/synthetic/app02d1";
+    private static readonly string[] BusinessEffects =
+    [
+        "BusinessSource", "BusinessSourceLine", "LedgerEffect", "StockPool", "StockRight", "BQuota",
+        "TripManifest", "TripManifestLine", "PhysicalStockBalance", "PhysicalStockMovement",
+        "SaleDelivery", "DeliveryStockIssue", "ReceivableOpenItem", "CashReceipt", "ReceiptAllocation",
+        "App03BSalePricing"
+    ];
 
     internal static async Task<Recovery> CheckRecovery(DemoRun run, App03DevHost host, CancellationToken ct)
     {
@@ -27,12 +27,14 @@ internal static class App03FieldEvidence
         var original = await db.QuerySingleAsync<Original>(new CommandDefinition("""
             SELECT s.Id AS SourceId,s.SourceNumber,c.CommandId,c.ProducerId,d.TripId,d.CustomerId,
                 d.ShipToSnapshotId,d.D2SelectionId AS SelectionId,d.TripManifestLineId,d.SkuId,
-                d.BaseQuantity,r.ReceivedAmount AS ReceivedCashAmount,r.VerificationEvidenceRef
+                d.BaseQuantity,r.ReceivedAmount AS ReceivedCashAmount,r.VerificationEvidenceRef,
+                d.StockRightId,h.StockLocationId
             FROM dbo.App03BSalePricing p
             JOIN dbo.SaleDelivery d ON d.TenantId=p.TenantId AND d.Id=p.SaleDeliveryId
             JOIN dbo.BusinessSource s ON s.TenantId=d.TenantId AND s.Id=d.BusinessSourceId
             JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId AND c.Id=s.BusinessCommandId
             JOIN dbo.CashReceipt r ON r.TenantId=d.TenantId AND r.SaleDeliveryId=d.Id
+            JOIN dbo.StockRight h ON h.TenantId=d.TenantId AND h.Id=d.StockRightId
             WHERE d.TenantId='tenant-a' AND d.BaseQuantity=2;
             """, cancellationToken: ct));
         using var response = await Send(host, B + $"/sales/{original.ProducerId}/{original.CommandId}?tripId={original.TripId}", ct);
@@ -51,6 +53,17 @@ internal static class App03FieldEvidence
         using var rejected = await stale.Content.ReadFromJsonAsync<JsonDocument>(ct);
         using var trips = await Send(host, B + "/trips", ct);
         using var list = await trips.Content.ReadFromJsonAsync<JsonDocument>(ct);
+        var before = await DevF01Evidence.Capture(run, BusinessEffects);
+        string saleId = Guid.NewGuid().ToString();
+        string quotaId = Guid.NewGuid().ToString("N");
+        Guid loadId = Guid.NewGuid();
+        var saleReason = await Reject(B + "/sales", request with { CommandId = saleId, SourceNumber = "STALE-" + saleId },
+            HttpStatusCode.OK);
+        var quotaReason = await Reject(BStock + "/quota", new GrantBQuotaCommand("warehouse", quotaId, "STALE-" + quotaId,
+            original.TripId, original.StockLocationId, original.SkuId, 1), HttpStatusCode.UnprocessableEntity, host.ReceiverToken);
+        var loadReason = await Reject(BStock + "/load", new C3LoadInput(loadId, original.TripId,
+            [new(original.StockRightId, 1, 1)]), HttpStatusCode.UnprocessableEntity, host.ReceiverToken);
+        var after = await DevF01Evidence.Capture(run, BusinessEffects);
         if (!response.IsSuccessStatusCode || found?.RootElement.GetProperty("sourceId").GetGuid() != original.SourceId
             || !replay.IsSuccessStatusCode || recovered?.RootElement.GetProperty("sourceId").GetGuid() != original.SourceId
             || !recovered.RootElement.GetProperty("replayed").GetBoolean()
@@ -59,24 +72,51 @@ internal static class App03FieldEvidence
             || history.RootElement.GetProperty("recentSales")[0].GetProperty("sourceId").GetGuid() != original.SourceId
             || stale.StatusCode != HttpStatusCode.UnprocessableEntity
             || rejected?.RootElement.GetProperty("reasonCode").GetString() != "APP03_B_TRIP_DAY_CLOSED"
-            || list?.RootElement[0].GetProperty("label").GetString() != "DEV-20261124-A")
+            || list?.RootElement[0].GetProperty("label").GetString() != "DEV-20261124-A"
+            || !before.SequenceEqual(after))
             throw new InvalidOperationException("A B source changed on next-day resume, or a closed-day B write was offered.");
-        return new(original.SourceId, original.CommandId, "2026-11-24", "APP03_B_TRIP_DAY_CLOSED");
+        // Fixture-only status change after checking the date gate on a still-prepared trip.
+        if (await db.ExecuteAsync(new CommandDefinition("""
+            UPDATE dbo.Trip SET Status='CLOSED'
+            WHERE TenantId='tenant-a' AND Id=@TripId AND Status='PREPARED' AND BusinessDate='20261123';
+            """, new { original.TripId }, cancellationToken: ct)) != 1)
+            throw new InvalidOperationException("Could not prepare the closed-trip history fixture.");
+        var closedList = await Read<JsonElement>(host, B + "/trips", ct);
+        var closedTrip = closedList.EnumerateArray().Single(trip => trip.GetProperty("tripId").GetGuid() == original.TripId);
+        var closedHistory = await Read<JsonElement>(host, B + "/trips/" + original.TripId, ct);
+        if (closedTrip.GetProperty("canSell").GetBoolean()
+            || closedHistory.GetProperty("lines").GetArrayLength() != 0
+            || closedHistory.GetProperty("recentSales")[0].GetProperty("sourceId").GetGuid() != original.SourceId)
+            throw new InvalidOperationException("The closed trip lost its B history or still offers new sales.");
+        return new(original.SourceId, original.CommandId, "2026-11-24", saleReason, quotaReason, loadReason,
+            closedTrip.GetProperty("label").GetString()!, before, after);
+
+        async Task<string> Reject(string path, object input, HttpStatusCode status, string? token = null)
+        {
+            using var rejectedWrite = await Send(host, path, ct, input, token);
+            var result = await rejectedWrite.Content.ReadFromJsonAsync<BusinessCommandOutcome>(cancellationToken: ct);
+            if (rejectedWrite.StatusCode != status
+                || result is not { Status: "REJECTED", ReasonCode: "APP03_B_TRIP_DAY_CLOSED", SourceId: null })
+                throw new InvalidOperationException($"Unexpected stale write result from {path}: {rejectedWrite.StatusCode}, {result}.");
+            return result.ReasonCode;
+        }
     }
 
-    private static async Task<HttpResponseMessage> Send(App03DevHost host, string path, CancellationToken ct, object? input = null)
+    private static async Task<HttpResponseMessage> Send(App03DevHost host, string path, CancellationToken ct,
+        object? input = null, string? token = null)
     {
         using var request = new HttpRequestMessage(input is null ? HttpMethod.Get : HttpMethod.Post, host.WebUrl + path);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", host.SourceToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token ?? host.SourceToken);
         if (input is not null) request.Content = JsonContent.Create(input);
         return await host.Client.SendAsync(request, ct);
     }
 
-    internal static async Task Review(DemoRun run, string directory, string source, Recovery recovery, CancellationToken ct)
+    internal static async Task Review(DemoRun run, string directory, string source, Recovery recovery,
+        UpgradeReview upgrade, CancellationToken ct)
     {
         var primary = await Read("tenant-a");
         var peer = await Read("tenant-b");
-        if (primary != new Counts(1, 1, 4, 2, 2, 4, 20000, 30000, 1, 0, 3, 1, 0, 0, 1)
+        if (primary != new Counts(2, 2, 5, 2, 2, 5, 40000, 30000, 1, 0, 3, 1, 1, 0, 1)
             || peer != new Counts(0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 0))
             throw new InvalidOperationException($"APP-03.5 SQL totals differ: tenant-a={primary}, tenant-b={peer}.");
         await using var db = new SqlConnection(run.Connection("tenant-a"));
@@ -91,6 +131,7 @@ internal static class App03FieldEvidence
             JOIN dbo.BusinessSource s ON s.TenantId=d.TenantId AND s.Id=d.BusinessSourceId
             JOIN dbo.DeliveryStockIssue x ON x.TenantId=d.TenantId AND x.SaleDeliveryId=d.Id AND x.BaseQuantity=d.BaseQuantity
             JOIN dbo.ReceivableOpenItem i ON i.TenantId=d.TenantId AND i.SaleDeliveryId=d.Id
+            JOIN dbo.Sku k ON k.TenantId=d.TenantId AND k.Id=d.SkuId AND k.Code='Z-FIELD-EA'
             LEFT JOIN dbo.App03BSalePricing p ON p.TenantId=d.TenantId AND p.SaleDeliveryId=d.Id
             WHERE d.TenantId=N'tenant-a'
             ORDER BY t.Code,d.RightKind,s.Id;
@@ -105,7 +146,7 @@ internal static class App03FieldEvidence
                 { Currency: "VND", UnitPrice: 10000, TaxAmount: 0, OutstandingAmount: 0, PlanId: not null, QuotePolicyId: not null }))
             throw new InvalidOperationException("APP-03.5 source, quota, issue, VND or AR lineage differs.");
         await File.WriteAllTextAsync(Path.Combine(directory, "sql-review.json"),
-            JsonSerializer.Serialize(new { source, runId = run.Id, primary, peer, rows, recovery },
+            JsonSerializer.Serialize(new { source, runId = run.Id, primary, peer, rows, upgrade, recovery },
                 new JsonSerializerOptions { WriteIndented = true }), ct);
 
         async Task<Counts> Read(string tenant)
@@ -152,7 +193,9 @@ internal static class App03FieldEvidence
 
     private sealed record Original(Guid SourceId, string SourceNumber, string CommandId, string ProducerId, Guid TripId,
         Guid CustomerId, Guid ShipToSnapshotId, Guid SelectionId, Guid TripManifestLineId, Guid SkuId,
-        decimal BaseQuantity, decimal ReceivedCashAmount, string VerificationEvidenceRef);
+        decimal BaseQuantity, decimal ReceivedCashAmount, string VerificationEvidenceRef, Guid StockRightId, Guid StockLocationId);
 
-    internal sealed record Recovery(Guid SourceId, string CommandId, string ResumedDate, string OldTripWriteRejection);
+    internal sealed record Recovery(Guid SourceId, string CommandId, string ResumedDate,
+        string SaleRejection, string QuotaRejection, string LoadRejection, string ClosedTripWithHistory,
+        DevF01Evidence.TableState[] BeforeStaleWrites, DevF01Evidence.TableState[] AfterStaleWrites);
 }

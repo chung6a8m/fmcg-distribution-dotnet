@@ -21,11 +21,13 @@ internal static class App03WorkspaceEvidence
             // .3 checks the original A/F workspace. .5 verifies the upgrade from that
             // same predecessor, while .4 exercises its A handoff on the current profile.
             var active = await Open("Start", startBeforeField: !handoff);
+            App03FieldEvidence.UpgradeReview? upgrade = null;
             if (field)
             {
-                await App03FieldEvidence.CheckPredecessor(active, ct);
+                var predecessor = await App03FieldEvidence.CheckPredecessor(run, active, ct);
                 await Stop();
                 active = await Open("Resume", verifyField: true);
+                upgrade = await App03FieldEvidence.CheckUpgrade(run, active, predecessor, ct);
             }
             if (handoff || field) await App03HandoffEvidence.Prepare(run, ct);
             var start = new ProcessStartInfo("node")
@@ -55,7 +57,7 @@ internal static class App03WorkspaceEvidence
                         businessDate: App03DayBootstrap.FirstDay.AddDays(1));
                     active = await Open("Resume");
                     var recovery = await App03FieldEvidence.CheckRecovery(run, active, ct);
-                    await App03FieldEvidence.Review(run, evidence.FullName, source, recovery, ct);
+                    await App03FieldEvidence.Review(run, evidence.FullName, source, recovery, upgrade!, ct);
                 }
                 else if (handoff) await App03HandoffEvidence.Review(run, evidence.FullName, source, ct);
                 else await ReviewWorkspace();
