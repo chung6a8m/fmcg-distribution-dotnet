@@ -137,7 +137,7 @@ public sealed partial class App01dCashierUnloadService
         return (new(warehouse, vehicle, sku, quantity, value, allocated, returns, releases), null);
     }
 
-    private static decimal D3CarryingCost(decimal cost, decimal total, decimal quantity) =>
+    internal static decimal D3CarryingCost(decimal cost, decimal total, decimal quantity) =>
         quantity == 0 || total == 0 ? 0 : quantity == total ? cost
             : decimal.Round(cost * (quantity / total), 4, MidpointRounding.AwayFromZero);
 

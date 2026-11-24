@@ -337,7 +337,9 @@ internal static class App02c1Dev
                     ["MAKER"] = Sign("tenant-a", "maker", App03FinanceBootstrap.AccountingActor("maker")),
                     ["CHECKER"] = Sign("tenant-a", "checker", App03FinanceBootstrap.AccountingActor("checker")),
                     ["PEER_ACCOUNTANT"] = Sign("tenant-b", "accountant", App03FinanceBootstrap.AccountingActor("accountant")),
-                    ["REFUND_CHECKER"] = Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker)
+                    ["REFUND_CHECKER"] = Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker),
+                    ["OWNER"] = Sign("tenant-a", "owner", App03FinanceBootstrap.Owner),
+                    ["PEER_OWNER"] = Sign("tenant-b", "owner", App03FinanceBootstrap.Owner)
                 } : null;
                 await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id, tokenB,
                     Sign("tenant-a", "finance", DevF05Evidence.Finance),
@@ -359,6 +361,7 @@ internal static class App02c1Dev
                     Console.WriteLine($"Open {webUrl}/ and paste the DEV credential once per browser tab.");
                     Console.WriteLine("Enter source, receiver, finance, qa or peer to copy a fresh credential.");
                     if (finance) Console.WriteLine("Finance roles: accountant, reconciler, maker, checker, refund-checker.");
+                    if (finance) Console.WriteLine("Enter owner or peer-owner for the read-only distributor overview.");
                     if (settlement) Console.WriteLine("Enter cashier for trip custody and employee advance returns.");
                     Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
                     while (!Console.IsInputRedirected)
@@ -374,6 +377,8 @@ internal static class App02c1Dev
                             "cashier" when settlement => Sign("tenant-a", "cashier", App03SettlementBootstrap.Cashier),
                             "qa" => Sign("tenant-a", "case_checker", DevF05Evidence.Qa),
                             "refund-checker" when finance => Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker),
+                            "owner" when finance => Sign("tenant-a", "owner", App03FinanceBootstrap.Owner),
+                            "peer-owner" when finance => Sign("tenant-b", "owner", App03FinanceBootstrap.Owner),
                             "accountant" or "reconciler" or "maker" or "checker" when finance =>
                                 Sign("tenant-a", choice, App03FinanceBootstrap.AccountingActor(choice)),
                             _ => null

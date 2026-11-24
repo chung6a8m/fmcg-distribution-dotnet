@@ -76,15 +76,20 @@ internal static class App03WorkspaceEvidence
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(2), settlement: true);
-                    active = await Open("Resume", enableSettlement: true);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
                     var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct);
+                    await App03OwnerEvidence.ReviewTripCoverage(run, active, secondTrip, thirdTrip,
+                        evidence.FullName, source, ct);
                     await App03SettlementEvidence.VerifyVehicleReuse(run, active, secondTrip, thirdTrip, evidence.FullName, ct);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(3), settlement: true);
-                    active = await Open("Resume", enableSettlement: true);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
                     var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
                     await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
+                    await Stop();
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
+                    await App03OwnerEvidence.ReviewSettlement(run, active, evidence.FullName, source, ct);
                 }
                 else if (field)
                 {
@@ -117,14 +122,16 @@ internal static class App03WorkspaceEvidence
         }
         Console.WriteLine($"{(settlement ? "APP-03.6" : field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
 
-        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false, bool enableSettlement = false)
+        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false,
+            bool enableSettlement = false, bool enableFinance = false)
         {
             var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
             host = App03DevSession.Run(operation, root, source, run.Id, active =>
             {
                 ready.SetResult(active);
                 return Task.CompletedTask;
-            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField, settlement: enableSettlement);
+            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField,
+                settlement: enableSettlement, finance: enableFinance);
             if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
             return await ready.Task.WaitAsync(ct);
         }

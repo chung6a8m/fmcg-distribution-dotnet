@@ -71,6 +71,8 @@ internal static class App03FinanceEvidence
                 throw new InvalidOperationException("APP-03.7 historical reconciliations changed during closure.");
             var original = await Original(delivery);
             await Browser(active, delivery, "cost");
+            await Browser(active, delivery, "owner-overview");
+            await App03OwnerEvidence.Review(run, active, folder, source, ct);
             var december = await Capture();
             Require(december.Primary, beforeRollover.Primary with { Closed = 3, LockedPeriod = 1, CostAdjustment = 1, PriorAdjustment = 100 }, "December");
             Require(december.Peer, november.Peer with { LockedPeriod = 1 }, "peer December");
@@ -293,6 +295,30 @@ internal static class App03FinanceEvidence
         await Command(c3 + "/load", new C3LoadInput(Guid.NewGuid(), trip.Id, [new(right.Id, 2, 2)]), host.ReceiverToken);
         var loaded = (await Send<DeliveryLine[]>(c4 + $"/trips/{trip.Id}/lines")).Single();
         var delivery = await Command(c4 + "/deliver", new C4DeliveryInput(Guid.NewGuid(), trip.Id, loaded.Id, loaded.ShipToVersion, 2));
+
+        // A second trip references the same MAIN/SKU and carries one EA of that SKU.
+        var sharedSku = catalog.Skus.Single(row => row.Label.StartsWith("R-05 ·", StringComparison.Ordinal));
+        var secondAddress = await Send<C1Outcome>(c1 + "/ship-to-selections",
+            new C1SelectionInput(Guid.NewGuid(), customer.Id, null, address.Id, address.Revision, null));
+        var secondOrder = (await Command(c2 + "/drafts",
+            new C2DraftInput(Guid.NewGuid(), customer.Id, trip.Id, secondAddress.Id!.Value, [new(sharedSku.Id, 1)]))).SourceId!.Value;
+        var secondConfirm = (await Command(c2 + "/confirm", new C2ConfirmInput(Guid.NewGuid(), secondOrder))).SourceId!.Value;
+        var secondLine = (await Send<C2OrderView[]>(c2 + "/orders")).Single(row => row.Id == secondOrder).Lines.Single().LineId!.Value;
+        await Command(c2 + "/reserve", new C2ReserveInput(Guid.NewGuid(), secondOrder, secondLine,
+            warehouse.Id, 1, secondConfirm), host.ReceiverToken);
+        var sharedRight = (await Send<Right[]>(c3 + $"/trips/{trip.Id}/rights", token: host.ReceiverToken)).Single(row => row.Id != right.Id);
+        await Command(c3 + "/load", new C3LoadInput(Guid.NewGuid(), trip.Id, [new(sharedRight.Id, 1, 1)]), host.ReceiverToken);
+
+        // The first trip has an active reservation for a different SKU that has never been loaded.
+        var firstTrip = catalog.Trips.Single(row => row.Label == "DEV-20261123-A");
+        var reservedAddress = await Send<C1Outcome>(c1 + "/ship-to-selections",
+            new C1SelectionInput(Guid.NewGuid(), customer.Id, null, address.Id, address.Revision, null));
+        Guid reservedOrder = (await Command(c2 + "/drafts",
+            new C2DraftInput(Guid.NewGuid(), customer.Id, firstTrip.Id, reservedAddress.Id!.Value, [new(sku.Id, 1)]))).SourceId!.Value;
+        Guid reservedConfirm = (await Command(c2 + "/confirm", new C2ConfirmInput(Guid.NewGuid(), reservedOrder))).SourceId!.Value;
+        Guid reservedLine = (await Send<C2OrderView[]>(c2 + "/orders")).Single(row => row.Id == reservedOrder).Lines.Single().LineId!.Value;
+        await Command(c2 + "/reserve", new C2ReserveInput(Guid.NewGuid(), reservedOrder, reservedLine,
+            warehouse.Id, 1, reservedConfirm), host.ReceiverToken);
         await run.Verify("tenant-a", app03Session: true);
         await using var db = new SqlConnection(run.Connection("tenant-a"));
         return await db.QuerySingleAsync<Guid>(new CommandDefinition(
