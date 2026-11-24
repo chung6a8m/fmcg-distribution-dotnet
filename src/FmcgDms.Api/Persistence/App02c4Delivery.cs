@@ -60,7 +60,7 @@ public sealed partial class App01a2CommandService
         var receipt = await WithC4Authority(principal, input.TripId, async (db, tx, tenant, actor) =>
         {
             await LockCommand(db, tx, tenant, key, ct);
-            if (connections.UsesApp02d3)
+            if (connections.UsesApp02d3 || connections.UsesApp03Field)
                 await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + input.TripId.ToString("N"), ct);
             var trip = await FindTrip(db, tx, tenant, input.TripId, ct);
             var args = new { Tenant = tenant, Actor = actor, input.CommandId, input.TripId,

@@ -29,6 +29,8 @@ public sealed record C4ArView(Guid SourceId, string Customer, string ShipTo, Dat
 public sealed record C4CaseView(Guid CommandId, Guid ManifestLineId, int ShipToVersion, DateTime OccurredAtUtc,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Quantity,
     string? ReasonCode, bool CanRetry);
+public sealed record C4TripView(Guid Id, string Code,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTime? BusinessDate);
 
 public sealed partial class App01a2CommandService
 {
@@ -65,12 +67,12 @@ public sealed partial class App01a2CommandService
         return result;
     }
 
-    public Task<IEnumerable<C3TripView>> DeliveryTripsC4(ClaimsPrincipal principal, CancellationToken ct) =>
-        WithC4Authority(principal, null, (db, tx, tenant, actor) => db.QueryAsync<C3TripView>(Sql("""
-            SELECT t.Id,t.Code FROM dbo.C4DeliveryWriter w
+    public Task<IEnumerable<C4TripView>> DeliveryTripsC4(ClaimsPrincipal principal, CancellationToken ct) =>
+        WithC4Authority(principal, null, (db, tx, tenant, actor) => db.QueryAsync<C4TripView>(Sql("""
+            SELECT t.Id,t.Code,CASE WHEN @Field=1 THEN t.BusinessDate END AS BusinessDate FROM dbo.C4DeliveryWriter w
             JOIN dbo.Trip t ON t.TenantId=w.TenantId AND t.Id=w.TripId
             WHERE w.TenantId=@Tenant AND w.ActorId=@Actor ORDER BY t.Code
-            """, new { Tenant = tenant, Actor = actor }, tx, ct)), ct);
+            """, new { Tenant = tenant, Actor = actor, Field = connections.UsesApp03Field }, tx, ct)), ct);
 
     public Task<IEnumerable<C4WorkspaceLine>> DeliveryLinesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         WithC4Authority<IEnumerable<C4WorkspaceLine>>(principal, trip, async (db, tx, tenant, _) =>

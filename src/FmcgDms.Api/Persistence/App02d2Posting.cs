@@ -12,7 +12,8 @@ public sealed partial class App01c2BPostingService
 {
     private const decimal D2FixtureUnitPrice = 10m;
     private sealed record D2PostingContext(Guid SelectionId, Guid? OutletId, D2PreviewResult? Preview = null,
-        bool D3Mode = false, D3Price? Price = null, bool D3Runtime = false);
+        bool D3Mode = false, D3Price? Price = null, bool D3Runtime = false, bool Field = false,
+        App01a2CommandService.FieldBPrice? FieldPrice = null);
     private sealed class D2PreviewResult
     {
         internal D2SalePreview? Value { get; set; }
@@ -115,7 +116,8 @@ public sealed partial class App01c2BPostingService
         input.CustomerCreditReservationId);
 
     internal Task<BusinessCommandOutcome> PostD2Sale(ClaimsPrincipal user, D2SaleInput input, CancellationToken ct) =>
-        PostSale(user, D2Command(input), new D2PostingContext(input.SelectionId, input.OutletId), ct);
+        PostSale(user, D2Command(input), new D2PostingContext(input.SelectionId, input.OutletId,
+            Field: connections.UsesApp03Field), ct);
 
     internal Task<(D2SalePreview?, BusinessCommandOutcome)> PreviewD2Sale(
         ClaimsPrincipal user, D2SaleInput input, CancellationToken ct) =>
@@ -126,7 +128,8 @@ public sealed partial class App01c2BPostingService
                 return (preview.Value, BusinessCommandOutcome.Rejected("INVALID_COMMAND_IDENTITY"));
             var outcome = await ValidateAndPost(db, tx, tenant, actor, Guid.Empty, D2Command(input),
                 new D2PostingContext(input.SelectionId, input.OutletId, preview,
-                    await IsD3Trip(db, tx, tenant, input.TripId, ct), D3Runtime: connections.UsesApp02d3), ct);
+                    await IsD3Trip(db, tx, tenant, input.TripId, ct), D3Runtime: connections.UsesApp02d3,
+                    Field: connections.UsesApp03Field), ct);
             return (preview.Value, outcome);
         }, ct);
 

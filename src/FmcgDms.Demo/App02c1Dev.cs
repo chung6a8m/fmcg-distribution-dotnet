@@ -41,6 +41,7 @@ internal static class App02c1Dev
         Console.CancelKeyPress += cancel;
         var run = persistent?.RunId ?? new DemoRun(Guid.NewGuid().ToString("N"));
         bool integrated = increment == "App03A1";
+        bool field = persistent?.UsesField == true;
         bool verifyUpgrade = integrated && mode == "Verify";
         bool visit = integrated || increment == "DevF01";
         bool advance = increment == "DevF02";
@@ -63,7 +64,7 @@ internal static class App02c1Dev
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
         string feature = advance ? "DEV-F02" : refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
-        if (integrated) feature = App03A1Profile.Name;
+        if (integrated) feature = field ? App03A1Profile.FieldName : App03A1Profile.Name;
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -110,9 +111,10 @@ internal static class App02c1Dev
                 await run.Verify(tenant, app03Session: persistent is not null);
                 if (persistent is not null)
                 {
-                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning);
+                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field);
                     await App03DayBootstrap.Seed(run, tenant, lifetime.Token, persistent.VerifyHandoff && tenant == "tenant-a");
                     await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
+                    if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     continue;
                 }
                 if (d1Run is not null)
@@ -225,7 +227,7 @@ internal static class App02c1Dev
             apiStart.Environment["App02Worker__Enabled"] = "false";
             apiStart.Environment["App02C1__Enabled"] = "true";
             apiStart.Environment["DevF01__Enabled"] = visit && !verifyUpgrade ? "true" : "false";
-            if (integrated && !verifyUpgrade) apiStart.Environment["App03__Profile"] = App03A1Profile.Name;
+            if (integrated && !verifyUpgrade) apiStart.Environment["App03__Profile"] = feature;
             apiStart.Environment["DevF02__Enabled"] = advance ? "true" : "false";
             apiStart.Environment["DevF03__Enabled"] = fefo || returnLane ? "true" : "false";
             apiStart.Environment["DevF04__Enabled"] = pricing || returnLane ? "true" : "false";
@@ -270,6 +272,20 @@ internal static class App02c1Dev
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
+            if (field)
+            {
+                apiStart.Environment["App02D1__Enabled"] = "true";
+                apiStart.Environment["App02D2__Enabled"] = "true";
+                if (persistent!.VerifyField)
+                {
+                    apiStart.Environment["App02D2__Enabled"] = "false";
+                    await App03A1Evidence.ExpectStartupRejection(apiStart, "requires the dedicated workspace", lifetime.Token);
+                    apiStart.Environment["App02D2__Enabled"] = "true";
+                    apiStart.Environment["App02D3__Enabled"] = "true";
+                    await App03A1Evidence.ExpectStartupRejection(apiStart, "does not support D", lifetime.Token);
+                    apiStart.Environment.Remove("App02D3__Enabled");
+                }
+            }
             if (d4)
             {
                 apiStart.Environment["App02D3__Enabled"] = "true";

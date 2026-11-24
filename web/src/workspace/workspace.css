@@ -31,6 +31,18 @@
   .app03-handoff-table tbody tr { border-block-start: 1px solid var(--fmcg-color-border-subtle); }
   .app03-handoff-table [data-source-active] { background: var(--fmcg-color-surface-subtle); }
   .app03-lot-label { display: none; }
+  .app03-field {
+    font-size: 1rem;
+    line-height: 1.5;
+    padding-block-end: env(safe-area-inset-bottom);
+  }
+  .app03-field :is(button, .button, input, select, textarea) {
+    min-height: var(--fmcg-density-field-control-min);
+    min-width: var(--fmcg-density-field-control-min);
+  }
+  .app03-field :is(.sales-filter, .c1-layout) { grid-template-columns: minmax(0, 1fr); }
+  .app03-field .field { min-width: 0; }
+  .app03-field :is(input, select, textarea) { max-width: 100%; font-size: 1rem; }
   @media (max-width: 680px) {
     .app03-nav-group .button { min-height: var(--fmcg-density-field-control-min); }
   }

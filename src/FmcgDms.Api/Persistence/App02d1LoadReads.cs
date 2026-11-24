@@ -28,20 +28,20 @@ public sealed partial class App01a2CommandService
         {
             if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
                 || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
-            return (await EligibleD1Rights(db, tx, tenant, trip, null, ct)).ToArray();
+            return (await EligibleD1Rights(db, tx, tenant, trip, null, connections.UsesApp03Field, ct)).ToArray();
         }, ct);
     }
 
     private static Task<IEnumerable<C3RightView>> EligibleD1Rights(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid trip, Guid[]? rightIds, CancellationToken ct)
+        string tenant, Guid trip, Guid[]? rightIds, bool field, CancellationToken ct)
     {
         const string sql = """
             SELECT r.Id,CAST(NULL AS uniqueidentifier) AS OrderId,r.StockLocationId AS WarehouseId,
-                w.Code AS WarehouseCode,r.SkuId,sku.Code AS SkuCode,sku.BaseUom,
+                w.Code AS WarehouseCode,r.SkuId,k.Code AS SkuCode,k.BaseUom,
                 r.GrantedBaseQuantity AS Granted,totals.Loaded,r.GrantedBaseQuantity-totals.Loaded AS WarehouseHeld
             FROM dbo.StockRight r
             JOIN dbo.BQuota q ON q.TenantId=r.TenantId AND q.StockRightId=r.Id
-            JOIN dbo.Sku sku ON sku.TenantId=r.TenantId AND sku.Id=r.SkuId AND sku.IsActive=1
+            JOIN dbo.Sku k ON k.TenantId=r.TenantId AND k.Id=r.SkuId AND k.IsActive=1
             JOIN dbo.StockLocation w ON w.TenantId=r.TenantId AND w.Id=r.StockLocationId AND w.Kind='WAREHOUSE' AND w.IsActive=1
             JOIN dbo.BusinessSourceLine sl ON sl.TenantId=r.TenantId AND sl.Id=r.BusinessSourceLineId
                 AND sl.SkuId=r.SkuId AND sl.BaseQuantity=r.GrantedBaseQuantity
@@ -64,7 +64,11 @@ public sealed partial class App01a2CommandService
                 AND r.ReleasedBaseQuantity=0 AND r.ConsumedBaseQuantity=0 AND totals.Loaded<=r.GrantedBaseQuantity
             """;
         string rightFilter = rightIds is null ? "" : " AND r.Id IN @Ids";
-        return db.QueryAsync<C3RightView>(Sql(sql + rightFilter + " ORDER BY w.Code,sku.Code,r.Id",
+        string fieldFilter = field ? " AND " + App03FieldB.EligibleSku + $"""
+             AND EXISTS (SELECT 1 FROM dbo.Trip t WHERE t.TenantId=r.TenantId AND t.Id=r.TripId
+                AND t.BusinessDate={App03FieldB.BusinessDate})
+            """ : "";
+        return db.QueryAsync<C3RightView>(Sql(sql + rightFilter + fieldFilter + " ORDER BY w.Code,k.Code,r.Id",
             new { Tenant = tenant, Trip = trip, Ids = rightIds }, tx, ct));
     }
 
@@ -84,7 +88,8 @@ public sealed partial class App01a2CommandService
         if (!warehouse && !finance)
             throw new UnauthorizedAccessException("Current Warehouse or Finance role required.");
 
-        using var rows = await db.QueryMultipleAsync(Sql("""
+        string fieldFilter = connections.UsesApp03Field ? " AND " + App03FieldB.EligibleSku : "";
+        using var rows = await db.QueryMultipleAsync(Sql($"""
             SELECT Nonce FROM dbo.App00ScratchMarker;
             SELECT t.Id,t.Code AS Label,
                 CONVERT(bit,CASE WHEN @Warehouse=1 AND w.ActorId=@Actor THEN 1 ELSE 0 END) AS CanLoad,
@@ -99,13 +104,14 @@ public sealed partial class App01a2CommandService
                     AND p.CurrencyUnit='SYNTHETIC_UNITLESS'
             ) p
             WHERE t.TenantId=@Tenant AND t.Status='PREPARED'
+                {(connections.UsesApp03Field ? " AND t.BusinessDate=" + App03FieldB.BusinessDate : "")}
                 AND ((@Warehouse=1 AND w.ActorId=@Actor) OR (@Finance=1 AND p.HasPool=1))
                 AND NOT EXISTS(SELECT 1 FROM dbo.TripManifest m WHERE m.TenantId=t.TenantId AND m.TripId=t.Id AND m.IsC3=0)
             ORDER BY t.Code;
             SELECT Id,Code AS Label FROM dbo.StockLocation
             WHERE @Warehouse=1 AND TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1 ORDER BY Code;
-            SELECT Id,CAST(Code+N' · '+Name AS nvarchar(300)) AS Label FROM dbo.Sku
-            WHERE @Warehouse=1 AND TenantId=@Tenant AND IsActive=1 ORDER BY Code;
+            SELECT k.Id,CAST(k.Code+N' · '+k.Name AS nvarchar(300)) AS Label FROM dbo.Sku k
+            WHERE @Warehouse=1 AND k.TenantId=@Tenant AND k.IsActive=1 {fieldFilter} ORDER BY k.Code;
             SELECT c.Id,CAST(c.Code+N' · '+c.Name AS nvarchar(300)) AS Label FROM dbo.Customer c
             WHERE @Finance=1 AND c.TenantId=@Tenant AND c.IsActive=1
                 AND EXISTS(SELECT 1 FROM dbo.BCreditPool p WHERE p.TenantId=c.TenantId AND p.CustomerId=c.Id

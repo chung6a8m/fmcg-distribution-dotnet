@@ -12,10 +12,15 @@ internal sealed record D2SaleInput(
 
 internal sealed record D2TripOption(Guid TripId, string Label);
 internal sealed record D2LineOption(Guid TripManifestLineId, Guid SkuId, string SkuLabel,
-    decimal AvailableQuantity, decimal UnitPrice);
+    decimal AvailableQuantity, decimal? UnitPrice);
 internal sealed record D2SelectionOption(Guid SelectionId, Guid ShipToSnapshotId, Guid? OutletId, string Label);
 internal sealed record D2CustomerOption(Guid CustomerId, string Label, D2SelectionOption[] Selections);
-internal sealed record D2Workspace(Guid TripId, D2LineOption[] Lines, D2CustomerOption[] Customers);
+internal sealed record D2CashOption(string EvidenceRef, Guid CustomerId, Guid ShipToSnapshotId, decimal Amount);
+internal sealed record FieldBSaleSource(Guid SourceId, string CommandId, decimal Quantity, decimal Payable);
+internal sealed record D2Workspace(Guid TripId, D2LineOption[] Lines, D2CustomerOption[] Customers,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] D2CashOption[]? VerifiedCash = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] FieldBSaleSource[]? RecentSales = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? CurrentDay = null);
 internal sealed record D2SalePreview(decimal Payable, decimal CashReceived, decimal ReceiptApplied, decimal CreditApplied,
     decimal Receivable, decimal CreditIssued, decimal Cost, bool PendingBank);
 

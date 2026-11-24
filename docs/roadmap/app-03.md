@@ -59,7 +59,7 @@ Mỗi hàng là một increment triển khai độc lập có thay đổi thực
 | APP-03.2 — Đầu ngày/ngày kế tiếp | .1b | Bootstrap có phiên bản, chuẩn bị chuyến mới trên lịch sử cũ | [DEV_VERIFIED_LOCAL](app-03-2-day-bootstrap.md#kết-quả-local-ngày-23112026) |
 | APP-03.3 — Phiên người dùng/khung ứng dụng | .1b; hợp đồng bootstrap .2 | Điểm vào chung, danh tính/tenant, điều hướng và ngữ cảnh | [DEV_VERIFIED_LOCAL](app-03-3-workspace.md#kết-quả-local-ngày-24112026) |
 | APP-03.4 — Sales bàn giao Kho | .2, .3 | Hàng đợi đơn/chuyến, Confirm/Reserve/Load và nguồn chung | [DEV_VERIFIED_LOCAL](app-03-4-handoff.md#kết-quả-local-ngày-24112026) |
-| APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | NOT_STARTED |
+| APP-03.5 — Kho bàn giao Hiện trường | .4 | Giao A, bán B, visit, Mixed và phục hồi trong tổ hợp hỗ trợ | [DEV_VERIFIED_LOCAL](app-03-5-field.md#kết-quả-local-ngày-24112026) |
 | APP-03.6 — Hiện trường bàn giao Thủ quỹ/Kho | .5 | Nộp/nhận tiền, trả xe, đường vào trả hàng và hoàn ứng | NOT_STARTED |
 | APP-03.7 — Bàn Kế toán/Finance | .6 | Hàng đợi D.4, correction, giá vốn, quà/waiver, credit/refund theo vai | NOT_STARTED |
 | APP-03.8 — Tổng quan Chủ NPP | Nguồn/read model .4–.7 | Báo cáo chỉ đọc, đúng nguồn/đơn vị/cấp dữ liệu, drill-down | NOT_STARTED |
@@ -138,13 +138,15 @@ Thứ tự ưu tiên: **.1a → .1b → .2/.3 → .4 → .5 → .6 → .7 → .8
 
 **Phạm vi:** danh sách chuyến/công việc của nhân viên; giao A, bán B online và visit F01. Ghép runtime/schema D với A/F theo ma trận được triển khai; quy định lô, giá, thuế, đơn vị tiền, quyền A và quota B trước khi mở tổ hợp đó. Tái sử dụng D.1/D.2, không mở B_NO_CHANNEL.
 
+[Cách bàn giao Kho–Hiện trường, ma trận hỗ trợ và kiểm chứng APP-03.5](app-03-5-field.md).
+
 **Hoàn tất:**
 
-- [ ] Cùng chuyến thực hiện A/B theo đúng quyền và hàng đang có; giao từng phần cập nhật đúng nguồn/counters.
-- [ ] Mất ACK, reload hoặc mở lại phiên tìm được lệnh/chứng từ gốc; retry không tạo giao/bán/thu tiền thứ hai.
-- [ ] Visit kết thúc không đơn và không phát sinh đơn 0 đồng, AR hoặc biến động kho.
-- [ ] Hành trình Field thay đổi có kiểm chứng browser ở 320 CSS px, vùng chạm mục tiêu 48×48, focus và mất mạng chỉ chặn business writes; thiết bị vật lý giữ acceptance riêng.
-- [ ] Mọi tổ hợp A/B/Mixed được công bố trong UI có kiểm runtime/schema và nghiệp vụ tương ứng; FEFO A không được dùng làm bằng chứng cho mode B có lô. Phạm vi chưa hỗ trợ được giữ rõ và không được tính vào acceptance.
+- [x] Cùng chuyến thực hiện A/B theo đúng quyền và hàng đang có; giao từng phần cập nhật đúng nguồn/counters.
+- [x] Mất ACK, reload hoặc mở lại phiên tìm được lệnh/chứng từ gốc; retry không tạo giao/bán/thu tiền thứ hai.
+- [x] Visit kết thúc không đơn và không phát sinh đơn 0 đồng, AR hoặc biến động kho.
+- [x] Hành trình Field thay đổi có kiểm chứng browser ở 320 CSS px, vùng chạm mục tiêu 48×48, focus và mất mạng chỉ chặn business writes; thiết bị vật lý giữ acceptance riêng.
+- [x] Mọi tổ hợp A/B/Mixed được công bố trong UI có kiểm runtime/schema và nghiệp vụ tương ứng; FEFO A không được dùng làm bằng chứng cho mode B có lô. Phạm vi chưa hỗ trợ được giữ rõ và không được tính vào acceptance.
 
 ### APP-03.6 — Hiện trường bàn giao Thủ quỹ và Kho
 
@@ -230,8 +232,8 @@ Hai lệnh DevF05 giữ profile riêng. [Launcher App03A1](app-03-1a-runtime-sch
 | Mục còn lại | Trách nhiệm/ưu tiên | Điều kiện hoàn tất |
 | --- | --- | --- |
 | F03: cạnh tranh cùng SKU/lô giữa hai chuyến A | [Đã kiểm chứng DEV cục bộ ở APP-03.4](app-03-4-handoff.md#kết-quả-local-ngày-24112026) | Không over-reserve/load/issue; nguồn, số dư và tenant đối chứng khớp khi cạnh tranh |
-| F04: thiếu/hết hạn plan và tự duyệt | [Đã kiểm chứng cho Confirm A ở APP-03.4](app-03-4-handoff.md#kết-quả-local-ngày-24112026). APP-03.5 kiểm các đường giá mới trước khi mở. | Từ chối đúng điều kiện, không thêm nguồn/effect; snapshot của nguồn cũ giữ nguyên |
-| Lô/FEFO/giá/thuế của B và tổ hợp Mixed với A/F | APP-03.5, một PR con có thể được tách nếu cần giữ review nhỏ | Runtime/schema và policy của tổ hợp được hỗ trợ; kiểm A/B trên cùng nguồn tồn, đúng currency và quyền |
+| F04: thiếu/hết hạn plan và tự duyệt | [Confirm A ở APP-03.4](app-03-4-handoff.md#kết-quả-local-ngày-24112026) và [bán B ở APP-03.5](app-03-5-field.md#kết-quả-local-ngày-24112026) | Từ chối đúng điều kiện, không thêm nguồn/effect; snapshot của nguồn cũ giữ nguyên |
+| Lô/FEFO/giá/thuế của B và tổ hợp Mixed với A/F | [APP-03.5 kiểm Mixed và B không quản lý lô](app-03-5-field.md#kết-quả-local-ngày-24112026) | Runtime/schema và policy của tổ hợp được hỗ trợ; kiểm A/B trên cùng nguồn tồn, đúng currency và quyền. B có lô ngoài phạm vi. |
 | Refund nguồn giao nhiều đợt hoặc đơn có nghĩa vụ quà | Backlog mở rộng AC-19/07; APP-03.7 sở hữu nếu hành trình .9 yêu cầu | Credit/refund/residual và nghĩa vụ quà đúng theo từng nguồn, không vượt lượng/tiền hợp lệ; F08 v1 không được coi là bằng chứng cho nhánh này |
 | Dùng customer credit cho hóa đơn/chứng từ mới | Backlog mở rộng AC-19/21 sau phạm vi APP-03 v1 | Allocation có nguồn, đúng quyền/số dư, không dùng trùng credit và đối chiếu AR/credit độc lập |
 | Điều chỉnh giá vốn sau nhiều QA release hoặc hàng đã dịch chuyển | Backlog mở rộng AC-06; .7 hiển thị đúng case chưa tự xử lý | Có phương trình/source-cost riêng, điều chỉnh kỳ hiện hành và bảo toàn kỳ khóa; không ép case vào oracle một lần release của F06 |

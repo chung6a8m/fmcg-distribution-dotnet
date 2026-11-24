@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useId, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
@@ -6,12 +6,16 @@ import './customers.css'
 const d2Api = '/api/synthetic/app02d2'
 type Trip = { tripId: string; label: string }
 type Line = {
-  tripManifestLineId: string; skuId: string; availableQuantity: number | string; unitPrice: number | string
+  tripManifestLineId: string; skuId: string; availableQuantity: number | string; unitPrice: number | string | null
   skuLabel: string
 }
 type Selection = { selectionId: string; shipToSnapshotId: string; outletId: string | null; label: string; outletLabel?: string }
 type Customer = { customerId: string; label: string; selections: Selection[] }
-type Catalog = { tripId: string; lines: Line[]; customers: Customer[] }
+type Cash = { evidenceRef: string; customerId: string; shipToSnapshotId: string; amount: number }
+type SaleSource = { sourceId: string; commandId: string; quantity: number; payable: number }
+type Catalog = {
+  tripId: string; lines: Line[]; customers: Customer[]; verifiedCash?: Cash[]; recentSales?: SaleSource[]; currentDay?: boolean
+}
 type Session = { identity: Identity; token: string; trips: Trip[] }
 type SaleInput = {
   producerId: string; commandId: string; sourceNumber: string
@@ -45,9 +49,9 @@ function pendingKey(identity: Identity) {
   return 'app02d2.pending.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
 }
 
-function restore(identity: Identity): SaleInput | null {
+function restore(identity: Identity, last = false): SaleInput | null {
   try {
-    const stored = pendingJson(pendingKey(identity))
+    const stored = pendingJson(pendingKey(identity) + (last ? '.result' : ''))
     if (!stored) return null
     const command = JSON.parse(stored) as SaleInput
     return command.producerId === identity.actorId && guidPattern.test(command.commandId) &&
@@ -81,10 +85,16 @@ async function read<T>(token: string, path: string, base = d2Api) {
   return response.json() as Promise<T>
 }
 
-export function BSaleWorkspace() {
+export function BSaleWorkspace({ workspaceToken, startTrip, onTripChange }: {
+  workspaceToken?: string; startTrip?: string; onTripChange?: (id: string) => void
+} = {}) {
+  const field = !!workspaceToken
+  const money = (amount: number) => field ? amount.toLocaleString('vi-VN') + ' VND' : String(amount)
   const [session, setSession] = useState<Session | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [customerId, setCustomerId] = useState('')
+  const [selectionId, setSelectionId] = useState('')
+  const [cashRef, setCashRef] = useState('')
   const [paymentMode, setPaymentMode] = useState('cash')
   const [review, setReview] = useState<Review | null>(null)
   const [pending, setPending] = useState<SaleInput | null>(null)
@@ -120,6 +130,10 @@ export function BSaleWorkspace() {
     const token = value(new FormData(event.currentTarget), 'token')
     event.currentTarget.reset()
     if (!token) return
+    connectToken(token)
+  }
+
+  function connectToken(token: string) {
     void work(async () => {
       const [identity, trips] = await Promise.all([
         read<Identity>(token, '/session', '/api/synthetic/app02c1'), read<Trip[]>(token, '/trips'),
@@ -127,18 +141,36 @@ export function BSaleWorkspace() {
       const unresolved = restore(identity)
       setSession({ identity, token, trips })
       setPending(unresolved)
+      if (!field) return
+      setLatest(restore(identity, true))
+      const tripId = [unresolved?.tripId, startTrip, trips[0]?.tripId]
+        .find(id => trips.some(trip => trip.tripId === id))
+      if (tripId) {
+        setCatalog(await read<Catalog>(token, `/trips/${tripId}`))
+        onTripChange?.(tripId)
+      }
     })
   }
+
+  const openWorkspace = useEffectEvent(connectToken)
+  useEffect(() => {
+    if (workspaceToken) openWorkspace(workspaceToken)
+  }, [workspaceToken])
 
   function openTrip(tripId: string) {
     if (!session || !tripId) return
     const token = session.token
     setCatalog(null)
     setSource('')
-    setLatest(null)
+    if (!field) setLatest(null)
     setCustomerId('')
+    setSelectionId('')
+    setCashRef('')
     setPaymentMode('cash')
-    void work(async () => setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(tripId)}`)))
+    void work(async () => {
+      setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(tripId)}`))
+      onTripChange?.(tripId)
+    })
   }
 
   function showPreview(event: FormEvent<HTMLFormElement>) {
@@ -149,11 +181,14 @@ export function BSaleWorkspace() {
     const selection = customer?.selections.find(item => item.selectionId === value(data, 'selection'))
     const line = catalog.lines.find(item => item.tripManifestLineId === value(data, 'manifest'))
     const quantity = value(data, 'quantity')
-    const cash = value(data, 'cash')
+    const witness = catalog.verifiedCash?.find(item => item.evidenceRef === value(data, 'cashRef')
+      && item.customerId === customerId && item.shipToSnapshotId === selection?.shipToSnapshotId)
+    const cash = field ? String(witness?.amount ?? '') : value(data, 'cash')
     const bankRef = paymentMode === 'bank' ? value(data, 'bankRef') : null
     const cashRef = paymentMode === 'cash' ? value(data, 'cashRef') : ''
     const creditRef = paymentMode === 'cash' ? value(data, 'creditRef') || null : null
     if (!customer || !selection || !line || !validPositive(quantity, 3) ||
+        (field && (!witness || !Number.isInteger(Number(quantity)))) ||
         (paymentMode === 'bank' ? !bankRef : !cashRef || !validPositive(cash, 4)) ||
         (creditRef && !guidPattern.test(creditRef))) {
       setNotice('Kiểm tra dòng hàng, địa chỉ giao, số lượng và chứng cứ thanh toán.')
@@ -214,12 +249,19 @@ export function BSaleWorkspace() {
         if (!(result.status === 'APPLIED' && result.sourceId) && result.status !== 'REJECTED')
           throw new Error('Unknown sale outcome')
         setPending(null)
+        if (field) setCashRef('')
         forgetPending(pendingKey(identity), command.commandId)
-        if (result.status === 'APPLIED') setLatest(command)
+        if (result.status === 'APPLIED') {
+          setLatest(command)
+          if (field) rememberPending(pendingKey(identity) + '.result', command)
+        }
         const disposition = result.outcomeCode === 'D2_BANK_PENDING_POSTED' ? ' Ngân hàng chờ xác minh.' : ''
         const message = result.status === 'APPLIED' ? 'Đã ghi bán và giao.' + disposition : reasonMessage(result.reasonCode)
         setSource(result.sourceId ?? '')
-        try { setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(command.tripId)}`)) }
+        try {
+          setCatalog(await read<Catalog>(token, `/trips/${encodeURIComponent(command.tripId)}`))
+          onTripChange?.(command.tripId)
+        }
         catch { setNotice(message + ' Hãy mở lại chuyến để cập nhật số liệu.'); return }
         setNotice(message)
       } catch {
@@ -230,9 +272,13 @@ export function BSaleWorkspace() {
 
   const blocked = busy || offline
   const customer = catalog?.customers.find(item => item.customerId === customerId)
+  const selection = customer?.selections.find(item => item.selectionId === selectionId)
+  const cashOptions = catalog?.verifiedCash?.filter(item => item.customerId === customerId
+    && item.shipToSnapshotId === selection?.shipToSnapshotId) ?? []
+  const Page = field ? 'section' : 'main'
 
-  return <main className="page c1-page sales-pane">
-    <header className="page-heading c1-header">
+  return <Page className={field ? 'sales-pane' : 'page c1-page sales-pane'}>
+    {!field ? <header className="page-heading c1-header">
       <div><h1>Bán và giao hàng B</h1><p>DEV tổng hợp{session && ' · ' + session.identity.tenantId}</p></div>
       <div className="button-row">
         <ThemeSelect />
@@ -242,8 +288,11 @@ export function BSaleWorkspace() {
           setSession(null); setCatalog(null); setPending(null); setLatest(null); setReview(null); setSource(''); setNotice('')
         }}>Đổi phiên DEV</Button>}
       </div>
-    </header>
-    {!session ? <form className="panel panel-content c1-sign-in" onSubmit={signIn}>
+    </header> : <header><h2>Bán và giao hàng B</h2>
+      <p>EA nguyên, hàng không quản lý lô. Thanh toán đủ bằng tiền mặt đã xác minh, theo giá VND và thuế suất 0% của dữ liệu DEV.</p>
+    </header>}
+    {!session ? workspaceToken ? <Button disabled={blocked} onClick={() => connectToken(workspaceToken)}>Tải chuyến bán B</Button>
+      : <form className="panel panel-content c1-sign-in" onSubmit={signIn}>
       <Field name="token" label="Mã truy cập DEV" type="password" autoComplete="off" required />
       <Button variant="primary" type="submit" disabled={blocked}>Kết nối</Button>
     </form> : <>
@@ -257,38 +306,47 @@ export function BSaleWorkspace() {
       </section>
       {catalog && <section className="panel panel-content" aria-label="Thông tin giao dịch">
         {catalog.lines.length ? <form key={catalog.tripId} onSubmit={showPreview}>
-          <fieldset className="sales-filter" disabled={blocked || !!pending || !!review}>
+          <fieldset className="sales-filter" disabled={busy || !!pending || !!review}>
             <Choices name="manifest" label="Dòng hàng B" options={catalog.lines.map(line => ({
               id: line.tripManifestLineId,
-              label: `${line.skuLabel} · Còn ${line.availableQuantity} EA · Giá ${line.unitPrice}`,
+              label: `${line.skuLabel} · Còn ${line.availableQuantity} EA` + (field ? '' : ` · Giá ${line.unitPrice}`),
             }))} />
             <Choices name="customer" label="Khách hàng" value={customerId}
-              options={catalog.customers.map(item => ({ id: item.customerId, label: item.label }))} onChange={setCustomerId} />
-            <Choices key={customerId} name="selection" label="ShipTo đã chốt" options={(customer?.selections ?? []).map(item => ({
+              options={catalog.customers.map(item => ({ id: item.customerId, label: item.label }))}
+              onChange={id => { setCustomerId(id); setSelectionId(''); setCashRef('') }} />
+            <Choices key={field ? 'field' : customerId} name="selection" label="ShipTo đã chốt"
+              value={field ? selectionId : undefined}
+              onChange={field ? id => { setSelectionId(id); setCashRef('') } : undefined}
+              options={(customer?.selections ?? []).map(item => ({
               id: item.selectionId,
               label: item.outletId ? `${item.label} · Outlet ${item.outletLabel ?? item.outletId}` : item.label,
             }))} />
-            <Field name="quantity" label="Số lượng bán" type="number" min="0.001" step="0.001" required />
-            <Choices name="payment" label="Nguồn thanh toán" value={paymentMode} onChange={setPaymentMode}
+            <Field name="quantity" label="Số lượng bán" type="number" min={field ? '1' : '0.001'} step={field ? '1' : '0.001'} required />
+            {field ? <Choices name="cashRef" label="Tiền mặt đã xác minh" value={cashRef} onChange={setCashRef}
+              options={cashOptions.map(item => ({ id: item.evidenceRef, label: money(item.amount) + ' · ' + item.evidenceRef }))} />
+              : <Choices name="payment" label="Nguồn thanh toán" value={paymentMode} onChange={setPaymentMode}
               options={[{ id: 'cash', label: 'Tiền mặt đã xác minh' }, { id: 'bank', label: 'Ngân hàng chờ xác minh' }]} />
-            {paymentMode === 'cash' ? <>
+            }
+            {!field && (paymentMode === 'cash' ? <>
               <Field name="cash" label="Số tiền mặt thực nhận" type="number" min="0.0001" step="0.0001" required />
               <Field name="cashRef" label="Chứng cứ tiền mặt đã xác minh" maxLength={128} required />
               <Field name="creditRef" label="Mã CustomerCredit đã giữ" maxLength={36} />
-            </> : <Field name="bankRef" label="Chứng cứ ngân hàng chờ xác minh" maxLength={128} required />}
-            <Button type="submit">Xem trước giao dịch</Button>
+            </> : <Field name="bankRef" label="Chứng cứ ngân hàng chờ xác minh" maxLength={128} required />)}
+            <Button type="submit" disabled={offline}>Xem trước giao dịch</Button>
           </fieldset>
-        </form> : <p>Chuyến chưa có dòng hàng B khả dụng.</p>}
+        </form> : <p>{catalog.currentDay === false
+          ? 'Chuyến thuộc ngày trước. Có thể tra cứu giao dịch đã ghi.'
+          : 'Chuyến chưa có dòng hàng B khả dụng.'}</p>}
       </section>}
       {review && <section className="panel panel-content" aria-labelledby="b-sale-review">
         <h2 id="b-sale-review">Xác nhận giao dịch</h2>
         <ul>
-          <li>Phải trả {review.preview.payable}</li>
+          <li>Phải trả {money(review.preview.payable)}</li>
           {review.preview.pendingBank && <li>Ngân hàng chờ xác minh</li>}
-          <li>Tiền đã xác minh áp vào giao dịch {review.preview.receiptApplied}</li>
-          <li>CustomerCredit áp vào giao dịch {review.preview.creditApplied}</li>
-          <li>Công nợ phát sinh {review.preview.receivable}</li>
-          <li>CustomerCredit phát sinh từ tiền dư {review.preview.creditIssued}</li>
+          <li>Tiền đã xác minh áp vào giao dịch {money(review.preview.receiptApplied)}</li>
+          {!field && <li>CustomerCredit áp vào giao dịch {review.preview.creditApplied}</li>}
+          <li>Công nợ phát sinh {money(review.preview.receivable)}</li>
+          {!field && <li>CustomerCredit phát sinh từ tiền dư {review.preview.creditIssued}</li>}
         </ul>
         <div className="button-row">
           <Button variant="primary" disabled={blocked} onClick={() => resolve(review.command, false)}>Ghi bán và giao</Button>
@@ -303,9 +361,18 @@ export function BSaleWorkspace() {
           <Button disabled={blocked} onClick={() => resolve(pending, false)}>Gửi lại cùng yêu cầu</Button>
         </div>
       </section>}
+      {!!catalog?.recentSales?.length && <section className="panel panel-content" aria-labelledby="b-sale-history">
+        <h2 id="b-sale-history">Giao dịch B đã ghi trên chuyến</h2>
+        <ul className="c1-rows">{catalog.recentSales.map(sale => <li key={sale.sourceId}>
+          <div><strong>{sale.quantity} EA · {money(sale.payable)}</strong>
+            <p className="c3-source">Mã nguồn {sale.sourceId}</p>
+            <p className="c3-source">Mã yêu cầu {sale.commandId}</p>
+          </div>
+        </li>)}</ul>
+      </section>}
     </>}
     {offline && <p role="status">Cần kết nối để ghi nghiệp vụ.</p>}
     {notice && <p role="status">{notice}</p>}
     {source && <p className="c3-source">Mã nguồn {source}</p>}
-  </main>
+  </Page>
 }

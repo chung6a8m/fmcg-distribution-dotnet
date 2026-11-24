@@ -7,25 +7,27 @@ namespace FmcgDms.Demo;
 
 internal static class App03WorkspaceEvidence
 {
-    internal static async Task Run(string root, string source, bool handoff = false)
+    internal static async Task Run(string root, string source, bool handoff = false, bool field = false)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-03 requires Windows LocalDB.");
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        string profile = handoff ? "app03-4" : "app03-3";
+        string profile = field ? "app03-5" : handoff ? "app03-4" : "app03-3";
         var evidence = Directory.CreateDirectory(Path.Combine(root, "TestResults", profile, run.Id));
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var ct = deadline.Token;
-        var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task host = App03DevSession.Run("Start", root, source, run.Id, active =>
-        {
-            ready.SetResult(active);
-            return Task.CompletedTask;
-        }, verifyHandoff: handoff);
+        Task? host = null;
         try
         {
-            if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
-            var active = await ready.Task.WaitAsync(ct);
-            if (handoff) await App03HandoffEvidence.Prepare(run, ct);
+            // .3 checks the original A/F workspace. .5 verifies the upgrade from that
+            // same predecessor, while .4 exercises its A handoff on the current profile.
+            var active = await Open("Start", startBeforeField: !handoff);
+            if (field)
+            {
+                await App03FieldEvidence.CheckPredecessor(active, ct);
+                await Stop();
+                active = await Open("Resume", verifyField: true);
+            }
+            if (handoff || field) await App03HandoffEvidence.Prepare(run, ct);
             var start = new ProcessStartInfo("node")
             {
                 WorkingDirectory = Path.Combine(root, "web"), UseShellExecute = false, CreateNoWindow = true
@@ -43,10 +45,19 @@ internal static class App03WorkspaceEvidence
             using var browser = Process.Start(start) ?? throw new InvalidOperationException("Cannot start APP-03 browser verification.");
             try
             {
-                if (!handoff) await RevokeSales(browser);
+                if (!handoff && !field) await RevokeSales(browser);
                 await browser.WaitForExitAsync(ct);
                 if (browser.ExitCode != 0) throw new InvalidOperationException($"APP-03 Chromium exited {browser.ExitCode}.");
-                if (handoff) await App03HandoffEvidence.Review(run, evidence.FullName, source, ct);
+                if (field)
+                {
+                    await Stop();
+                    await App03DevSession.Run("NextDay", root, source, run.Id,
+                        businessDate: App03DayBootstrap.FirstDay.AddDays(1));
+                    active = await Open("Resume");
+                    var recovery = await App03FieldEvidence.CheckRecovery(run, active, ct);
+                    await App03FieldEvidence.Review(run, evidence.FullName, source, recovery, ct);
+                }
+                else if (handoff) await App03HandoffEvidence.Review(run, evidence.FullName, source, ct);
                 else await ReviewWorkspace();
             }
             finally
@@ -60,22 +71,42 @@ internal static class App03WorkspaceEvidence
         }
         finally
         {
-            if (!host.IsCompleted && EventWaitHandle.TryOpenExisting($@"Local\FmcgDms.APP03.{run.Id}", out var stop))
-            {
-                using (stop) stop.Set();
-            }
-            try { await host; }
+            try { await Stop(); }
             finally
             {
                 if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
             }
         }
-        Console.WriteLine($"{(handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
+        Console.WriteLine($"{(field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
+
+        async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false)
+        {
+            var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
+            host = App03DevSession.Run(operation, root, source, run.Id, active =>
+            {
+                ready.SetResult(active);
+                return Task.CompletedTask;
+            }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField);
+            if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
+            return await ready.Task.WaitAsync(ct);
+        }
+
+        async Task Stop()
+        {
+            if (host is null) return;
+            if (!host.IsCompleted && EventWaitHandle.TryOpenExisting($@"Local\FmcgDms.APP03.{run.Id}", out var stop))
+            {
+                using (stop) stop.Set();
+            }
+            Task ending = host;
+            host = null;
+            await ending;
+        }
 
         async Task RevokeSales(Process browser)
         {
             var checkpoint = Path.Combine(evidence.FullName, "revoke.request");
-            while (!File.Exists(checkpoint) && !browser.HasExited && !host.IsCompleted)
+            while (!File.Exists(checkpoint) && !browser.HasExited && host is { IsCompleted: false })
                 await Task.Delay(150, ct);
             if (!File.Exists(checkpoint) || await File.ReadAllTextAsync(checkpoint, ct) != run.Id)
                 throw new InvalidOperationException("APP-03 Chromium did not reach the revocation checkpoint.");
