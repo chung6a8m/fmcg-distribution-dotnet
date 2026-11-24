@@ -96,3 +96,7 @@ Biên nhận cuối ghi trong PR body: final PR HEAD, tested workflow SHA, run/a
 Live branch-protection settings cần được đối chiếu khi đánh giá merge readiness; connector đã trả 403 ở lần đọc ban đầu. Giữ nguyên tên `validate` không tự chứng minh cấu hình protected checks. Kết quả Linux/static không chứng minh Windows LocalDB, lượt `main`, laptop hay physical PREPROD.
 
 Kế hoạch triển khai: [2026-11-24-app00a-parallel-ci](../superpowers/plans/2026-11-24-app00a-parallel-ci.md).
+
+## 6. Hủy lượt PR bị thay thế
+
+Follow-up mục 3 được Owner yêu cầu ngày 25/11/2026: [chính sách concurrency cho PR CI](pr-ci-concurrency.md). Chính sách ở cấp workflow giữ bốn worker song song, yêu cầu hủy lượt PR bị thay thế trong cùng workflow và dùng group riêng cho từng lượt push `main`/manual. Tài liệu liên kết ghi phạm vi 16 workflow, giới hạn khi re-run HEAD cũ và cách kiểm chứng tự hủy; biên nhận thực thi nằm trong PR tương ứng.
