@@ -16,8 +16,9 @@ internal sealed record OwnerMetric(string Metric, string Unit, int Known, int Ex
 
 internal static partial class App03OwnerReport
 {
-    private sealed record TripStock(Guid TripId, Guid SkuId, Guid? VehicleLocationId, string Label, string Unit,
-        bool NeverLoaded, decimal? Quantity, decimal? VehicleQuantity, decimal? VehicleCost);
+    internal sealed record TripStock(Guid TripId, Guid SkuId, Guid? VehicleLocationId, string Label, string Unit,
+        bool NeverLoaded, decimal? Quantity, decimal? VehicleQuantity, decimal? VehicleCost,
+        decimal? SourceQuantity, decimal? SourceCost);
 
     internal static Task<string> Session(TenantConnections connections, ClaimsPrincipal user, CancellationToken ct) =>
         WithOwner(connections, user, (db, tx, _) => db.QuerySingleAsync<string>(
@@ -41,16 +42,18 @@ internal static partial class App03OwnerReport
             return new { TenantId = tenant, clock.AsOf, clock.BusinessCutoff, Metrics = metrics };
         }, ct);
 
-    private static void AddTripStock(List<OwnerSource> rows, IEnumerable<TripStock> stocks)
+    internal static void AddTripStock(List<OwnerSource> rows, IEnumerable<TripStock> stocks)
     {
         foreach (var vehicle in stocks.GroupBy(stock => (stock.VehicleLocationId, stock.SkuId)))
         {
             var baseline = vehicle.First();
             decimal vehicleQuantity = baseline.VehicleQuantity.GetValueOrDefault();
             decimal vehicleCost = baseline.VehicleCost.GetValueOrDefault();
-            bool reconciled = baseline.VehicleQuantity.HasValue && baseline.VehicleCost.HasValue
+            bool quantityReconciled = baseline.VehicleQuantity.HasValue && baseline.VehicleQuantity == baseline.SourceQuantity
                 && vehicle.All(stock => stock.Quantity is >= 0)
                 && vehicle.Sum(stock => stock.Quantity.GetValueOrDefault()) == vehicleQuantity;
+            bool valueReconciled = quantityReconciled && baseline.VehicleCost is >= 0 && baseline.VehicleCost == baseline.SourceCost
+                && (vehicleQuantity != 0 || vehicleCost == 0);
             decimal cumulativeQuantity = 0;
             decimal allocatedValue = 0;
             foreach (var stock in vehicle)
@@ -59,14 +62,17 @@ internal static partial class App03OwnerReport
                 decimal? value = null;
                 if (stock.NeverLoaded)
                     quantity = value = 0;
-                else if (reconciled)
+                else if (quantityReconciled)
                 {
                     quantity = stock.Quantity.GetValueOrDefault();
-                    cumulativeQuantity += quantity.Value;
-                    // Consecutive rounded totals telescope to one stored-precision vehicle allocation.
-                    decimal cumulativeValue = App01dCashierUnloadService.D3CarryingCost(vehicleCost, vehicleQuantity, cumulativeQuantity);
-                    value = cumulativeValue - allocatedValue;
-                    allocatedValue = cumulativeValue;
+                    if (valueReconciled)
+                    {
+                        cumulativeQuantity += quantity.Value;
+                        // Consecutive rounded totals telescope to one stored-precision vehicle allocation.
+                        decimal cumulativeValue = App01dCashierUnloadService.D3CarryingCost(vehicleCost, vehicleQuantity, cumulativeQuantity);
+                        value = cumulativeValue - allocatedValue;
+                        allocatedValue = cumulativeValue;
+                    }
                 }
                 rows.Add(new("trip-qty", stock.Unit, stock.TripId, stock.SkuId, stock.Label,
                     stock.NeverLoaded ? "NOT_LOADED" : quantity.HasValue ? "TRIP_LEDGER" : "RECONCILIATION_REQUIRED", quantity));

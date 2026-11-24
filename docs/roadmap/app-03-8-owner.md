@@ -20,7 +20,7 @@ Mỗi dòng chỉ số ghi phạm vi, đơn vị và số nguồn có giá trị
 | --- | --- |
 | Đơn và chuyến | Nháp C.2, trạng thái AOrder và Trip. Mỗi đơn hoặc chuyến một dòng. |
 | MAIN, xe và QA | PhysicalStockBalance theo vị trí và SKU. Giá trị trong profile bootstrap là VND. Dòng lượng dùng đơn vị cơ sở của SKU. Tồn MAIN không đi qua danh sách chuyến. |
-| TRIP | Mẫu số gồm quyền giữ, manifest và hiệu ứng vật lý theo chuyến và SKU. Nguồn chưa nạp có lượng và giá trị bằng 0. Nguồn đã nạp cần khớp manifest, hiệu ứng và số dư theo xe/SKU. Phân bổ giá trị theo chênh lệch giữa các mốc lũy kế đã làm tròn, theo thứ tự ngày và mã chuyến. Tổng giá trị phân bổ khớp với giá trị xe khi lượng đối chiếu đủ. |
+| TRIP | Mẫu số gồm quyền giữ, manifest và hiệu ứng vật lý theo chuyến và SKU. Nguồn chưa nạp có lượng và giá trị bằng 0. Nguồn đã nạp cần khớp manifest, hiệu ứng và số dư theo xe/SKU. Lượng và giá trị xe được đối chiếu với tồn đầu kỳ cộng toàn bộ hiệu ứng vật lý của vị trí và SKU đó. Khi chỉ lệch giá trị, lượng đã đối chiếu vẫn được hiển thị và phần giá trị được đánh dấu chưa đủ dữ liệu. Phân bổ giá trị theo chênh lệch giữa các mốc lũy kế đã làm tròn, theo thứ tự ngày và mã chuyến. Tổng giá trị phân bổ khớp giá trị xe đã đối chiếu. |
 | Lô và quyền | Lô theo vị trí, SKU và hạn dùng từ opening, nạp, xuất, trả xe và các bước F05. Quyền giữ A và quota B theo StockRight, độc lập với số lượng vật lý. |
 | AR và giá vốn | AR theo ReceivableOpenItem và lần giao A/B, dùng snapshot F04 hoặc B pricing để xác định đơn vị. C.4 đang chờ kết quả nằm trong độ phủ AR A. Phần đã biết đối chiếu số phải thu gốc và số tiền đã phân bổ hoặc tất toán F08. Nguồn thiếu snapshot tiền nằm trong nhóm `SYNTHETIC_UNITLESS`. Giá vốn là tổng hiệu ứng giao, trả QA và chênh lệch F06. |
 | Tiền khách và quỹ | Hiệu ứng credit tiền khách, custody và fund theo hợp đồng D.3 của profile VND. Credit trả hàng, thực chi và số dư quỹ hoàn tiền thuộc F08. |
@@ -58,3 +58,14 @@ Source runtime tree `ce886ef003e12535f308715e6223d2726bd8d642` trên commit `430
 - `owner-review.json` SHA-256 `018CE4C53BEAC64EBA0A9DD827BBA9CA65C5ED0C3B9B49EB3861E4CD395156D2`. `owner-overview.xml` SHA-256 `6EB1B0DE493755A1AA15497520B5C88F81E1EDA29A68C2DC599715F3CE60D55D`.
 - `VerifySettlement` run `cab9c8957e6440ec832eff8e35b7a1c4` đạt 1/1 Chromium và 3/3 đối chiếu tiền của Owner. Hai chuyến cùng xe có giá trị 50,0001 và 50,0000 VND, khớp số dư 100,0001 VND. Mẫu số giữ 5 nguồn. Độ phủ giảm từ 5/5 xuống 2/5 khi số dư xe bị thiếu hoặc lệch theo mỗi chiều. Fixture khôi phục số dư trước khi trả xe. `owner-trip-coverage.json` SHA-256 `D673C9F85D3F222BD97EF1ACB0BC6CEA78AB0DD7E12F85BAD77EC6022461EB3B`.
 - .NET đạt 352/352. `app03-8-findings-final.trx` SHA-256 `DC3ADDF42E1FFC24767837BF8530284B2E55EC10AD669B9AFD2BD8DABFB90B38`. Web build, 23/23 bài kiểm tra web và `Verify-Business.ps1` đều qua.
+
+## Kiểm chứng sau review vòng 2 PR #142
+
+Source runtime tree `42f3548bac7ca7eec488535cdbd769b7db72bc55` trên commit `74269c0efc98ccb00ba85b27ba488ee4c18f4b97`, trước khi bổ sung biên nhận.
+
+Ca hồi quy `VerifySettlement` trên hành vi cũ, run `0b8ec40612874cd2971394aa71ddbadb`, tái hiện giá trị một chuyến 4.000,0001 VND khi số dư xe bị tăng 0,0001 VND mà chứng từ gốc giữ nguyên. Kết quả mong đợi giữ 1 EA và đánh dấu giá trị cần đối soát. Lượt kiểm chứng vòng 2 dùng 8.000 VND từ tồn đầu kỳ và sổ vật lý cho kịch bản tích hợp. Bài kiểm tra phân bổ riêng giữ kịch bản 100,0001 VND với số dư và nguồn khớp nhau.
+
+- `VerifySettlement` run `66d2b2fc0dcc46c497d77cd333ba624a` đạt 1/1 bài Chromium và 3/3 đối chiếu số liệu tiền. Khi số dư lệch riêng 0,0001 VND, lượng TRIP giữ 5/5 nguồn và giá trị còn 2/5 nguồn. Hai chuyến trên xe bị lệch đều giữ 1 EA và có giá trị cần đối soát. Fixture khôi phục số dư trước khi chạy tiếp trả xe D.3. `owner-trip-coverage.json` SHA-256 `4CD269ED187957DE2EB0038C3ACB8A6F5A229E6273D996A034DB079D6529A04C`.
+- Bài kiểm tra riêng `App03OwnerStockTests` đạt 3/3. Phân bổ 100,0001 VND thành 50,0001 và 50,0000 VND. Nguồn đã nạp có lượng 0 vẫn cần giá trị nguồn bằng 0 để công bố giá trị là 0.
+- `VerifyFinance` run `18dc6118f1854eed972712668176002e` đạt 6/6 bài Chromium và 18/18 đối chiếu SQL. `owner-review.json` SHA-256 `666CEF8717701ABA7ABA2FA7D159F8113652770FD9483D9DC2BD08E9F38871FC`. `owner-overview.xml` SHA-256 `FC3E0090528CFE350A606D2BB4BAF005FE2CD92DA38B0B3E52A846C9C4610F46`.
+- .NET đạt 355/355. `app03-8-round2.trx` SHA-256 `DD1964C1908A7AF40153DEFD52B89088DF3E3C1CFEB300C01D75F9EBCCC86CA6`. Kiểm tra snapshot nghiệp vụ đạt.

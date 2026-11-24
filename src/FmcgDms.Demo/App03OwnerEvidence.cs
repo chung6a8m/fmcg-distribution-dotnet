@@ -30,28 +30,49 @@ internal static class App03OwnerEvidence
                 WHERE r.TenantId=@tenant AND k.BaseUom='EA'
             ) rights;
             """, new { tenant }, cancellationToken: ct));
-        if (pair.Quantity != 2) throw new InvalidOperationException("Shared vehicle fixture requires two EA.");
+        var physicalSource = await db.QuerySingleAsync<(decimal Quantity, decimal Cost)>(new CommandDefinition("""
+            SELECT SUM(Quantity),SUM(Cost) FROM (
+                SELECT BaseQuantity AS Quantity,CostAmount AS Cost FROM dbo.PhysicalStockOpening
+                WHERE TenantId=@tenant AND StockLocationId=@Vehicle AND SkuId=@Sku
+                UNION ALL
+                SELECT QuantityDelta,AmountDelta FROM dbo.LedgerEffect
+                WHERE TenantId=@tenant AND StockLocationId=@Vehicle AND SkuId=@Sku AND LedgerKind='PHYSICAL_STOCK'
+            ) physical;
+            """, new { tenant, pair.Vehicle, pair.Sku }, cancellationToken: ct));
+        if (physicalSource != (2m, 8000m) || (pair.Quantity, pair.Cost) != physicalSource)
+            throw new InvalidOperationException("Shared vehicle opening and effects must reconcile to two EA and 8,000 VND.");
+
+        int costAffected = await db.QuerySingleAsync<int>(new CommandDefinition("""
+            SELECT COUNT(DISTINCT TripId) FROM dbo.TripManifestLine
+            WHERE TenantId=@tenant AND VehicleLocationId=@Vehicle AND SkuId=@Sku AND LoadedBaseQuantity>0;
+            """, new { tenant, pair.Vehicle, pair.Sku }, cancellationToken: ct));
 
         const string balanceKey = " WHERE TenantId=@tenant AND StockLocationId=@Vehicle AND SkuId=@Sku";
         var key = new { tenant, pair.Vehicle, pair.Sku, pair.Quantity, pair.Cost };
-        JsonElement complete;
+        var complete = await ReadReport();
+        JsonElement costDrift;
         JsonElement missing;
         JsonElement lowBalance;
         JsonElement highBalance;
         try
         {
-            // Exercise stored 4-decimal precision using only this owned scratch balance.
-            await db.ExecuteAsync(new CommandDefinition("UPDATE dbo.PhysicalStockBalance SET OnHandCostAmount=100.0001" +
+            Require(complete, older, 1, 4000);
+            Require(complete, newer, 1, 4000);
+            RequireCoverage(complete, "trip-qty", "EA", expectedKeys);
+            RequireCoverage(complete, "trip-value", "VND", expectedKeys);
+            if (Value(complete, "trip-value", "VND") != physicalSource.Cost)
+                throw new InvalidOperationException("Owner TRIP value differs from the independently summed physical sources.");
+
+            // Keep source quantities and values fixed. Corrupt only the cached cost by one stored unit.
+            await db.ExecuteAsync(new CommandDefinition("UPDATE dbo.PhysicalStockBalance SET OnHandCostAmount=@Cost+0.0001" +
                 balanceKey, key, cancellationToken: ct));
-            complete = await ReadReport();
-            var quantity = Metric(complete, "trip-qty", "EA");
-            var value = Metric(complete, "trip-value", "VND");
-            Require(complete, older, 1, 50.0001m);
-            Require(complete, newer, 1, 50.0000m);
-            if (quantity.GetProperty("known").GetInt32() != expectedKeys || quantity.GetProperty("expected").GetInt32() != expectedKeys
-                || value.GetProperty("known").GetInt32() != expectedKeys || value.GetProperty("expected").GetInt32() != expectedKeys
-                || Value(complete, "trip-value", "VND") != 100.0001m)
-                throw new InvalidOperationException("Complete TRIP coverage or carrying value differs from the SQL oracle.");
+            costDrift = await ReadReport();
+            Require(costDrift, older, 1, null);
+            Require(costDrift, newer, 1, null);
+            RequireCoverage(costDrift, "trip-qty", "EA", expectedKeys);
+            RequireCoverage(costDrift, "trip-value", "VND", expectedKeys - costAffected);
+            await db.ExecuteAsync(new CommandDefinition("UPDATE dbo.PhysicalStockBalance SET OnHandCostAmount=@Cost" +
+                balanceKey, key, cancellationToken: ct));
 
             await db.ExecuteAsync(new CommandDefinition("UPDATE dbo.PhysicalStockBalance SET OnHandBaseQuantity=1" +
                 balanceKey, key, cancellationToken: ct));
@@ -79,9 +100,17 @@ internal static class App03OwnerEvidence
                 """, key, cancellationToken: CancellationToken.None));
         }
         await File.WriteAllTextAsync(Path.Combine(folder, "owner-trip-coverage.json"),
-            JsonSerializer.Serialize(new { source, runId = run.Id, older, newer, pair, expectedKeys,
-                expectedSplit = new[] { 50.0001m, 50m }, complete, lowBalance, highBalance, missing },
+            JsonSerializer.Serialize(new { source, runId = run.Id, older, newer, expectedKeys, costAffected,
+                vehicle = new { pair.Vehicle, pair.Sku, physicalSource.Quantity, physicalSource.Cost },
+                complete, costDrift, lowBalance, highBalance, missing },
                 new JsonSerializerOptions { WriteIndented = true }), ct);
+
+        void RequireCoverage(JsonElement report, string metric, string unit, int known)
+        {
+            var row = Metric(report, metric, unit);
+            if (row.GetProperty("expected").GetInt32() != expectedKeys || row.GetProperty("known").GetInt32() != known)
+                throw new InvalidOperationException($"Owner {metric} expected {known}/{expectedKeys} sources.");
+        }
 
         void CheckIncomplete(JsonElement report)
         {
@@ -112,9 +141,15 @@ internal static class App03OwnerEvidence
             if (actual != (quantity, value))
                 throw new InvalidOperationException($"TRIP {trip} expected {(quantity, value)}, got {actual}.");
 
-            decimal? SourceValue(string metric, string unit) => Number(Metric(report, metric, unit).GetProperty("sources")
-                .EnumerateArray().Single(s => s.GetProperty("id").GetGuid() == trip
-                    && s.GetProperty("relatedId").GetGuid() == pair.Sku).GetProperty("value"));
+            decimal? SourceValue(string metric, string unit)
+            {
+                var row = Metric(report, metric, unit).GetProperty("sources").EnumerateArray().Single(s =>
+                    s.GetProperty("id").GetGuid() == trip && s.GetProperty("relatedId").GetGuid() == pair.Sku);
+                var amount = Number(row.GetProperty("value"));
+                if (amount is null && row.GetProperty("state").GetString() != "RECONCILIATION_REQUIRED")
+                    throw new InvalidOperationException($"Missing TRIP {trip} {metric} must be flagged for reconciliation.");
+                return amount;
+            }
         }
     }
     internal static async Task ReviewSettlement(DemoRun run, App03DevHost host, string folder, string source, CancellationToken ct)

@@ -247,13 +247,23 @@ internal static partial class App03OwnerReport
             CAST(CASE WHEN v.TripId IS NULL AND COALESCE(m.Loaded,0)=0 THEN 1 ELSE 0 END AS bit) AS NeverLoaded,
             CASE WHEN v.TripId IS NULL AND COALESCE(m.Loaded,0)=0 THEN 0
                  WHEN m.MissingProof=0 AND v.Quantity=m.Remaining THEN v.Quantity END AS Quantity,
-            b.OnHandBaseQuantity AS VehicleQuantity,b.OnHandCostAmount AS VehicleCost
+            b.OnHandBaseQuantity AS VehicleQuantity,b.OnHandCostAmount AS VehicleCost,
+            o.BaseQuantity+COALESCE(physical.Quantity,0) AS SourceQuantity,
+            o.CostAmount+COALESCE(physical.Amount,0) AS SourceCost
         FROM Expected e
         JOIN dbo.Trip t ON t.TenantId=@Tenant AND t.Id=e.TripId
         JOIN dbo.Sku k ON k.TenantId=t.TenantId AND k.Id=e.SkuId
         LEFT JOIN Manifest m ON m.TripId=t.Id AND m.SkuId=k.Id
         LEFT JOIN VehicleLedger v ON v.TripId=t.Id AND v.SkuId=k.Id
         LEFT JOIN dbo.PhysicalStockBalance b ON b.TenantId=t.TenantId AND b.StockLocationId=t.VehicleLocationId AND b.SkuId=k.Id
+        LEFT JOIN dbo.PhysicalStockOpening o ON o.TenantId=t.TenantId AND o.StockLocationId=t.VehicleLocationId AND o.SkuId=k.Id
+        OUTER APPLY (
+            SELECT CONVERT(decimal(28,3),SUM(l.QuantityDelta)) AS Quantity,
+                CONVERT(decimal(28,4),SUM(l.AmountDelta)) AS Amount
+            FROM dbo.LedgerEffect l
+            WHERE l.TenantId=o.TenantId AND l.StockLocationId=o.StockLocationId AND l.SkuId=o.SkuId
+                AND l.LedgerKind='PHYSICAL_STOCK'
+        ) physical
         ORDER BY t.BusinessDate,t.Code,t.Id,k.Code;
         """;
 }
