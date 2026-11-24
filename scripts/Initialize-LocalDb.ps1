@@ -27,7 +27,7 @@ function Get-LocalDbBootstrapError([string]$Text) {
     if ($Text -match 'login failed|cannot open database|\b18456\b') { return 'AuthenticationFailed' }
     if ($Text -match 'certificate|SSL Provider|TLS handshake|encryption error') { return 'TlsError' }
     if ($Text -match 'Cannot create an automatic instance') { return 'AutomaticInstanceCreationFailed' }
-    if ($Text -match '(?:specified LocalDB version|LocalDB runtime).*(?:not installed|not found)') { return 'EngineUnavailable' }
+    if ($Text -match '(?:specified (?:LocalDB|Local Database) version|LocalDB runtime).*(?:not installed|not found|not available)') { return 'EngineUnavailable' }
     if ($Text -match 'Start of LocalDB instance .* failed|SQL Server process failed to start') { return 'InstanceStartFailed' }
     if ($Text -match 'Creation of LocalDB instance .* failed') { return 'InstanceCreationFailed' }
     if ($Text.Trim() -ceq 'The automatic instance "MSSQLLocalDB" is not created.') { return 'AutomaticInstanceNotCreated' }
@@ -46,11 +46,31 @@ function Get-LocalDbBootstrapError([string]$Text) {
     return 'None'
 }
 
+function Get-LocalDbNativeDetail([string]$Text) {
+    # Match only fixed cause categories. Never retain the raw native message,
+    # which can include user profile, registry or instance directory paths.
+    switch -Regex ($Text) {
+        '(?:LocalDB|Local Database) version.*(?:not available|not installed)' { return 'VersionUnavailable' }
+        '(?:(?:LocalDB|Local Database) version.*invalid|invalid.*(?:LocalDB|Local Database|version))' { return 'InvalidVersion' }
+        'version available.*lower than.*requested' { return 'VersionTooLow' }
+        'instance with the same name already exists.*lower version' { return 'ExistingLowerVersion' }
+        'parameter.*(?:incorrect|invalid)' { return 'InvalidParameter' }
+        'instance name.*invalid' { return 'InvalidInstanceName' }
+        '(?:automatic instance.*version|version.*automatic instance)' { return 'AutomaticInstanceVersionConstraint' }
+        '(?:instance configuration.*corrupt|configuration.*instance.*corrupt)' { return 'InstanceConfigurationCorrupt' }
+        'SQL Server process failed to start' { return 'SqlServerStartupFailed' }
+        '(?:user.?profile|user profile).*folder' { return 'UserProfileFolder' }
+        '(?:instance.*folder|folder.*instance)' { return 'InstanceFolder' }
+        '(?:instance.*registry|registry.*instance)' { return 'InstanceRegistry' }
+        default { return 'Unclassified' }
+    }
+}
+
 function Invoke-LocalDbBootstrapStage {
     param([hashtable]$Context, [string]$Stage, [string[]]$Arguments, [int]$Attempt = 1)
     $remaining = $Context.deadlineMilliseconds - $Context.watch.ElapsedMilliseconds
     if ($remaining -le 0) { Stop-LocalDbBootstrap 'DeadlineExceeded' }
-    $limit = if ($Stage -eq 'info') { 3000 } elseif ($Stage -eq 'readiness') { 12000 } else { 15000 }
+    $limit = if ($Stage -in 'info', 'versions') { 3000 } elseif ($Stage -eq 'readiness') { 12000 } else { 15000 }
     $timeout = [int][Math]::Min($limit, $remaining)
     $executable = if ($Stage -eq 'readiness') { 'SQLCMD.EXE' } else { 'SqlLocalDB.exe' }
     $started = [DateTime]::UtcNow.ToString('o')
@@ -84,6 +104,7 @@ function Invoke-LocalDbBootstrapStage {
         stage = $Stage; attempt = $Attempt; startedUtc = $started
         elapsedMilliseconds = $Context.watch.ElapsedMilliseconds
         status = $native.status; exitCode = $native.exitCode; error = $errorKind
+        nativeDetail = if ($errorKind -ne 'None') { Get-LocalDbNativeDetail $text } else { $null }
         nativeCode = if ($code) { $code } else { $null }
         truncated = [bool]$native.truncated
         deadlineExpired = $Context.watch.ElapsedMilliseconds -ge $Context.deadlineMilliseconds
@@ -131,7 +152,7 @@ function Initialize-LocalDb {
     $report = [ordered]@{
         schemaVersion = 'CI_LOCALDB_BOOTSTRAP_V1'; startedUtc = [DateTime]::UtcNow.ToString('o')
         status = 'FAILED'; failure = $null; mode = 'UNKNOWN'; instance = 'MSSQLLocalDB'
-        expectedVersion = '15.0'; engineVersion = $null; readinessAttempts = 0
+        expectedVersion = '15.0'; engineVersion = $null; installedVersions = @(); readinessAttempts = 0
         deadlineSeconds = $DeadlineSeconds; elapsedMilliseconds = 0; attempts = @(); requireWarm = [bool]$RequireWarm
         sourceHeadSha = if ($env:CI_LOCALDB_SOURCE_HEAD_SHA -cmatch '\A[a-f0-9]{40}\z') { $env:CI_LOCALDB_SOURCE_HEAD_SHA }
         workflowSha = if ($env:GITHUB_SHA -cmatch '\A[a-f0-9]{40}\z') { $env:GITHUB_SHA }
@@ -156,6 +177,20 @@ function Initialize-LocalDb {
             $info.native.status -in 'OK', 'COMMAND_FAILED') {
             if ($RequireWarm) { Stop-LocalDbBootstrap 'WarmInstanceRequired' }
             $report.mode = 'COLD'
+            # An executable file version does not prove a runtime is registered.
+            # Inspect the read-only runtime inventory before any cold mutation.
+            $versions = Invoke-LocalDbBootstrapStage $context 'versions' @('versions')
+            Assert-LocalDbBootstrapStage $versions
+            $installed = @(foreach ($line in ($versions.native.stdout -split "`n")) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $match = [regex]::Match($line.Trim(), '\AMicrosoft SQL Server [0-9]{4} \(([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)\)\z')
+                if (!$match.Success) { Stop-LocalDbBootstrap 'InstanceMetadataMismatch' }
+                $match.Groups[1].Value
+            })
+            $report.installedVersions = $installed
+            if (!@($installed | Where-Object { $_ -match '\A15\.0\.' }).Count) {
+                Stop-LocalDbBootstrap 'EngineUnavailable'
+            }
             $create = Invoke-LocalDbBootstrapStage $context 'create' @('create', 'MSSQLLocalDB', '15.0')
             Assert-LocalDbBootstrapStage $create
             $info = Invoke-LocalDbBootstrapStage $context 'info' @('info', 'MSSQLLocalDB')

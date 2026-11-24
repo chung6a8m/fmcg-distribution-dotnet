@@ -25,7 +25,7 @@ Các lượt trên dùng image `20261116.370.1`. Thông báo “automatic instan
 `scripts/Initialize-LocalDb.ps1` được gọi ở cả bốn worker APP00A và sáu job SQL B3–B8. Helper chỉ chấp nhận đúng `MSSQLLocalDB` trên GitHub-hosted Windows. Database scratch, migration, ownership và nonce tiếp tục do các script/test hiện có bảo vệ.
 
 1. Xác nhận môi trường và hai executable có sẵn; kiểm tra instance.
-2. Chỉ khi nhận đúng toàn bộ câu thông báo instance `MSSQLLocalDB` chưa được tạo, gọi `create MSSQLLocalDB 15.0` một lần.
+2. Chỉ khi nhận đúng toàn bộ câu thông báo instance `MSSQLLocalDB` chưa được tạo, đọc `versions` để xác nhận runtime 15.0 đã đăng ký, rồi gọi `create MSSQLLocalDB 15.0` một lần. File version của executable không thay thế được inventory runtime.
 3. Đọc lại metadata duy nhất và hợp lệ. Giữ runtime family `15.0` đang dùng, không cài hoặc tự chuyển engine version.
 4. Nếu `Stopped`, gọi `start` một lần. Native exit và thông báo thành công đều phải hợp lệ; output lỗi/không nhận diện không được một probe sau đó che đi.
 5. Xác nhận lại `Running`, rồi truy vấn chỉ đọc trong `master`, kiểm `IsLocalDB` và version trước khi trả `READY`.
@@ -48,7 +48,7 @@ Không retry migration, lệnh HTTP, ledger hoặc test suite. Không xóa/reset
 
 ## 3. Evidence và tương thích collector
 
-Mỗi invocation ghi JSON riêng dưới `TestResults/LocalDbBootstrap/`: schema `CI_LOCALDB_BOOTSTRAP_V1`, source HEAD, workflow SHA, run/attempt, job, image, mode cold/warm/stopped, native exit/status, stage/attempt, deadline và kết luận. Một timeout được khôi phục vẫn nằm trong history.
+Mỗi invocation ghi JSON riêng dưới `TestResults/LocalDbBootstrap/`: schema `CI_LOCALDB_BOOTSTRAP_V1`, source HEAD, workflow SHA, run/attempt, job, image, mode cold/warm/stopped, runtime đã đăng ký, native exit/status, stage/attempt, deadline và kết luận. Một timeout được khôi phục vẫn nằm trong history. Native detail chỉ dùng các nhãn cố định để phân biệt lý do version/parameter/profile/folder/registry phía sau tiêu đề create/start thất bại, không giữ raw message.
 
 Helper xuất basename receipt và projection `info/start/sqlcmd` qua step outputs. Failure collector nhận lại các giá trị này cùng source HEAD; báo cáo LAB-E02 có job và receipt identity để liên kết đúng invocation. Nếu SDK/source guard thất bại trước khi helper chạy, collector ghi không có invocation được ghi nhận, không dựng một bootstrap history giả.
 

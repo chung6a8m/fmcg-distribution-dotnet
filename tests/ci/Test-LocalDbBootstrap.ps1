@@ -49,6 +49,12 @@ function Invoke-LocalDbProbe {
         return @{ status = 'TIMEOUT'; exitCode = $null; stdout = ''; stderr = ''; truncated = $false }
     }
     switch ($verb) {
+        'versions' {
+            Assert-That ($Arguments.Count -eq 1) 'Installed runtime inspection accepts no target.'
+            if ($script:Scenario -eq 'UnregisteredEngine') { return Native-Result 'Microsoft SQL Server 2022 (16.0.1000.1)' }
+            if ($script:Scenario -eq 'UnknownVersions') { return Native-Result 'Unknown runtime TOP_SECRET_SENTINEL' }
+            return Native-Result 'Microsoft SQL Server 2019 (15.0.4382.1)'
+        }
         'info' {
             Assert-That ($Arguments.Count -eq 2 -and $Arguments[1] -ceq 'MSSQLLocalDB') 'Foreign inspect target.'
             if ($script:Scenario -eq 'DeniedInfo') {
@@ -74,6 +80,12 @@ function Invoke-LocalDbProbe {
             Assert-That ($script:State -eq 'Missing') 'Existing instance must not be recreated.'
             if ($script:Scenario -eq 'MissingEngine') {
                 return Native-Result 'The specified LocalDB version is not installed.' 1 'COMMAND_FAILED'
+            }
+            if ($script:Scenario -eq 'NativeUnavailableVersion') {
+                return Native-Result "Creation of LocalDB instance `"MSSQLLocalDB`" failed because of the following error:`r`nThe specified Local Database version is not available on this computer."
+            }
+            if ($script:Scenario -eq 'NativeInvalidParameter') {
+                return Native-Result "Creation of LocalDB instance `"MSSQLLocalDB`" failed because of the following error:`nThe parameter for the Local Database Instance API method is incorrect. Consult the API documentation."
             }
             if ($script:Scenario -eq 'CreateFailureZero') {
                 return Native-Result 'Cannot create an automatic instance. TOP_SECRET_SENTINEL'
@@ -137,8 +149,9 @@ function Run-Case([string]$Name, [string]$Initial, [string]$Want, [string]$Failu
 }
 
 $cold = Run-Case 'Cold' 'Missing' 'READY'
-Assert-That (($script:Calls -join ',') -ceq 'info,create,info,start,info,readiness') 'Cold sequence changed.'
-Assert-That ($cold.mode -ceq 'COLD' -and $cold.attempts.Count -eq 6) 'Cold history incomplete.'
+Assert-That (($script:Calls -join ',') -ceq 'info,versions,create,info,start,info,readiness') 'Cold sequence must verify registered runtime before creation.'
+Assert-That ($cold.mode -ceq 'COLD' -and $cold.attempts.Count -eq 7) 'Cold history incomplete.'
+Assert-That ($cold.installedVersions -contains '15.0.4382.1') 'Installed runtime version was not retained.'
 $warm = Run-Case 'Warm' 'Running' 'READY'
 Assert-That (($script:Calls -join ',') -ceq 'info,readiness') 'Warm instance was changed.'
 Assert-That ($warm.mode -ceq 'WARM') 'Warm receipt is not classified.'
@@ -150,6 +163,12 @@ Assert-That ($script:Calls.Count -eq 0) 'Foreign target ran a native command.'
 $null = Run-Case 'MissingTool' 'Missing' 'FAILED' 'ToolUnavailable'
 Assert-That ($script:Calls.Count -eq 0) 'Missing sqlcmd was detected only after changing an instance.'
 $null = Run-Case 'MissingEngine' 'Missing' 'FAILED' 'EngineUnavailable'
+$null = Run-Case 'UnregisteredEngine' 'Missing' 'FAILED' 'EngineUnavailable'
+Assert-That (($script:Calls -join ',') -ceq 'info,versions') 'Unregistered runtime caused an instance mutation.'
+$null = Run-Case 'UnknownVersions' 'Missing' 'FAILED' 'InstanceMetadataMismatch'
+$null = Run-Case 'NativeUnavailableVersion' 'Missing' 'FAILED' 'EngineUnavailable'
+$invalidParameter = Run-Case 'NativeInvalidParameter' 'Missing' 'FAILED' 'InstanceCreationFailed'
+Assert-That ($invalidParameter.attempts[-1].nativeDetail -ceq 'InvalidParameter') 'Specific native reason was hidden by its generic creation header.'
 $null = Run-Case 'DeniedInfo' 'Stopped' 'FAILED' 'AccessDenied'
 $null = Run-Case 'WrongVersion' 'Stopped' 'FAILED' 'VersionMismatch'
 $null = Run-Case 'ForeignMetadata' 'Stopped' 'FAILED' 'InstanceMetadataMismatch'
