@@ -106,6 +106,8 @@ Revision từ read không thay thế recheck trong transaction. Close, assign/re
 
 ### APP-05.0 — Ổn định CI nền
 
+**Cải tiến thời gian chờ đã được Owner yêu cầu ngày 24/11/2026:** [APP-00A — bốn nhóm CI song song](app-00a-parallel-ci.md) kế thừa baseline merge PR #144, giữ đầy đủ kiểm chứng và tách worker cùng check `validate` tổng hợp. Đây là follow-up triển khai có source/evidence riêng; lịch sử timeout và điều kiện closeout bên dưới vẫn được giữ.
+
 **Files:** `.github/workflows/app00a.yml`; các script runner liên quan chỉ khi phép đo cho thấy cần sửa. Bắt đầu bằng thời lượng/job/step của run baseline và các lượt PR thành công. `VerifyAcceptance`/F09 All chưa được gọi bởi workflow APP-00A ở baseline; không gọi chúng là gate CI đang có.
 
 - [x] Ghi thời lượng, step cuối và nguyên nhân hủy; tách lỗi môi trường/timeout khỏi assertion, chỉ ra các gate/artifact chưa chạy được.
