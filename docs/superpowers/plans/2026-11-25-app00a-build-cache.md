@@ -4,7 +4,7 @@
 
 **Goal:** Reduce APP-00A preparation overhead only where observed timings and complete CI justify it.
 
-**Architecture:** Cache NuGet package data in the four independent Windows workers while always restoring/building/testing. Reuse the same-job Release Demo/API build through an explicit source-bound CI opt-in in the two launchers. Retain all existing workflow gates and witnesses.
+**Architecture:** Measure NuGet caching and retain only demonstrated useful work. The completed experiment did not establish material archive-cache benefit, so the final implementation keeps same-job Release Demo/API reuse through an explicit source-bound CI opt-in, with all existing restores, builds, workflow gates and witnesses intact.
 
 **Tech Stack:** GitHub Actions, PowerShell, .NET SDK 10.0.404, Node 26, Python verification.
 
@@ -23,7 +23,7 @@
 - Dirty source or mismatched Demo/API at the same checkout must fail before runtime launch when reuse is explicitly requested.
 - Default local execution must continue building, including original failure propagation and Remove behavior.
 - APP-03 copied standalone Stop must remain independent of repository/helper; nested NextDay must inherit reuse.
-- Cache key/input changes or a failed job must not create a misleading warm result; no cache-hit path may skip restore/test/audit.
+- Failed or carried-forward jobs must not create a misleading warm result; final archive-cache removal must retain every original restore/test/audit.
 - Native LocalDB early failure and queue variance must not be counted as performance savings.
 
 ### Task 1: Same-job build reuse guard
@@ -36,13 +36,14 @@
 - [ ] Implement the guard and wire it below APP-03's Stop return. Validate CI Windows, clean/source marker equality, Release/net10.0 Demo and API DLL ProductVersion SHA suffixes, plus the API project-reference copy in Demo output; require both executables' deps/runtimeconfig metadata. Missing or stale app-local API must be rejected before SQL/runtime launch. Preserve existing Remove exception when opt-in is absent.
 - [ ] Run regression suite with real temporary files/assembly metadata and mocked process boundary; expect all pass. Parse modified PowerShell files; expect no syntax errors.
 
-### Task 2: Workflow package cache and opt-in
+### Task 2: Workflow opt-in and measured cache selection
 
 **Files:** Modify `.github/workflows/app00a.yml`; update `docs/roadmap/app-00a-parallel-ci.md` with a substantive follow-up link.
 
-**Interfaces:** Produce Task 1's `FMCG_CI_PREBUILT_SHA` via `GITHUB_ENV` after successful initial Release build in web_sales/app03/distribution. A configure step after checkout in each worker writes `NUGET_PACKAGES` under `RUNNER_TEMP` to `GITHUB_ENV` (runner context is unavailable in job-level env). Use the exact dependency key; save uses restore's primary key.
+**Interfaces:** Produce Task 1's `FMCG_CI_PREBUILT_SHA` via `GITHUB_ENV` after successful initial Release build in web_sales/app03/distribution. The experimental NuGet configure/restore/save steps and path override are removed after the measured selection decision; dependency storage returns to its original defaults.
 
-- [ ] Add explicit NuGet restore/save steps; retain unconditional existing restore/build/test commands and read-only permissions. Save after verification only on success and non-exact-hit.
+- [x] Trial exact NuGet package caching without skipping restore/build/test; capture miss and exact-hit phases with archive overhead on source `fc2d79f`.
+- [ ] Remove all experimental NuGet configure/restore/save steps after the 12s warm path versus 13s cold restore did not establish material benefit; retain unconditional original commands and permissions.
 - [ ] Add the guard regression to core_sql and opt-in setup after the existing builds in the three browser workers.
 - [ ] Run actionlint, 15 aggregate-gate tests and business validators; compare original step commands/env/conditions/evidence to base. Expect no gate removal and no application/business changes.
 
@@ -54,5 +55,6 @@
 
 - [ ] Fresh independent review the entire diff and concrete failure classes; fix important correctness findings with regression evidence.
 - [ ] Commit and publish exact verified tree on `ci/measured-build-cache`; create PR against current main.
-- [ ] Complete full CI, record cold miss+save and exact warm hit from a fresh-runner rerun at the same source/key. Retain all suites. Compare total restore/cache overhead and per-job/workflow elapsed; do not attribute unrelated runner variation to cache.
-- [ ] Keep only measured useful optimization; record negative LocalDB evidence separately if encountered. Update PR body with source, runs, attempts, timing limits and all gates. Leave open for Owner review/merge.
+- [x] Complete experimental cold CI (24/24 jobs) and capture exact-hit phases from a fresh-worker same-source/key rerun. Warm APP-03.5 hit the existing 3s session-proxy timeout; .6/.7 skipped, so its 244s truncated job is not a performance result or acceptance.
+- [ ] Review the substantive cache-removal change, then complete full CI on that final source, including APP-03.5/.6/.7 and all25 reuse calls. Do not add retries/timeouts or change runtime witnesses to make the benchmark pass.
+- [ ] Keep only the demonstrated build-reuse optimization; update PR body with final source/runs, experimental negative evidence, timing limits and all gates. Leave open for Owner review/merge.

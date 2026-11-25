@@ -16,11 +16,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Configure NuGet package cache
-        shell: pwsh
-        run: |
-          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
-          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -64,12 +59,6 @@ jobs:
           CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb_warm.outputs.receipt || steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
-      - name: Restore NuGet package cache
-        id: nuget_cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: app00a-nuget-v1-${{ runner.os }}-${{ runner.arch }}-windows2022-${{ hashFiles('global.json', 'FmcgDms.slnx', '**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/NuGet.config', '**/nuget.Config', '**/nuget.config', '**/packages.lock.json', '**/packages.*.lock.json') }}
       - name: .NET restore
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
@@ -775,12 +764,6 @@ jobs:
           name: app00a-test-evidence
           path: '**/TestResults/**/*'
           if-no-files-found: warn
-      - name: Save NuGet package cache
-        if: ${{ success() && steps.nuget_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
 
   web_sales:
     runs-on: windows-2022
@@ -788,11 +771,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Configure NuGet package cache
-        shell: pwsh
-        run: |
-          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
-          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -827,12 +805,6 @@ jobs:
           CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
-      - name: Restore NuGet package cache
-        id: nuget_cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: app00a-nuget-v1-${{ runner.os }}-${{ runner.arch }}-windows2022-${{ hashFiles('global.json', 'FmcgDms.slnx', '**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/NuGet.config', '**/nuget.Config', '**/nuget.config', '**/packages.lock.json', '**/packages.*.lock.json') }}
       - name: .NET restore
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
@@ -949,12 +921,6 @@ jobs:
           name: app00a-test-evidence-web-sales
           path: '**/TestResults/**/*'
           if-no-files-found: warn
-      - name: Save NuGet package cache
-        if: ${{ success() && steps.nuget_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
 
   app03:
     runs-on: windows-2022
@@ -962,11 +928,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Configure NuGet package cache
-        shell: pwsh
-        run: |
-          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
-          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -1001,12 +962,6 @@ jobs:
           CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
-      - name: Restore NuGet package cache
-        id: nuget_cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: app00a-nuget-v1-${{ runner.os }}-${{ runner.arch }}-windows2022-${{ hashFiles('global.json', 'FmcgDms.slnx', '**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/NuGet.config', '**/nuget.Config', '**/nuget.config', '**/packages.lock.json', '**/packages.*.lock.json') }}
       - name: .NET restore
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
@@ -1071,12 +1026,6 @@ jobs:
           name: app00a-test-evidence-app03
           path: '**/TestResults/**/*'
           if-no-files-found: warn
-      - name: Save NuGet package cache
-        if: ${{ success() && steps.nuget_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
 
   distribution:
     runs-on: windows-2022
@@ -1084,11 +1033,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      - name: Configure NuGet package cache
-        shell: pwsh
-        run: |
-          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
-          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -1123,12 +1067,6 @@ jobs:
           CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
           LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Collect-LocalDbDiagnostics.ps1
-      - name: Restore NuGet package cache
-        id: nuget_cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: app00a-nuget-v1-${{ runner.os }}-${{ runner.arch }}-windows2022-${{ hashFiles('global.json', 'FmcgDms.slnx', '**/*.csproj', '**/*.props', '**/*.targets', '**/NuGet.Config', '**/NuGet.config', '**/nuget.Config', '**/nuget.config', '**/packages.lock.json', '**/packages.*.lock.json') }}
       - name: .NET restore
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
@@ -1176,12 +1114,6 @@ jobs:
           name: app00a-test-evidence-distribution
           path: '**/TestResults/**/*'
           if-no-files-found: warn
-      - name: Save NuGet package cache
-        if: ${{ success() && steps.nuget_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.NUGET_PACKAGES }}
-          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
 
   validate:
     name: validate
