@@ -39,9 +39,11 @@ public static class ScratchMigrator
             throughVersion: 202611230006, migrationTag: App02DevF05Schema.Profile);
 
     public static void MigrateApp03A1(string connectionString, string tenantId, string expectedNonce,
-        LogLevel minimumLogLevel = LogLevel.Information, bool field = false, bool settlement = false, bool finance = false, bool closeReadiness = false) =>
+        LogLevel minimumLogLevel = LogLevel.Information, bool field = false, bool settlement = false,
+        bool finance = false, bool closeReadiness = false, bool tripClosure = false) =>
         MigrateCore(connectionString, tenantId, expectedNonce, minimumLogLevel, bindBeforeFeatureMigrations: true,
-            throughVersion: App03A1Profile.BaseVersion, app03A1: true, app03Field: field, app03Settlement: settlement, app03Finance: finance, app05CloseReadiness: closeReadiness);
+            throughVersion: App03A1Profile.BaseVersion, app03A1: true, app03Field: field, app03Settlement: settlement,
+            app03Finance: finance, app05CloseReadiness: closeReadiness, app05TripClosure: tripClosure);
 
     public static void MigrateDevF07(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel = LogLevel.Information) =>
@@ -80,7 +82,8 @@ public static class ScratchMigrator
 
     private static void MigrateCore(string connectionString, string tenantId, string expectedNonce,
         LogLevel minimumLogLevel, bool bindBeforeFeatureMigrations, long? throughVersion, string? migrationTag = null,
-        bool app03A1 = false, bool app03Field = false, bool app03Settlement = false, bool app03Finance = false, bool app05CloseReadiness = false)
+        bool app03A1 = false, bool app03Field = false, bool app03Settlement = false, bool app03Finance = false,
+        bool app05CloseReadiness = false, bool app05TripClosure = false)
     {
         if (string.IsNullOrWhiteSpace(expectedNonce) || !Guid.TryParseExact(expectedNonce, "N", out _))
             throw new ArgumentException("Expected GUID-N nonce.", nameof(expectedNonce));
@@ -130,11 +133,13 @@ public static class ScratchMigrator
             try
             {
                 App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(),
-                    complete: false, field: app03Field, settlement: app03Settlement, finance: app03Finance, closeReadiness: app05CloseReadiness);
-                foreach (var (tag, version) in App03A1Profile.MigrationSteps(app03Field, app03Settlement, app03Finance, app05CloseReadiness))
+                    complete: false, field: app03Field, settlement: app03Settlement, finance: app03Finance,
+                    closeReadiness: app05CloseReadiness, tripClosure: app05TripClosure);
+                foreach (var (tag, version) in App03A1Profile.MigrationSteps(app03Field, app03Settlement, app03Finance, app05CloseReadiness, app05TripClosure))
                     Apply(tag, version);
                 App03A1Profile.RequireSchema(App03A1Profile.ReadSchema(conn, expectedNonce).GetAwaiter().GetResult(),
-                    complete: true, field: app03Field, settlement: app03Settlement, finance: app03Finance, closeReadiness: app05CloseReadiness);
+                    complete: true, field: app03Field, settlement: app03Settlement, finance: app03Finance,
+                    closeReadiness: app05CloseReadiness, tripClosure: app05TripClosure);
             }
             finally
             {

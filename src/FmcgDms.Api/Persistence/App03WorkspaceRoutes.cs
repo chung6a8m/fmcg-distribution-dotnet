@@ -72,6 +72,7 @@ internal static class App03WorkspaceRoutes
                 AccountingRoles = accounting ?? [],
                 Owner = owner is not null,
                 TripClose = await closeReadinessAccess,
+                TripClosure = connections.UsesApp05TripClosure && await closeReadinessAccess,
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt
             });

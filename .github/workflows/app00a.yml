@@ -1074,6 +1074,9 @@ jobs:
       - name: APP-05.1 guarded predecessor upgrade and interrupted migration recovery
         shell: pwsh
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyCloseReadinessUpgrade
+      - name: APP-05.2 close, lost acknowledgement recovery and zero-stock handoff
+        shell: pwsh
+        run: ./scripts/Run-App03Dev.ps1 -Action VerifyTripClosure
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -1090,6 +1093,7 @@ jobs:
             TestResults/app03-7/
             TestResults/app05-1/
             TestResults/app05-1-upgrade/
+            TestResults/app05-2/
           if-no-files-found: warn
       - name: Upload test evidence
         if: always()

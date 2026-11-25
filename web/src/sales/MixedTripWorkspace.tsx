@@ -14,7 +14,7 @@ type Report = Trip & {
   mainQty: number; mainCost: number; tripQty: number; tripCost: number; aHold: number; bQuota: number
   soldQty: number; cogs: number; customerCredit: number; advance: number; totalAllocated: number; asOfUtc: string
   pendingOfferId?: string | null; pendingOfferAmount?: number | null
-  canOffer: boolean; canAccept: boolean; canUnload: boolean
+  canOffer: boolean; canAccept: boolean; canUnload: boolean; canZeroHandoff?: boolean
 }
 type Base = { producerId: string; commandId: string; sourceNumber: string; tripId: string }
 type Command =
@@ -394,7 +394,7 @@ export function MixedTripWorkspace({ workspaceSession, startTrip, onTripChange }
           <Button type="submit" variant="primary">Xác nhận đã nhận tiền</Button>
         </fieldset>
       </form>}
-    {report && canPost && report.canUnload && (carryStock || report.soldQty > 0) &&
+    {report && canPost && report.canUnload && (carryStock || report.soldQty > 0 || report.canZeroHandoff) &&
       <form className="panel panel-content" onSubmit={event => submit(event, 'unload')}>
         <h2>{carryStock ? 'Trả hàng về kho' : 'Bàn giao chuyến'}</h2>
         {(report.custody !== 0 || report.pendingOfferId) && <p>Hoàn tất nộp và nhận tiền trước khi trả xe.</p>}

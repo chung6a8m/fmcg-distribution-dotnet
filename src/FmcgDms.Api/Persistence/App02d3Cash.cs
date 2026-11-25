@@ -20,7 +20,10 @@ internal sealed record D3TripReport(Guid TripId, string Label, string TripStatus
     decimal ArA, decimal ArB, decimal MainQty, decimal MainCost, decimal TripQty, decimal TripCost,
     decimal AHold, decimal BQuota, Guid? PendingOfferId, decimal PendingOfferAmount,
     decimal CustomerCredit, decimal Advance, decimal TotalAllocated, decimal SoldQty, decimal Cogs, DateTimeOffset AsOfUtc,
-    bool CanOffer, bool CanAccept, bool CanUnload);
+    bool CanOffer, bool CanAccept, bool CanUnload)
+{
+    public bool CanZeroHandoff { get; init; }
+}
 
 public sealed partial class App01dCashierUnloadService
 {
@@ -221,6 +224,13 @@ public sealed partial class App01dCashierUnloadService
                 WHERE t.TenantId=@Tenant AND t.Id=@Trip
                 GROUP BY b.SkuId,b.OnHandBaseQuantity,b.OnHandCostAmount;
                 """, new { Tenant = tenant, Trip = tripId }, tx, ct));
+            if (connections.UsesApp05TripClosure)
+            {
+                if (report.TripStatus is "CLOSED" or "CLOSED_WITH_OPEN_CASES")
+                    report = report with { CanOffer = false, CanAccept = false, CanUnload = false };
+                else if (report.CanUnload && report.SoldQty == 0 && report.Custody == 0 && report.PendingOfferId is null)
+                    report = report with { CanZeroHandoff = await PlanZeroStockHandoff(db, tx, tenant, tripId, ct) is not null };
+            }
             return report with
             {
                 TripQty = stock.Sum(row => row.TripQuantity),

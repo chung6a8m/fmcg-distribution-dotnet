@@ -21,6 +21,7 @@ public sealed partial class App01dCashierUnloadService
     private sealed record D3Release(D3Right Right, decimal Quantity, decimal NeverLoaded);
     private sealed record D3ReturnPlan(Guid Warehouse, Guid Vehicle, Guid Sku, decimal Quantity,
         decimal Value, decimal AllocatedAfter, IReadOnlyList<D3Return> Returns, IReadOnlyList<D3Release> Releases);
+    private sealed record D3ZeroHandoff(Guid Warehouse, App05CloseReadiness.ALine[] Lines);
 
     public Task<BusinessCommandOutcome> UnloadD3Async(ClaimsPrincipal principal, D3UnloadInput input,
         CancellationToken ct) =>
@@ -47,7 +48,7 @@ public sealed partial class App01dCashierUnloadService
         if (await db.ExecuteScalarAsync<int>(Sql("""
             SELECT COUNT(*) FROM dbo.C4DeliveryEvidence e WITH (HOLDLOCK)
             JOIN dbo.BusinessCommand c WITH (HOLDLOCK) ON c.TenantId=e.TenantId AND c.Id=e.Id
-            WHERE e.TenantId=@Tenant AND e.TripId=@Trip AND c.Status='RECEIVED';
+            WHERE e.TenantId=@Tenant AND e.TripId=@Trip AND c.Status IN ('RECEIVED','PENDING');
             """, scope, tx, ct)) != 0)
             return BusinessCommandOutcome.Rejected("C4_DELIVERY_PENDING");
 
@@ -60,17 +61,26 @@ public sealed partial class App01dCashierUnloadService
             return BusinessCommandOutcome.Rejected("CUSTODY_NOT_SETTLED");
 
         var (plans, rejection) = await PlanD3Return(db, tx, tenant, input.TripId, trip.VehicleLocationId, ct);
-        if (plans is null) return BusinessCommandOutcome.Rejected(rejection!);
+        var zero = connections.UsesApp05TripClosure && rejection == "LOADED_MANIFEST_NOT_ELIGIBLE"
+            ? await PlanZeroStockHandoff(db, tx, tenant, input.TripId, ct) : null;
+        if (plans is null && zero is null) return BusinessCommandOutcome.Rejected(rejection!);
+        Guid warehouse = zero?.Warehouse ?? plans![0].Warehouse;
+        plans ??= [];
 
         Guid source = Guid.NewGuid();
         var owned = new { Source = source, Tenant = tenant, Command = command, Number = input.SourceNumber,
-            Actor = actor, Trip = input.TripId, Warehouse = plans[0].Warehouse, Vehicle = trip.VehicleLocationId };
+            Actor = actor, Trip = input.TripId, Warehouse = warehouse, Vehicle = trip.VehicleLocationId };
         await db.ExecuteAsync(Sql($"""
             INSERT dbo.BusinessSource(Id,TenantId,BusinessCommandId,SourceKind,SourceNumber,ActorId,TripId,OccurredAtUtc,RecordedAtUtc)
             VALUES(@Source,@Tenant,@Command,N'TRIP_UNLOAD',@Number,@Actor,@Trip,{App02c6Clock.SqlUtcNow},{App02c6Clock.SqlUtcNow});
             INSERT dbo.D3TripUnload(Id,TenantId,TripId,WarehouseLocationId,VehicleLocationId,RecordedAtUtc)
             VALUES(@Source,@Tenant,@Trip,@Warehouse,@Vehicle,{App02c6Clock.SqlUtcNow});
             """, owned, tx, ct));
+        if (zero is not null)
+            await db.ExecuteAsync(Sql("""
+                INSERT dbo.App05ZeroStockHandoffLine(TenantId,TripId,HandoffId,OrderLineId,ConfirmSourceId,HeldBaseQuantity)
+                VALUES(@Tenant,@Trip,@Source,@OrderLineId,@ConfirmSourceId,@Held);
+                """, zero.Lines.Select(line => new { owned.Tenant, owned.Trip, owned.Source, line.OrderLineId, line.ConfirmSourceId, line.Held }), tx, ct));
         int number = 0;
         foreach (var plan in plans)
         {
@@ -130,6 +140,59 @@ public sealed partial class App01dCashierUnloadService
             """, scope, tx, ct));
         await VerifyD3Return(db, tx, tenant, source, plans, ct);
         return BusinessCommandOutcome.Applied(number == 0 ? "TRIP_HANDOFF_RECONCILING" : "TRIP_REMAINDER_UNLOADED", source);
+    }
+
+    private static async Task<D3ZeroHandoff?> PlanZeroStockHandoff(SqlConnection db, SqlTransaction tx, string tenant,
+        Guid tripId, CancellationToken ct)
+    {
+        var trip = await FindTrip(db, tx, tenant, tripId, ct);
+        if (trip is null || trip.Status is not ("PREPARED" or "IN_PROGRESS") ||
+            trip.VehicleKind != "VEHICLE" || !trip.VehicleActive)
+            return null;
+
+        var scope = new { Tenant = tenant, Trip = tripId };
+        using var grid = await db.QueryMultipleAsync(Sql("""
+            SELECT CONVERT(bit,CASE WHEN
+                EXISTS(SELECT 1 FROM dbo.TripManifest WHERE TenantId=@Tenant AND TripId=@Trip)
+                OR EXISTS(SELECT 1 FROM dbo.TripManifestLine WHERE TenantId=@Tenant AND TripId=@Trip)
+                OR EXISTS(SELECT 1 FROM dbo.StockRight WHERE TenantId=@Tenant AND TripId=@Trip AND RightKind='B')
+                OR EXISTS(SELECT 1 FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND TripId=@Trip)
+                OR EXISTS(SELECT 1 FROM dbo.BusinessSource s JOIN dbo.BusinessSourceLine l
+                    ON l.TenantId=s.TenantId AND l.BusinessSourceId=s.Id
+                    JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
+                    WHERE s.TenantId=@Tenant AND s.TripId=@Trip AND e.LedgerKind='PHYSICAL_STOCK')
+                THEN 1 ELSE 0 END);
+            SELECT w.Id FROM dbo.StockLocation w
+            WHERE w.TenantId=@Tenant AND w.Kind='WAREHOUSE' AND w.IsActive=1
+                AND NOT EXISTS(SELECT 1 FROM dbo.StockRight r WHERE r.TenantId=w.TenantId AND r.TripId=@Trip
+                    AND (r.StockLocationId<>w.Id OR r.ConsumedBaseQuantity<>0 OR r.ReleasedBaseQuantity<>0));
+            """, scope, tx, ct));
+        bool hasStockSource = await grid.ReadSingleAsync<bool>();
+        var warehouses = (await grid.ReadAsync<Guid>()).ToArray();
+        if (hasStockSource || warehouses.Length != 1) return null;
+
+        var preview = await App05CloseReadiness.Read(db, tx, tenant, tripId, false, ct);
+        if (preview.HandoffId is not null || preview.ALines.Length == 0 ||
+            preview.ALines.Any(line => line.Remaining <= 0 || line.Loaded != 0 || line.Delivered != 0) ||
+            preview.Blockers.Any(blocker => blocker.Code is not ("ZERO_STOCK_HANDOFF_REQUIRED" or "FOLLOW_UP_REQUIRED")) ||
+            !await VerifyZeroHandoffBalances(db, tx, tenant, warehouses[0], preview.ALines, ct))
+            return null;
+        return new(warehouses[0], preview.ALines);
+    }
+
+    internal static async Task<bool> VerifyZeroHandoffBalances(SqlConnection db, SqlTransaction tx, string tenant,
+        Guid warehouse, IReadOnlyList<App05CloseReadiness.ALine> lines, CancellationToken ct)
+    {
+        foreach (var sku in lines.Where(line => line.Held > 0).GroupBy(line => line.SkuId).OrderBy(group => group.Key))
+        {
+            var physical = await ReadD3Physical(db, tx, tenant, warehouse, sku.Key, ct);
+            var pool = await ReadD3Pool(db, tx, tenant, warehouse, sku.Key, ct);
+            if (physical is null || physical.OnHandBaseQuantity != physical.SourceBaseQuantity ||
+                physical.OnHandCostAmount != physical.SourceCostAmount || pool is null ||
+                pool.OnHand != physical.OnHandBaseQuantity || pool.Allocated < sku.Sum(line => line.Held))
+                return false;
+        }
+        return true;
     }
 
     private static async Task UpdateD3Balances(SqlConnection db, SqlTransaction tx, string tenant,

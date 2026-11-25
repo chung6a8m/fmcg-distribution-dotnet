@@ -1,11 +1,12 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance', 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance', 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
     [string] $RunId,
     [string] $BusinessDate,
-    [switch] $CloseReadiness
+    [switch] $CloseReadiness,
+    [switch] $TripClosure
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,8 +17,8 @@ if ($requiresRunId -ne [bool] $RunId) {
 if (($Action -eq 'NextDay') -ne [bool] $BusinessDate) {
     throw 'Supply -BusinessDate (yyyy-MM-dd) for NextDay only.'
 }
-if ($CloseReadiness -and $Action -notin 'Start', 'Resume') {
-    throw 'Supply -CloseReadiness only for Start or Resume. NextDay reads the persisted profile.'
+if (($CloseReadiness -or $TripClosure) -and $Action -notin 'Start', 'Resume') {
+    throw 'Supply -CloseReadiness or -TripClosure only for Start or Resume. NextDay reads the persisted profile.'
 }
 if ($Action -eq 'Stop') {
     if (!$IsWindows) { throw 'The APP-03 session requires Windows.' }
@@ -72,7 +73,7 @@ if ($Action -eq 'Stop') {
 
 $repo = Split-Path -Parent $PSScriptRoot
 $previousAcceptanceTree = $env:APP03_ACCEPTANCE_TREE
-$previousCloseReadinessTree = $env:APP05_EVIDENCE_TREE
+$previousApp05EvidenceTree = $env:APP05_EVIDENCE_TREE
 Push-Location -LiteralPath $repo
 try {
     $source = git rev-parse HEAD
@@ -80,7 +81,7 @@ try {
     $changes = git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
-    if ($Action -in 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade') {
+    if ($Action -in 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure') {
         $evidenceTree = if (!$changes) {
             git rev-parse 'HEAD^{tree}'
             if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the evidence source tree.' }
@@ -110,7 +111,9 @@ try {
     if ($Action -eq 'VerifyFinance') { $sessionArgs[1] = 'VerifyFinance' }
     if ($Action -eq 'VerifyCloseReadiness') { $sessionArgs[1] = 'VerifyCloseReadiness' }
     if ($Action -eq 'VerifyCloseReadinessUpgrade') { $sessionArgs[1] = 'VerifyCloseReadinessUpgrade' }
-    if ($CloseReadiness) { $sessionArgs += 'CloseReadiness' }
+    if ($Action -eq 'VerifyTripClosure') { $sessionArgs[1] = 'VerifyTripClosure' }
+    if ($TripClosure) { $sessionArgs += 'TripClosure' }
+    elseif ($CloseReadiness) { $sessionArgs += 'CloseReadiness' }
     dotnet $demo @sessionArgs
     if ($LASTEXITCODE -ne 0) { throw "APP-03 DEV $Action failed." }
 }
@@ -118,8 +121,8 @@ finally {
     if ($Action -eq 'VerifyAcceptance') {
         [Environment]::SetEnvironmentVariable('APP03_ACCEPTANCE_TREE', $previousAcceptanceTree, 'Process')
     }
-    if ($Action -in 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade') {
-        [Environment]::SetEnvironmentVariable('APP05_EVIDENCE_TREE', $previousCloseReadinessTree, 'Process')
+    if ($Action -in 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure') {
+        [Environment]::SetEnvironmentVariable('APP05_EVIDENCE_TREE', $previousApp05EvidenceTree, 'Process')
     }
     Pop-Location
 }

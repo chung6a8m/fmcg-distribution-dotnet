@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / APP05_0_MAIN_CI_VERIFIED / APP05_1_IMPLEMENTED_PENDING_FINAL_CI`. Commit lập roadmap là `DOCS_ONLY`; APP-05.0 đã hoàn thành trong phạm vi CI synthetic/nonproduction qua PR #144–#149, với biên nhận merge/main CI ngày 25/11/2026 ở mục 5; các checkbox chỉ ghi nhận công việc đã thực sự thực hiện; APP-05.1 có implementation DEV và biên nhận local ở mục 5. APP-05.2–.7 chưa triển khai.
+**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / APP05_0_MAIN_CI_VERIFIED / APP05_1_MERGED / APP05_2_LOCAL_DEV_VERIFIED`. Các biên nhận nằm ở mục 5. Phạm vi xác minh là synthetic DEV và CI.
 
 **Goal:** Owner tự hoàn tất một ca trên laptop Windows với dữ liệu mẫu APP-03: xử lý A chưa giao, đóng chuyến có bàn giao trách nhiệm, rồi tiếp tục đúng đơn và nguồn vào ngày sau trên cùng database.
 
@@ -73,8 +73,8 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
 | **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `MERGED / MAIN_CI_VERIFIED` (CI-only; còn investigation riêng) |
-| **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt, CI final HEAD của .1 vẫn bắt buộc | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `IMPLEMENTED / LOCAL_DEV_EVIDENCE / FINAL_HEAD_CI_PENDING` |
-| **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `NOT_STARTED` |
+| **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `MERGED / FINAL_HEAD_CI_VERIFIED` |
+| **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `NOT_STARTED` |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `NOT_STARTED` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `NOT_STARTED` |
@@ -204,15 +204,27 @@ Mục tiêu thử nghiệm full 10–14 phút đã quan sát được trên các
 
 **Review F08, PR #152.** Readiness dùng phần credit còn có thể duyệt sau khi trừ thực chi và các khoản đã duyệt đang giữ chỗ. Đề nghị đã duyệt tiếp tục hiện đến khi thực chi. Lượt local `3cda9679e8134f159484ee3ca40ac035` tái hiện đề nghị thứ hai vẫn hiện dù lệnh duyệt trả `F08_CREDIT_EXCEEDED`. Sau sửa, lượt `3147424f1abe46ccaff8aacaa740080a` đạt Chromium 1/1 và 61 đối chiếu, zero diff. Ca dùng lệnh thật qua ba mốc trước duyệt, đã duyệt chưa chi, và sau chi. Kiểm đúng ID việc và điều kiện cần giao việc, lịch sử hai đề nghị và tenant đối chứng. SHA256 `run.json` `1AD297EFB280CF2F763147168BE5012780FA48CE9D1709002AA28A2866880E63`.
 
+#### Closeout APP-05.1 — 25/11/2026
+
+[PR #152](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/152) đã merge lúc 15:21 ICT theo yêu cầu Owner. Source cuối `6497469f68160f11d1e8d2787263b60aba2dbd36`, merge `6938a7b6f25af575e8a49bd10212ac60780f55a7`, cùng tree `e758169a5d745d7b4abeae357a6c6703bc6cf0fc`. Review độc lập đã chỉ ra khoản credit F08 đang giữ chỗ. Bản sửa và regression API/SQL được review lại trên diff.
+
+Final-source CI đạt 10/10 workflows và 25/25 checks. [APP-00A run 45571418949, attempt 3](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45571418949/attempts/3) giữ nguyên source khi chạy lại `web_sales` sau lỗi khởi động LocalDB 5178 và `NativeProcessTimeout`. [Artifact APP-03](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45571418949/artifacts/15003585247) ghi readiness `259e8535614c45aeb9adab58f6331b80` đạt 61/61 và upgrade `768ee72139794679a9a301be58853c1c` đạt. Lượt local trên source cuối `a1259c50a1ac4bfeaaab5dff5e52305c` và `4240af7dc57c4acea3834880225947f5` cũng đạt.
+
+[APP-00A trên main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45575522246) chạy riêng trên merge commit. Attempt 1 đạt job `app03`, gồm hai bước APP-05.1. Job `distribution` dừng khi request dựng fixture D.3 vượt timeout HTTP 3 giây. Failed jobs được chạy lại trên cùng merge commit.
+
 ### APP-05.2 — Quyết định đóng chuyến và lịch sử
 
 **Files:** phần mới .1; `src/FmcgDms.Api/Persistence/App01dD3Unload.cs`, `App01dD3UnloadPlan.cs`, `App01dCashierUnloadService.cs`, `App02d3Cash.cs`, `App02d3Routes.cs`, `App01a2CommandService.cs`, các route/command kiểm trạng thái Trip; `web/src/sales/TripCloseWorkspace.tsx` dự kiến. Tạo `App05TripClosure.cs`/migration và `tests/FmcgDms.Api.Tests/App05TripClosureTests.cs` khi phù hợp.
 
-- [ ] Viết và chạy ca đỏ RF-01: close đua với source/assignment/evidence thay đổi, thiếu người/hạn, mất ACK, lỗi trước COMMIT, cùng ID đổi payload, ID mới sau chốt và quyền bị thu hồi. Kiểm các đường ghi cũ không được tiếp tục hoạt động trên chuyến đã đóng.
-- [ ] Thêm nhánh bàn giao bằng 0 cho Trip có nghĩa vụ A nhưng chưa có manifest: chứng minh không có physical effect của riêng chuyến, không pending cash/evidence; chuyển RECONCILING có nguồn. Bao phủ Confirm có HELD và Confirm chưa Reserve, không tạo manifest/movement giả. Trip hoàn toàn chưa dùng hiển thị ngoài mẫu số kết ca, không tạo case rỗng.
-- [ ] Close recheck trong transaction, tuần tự hóa với command nguồn liên quan; đối chiếu lock `APP01C:TRIP:<tenant>:<trip>` hiện dùng bởi D.3/C.4 intake và thứ tự khóa với cash offer/accept, unload, assignment, Reserve/transfer/cancel. Ghi closure, snapshot, follow-ups và command outcome nguyên tử. Server quyết định CLOSED khi sạch, CLOSED_WITH_OPEN_CASES khi chỉ còn việc được phép đã giao đủ thông tin. Không bắt TripId kế nhiệm.
-- [ ] Lưu immutable snapshot và một closure/trip; UI tách việc mở lúc chốt khỏi việc mở hiện tại. Tồn tại follow-up chưa hoàn tất không mở lại quyền business write trên Trip cũ; correction sau chốt đi tiến theo D/F.
-- [ ] Đối chiếu SQL không có movement/AR/COGS/thu/chi mới do close, chạy hồi quy D.3/.6 và command-state bị ảnh hưởng; commit đề xuất: `feat: close trips with durable follow-up handoff`.
+- [x] Viết ca đỏ cho điều kiện quyết định. Chạy ca live thiếu giao việc, revision cũ sau khi đổi giao việc, hai lệnh tranh cùng chuyến, mất ACK, lỗi trước COMMIT, đổi payload, dùng lại ID giữa hai loại lệnh, ID mới sau chốt, sai tenant và quyền bị thu hồi.
+- [x] Bàn giao bằng 0 cho Trip có nghĩa vụ A chưa nạp. D.3 đối chiếu nguồn của riêng chuyến và ghi nguồn Confirm theo dòng, gồm Confirm đã giữ và chưa Reserve. Chuyến bootstrap trống vẫn ngoài mẫu số kết ca.
+- [x] Dùng lock command rồi `APP01C:TRIP:<tenant>:<trip>` và transaction Serializable để đọc lại nguồn cùng phân công. Ghi status, biên bản và kết quả lệnh trong cùng giao dịch. Chuyến chốt có việc giữ người/hạn và liên kết chính xác, chưa cần chuyến kế nhiệm.
+- [x] Lưu biên bản bất biến, mở được từ phiên mới và hiển thị riêng số việc lúc chốt và số đang mở. Hồi quy live từ chối draft, delivery và giao việc mới sau chốt.
+- [x] Đối chiếu SQL sau rollback, bàn giao bằng 0 và close. Các bước này giữ tồn, AR, COGS, thu/chi và nguồn tenant đối chứng. CI full trên source cuối là gate của PR.
+
+**Thao tác DEV.** Khởi chạy `./scripts/Run-App03Dev.ps1 -Action Start -TripClosure` hoặc bật trên phiên cũ qua `-Action Resume -RunId <nonce> -TripClosure`. Profile `APP-05.2-v1` bổ sung migration `202611250002` qua chuỗi nguồn của .1. Kho dùng bàn giao D.3. Tenant Ops chốt từ **Chuẩn bị đóng chuyến**. API nhận `POST /api/synthetic/app05/trip-close/trips/{tripId}/close`, trả biên nhận theo cùng command ID và payload. `GET .../{tripId}/closure` tìm biên nhận bền sau khi đọc lại quyền hiện hành. Snapshot lưu dữ kiện, nguồn và trách nhiệm tại lúc đóng. Tiến trình D/F cập nhật số đang mở theo nguồn.
+
+**Biên nhận local.** `VerifyTripClosure` lượt `83221198f40446f594bb17b3ac1d6895` trên working tree đạt Chromium 2/2 và 30/30 đối chiếu SQL, zero diff. Kiểm A40/25/15 có hai việc lúc chốt và còn một sau D.4 cutoff ngày sau, chốt sạch sau đối soát, và bàn giao bằng 0 cho hai dòng Confirm5 có HELD5 và Reserve0. Lượt chạy dùng trigger rollback có guard trong DB synthetic và bỏ ACK sau khi server đã commit. SHA256 `run.json` `8A2BC90467E3A888AB2B9B032A41AC84C0244B100B8DAF5A3D38D7B2E11B5049`. Nhánh C.4 evidence đang chờ có guard chung trước bàn giao và chốt. Hành trình này chạy blocker tồn xe và chưa tạo riêng một C.4 evidence đang chờ.
 
 ### APP-05.3 — Liên kết kế nhiệm và chuyển HELD
 
@@ -337,4 +349,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Bước tiếp theo:** **APP-05.1 — Readiness, việc tồn và fixture dùng chung**. APP-05.0 đã MERGED / MAIN_CI_VERIFIED trong phạm vi CI-only; giữ các investigation riêng ở biên nhận mục 5. APP-05.1 đã có implementation DEV, cần review và full CI trên final HEAD theo gate hiện hành. Đích nghiệm thu là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày; các trạng thái này chỉ được công bố sau execution có bằng chứng.
+**Bước tiếp theo:** **APP-05.2 — Quyết định đóng chuyến và lịch sử**. APP-05.1 đã merge với full CI trên source cuối và review độc lập. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.

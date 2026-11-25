@@ -227,7 +227,10 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
                 if (!d3)
                     await LockAsync(db, tx,
                         "APP01C:TRIP:" + tenant + ":" + tripId.ToString("N"), ct);
-                outcome = await handler(db, tx, tenant, actor, commandId, request, ct);
+                outcome = connections.UsesApp05TripClosure &&
+                    await FindTrip(db, tx, tenant, tripId, ct) is { Status: "CLOSED" or "CLOSED_WITH_OPEN_CASES" }
+                    ? BusinessCommandOutcome.Rejected("TRIP_ALREADY_CLOSED")
+                    : await handler(db, tx, tenant, actor, commandId, request, ct);
             }
 
             if (outcome.Status is not ("APPLIED" or "REJECTED"))

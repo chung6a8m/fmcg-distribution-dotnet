@@ -15,8 +15,8 @@ internal static partial class App05CloseReadiness
                     OccurredAt < ReportCutoff && ReportCutoff <= ReportAsOf && ReportAsOf <= asOf)), CaseId);
     }
 
-    private static async Task<Preview> Read(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId, bool ops,
-        CancellationToken ct)
+    internal static async Task<Preview> Read(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId, bool ops,
+        CancellationToken ct, bool closing = false)
     {
         var scope = new { Tenant = tenant, Trip = tripId };
         var trip = await db.QuerySingleAsync<Trip>(App02a3Sql.Cmd(TripSql + " AND t.Id=@Trip;", scope, tx, ct));
@@ -119,6 +119,34 @@ internal static partial class App05CloseReadiness
                     ? "Cần biên nhận bàn giao chuyến chưa nạp" : "Hoàn thành bàn giao cuối chuyến"));
         if (trip.UnloadId is not null && trip.Status is not ("RECONCILING" or "CLOSED" or "CLOSED_WITH_OPEN_CASES"))
             blockers.Add(new("HANDOFF_SOURCE_DRIFT", D3, trip.UnloadId, "Đối chiếu trạng thái chuyến với biên nhận bàn giao"));
+        if (closing && trip.Status == "RECONCILING" && trip.UnloadId is Guid handoffId &&
+            !await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
+                SELECT CONVERT(bit,CASE WHEN EXISTS(
+                    SELECT 1 FROM dbo.BusinessSource s
+                    JOIN dbo.BusinessCommand c ON c.TenantId=s.TenantId AND c.Id=s.BusinessCommandId
+                    JOIN dbo.D3CommandScope scope ON scope.TenantId=c.TenantId AND scope.CommandRowId=c.Id
+                    WHERE s.TenantId=@Tenant AND s.Id=@HandoffId AND s.TripId=@Trip AND s.SourceKind='TRIP_UNLOAD'
+                        AND c.Status='APPLIED' AND c.ActorId COLLATE Latin1_General_100_BIN2=s.ActorId COLLATE Latin1_General_100_BIN2
+                        AND scope.TripId=s.TripId AND scope.RoleCode='warehouse'
+                ) THEN 1 ELSE 0 END);
+                """, new { scope.Tenant, scope.Trip, HandoffId = handoffId }, tx, ct)))
+            blockers.Add(new("HANDOFF_SOURCE_DRIFT", D3, handoffId, "Đối chiếu nguồn và lệnh Kho đã bàn giao"));
+
+        if (closing && trip.Status == "RECONCILING" && trip.UnloadId is not null && manifests.Length == 0 &&
+            rights.All(right => right.Kind == "A"))
+        {
+            using var handoff = await db.QueryMultipleAsync(App02a3Sql.Cmd("""
+                SELECT WarehouseLocationId FROM dbo.D3TripUnload WHERE TenantId=@Tenant AND TripId=@Trip AND Id=@HandoffId;
+                SELECT OrderLineId,ConfirmSourceId,HeldBaseQuantity AS Held FROM dbo.App05ZeroStockHandoffLine
+                WHERE TenantId=@Tenant AND TripId=@Trip AND HandoffId=@HandoffId;
+                """, new { scope.Tenant, scope.Trip, HandoffId = trip.UnloadId }, tx, ct));
+            Guid warehouse = await handoff.ReadSingleAsync<Guid>();
+            var proof = (await handoff.ReadAsync<ZeroStockLine>()).ToHashSet();
+            if (aLines.Count == 0 || !proof.SetEquals(aLines.Select(line =>
+                    new ZeroStockLine(line.OrderLineId, line.ConfirmSourceId, line.Held))) ||
+                !await App01dCashierUnloadService.VerifyZeroHandoffBalances(db, tx, tenant, warehouse, aLines, ct))
+                blockers.Add(new("ZERO_HANDOFF_SOURCE_DRIFT", D3, trip.UnloadId, "Đối chiếu biên nhận bàn giao bằng 0"));
+        }
 
         var assignments = (await db.QueryAsync<Assignment>(App02a3Sql.Cmd(AssignmentsSql, scope, tx, ct)))
             .ToDictionary(row => (row.SourceKind, row.SourceId));
@@ -143,7 +171,8 @@ internal static partial class App05CloseReadiness
         }));
         return new(tripId, trip.Code, DateOnly.FromDateTime(trip.BusinessDate), asOf, trip.Status,
             state, revision, coverage, ops && trip.Used && trip.Status is not ("CLOSED" or "CLOSED_WITH_OPEN_CASES"),
-            ops ? assignees : [], blockers.ToArray(), aLines.ToArray(), ar.Select(row => row.Proven ? row : row with { Amount = null }).ToArray(), work);
+            ops ? assignees : [], blockers.ToArray(), aLines.ToArray(), ar.Select(row => row.Proven ? row : row with { Amount = null }).ToArray(),
+            work, trip.UnloadId, closing && ops && CloseTarget(trip.Status, state, coverage, trip.UnloadId) is not null);
     }
 
     private static string FinanceLabel(string state) => state switch
@@ -164,4 +193,6 @@ internal static partial class App05CloseReadiness
         "AWAITING_RECONCILIATION" or "REPORT_STALE" => "Lập báo cáo bao phủ nguồn giao",
         _ => "Mở hồ sơ đối soát gốc và xử lý chênh lệch"
     };
+
+    private sealed record ZeroStockLine(Guid OrderLineId, Guid ConfirmSourceId, decimal Held);
 }

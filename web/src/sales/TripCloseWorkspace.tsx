@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Button, Field } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import './customers.css'
 
 const api = '/api/synthetic/app05/trip-close'
+const revisionPattern = /^[0-9a-f]{64}$/i
 const idPattern = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i
 const quantity = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 4 })
 const ict = new Intl.DateTimeFormat('vi-VN', {
@@ -21,7 +22,7 @@ const states: Record<string, string> = {
 }
 const tripStates: Record<string, string> = {
   PREPARED: 'Đã chuẩn bị', IN_PROGRESS: 'Đang thực hiện', RECONCILING: 'Đang đối soát',
-  CLOSED: 'Đã đóng', CLOSED_WITH_OPEN_CASES: 'Đã đóng, còn việc tồn', UNUSED: 'Chưa phát sinh nghiệp vụ',
+  CLOSED: 'Đã đóng', CLOSED_WITH_OPEN_CASES: 'Đã đóng với việc tồn lúc chốt', UNUSED: 'Chưa phát sinh nghiệp vụ',
 }
 const quantityColumns = [
   ['confirmed', 'Đã xác nhận'], ['remaining', 'Còn phải giao'], ['held', 'Đang giữ (HELD)'],
@@ -39,8 +40,15 @@ type Readiness = Trip & {
   asOf: string; state: string; revision: string; coverage: { known: number | null; expected: number | null }
   blockers: (Source & { code: string; action: string })[]; aLines: ALine[]
   receivables: { deliveryId: string; amount: number | null; dueBusinessDate: string | null; unit: string; proven: boolean }[]
-  work: Work[]; assignees: string[]; canAssign: boolean
+  work: Work[]; assignees: string[]; canAssign: boolean; canClose?: boolean
 }
+type CloseCommand = { commandId: string; expectedRevision: string }
+type Closure = {
+  closureId: string; tripId: string; commandId: string; handoffId: string
+  status: 'CLOSED' | 'CLOSED_WITH_OPEN_CASES'; closedAt: string; closedBy: string; openWorkCount: number
+  snapshot: Pick<Readiness, 'businessDate' | 'asOf' | 'revision' | 'coverage' | 'aLines' | 'receivables' | 'work'>
+}
+type ClosureHistory = { closure: Closure | null; currentOpenWorkCount: number | null }
 type Assignment = Pick<FollowUp, 'assignee' | 'dueAt' | 'nextAction' | 'reason'> & {
   commandId: string; sourceKind: string; sourceId: string; expectedRevision: string
 }
@@ -61,10 +69,29 @@ function restoreAssignment(key: string): Assignment | null {
   } catch { return null }
 }
 
-async function request<T>(token: string, path: string, body?: Assignment): Promise<T> {
+function restoreClose(key: string): CloseCommand | null {
+  try {
+    const item = JSON.parse(pendingJson(key) ?? 'null') as CloseCommand | null
+    return item && idPattern.test(item.commandId) && revisionPattern.test(item.expectedRevision)
+      ? { commandId: item.commandId, expectedRevision: item.expectedRevision } : null
+  } catch { return null }
+}
+
+class TripCloseHttpError extends HttpError {
+  constructor(status: number, readonly code?: string) { super(status) }
+}
+
+async function request<T>(token: string, path: string, body?: Assignment | CloseCommand): Promise<T> {
   const response = await requestSalesApi(api, token, path, body && JSON.stringify(body))
-  if (!response.ok) throw new HttpError(response.status)
+  if (!response.ok) {
+    const problem = await response.json().catch(() => null) as { code?: string } | null
+    throw new TripCloseHttpError(response.status, problem?.code)
+  }
   return response.json() as Promise<T>
+}
+
+function coverageLabel({ expected, known }: Readiness['coverage']) {
+  return expected == null || known == null ? 'chưa xác định' : known + '/' + expected
 }
 
 function SourceLink({ source, tripId, access }: { source: Source; tripId: string; access: LinkAccess }) {
@@ -97,8 +124,9 @@ function SourceLink({ source, tripId, access }: { source: Source; tripId: string
   }
 }
 
-export function TripCloseWorkspace({ token, identity, offline, tripId, onTripChange, access }: {
+export function TripCloseWorkspace({ token, identity, offline, tripId, onTripChange, access, tripClosure }: {
   token: string; identity: Identity; offline: boolean; tripId: string; onTripChange: (id: string) => void; access: LinkAccess
+  tripClosure: boolean
 }) {
   const [trips, setTrips] = useState<Trip[] | null>(null)
   const [error, setError] = useState(false)
@@ -140,15 +168,25 @@ export function TripCloseWorkspace({ token, identity, offline, tripId, onTripCha
               </select>
             </div>}
     </section>
-    {!offline && selected && <TripDetails key={selected.tripId} token={token} identity={identity} trip={selected} access={access} />}
+    {!offline && selected && <TripDetails key={selected.tripId} token={token} identity={identity} trip={selected}
+      access={access} tripClosure={tripClosure} />}
   </div>
 }
 
-function TripDetails({ token, identity, trip, access }: { token: string; identity: Identity; trip: Trip; access: LinkAccess }) {
+function TripDetails({ token, identity, trip, access, tripClosure }: {
+  token: string; identity: Identity; trip: Trip; access: LinkAccess; tripClosure: boolean
+}) {
   const { tripId } = trip
   const path = '/trips/' + tripId
   const storageKey = 'app05.trip-close.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, tripId])
+  const closeKey = storageKey + '.close'
   const [pending, setPending] = useState(() => restoreAssignment(storageKey))
+  const [pendingClose, setPendingClose] = useState(() => tripClosure ? restoreClose(closeKey) : null)
+  const [confirmation, setConfirmation] = useState<CloseCommand['expectedRevision'] | null>(null)
+  const [history, setHistory] = useState<{ data: ClosureHistory; attempt: number } | null>(null)
+  const [receipt, setReceipt] = useState<Closure | null>(null)
+  const [historyError, setHistoryError] = useState(false)
+  const [closeNotice, setCloseNotice] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [result, setResult] = useState<{ data: Readiness; attempt: number } | null>(null)
   const [error, setError] = useState(false)
@@ -158,7 +196,12 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
   const inFlight = useRef(false)
   const data = result?.data
   const fresh = result?.attempt === attempt
-  const canEdit = !!data?.canAssign && fresh && !busy && !pending && !error
+  const closure = history?.data.closure ?? receipt
+  const historyFresh = !tripClosure || (history?.attempt === attempt && !historyError)
+  const closed = !!closure || data?.status === 'CLOSED' || data?.status === 'CLOSED_WITH_OPEN_CASES'
+  const canEdit = !!data?.canAssign && fresh && historyFresh && !closed && !busy && !pending && !pendingClose && !error
+  const canClose = tripClosure && data?.canClose && fresh && historyFresh && !closed && !busy && !pending && !pendingClose
+  const canReplayClose = tripClosure && fresh && historyFresh && !closed && !busy && !pending
 
   useEffect(() => {
     let current = true
@@ -173,16 +216,39 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
         setError(true)
       }
     })
+    if (tripClosure) {
+      void request<ClosureHistory>(token, path + '/closure').then(data => {
+        if (!current) return
+        setHistory({ data, attempt })
+        setHistoryError(false)
+        if (data.closure) {
+          const original = restoreClose(closeKey)
+          if (original) {
+            forgetPending(closeKey, original.commandId)
+            setPendingClose(null)
+            setCloseNotice(original.commandId === data.closure.commandId
+              ? 'Đã tra được kết quả của yêu cầu đóng chuyến.'
+              : 'Chuyến đã đóng theo yêu cầu khác. Xem biên bản để đối chiếu.')
+          }
+        }
+      }).catch(failure => {
+        if (!current) return
+        setHistory(null)
+        setHistoryError(true)
+        if (failure instanceof HttpError && [401, 403].includes(failure.status)) setReceipt(null)
+      })
+    }
     return () => { current = false }
-  }, [attempt, path, token])
+  }, [attempt, closeKey, path, token, tripClosure])
 
   function refresh() {
     setError(false)
+    setHistoryError(false)
     setAttempt(value => value + 1)
   }
 
   async function send(command: Assignment) {
-    if (!navigator.onLine || inFlight.current || !data?.canAssign) return
+    if (!navigator.onLine || inFlight.current || !data?.canAssign || closed || pendingClose) return
     inFlight.current = true
     setBusy(true)
     setNotice('')
@@ -213,6 +279,41 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
     }
   }
 
+  async function closeTrip(command: CloseCommand) {
+    if (!navigator.onLine || inFlight.current || !(pendingClose ? canReplayClose : canClose)) return
+    inFlight.current = true
+    setBusy(true)
+    setConfirmation(null)
+    setCloseNotice('')
+    rememberPending(closeKey, command)
+    setPendingClose(command)
+    try {
+      const outcome = await request<Closure>(token, path + '/close', command)
+      if (outcome.commandId !== command.commandId || outcome.tripId !== tripId
+        || !idPattern.test(outcome.closureId) || !['CLOSED', 'CLOSED_WITH_OPEN_CASES'].includes(outcome.status))
+        throw new Error('Invalid closure acknowledgement')
+      setReceipt(outcome)
+      forgetPending(closeKey, command.commandId)
+      setPendingClose(null)
+      setCloseNotice('Đã đóng chuyến.')
+    } catch (failure) {
+      if (failure instanceof TripCloseHttpError && failure.code && [400, 409, 422].includes(failure.status)
+        && failure.code !== 'COMMAND_PAYLOAD_CONFLICT') {
+        forgetPending(closeKey, command.commandId)
+        setPendingClose(null)
+        setCloseNotice(failure.status === 409
+          ? 'Dữ liệu hoặc trạng thái chuyến đã thay đổi. Kiểm tra lại trước khi đóng.'
+          : 'Yêu cầu đóng chuyến bị từ chối. Kiểm tra điều kiện hiện tại.')
+      } else {
+        setCloseNotice('Chưa xác nhận được kết quả đóng chuyến. Tra cứu biên bản hoặc gửi lại đúng yêu cầu gốc.')
+      }
+    } finally {
+      inFlight.current = false
+      setBusy(false)
+      refresh()
+    }
+  }
+
   return <>
     <section className="panel panel-content">
       <h3>Điều kiện cần xử lý</h3>
@@ -220,10 +321,10 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
       {error ? <p role="alert">Không tải được dữ liệu đối soát chuyến.</p>
         : !fresh && <p role="status">Đang tải đối soát chuyến…</p>}
       {data && <>
-        <p><strong>{states[data.state] ?? data.state}</strong> · {tripStates[data.status] ?? data.status}</p>
+        <p>{closed ? <strong>{tripStates[closure?.status ?? data.status]}</strong>
+          : <><strong>{states[data.state] ?? data.state}</strong> · {tripStates[data.status] ?? data.status}</>}</p>
         <p>Ngày nghiệp vụ {dateLabel(data.businessDate)} · Tính đến <time dateTime={data.asOf}>{dateTimeLabel(data.asOf)}</time></p>
-        <p>Độ phủ nguồn {data.coverage.expected == null || data.coverage.known == null
-          ? 'chưa xác định' : data.coverage.known + '/' + data.coverage.expected}</p>
+        <p>Độ phủ nguồn {coverageLabel(data.coverage)}</p>
         {data.blockers.length ? <ul className="c1-rows">
           {data.blockers.map((blocker, index) => <li key={blocker.code + (blocker.sourceId ?? index)} data-blocker-code={blocker.code}>
             <div className="c3-source">
@@ -232,43 +333,38 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
               <SourceLink source={blocker} tripId={tripId} access={access} />
             </div>
           </li>)}
-        </ul> : <p>Không có điều kiện chặn trong dữ liệu đã đọc.</p>}
+        </ul> : !closed && <p>Không có điều kiện chặn trong dữ liệu đã đọc.</p>}
+        {tripClosure && data.canClose && !closed && !pendingClose && <div className="button-row">
+          <Button variant="primary" disabled={!canClose} onClick={() => setConfirmation(data.revision)}>Đóng chuyến</Button>
+        </div>}
       </>}
     </section>
+    {tripClosure && historyError && <section className="panel panel-content">
+      <p role="alert">Không tải được biên bản đóng chuyến.</p>
+      <div className="button-row"><Button disabled={busy} onClick={refresh}>Tải lại biên bản</Button></div>
+    </section>}
+    {closure && <TripClosureHistory closure={closure}
+      currentOpenWorkCount={historyFresh ? history?.data.currentOpenWorkCount : undefined} access={access} />}
+    {closeNotice && <p role="status">{closeNotice}</p>}
+    {pendingClose && !closed && <section className="panel panel-content">
+      <h3>Khôi phục yêu cầu đóng chuyến</h3>
+      <p className="c3-source">Mã yêu cầu {pendingClose.commandId}</p>
+      <div className="button-row">
+        <Button disabled={busy} onClick={refresh}>Tra cứu kết quả đóng chuyến</Button>
+        <Button disabled={!canReplayClose} onClick={() => void closeTrip(pendingClose)}>Gửi lại cùng yêu cầu đóng chuyến</Button>
+      </div>
+    </section>}
+    {confirmation && data && <ConfirmTripClosure code={data.code} openWorkCount={data.work.length}
+      enabled={canClose === true && confirmation === data.revision} onDismiss={() => setConfirmation(null)}
+      onConfirm={() => void closeTrip({ commandId: crypto.randomUUID(), expectedRevision: confirmation })} />}
     {data && <>
       <section className="panel panel-content">
-        <h3>Số lượng theo dòng A</h3>
-        {data.aLines.length ? <div className="app03-table-scroll">
-          <table className="app03-handoff-table trip-close-table" aria-label="Số lượng theo dòng A">
-            <thead><tr><th scope="col">Dòng đơn và nguồn</th>
-              {quantityColumns.map(([column, label]) => <th scope="col" key={column}>{label}</th>)}
-            </tr></thead>
-            <tbody>{data.aLines.map(line => <tr key={line.orderLineId} data-order-line-id={line.orderLineId}>
-              <td className="c3-source"><div>
-                <strong>{line.skuCode ?? line.skuId}</strong>
-                <p>Mã dòng {line.orderLineId}</p>
-                <p>Xác nhận {line.confirmSourceId}</p>
-                <SourceLink source={{ sourceKind: 'A_REMAINDER', relatedId: line.orderId }} tripId={tripId} access={access} />
-              </div></td>
-              {quantityColumns.map(([column, label]) => <td key={column}>
-                <span className="app03-lot-label" aria-hidden="true">{label}</span>
-                <div>
-                  <span data-quantity={column}>{quantity.format(line[column])} {line.unit}</span>
-                  {column === 'loaded' && <p>Trên xe {quantity.format(line.onVehicle)} {line.unit}</p>}
-                </div>
-              </td>)}
-            </tr>)}</tbody>
-          </table>
-        </div> : <p>Chưa có dòng A đã xác nhận.</p>}
+        <h3>{closed ? 'Số lượng hiện tại theo dòng A' : 'Số lượng theo dòng A'}</h3>
+        <TripCloseQuantities lines={data.aLines} tripId={tripId} access={access} />
       </section>
       {data.receivables.length > 0 && <section className="panel panel-content">
-        <h3>Phải thu theo lần giao</h3>
-        <ul className="c1-rows">{data.receivables.map(row => <li key={row.deliveryId}><div className="c3-source">
-          <strong>{row.amount === null || !row.proven ? 'Chưa đủ nguồn xác nhận phải thu'
-            : quantity.format(row.amount) + ' ' + row.unit}</strong>
-          {row.dueBusinessDate && <p>Đến hạn {dateLabel(row.dueBusinessDate)}</p>}
-          <p>Mã lần giao {row.deliveryId}</p>
-        </div></li>)}</ul>
+        <h3>{closed ? 'Phải thu hiện tại theo lần giao' : 'Phải thu theo lần giao'}</h3>
+        <TripCloseReceivables rows={data.receivables} />
       </section>}
       <section className="panel panel-content">
         <h3>Việc tồn</h3>
@@ -291,7 +387,7 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
                 <dt>Hành động tiếp theo</dt><dd>{source.followUp.nextAction}</dd>
                 <dt>Lý do</dt><dd>{source.followUp.reason}</dd>
               </dl> : <p>Chưa giao người phụ trách và hạn xử lý.</p>}
-              {data.canAssign && (editor?.key === workKey(source) && editor.revision === data.revision ? <AssignmentForm
+              {data.canAssign && !closed && (editor?.key === workKey(source) && editor.revision === data.revision ? <AssignmentForm
                 source={source} assignees={data.assignees} enabled={canEdit} revision={editor.revision}
                 cancel={() => setEditor(null)} submit={command => void send(command)} />
                 : <Button disabled={!canEdit} onClick={() => setEditor({ key: workKey(source), revision: data.revision })}>
@@ -303,6 +399,112 @@ function TripDetails({ token, identity, trip, access }: { token: string; identit
       </section>
     </>}
   </>
+}
+
+function TripCloseQuantities({ lines, tripId, access, atClose = false }: {
+  lines: ALine[]; tripId: string; access: LinkAccess; atClose?: boolean
+}) {
+  if (lines.length === 0) return <p>Chưa có dòng A đã xác nhận.</p>
+  return <div className="app03-table-scroll">
+    <table className="app03-handoff-table trip-close-table" aria-label={atClose ? 'Số lượng dòng A lúc đóng' : 'Số lượng theo dòng A'}>
+      <thead><tr><th scope="col">Dòng đơn và nguồn</th>
+        {quantityColumns.map(([column, label]) => <th scope="col" key={column}>{label}</th>)}
+      </tr></thead>
+      <tbody>{lines.map(line => <tr key={line.orderLineId} data-order-line-id={atClose ? undefined : line.orderLineId}>
+        <td className="c3-source"><div>
+          <strong>{line.skuCode ?? line.skuId}</strong>
+          <p>Mã dòng {line.orderLineId}</p>
+          <p>Xác nhận {line.confirmSourceId}</p>
+          <SourceLink source={{ sourceKind: 'A_REMAINDER', relatedId: line.orderId }} tripId={tripId} access={access} />
+        </div></td>
+        {quantityColumns.map(([column, label]) => <td key={column}>
+          <span className="app03-lot-label" aria-hidden="true">{label}</span>
+          <div>
+            <span data-quantity={column}>{quantity.format(line[column])} {line.unit}</span>
+            {column === 'loaded' && <p>Trên xe {quantity.format(line.onVehicle)} {line.unit}</p>}
+          </div>
+        </td>)}
+      </tr>)}</tbody>
+    </table>
+  </div>
+}
+
+function TripCloseReceivables({ rows }: { rows: Readiness['receivables'] }) {
+  return <ul className="c1-rows">{rows.map(row => <li key={row.deliveryId}><div className="c3-source">
+    <strong>{row.amount === null || !row.proven ? 'Chưa đủ nguồn xác nhận phải thu'
+      : quantity.format(row.amount) + ' ' + row.unit}</strong>
+    {row.dueBusinessDate && <p>Đến hạn {dateLabel(row.dueBusinessDate)}</p>}
+    <p>Mã lần giao {row.deliveryId}</p>
+  </div></li>)}</ul>
+}
+
+function TripClosureHistory({ closure, currentOpenWorkCount, access }: {
+  closure: Closure; currentOpenWorkCount?: number | null; access: LinkAccess
+}) {
+  const snapshot = closure.snapshot
+  return <section className="panel panel-content" data-closure-id={closure.closureId} data-closure-status={closure.status}>
+    <h3>Biên bản đóng chuyến</h3>
+    <p><strong>{tripStates[closure.status]}</strong></p>
+    <dl className="sales-facts c3-source">
+      <dt>Mã biên bản</dt><dd>{closure.closureId}</dd>
+      <dt>Mã yêu cầu</dt><dd>{closure.commandId}</dd>
+      <dt>Biên nhận bàn giao</dt><dd>{closure.handoffId}</dd>
+      <dt>Người đóng chuyến</dt><dd>{closure.closedBy}</dd>
+      <dt>Thời điểm đóng</dt><dd><time dateTime={closure.closedAt}>{dateTimeLabel(closure.closedAt)}</time></dd>
+      <dt>Việc mở lúc đóng</dt><dd data-testid="closure-open-at-close">{closure.openWorkCount}</dd>
+      <dt>Việc đang mở</dt><dd data-testid="closure-open-current">{currentOpenWorkCount ?? 'Chưa xác định'}</dd>
+    </dl>
+    <details>
+      <summary>Ảnh chốt và nguồn</summary>
+      <p>Ngày nghiệp vụ {dateLabel(snapshot.businessDate)} · Độ phủ nguồn {coverageLabel(snapshot.coverage)}</p>
+      <p>Tính đến <time dateTime={snapshot.asOf}>{dateTimeLabel(snapshot.asOf)}</time></p>
+      <p className="c3-source">Mã phiên bản nguồn {snapshot.revision}</p>
+      <h4>Số lượng dòng A lúc đóng</h4>
+      <TripCloseQuantities lines={snapshot.aLines} tripId={closure.tripId} access={access} atClose />
+      {snapshot.receivables.length > 0 && <>
+        <h4>Phải thu lúc đóng</h4>
+        <TripCloseReceivables rows={snapshot.receivables} />
+      </>}
+      {snapshot.work.length > 0 && <ul className="c1-rows">
+        {snapshot.work.map(item => <li key={workKey(item)}><div className="c3-source">
+          <h4>{item.label}</h4>
+          <p>Mã nguồn {item.sourceId}</p>
+          {item.followUp && <>
+            <p>{item.followUp.assignee} · <time dateTime={item.followUp.dueAt}>{dateTimeLabel(item.followUp.dueAt)}</time></p>
+            <p>{item.followUp.nextAction}</p>
+            <p>Lý do {item.followUp.reason}</p>
+          </>}
+          <SourceLink source={item} tripId={closure.tripId} access={access} />
+        </div></li>)}
+      </ul>}
+    </details>
+  </section>
+}
+
+function ConfirmTripClosure({ code, openWorkCount, enabled, onDismiss, onConfirm }: {
+  code: string; openWorkCount: number; enabled: boolean; onDismiss: () => void; onConfirm: () => void
+}) {
+  const title = useId()
+  const dialog = useRef<HTMLDialogElement>(null)
+  const cancel = useRef<HTMLButtonElement>(null)
+  useLayoutEffect(() => {
+    if (dialog.current && !dialog.current.open) dialog.current.showModal()
+    cancel.current?.focus()
+  }, [])
+  return <dialog className="demo-dialog" ref={dialog} aria-labelledby={title} onClose={onDismiss}>
+    <form className="panel-content" onSubmit={event => {
+      event.preventDefault()
+      if (enabled && navigator.onLine) onConfirm()
+    }}>
+      <h2 id={title}>Xác nhận đóng chuyến</h2>
+      <p>Chuyến {code} · {openWorkCount} việc còn mở</p>
+      <p>Biên bản lưu nguồn và phân công tại thời điểm đóng. Các thao tác bán, nạp và giao trên chuyến sẽ kết thúc.</p>
+      <div className="button-row">
+        <Button ref={cancel} onClick={() => dialog.current?.close()}>Quay lại</Button>
+        <Button variant="primary" type="submit" disabled={!enabled}>Xác nhận đóng chuyến</Button>
+      </div>
+    </form>
+  </dialog>
 }
 
 function AssignmentForm({ source, assignees, enabled, revision, cancel, submit }: {

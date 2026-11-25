@@ -100,11 +100,7 @@ public sealed partial class App01dCashierUnloadService
             mainBalance.OnHandCostAmount + value > MaximumAmount)
             return (null, "VEHICLE_REMAINDER_MISMATCH");
 
-        var pool = await db.QuerySingleOrDefaultAsync<D3Pool>(Sql("""
-            SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
-            FROM dbo.StockPool WITH (UPDLOCK,HOLDLOCK)
-            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku;
-            """, new { Tenant = tenant, Warehouse = warehouse, Sku = sku }, tx, ct));
+        var pool = await ReadD3Pool(db, tx, tenant, warehouse, sku, ct);
         decimal neverLoadedB = releases.Sum(r => r.NeverLoaded);
         decimal returnedA = lines.Where(l => l.Kind == "A").Sum(l => l.Remaining);
         if (pool is null || pool.OnHand != mainBalance.OnHandBaseQuantity || pool.Allocated < neverLoadedA + neverLoadedB)
@@ -247,4 +243,12 @@ public sealed partial class App01dCashierUnloadService
             ) d
             WHERE b.TenantId=@Tenant AND b.StockLocationId=@Location AND b.SkuId=@Sku;
             """, new { Tenant = tenant, Location = location, Sku = sku }, tx, ct));
+
+    private static Task<D3Pool?> ReadD3Pool(SqlConnection db, SqlTransaction tx,
+        string tenant, Guid warehouse, Guid sku, CancellationToken ct) =>
+        db.QuerySingleOrDefaultAsync<D3Pool>(Sql("""
+            SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
+            FROM dbo.StockPool WITH (UPDLOCK,HOLDLOCK)
+            WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku;
+            """, new { Tenant = tenant, Warehouse = warehouse, Sku = sku }, tx, ct));
 }
