@@ -87,6 +87,7 @@ if (app03Workspace)
     if (!app03A1 || App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not string workspaceClock)
         throw new InvalidOperationException("APP-03 workspace requires the supported DEV profile and its run clock.");
     App03WorkspaceRoutes.Map(app, workspaceClock, app03Field, app03Settlement, tenantCatalog.UsesApp03Finance);
+    if (tenantCatalog.UsesApp05CloseReadiness) App05CloseReadiness.Map(app);
 }
 
 if ((app.Environment.IsDevelopment() || app.Environment.IsEnvironment("IntegrationTest"))

@@ -212,7 +212,7 @@ internal static partial class App03OwnerReport
         ORDER BY r.Metric,Unit,Label,r.Id,State;
         """;
 
-    private const string TripStockSql = """
+    internal const string TripStockSql = """
         WITH VehicleLedger AS (
             SELECT t.Id AS TripId,e.SkuId,SUM(e.QuantityDelta) AS Quantity
             FROM dbo.Trip t

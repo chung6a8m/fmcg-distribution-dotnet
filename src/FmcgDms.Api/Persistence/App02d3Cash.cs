@@ -81,7 +81,7 @@ public sealed partial class App01dCashierUnloadService
             throw new UnauthorizedAccessException("Current D.3 trip assignment required.");
     }
 
-    private static Task<bool> HasPendingD3CashOffer(SqlConnection db, SqlTransaction tx, string tenant,
+    internal static Task<bool> HasPendingD3CashOffer(SqlConnection db, SqlTransaction tx, string tenant,
         Guid tripId, CancellationToken ct) =>
         db.ExecuteScalarAsync<bool>(Sql("""
             SELECT CAST(CASE WHEN EXISTS (

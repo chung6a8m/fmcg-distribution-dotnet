@@ -9,6 +9,8 @@ public static class App03A1Profile
     public const string Name = "APP-03.1a-v1";
     public const string SettlementName = "APP-03.6-v1";
     public const string FinanceName = "APP-03.7-v1";
+    public const string CloseReadinessName = "APP-05.1-v1";
+    public const string CloseReadinessBootstrapVersion = "APP-05.1-DAILY-CLOSE-v1";
     public const string FieldName = "APP-03.5-v1";
     public const string DayBootstrapVersion = "APP-03.2-VND-v1";
     internal const string DayBootstrapKey = "App03:DayBootstrap";
@@ -27,7 +29,7 @@ public static class App03A1Profile
     {
         var profile = config[ConfigurationKey];
         var bootstrap = config[DayBootstrapKey];
-        if (bootstrap is not null && (bootstrap != DayBootstrapVersion || profile is not (Name or FieldName or SettlementName or FinanceName)
+        if (bootstrap is not null && (bootstrap != DayBootstrapVersion || profile is not (Name or FieldName or SettlementName or FinanceName or CloseReadinessName)
             || App02c6Clock.GetConfiguredPath(config, host) is null))
             throw new InvalidOperationException("APP-03.2 requires its supported bootstrap version and a dedicated APP-03 clock.");
         bool visit = config.GetValue<bool>("DevF01:Enabled");
@@ -38,15 +40,15 @@ public static class App03A1Profile
                 throw new InvalidOperationException($"Combining DEV-F01 with other F features requires the {Name} profile.");
             return false;
         }
-        if (profile is not (Name or FieldName or SettlementName or FinanceName) || (!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest")))
+        if (profile is not (Name or FieldName or SettlementName or FinanceName or CloseReadinessName) || (!host.IsDevelopment() && !host.IsEnvironment("IntegrationTest")))
             throw new InvalidOperationException("Unsupported APP-03 DEV profile or hosting environment.");
         if (!config.GetValue<bool>("SyntheticAuth:Enabled") || !config.GetValue<bool>("App02C2:DedicatedRuntime")
             || Enumerable.Range(1, 5).Any(i => !config.GetValue<bool>($"App02C{i}:Enabled"))
             || Features.Any(f => !config.GetValue<bool>($"{f.Tag}:Enabled")))
             throw new InvalidOperationException($"{Name} requires synthetic auth, dedicated C.1–C.5 and DEV-F01/F03/F04/F05.");
-        bool finance = profile == FinanceName;
-        bool settlement = profile is SettlementName or FinanceName;
-        bool field = profile is FieldName or SettlementName or FinanceName;
+        bool finance = profile is FinanceName or CloseReadinessName;
+        bool settlement = finance || profile == SettlementName;
+        bool field = settlement || profile == FieldName;
         if (field && (bootstrap != DayBootstrapVersion || !config.GetValue<bool>("App03:Workspace")
             || !config.GetValue<bool>("App02D1:Enabled") || !config.GetValue<bool>("App02D2:Enabled")))
             throw new InvalidOperationException($"{FieldName} requires the dedicated workspace, business day, D.1 and D.2.");
@@ -72,7 +74,8 @@ public static class App03A1Profile
         {
             await using var db = await connections.OpenApp02c4Async(App02a3Sql.WorkerPrincipal(tenant), ct);
             var state = await ReadSchema(db, nonce, ct);
-            RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement, finance: connections.UsesApp03Finance);
+            RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement,
+                finance: connections.UsesApp03Finance, closeReadiness: connections.UsesApp05CloseReadiness);
             if (connections.UsesApp03Settlement) await VerifySettlementSchema(db, ct);
             if (connections.UsesApp03Finance && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
                 SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'd4app.FinanceQueueProvenance',N'V') IS NOT NULL
@@ -93,6 +96,19 @@ public static class App03A1Profile
                     THEN 1 ELSE 0 END AS bit);
                 """, new { Version = DayBootstrapVersion }, cancellationToken: ct)))
                 throw new InvalidOperationException("APP-03.2 requires its installed bootstrap in both tenant databases.");
+            if (connections.UsesApp05CloseReadiness && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                IF OBJECT_ID(N'dbo.LocalApp05Bootstrap',N'U') IS NULL
+                    OR OBJECT_ID(N'dbo.LocalApp05TripBootstrap',N'U') IS NULL
+                    OR OBJECT_ID(N'dbo.App05TripOperator',N'U') IS NULL
+                    OR OBJECT_ID(N'dbo.App05FollowUp',N'U') IS NULL
+                    OR OBJECT_ID(N'dbo.App05FollowUpAssignment',N'U') IS NULL
+                    SELECT CAST(0 AS bit);
+                ELSE SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM dbo.LocalApp05Bootstrap WHERE Slot=1 AND Version=@Version)
+                    AND NOT EXISTS (SELECT 1 FROM dbo.Trip t WHERE t.TenantId=@tenant AND t.BusinessDate IS NOT NULL
+                        AND NOT EXISTS(SELECT 1 FROM dbo.LocalApp05TripBootstrap prepared WHERE prepared.TripId=t.Id))
+                    THEN 1 ELSE 0 END AS bit);
+                """, new { Version = CloseReadinessBootstrapVersion, tenant }, cancellationToken: ct)))
+                throw new InvalidOperationException($"{CloseReadinessName} requires the prepared fixture in both tenant databases.");
         }
     }
 
@@ -109,8 +125,10 @@ public static class App03A1Profile
             throw new InvalidOperationException($"{SettlementName} requires the complete handoff schema in both tenants.");
     }
 
-    internal static IEnumerable<(string? Tag, long Version)> MigrationSteps(bool field, bool settlement, bool finance)
+    internal static IEnumerable<(string? Tag, long Version)> MigrationSteps(bool field, bool settlement, bool finance, bool closeReadiness = false)
     {
+        if (closeReadiness && !(field && settlement && finance))
+            throw new InvalidOperationException($"{CloseReadinessName} requires its complete APP-03 finance predecessor.");
         foreach (var feature in Features) yield return feature;
         if (field) yield return (FieldName, App03FieldSchema.Version);
         if (settlement)
@@ -129,6 +147,7 @@ public static class App03A1Profile
             yield return (FinanceName, App03FinanceCaseLinksSchema.Version);
             yield return (FinanceName, App03OwnerSchema.Version);
         }
+        if (closeReadiness) yield return (CloseReadinessName, App05FollowUpSchema.Version);
     }
 
     internal static Task<SchemaState> ReadSchema(SqlConnection db, string nonce, CancellationToken ct = default) =>
@@ -156,10 +175,10 @@ public static class App03A1Profile
                            AND OBJECT_ID(N'dbo.BQuota',N'U') IS NOT NULL THEN 1 ELSE 0 END AS bit) AS HasD1D2;
             """, new { nonce, BaseVersion }, cancellationToken: ct));
 
-    internal static void RequireSchema(SchemaState state, bool complete, bool field = false, bool settlement = false, bool finance = false)
+    internal static void RequireSchema(SchemaState state, bool complete, bool field = false, bool settlement = false, bool finance = false, bool closeReadiness = false)
     {
         var installed = state.FeatureVersions.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(long.Parse).ToHashSet();
-        var versions = MigrationSteps(field, settlement, finance);
+        var versions = MigrationSteps(field, settlement, finance, closeReadiness);
         if (!state.Owned || !state.HasBase || (field && !state.HasD1D2) || (complete && !state.HasFeatureTables) ||
             !installed.SetEquals((complete ? versions : versions.Take(installed.Count)).Select(f => f.Version)))
             throw new InvalidOperationException(complete

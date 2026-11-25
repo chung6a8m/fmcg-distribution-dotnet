@@ -1,3 +1,4 @@
+import { linkedRecord } from '../workspace/linked-record'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
@@ -46,8 +47,9 @@ function sourceKey(delivery: Delivery) {
   return delivery.deliveryId + ':' + delivery.lotId
 }
 
-export function ReturnWorkspace({ workspaceSession, startSource, startDelivery, onSourceChange }: {
+export function ReturnWorkspace({ workspaceSession, startSource, startDelivery, onSourceChange, linkedCase }: {
   workspaceSession?: Session; startSource?: string; startDelivery?: string; onSourceChange?: (source: string) => void
+  linkedCase?: string
 } = {}) {
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState('')
@@ -83,7 +85,7 @@ export function ReturnWorkspace({ workspaceSession, startSource, startDelivery, 
 
   if (workspaceSession)
     return <ReturnPanel session={workspaceSession} offline={offline}
-      startSource={startSource} startDelivery={startDelivery} onSourceChange={onSourceChange} />
+      startSource={startSource} startDelivery={startDelivery} onSourceChange={onSourceChange} linkedCase={linkedCase} />
 
   return <main className="page c1-page">
     <header className="page-heading c1-header">
@@ -102,8 +104,9 @@ export function ReturnWorkspace({ workspaceSession, startSource, startDelivery, 
   </main>
 }
 
-function ReturnPanel({ session: { token, identity }, offline, startSource = '', startDelivery, onSourceChange }: {
+function ReturnPanel({ session: { token, identity }, offline, startSource = '', startDelivery, onSourceChange, linkedCase }: {
   session: Session; offline: boolean; startSource?: string; startDelivery?: string; onSourceChange?: (source: string) => void
+  linkedCase?: string
 }) {
   const phase = phases[identity.role]
   const request = phase.action === 'REQUEST'
@@ -278,7 +281,7 @@ function ReturnPanel({ session: { token, identity }, offline, startSource = '', 
       <h2>Danh sách hồ sơ trả hàng</h2>
       {ledger && ledger.cases.length === 0 && <p>Chưa có hồ sơ trả hàng.</p>}
       {ledger && ledger.cases.length > 0 && <ul className="c1-rows">
-        {ledger.cases.map(row => <li key={row.id} id={'return-' + row.id}><div className="c3-source">
+        {ledger.cases.map(row => <li key={row.id} id={'return-' + row.id} {...linkedRecord(row.id, linkedCase)}><div className="c3-source">
           <strong>{row.customer} · {row.sku} · {row.lotCode}</strong>
           <p>{states[row.state]} · {amounts.format(row.quantity)} EA</p>
           {row.releasedCost != null && <p>Giá vốn hoàn {amounts.format(row.releasedCost)} VND</p>}

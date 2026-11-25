@@ -20,6 +20,13 @@ if (args is ["App03Session", var sessionAction, var sessionRoot, var sessionSour
     await App03DevSession.Run(sessionAction, sessionRoot, sessionSource, sessionId == "-" ? null : sessionId, settlement: true, finance: true);
     return;
 }
+if (args is ["App03Session", var closeAction, var closeRoot, var closeSource, var closeId, "CloseReadiness"]
+    && closeAction is "Start" or "Resume")
+{
+    await App03DevSession.Run(closeAction, closeRoot, closeSource, closeId == "-" ? null : closeId,
+        closeReadiness: true);
+    return;
+}
 if (args is ["App03Session", "NextDay", var dayRoot, var daySource, var dayId, var day])
 {
     var target = DateOnly.ParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture);

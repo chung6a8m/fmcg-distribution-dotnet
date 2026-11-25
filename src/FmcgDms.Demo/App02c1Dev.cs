@@ -44,6 +44,7 @@ internal static class App02c1Dev
         bool field = persistent?.UsesField == true;
         bool settlement = persistent?.UsesSettlement == true;
         bool finance = persistent?.UsesFinance == true;
+        bool closeReadiness = persistent?.UsesCloseReadiness == true;
         bool verifyUpgrade = integrated && mode == "Verify";
         bool visit = integrated || increment == "DevF01";
         bool advance = increment == "DevF02";
@@ -66,7 +67,7 @@ internal static class App02c1Dev
         bool c3 = c4 || increment == "App02C3";
         bool c2 = visit || c3 || increment == "App02C2";
         string feature = advance ? "DEV-F02" : refunds ? "DEV-F08" : gifts ? "DEV-F07" : adjustments ? "DEV-F06" : returns ? "DEV-F05" : pricing ? "DEV-F04" : fefo ? "DEV-F03" : visit ? "DEV-F01" : d4 ? "APP-02D.4" : d3 ? "APP-02D.3" : d2 ? "APP-02D.2" : d1 ? "APP-02D.1" : c6 ? "APP-02C.6" : c5 ? "APP-02C.5" : c4 ? "APP-02C.4" : c3 ? "APP-02C.3" : c2 ? "APP-02C.2" : "APP-02C.1";
-        if (integrated) feature = finance ? App03A1Profile.FinanceName : settlement ? App03A1Profile.SettlementName : field ? App03A1Profile.FieldName : App03A1Profile.Name;
+        if (integrated) feature = persistent?.Profile ?? App03A1Profile.Name;
         Console.WriteLine($"{feature} DEV session {run.Id}, source {source}");
         var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         string[] roles = c2 ? ["sales", "warehouse"] : ["sales"];
@@ -113,12 +114,13 @@ internal static class App02c1Dev
                 await run.Verify(tenant, app03Session: persistent is not null);
                 if (persistent is not null)
                 {
-                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field, settlement, finance);
+                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field, settlement, finance, closeReadiness);
                     await App03DayBootstrap.Seed(run, tenant, lifetime.Token, persistent.VerifyHandoff && tenant == "tenant-a");
                     await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (settlement) await App03SettlementBootstrap.Prepare(run, tenant, lifetime.Token);
                     if (finance) await App03FinanceBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
+                    if (closeReadiness) await App05CloseBootstrap.Prepare(run, tenant, lifetime.Token);
                     continue;
                 }
                 if (d1Run is not null)
@@ -342,12 +344,19 @@ internal static class App02c1Dev
                     ["OWNER"] = Sign("tenant-a", "owner", App03FinanceBootstrap.Owner),
                     ["PEER_OWNER"] = Sign("tenant-b", "owner", App03FinanceBootstrap.Owner)
                 } : null;
+                Dictionary<string, string>? closeCredentials = closeReadiness ? new()
+                {
+                    ["OPS"] = Sign("tenant-a", "tenant_ops", App05CloseBootstrap.Ops),
+                    ["PEER_OPS"] = Sign("tenant-b", "tenant_ops", App05CloseBootstrap.Ops),
+                    ["ASSIGNEE"] = Sign("tenant-a", "trip_assignee", App05CloseBootstrap.Assignee),
+                    ["PEER_ASSIGNEE"] = Sign("tenant-b", "trip_assignee", App05CloseBootstrap.Assignee)
+                } : null;
                 await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id, tokenB,
                     Sign("tenant-a", "finance", DevF05Evidence.Finance),
                     Token(key, "tenant-a", roles, validitySeconds: -60),
                     Sign("tenant-a", "warehouse", DevF05Evidence.Receiver),
                     Sign("tenant-a", "cashier", App03SettlementBootstrap.Cashier),
-                    Sign("tenant-a", "case_checker", DevF05Evidence.Qa), financeCredentials));
+                    Sign("tenant-a", "case_checker", DevF05Evidence.Qa), financeCredentials, closeCredentials));
                 await Task.Delay(Timeout.InfiniteTimeSpan, lifetime.Token);
                 return;
             }
@@ -363,6 +372,7 @@ internal static class App02c1Dev
                     Console.WriteLine("Enter source, receiver, finance, qa or peer to copy a fresh credential.");
                     if (finance) Console.WriteLine("Finance roles: accountant, reconciler, maker, checker, refund-checker.");
                     if (finance) Console.WriteLine("Enter owner or peer-owner for the read-only distributor overview.");
+                    if (closeReadiness) Console.WriteLine("Enter ops, peer-ops or assignee for APP-05.1 readiness.");
                     if (settlement) Console.WriteLine("Enter cashier for trip custody and employee advance returns.");
                     Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
                     while (!Console.IsInputRedirected)
@@ -380,6 +390,9 @@ internal static class App02c1Dev
                             "refund-checker" when finance => Sign("tenant-a", "finance", App03FinanceBootstrap.RefundChecker),
                             "owner" when finance => Sign("tenant-a", "owner", App03FinanceBootstrap.Owner),
                             "peer-owner" when finance => Sign("tenant-b", "owner", App03FinanceBootstrap.Owner),
+                            "ops" when closeReadiness => Sign("tenant-a", "tenant_ops", App05CloseBootstrap.Ops),
+                            "peer-ops" when closeReadiness => Sign("tenant-b", "tenant_ops", App05CloseBootstrap.Ops),
+                            "assignee" when closeReadiness => Sign("tenant-a", "trip_assignee", App05CloseBootstrap.Assignee),
                             "accountant" or "reconciler" or "maker" or "checker" when finance =>
                                 Sign("tenant-a", choice, App03FinanceBootstrap.AccountingActor(choice)),
                             _ => null

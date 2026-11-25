@@ -90,3 +90,14 @@
     outline-offset: var(--fmcg-focus-offset);
   }
 }
+
+@layer components {
+  .trip-close :is(h3, h4) { font-weight: var(--fmcg-font-weight-bold); }
+  @container (width < 620px) {
+    .trip-close-table td {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      padding-block: 0.25rem;
+    }
+    .trip-close-table td:first-child { grid-template-columns: minmax(0, 1fr); }
+  }
+}

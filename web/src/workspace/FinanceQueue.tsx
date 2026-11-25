@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { linkedRecord } from './linked-record'
 import { Button, Field } from '../ui/controls'
 import { HttpError, forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from '../sales/customer-api'
 import { ReconciliationResult, type Reconciliation } from '../sales/PartnerRehearsalWorkspace'
@@ -71,8 +72,9 @@ const sourceLabel = (source: Source) => `${source.trip} · ${source.customer} ·
 const isCorrectionCase = (row: Case) => row.reason === 'AMOUNT_MISMATCH' && (row.canonicalCaseId ?? row.id) === row.id
 const reportLabel = (report: Report) => `${format(report.fromUtc)} → ${format(report.cutoff)} · Tính đến ${format(report.asOf)} · ${report.status} · ${report.id}`
 
-export function FinanceQueue({ token, identity, roles, offline }: {
+export function FinanceQueue({ token, identity, roles, offline, startSource, startDelivery, startCase }: {
   token: string; identity: Identity; roles: string[]; offline: boolean
+  startSource?: string; startDelivery?: string; startCase?: string
 }) {
   const key = 'app03.accounting.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId])
   const correctionKey = key + '.correction'
@@ -81,7 +83,7 @@ export function FinanceQueue({ token, identity, roles, offline }: {
   const [pendingReport, setPendingReport] = useState(() => restoreReport(reportKey))
   const [pending, setPending] = useState(() => restore(key))
   const [queue, setQueue] = useState<Queue | null>(null)
-  const [selection, setSelection] = useState('')
+  const [selection, setSelection] = useState<string | null>(null)
   const [reportId, setReportId] = useState('')
   const [caseId, setCaseId] = useState('')
   const [correctionId, setCorrectionId] = useState('')
@@ -92,7 +94,9 @@ export function FinanceQueue({ token, identity, roles, offline }: {
   const [revision, setRevision] = useState(0)
   const [loadedRevision, setLoadedRevision] = useState(-1)
   const active = useRef(false)
-  const source = queue?.sources.find(row => row.deliveryId === selection)
+  const linkedSource = queue?.sources.find(row => row.sourceLineId === startSource && row.deliveryId === startDelivery)
+  const source = selection ? queue?.sources.find(row => row.sourceLineId === selection) : linkedSource
+  const linkedCase = linkedSource && queue?.cases.find(row => row.id === startCase && row.deliveryId === linkedSource.deliveryId)
   const selectedReport = queue?.reports.find(row => row.id === reportId)
   const selectedCase = queue?.cases.find(row => row.id === caseId && !row.closedReportId)
   const mayPropose = selectedCase && isCorrectionCase(selectedCase)
@@ -316,7 +320,8 @@ export function FinanceQueue({ token, identity, roles, offline }: {
       {queue?.asOf && <p>Ảnh hàng đợi lúc {format(queue.asOf)}</p>}
       {queue && queue.sources.length === 0 && <p>Chưa có nguồn giao hàng trong phiên.</p>}
       {queue && queue.sources.length > 0 && <ul className="c1-rows">{queue.sources.map(row => <li key={row.sourceLineId} data-delivery={row.deliveryId}>
-        <Button aria-pressed={row.deliveryId === selection} disabled={busy || pending !== null} onClick={() => setSelection(row.deliveryId)}>
+        <Button aria-pressed={row.sourceLineId === source?.sourceLineId} disabled={busy || pending !== null}
+          onClick={() => setSelection(row.sourceLineId)}>
           {sourceLabel(row)}
         </Button>
         <p>{row.receiptId ? 'Đã tiếp nhận' : 'Chưa tiếp nhận'} · {row.postingId ? 'Đã ghi sổ' : 'Chưa ghi sổ'}
@@ -329,7 +334,16 @@ export function FinanceQueue({ token, identity, roles, offline }: {
             onClick={() => openReport(row.reportId!)}>Mở báo cáo nguồn</Button>}
         </div>}
       </li>)}</ul>}
-      {source && <dl className="sales-facts">
+      {linkedCase && <div className="c3-source" {...linkedRecord(linkedCase.id, startCase)}>
+        <h3>Hồ sơ đối soát nguồn</h3>
+        <p>Hồ sơ {linkedCase.id} · {linkedCase.reason}</p>
+        <p>Báo cáo {linkedCase.reportId}</p>
+        {linkedCase.closedReportId && <p>Báo cáo đóng {linkedCase.closedReportId}</p>}
+        {roles.includes('reconciler') && <Button disabled={busy || offline} onClick={() => openReport(linkedCase.reportId)}>
+          Mở báo cáo hồ sơ
+        </Button>}
+      </div>}
+      {source && <dl className="sales-facts" {...linkedRecord(source.sourceLineId, linkedCase ? undefined : startSource)}>
         <dt>Lần giao</dt><dd className="d4-identifier">{source.deliveryId}</dd>
         <dt>Thời điểm giao</dt><dd>{format(source.occurredAt)}</dd>
         <dt>Dòng nguồn</dt><dd className="d4-identifier">{source.sourceLineId}</dd>

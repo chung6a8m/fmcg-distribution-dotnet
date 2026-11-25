@@ -294,7 +294,7 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
             WHERE t.TenantId=@Tenant AND t.Id=@Trip;
             """, new { Tenant = tenant, Trip = tripId }, tx, ct));
 
-    private static async Task<decimal> Custody(SqlConnection db, SqlTransaction tx,
+    internal static async Task<decimal> Custody(SqlConnection db, SqlTransaction tx,
         string tenant, Guid trip, CancellationToken ct) =>
         await db.ExecuteScalarAsync<decimal>(Sql("""
             SELECT COALESCE(SUM(e.AmountDelta),0)
@@ -307,7 +307,7 @@ public sealed partial class App01dCashierUnloadService(TenantConnections connect
                 AND e.LedgerKind=N'CUSTODY';
             """, new { Tenant = tenant, Trip = trip }, tx, ct));
 
-    private static async Task<bool> ReconcileCustody(
+    internal static async Task<bool> ReconcileCustody(
         SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, decimal custody, CancellationToken ct)
     {
