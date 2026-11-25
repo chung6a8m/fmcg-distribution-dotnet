@@ -83,7 +83,9 @@ try {
     }
 
     $demo = 'src/FmcgDms.Demo/bin/Release/net10.0/FmcgDms.Demo.dll'
-    if ($Action -ne 'Remove' -or !(Test-Path -LiteralPath $demo)) {
+    . (Join-Path $PSScriptRoot 'Use-CiPrebuiltDemo.ps1')
+    $usePrebuilt = Test-CiPrebuiltDemo -RepositoryRoot $repo -SourceCommit $source
+    if (!$usePrebuilt -and ($Action -ne 'Remove' -or !(Test-Path -LiteralPath $demo))) {
         dotnet build src/FmcgDms.Demo/FmcgDms.Demo.csproj -c Release
         if ($LASTEXITCODE -ne 0) { throw 'APP-03 DEV host build failed.' }
     }

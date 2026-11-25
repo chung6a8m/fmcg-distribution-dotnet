@@ -10,8 +10,11 @@ try {
     $changes = git status --porcelain
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
-    dotnet build src/FmcgDms.Demo/FmcgDms.Demo.csproj -c Release
-    if ($LASTEXITCODE -ne 0) { throw 'DEV host build failed.' }
+    . (Join-Path $PSScriptRoot 'Use-CiPrebuiltDemo.ps1')
+    if (!(Test-CiPrebuiltDemo -RepositoryRoot $repo -SourceCommit $source)) {
+        dotnet build src/FmcgDms.Demo/FmcgDms.Demo.csproj -c Release
+        if ($LASTEXITCODE -ne 0) { throw 'DEV host build failed.' }
+    }
     sqllocaldb start MSSQLLocalDB
     if ($LASTEXITCODE -ne 0) { throw 'MSSQLLocalDB did not start.' }
     $mode = if ($Verify) { 'Verify' } else { 'Interactive' }
