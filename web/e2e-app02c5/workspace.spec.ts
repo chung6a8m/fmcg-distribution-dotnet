@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 
 async function signIn(page: Page, slot = 'A') {
   const token = process.env['APP02C1_BROWSER_TOKEN_' + slot]
@@ -107,7 +108,26 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   expect(postedResponse.headers()['cache-control']).toBe('no-store')
   const posted = await postedResponse.json()
   expect(posted).toMatchObject({ expected: 1, reconciled: 1, knownBalance: '375.0000', knownOverdue: '0' })
-  expect(posted.sources[0]).toMatchObject({ overdue: false, dueBusinessDate: dueDate + 'T00:00:00' })
+  const orders = await page.request.get('/api/synthetic/app02c2/orders', { headers: tenantA })
+  expect(orders.ok()).toBeTruthy()
+  const [order] = await orders.json() as { id: string; lines: { lineId: string }[] }[]
+  const orderLineId = order.lines[0].lineId
+  expect(orderLineId).toMatch(/^[0-9a-f-]{36}$/i)
+  expect(orderLineId).not.toBe(order.id)
+  expect(posted.sources[0]).toMatchObject({
+    overdue: false, dueBusinessDate: dueDate + 'T00:00:00',
+    orderId: order.id, orderLineId, originTrip: 'C2-TRIP', trip: 'C2-TRIP',
+  })
+  const peerLine = await page.request.get(reportUrl, {
+    params: { orderLineId }, headers: headers('APP02C1_BROWSER_TOKEN_B'),
+  })
+  expect(peerLine.ok()).toBeTruthy()
+  expect(await peerLine.json()).toMatchObject({ expected: null, sources: [] })
+  const otherLine = await page.request.get(reportUrl, {
+    params: { orderLineId: '00000000-0000-0000-0000-000000000001' }, headers: tenantA,
+  })
+  expect(otherLine.ok()).toBeTruthy()
+  expect(await otherLine.json()).toMatchObject({ expected: null, sources: [] })
 
   await page.setViewportSize({ width: 320, height: 800 })
   await page.getByLabel('Chế độ hiển thị').selectOption('dark')
@@ -146,14 +166,31 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   } finally { await peer.close() }
   await open(page, 'Báo cáo AR')
   await expect(page.getByText(/Nguồn đã đối soát 1\/2/)).toBeVisible()
+  await page.getByLabel('Mã dòng đơn A').fill('sai-dinh-dang')
+  await page.getByRole('button', { name: 'Tải báo cáo' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Nhập mã dòng đơn A theo định dạng UUID.')
+  await page.getByLabel('Mã dòng đơn A').fill(orderLineId)
+  const filteredReport = page.waitForResponse(response =>
+    new URL(response.url()).searchParams.get('orderLineId') === orderLineId)
+  await page.getByRole('button', { name: 'Tải báo cáo' }).click()
+  expect((await filteredReport).ok()).toBeTruthy()
+  await expect(page.getByText(/Nguồn đã đối soát 1\/2/)).toBeVisible()
   await expect(page.getByText(/Tổng còn nợ đã đối soát 375/)).toBeVisible()
   const download = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Xuất JSON' }).click()
-  expect((await download).suggestedFilename()).toBe('sales-a-ar.json')
+  const exported = await download
+  expect(exported.suggestedFilename()).toBe('sales-a-ar.json')
+  expect(JSON.parse(await readFile(await exported.path(), 'utf8'))).toMatchObject({
+    filter: { orderLineId },
+    sources: [{ orderLineId }, { orderLineId }],
+  })
   await page.locator('summary').filter({ hasText: 'Chờ ghi sổ' }).press('Enter')
   await expect(page.getByText('c1-dev-sales', { exact: true })).toBeVisible()
   await page.locator('summary').filter({ hasText: 'Đã đối soát' }).press('Enter')
   await expect(page.getByText('Đến hạn ' + dueDate)).toBeVisible()
+  const deliveryDetail = page.locator('details').filter({ has: page.locator('summary').filter({ hasText: 'Đã đối soát' }) })
+  await expect(deliveryDetail.locator('dt', { hasText: 'Chuyến gốc' }).locator('+ dd')).toHaveText('C2-TRIP')
+  await expect(deliveryDetail.locator('dt', { hasText: 'Chuyến giao' }).locator('+ dd')).toHaveText('C2-TRIP')
   await page.screenshot({ path: info.outputPath('ar-narrow-dark.png'), fullPage: true })
 
   const historical = await page.request.get(reportUrl, { headers: tenantA, params: { asOf: posted.asOf } })

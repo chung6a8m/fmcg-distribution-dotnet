@@ -8,7 +8,7 @@ internal static class App02c5Routes
     public static void Map(WebApplication app, bool app03Workspace)
     {
         app.MapGet("/api/synthetic/app02c5/ar", async (string? asOf, Guid? customerId, Guid? orderId,
-            Guid? deliveryId, DateOnly? due, bool? overdue, bool? download,
+            Guid? deliveryId, DateOnly? due, bool? overdue, bool? download, Guid? orderLineId,
             HttpContext context, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";
@@ -21,7 +21,8 @@ internal static class App02c5Routes
                     return Results.BadRequest(new { error = "UTC_CUTOFF_INVALID" });
                 cutoff = parsed;
             }
-            var report = await service.ReceivablesC5(user, cutoff, new(customerId, orderId, deliveryId, due, overdue), ct);
+            var report = await service.ReceivablesC5(user, cutoff,
+                new(customerId, orderId, deliveryId, due, overdue, orderLineId), ct);
             if (report is null) return Results.BadRequest(new { error = "UTC_CUTOFF_IN_FUTURE" });
             if (download == true) context.Response.Headers.ContentDisposition = "attachment; filename=\"sales-a-ar.json\"";
             return Results.Ok(app03Workspace ? report with { Currency = "VND" } : report);

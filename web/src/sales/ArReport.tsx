@@ -3,7 +3,8 @@ import { Button, Field } from '../ui/controls'
 import { HttpError, read, readError, requestSalesApi, type Customer } from './customer-api'
 
 type Source = {
-  commandId: string; orderId: string; customer: string; trip: string; owner: string; occurredAtUtc: string
+  commandId: string; orderId: string; orderLineId: string; customer: string; originTrip: string; trip: string
+  owner: string; occurredAtUtc: string
   sourceId: string | null; deliveryId: string | null; loadSourceId: string | null; confirmSourceId: string | null
   shipToSnapshotId: string | null; shipToVersion: number; shipTo: string | null
   policyVersion: number; termsDays: number; businessDate: string | null; dueBusinessDate: string | null
@@ -19,7 +20,8 @@ type Report = {
   asOf: string; expected: number | null; reconciled: number; knownBalance: string | null
   knownOverdue: string | null; customers: CustomerTotal[]; sources: Source[]
 }
-type Filter = { asOf: string; customerId: string; orderId: string; deliveryId: string; due: string; overdue: string }
+type Filter = { asOf: string; customerId: string; orderId: string; orderLineId: string;
+  deliveryId: string; due: string; overdue: string }
 const api = '/api/synthetic/app02c5'
 const statusText: Record<string, string> = {
   RECONCILED: 'Đã đối soát', PENDING: 'Chờ ghi sổ', REJECTED: 'Ghi sổ bị từ chối',
@@ -41,6 +43,8 @@ function SourceDetail({ source, returnUrl }: { source: Source; returnUrl?: strin
   return <details className="panel panel-content">
     <summary>{source.customer} · {source.trip} · {statusText[source.status]}</summary>
     <dl className="sales-facts">
+      <dt>Chuyến gốc</dt><dd>{source.originTrip}</dd>
+      <dt>Chuyến giao</dt><dd>{source.trip}</dd>
       <dt>Số lượng giao</dt><dd>{decimal(source.quantity)}</dd>
       {source.status === 'RECONCILED' ? <>
         <dt>Ngày giao</dt><dd>{source.businessDate?.slice(0, 10)}</dd>
@@ -58,6 +62,7 @@ function SourceDetail({ source, returnUrl }: { source: Source; returnUrl?: strin
       </>}
       <dt>Chính sách đã Confirm</dt><dd>v{source.policyVersion} · {source.termsDays} ngày</dd>
       <dt>Mã đơn</dt><dd>{source.orderId}</dd>
+      <dt>Mã dòng đơn A</dt><dd>{source.orderLineId}</dd>
       <dt>Mã yêu cầu</dt><dd>{source.commandId}</dd>
       <dt>Nguồn Confirm</dt><dd>{source.confirmSourceId}</dd>
       <dt>Nguồn nạp</dt><dd>{source.loadSourceId}</dd>
@@ -104,7 +109,9 @@ export function ScopedArReport({ onCheckOrder, ...props }: ReportProps & { onChe
 }
 
 export function ArReport({ token, orderId, returnUrl }: ReportProps) {
-  const [filter, setFilter] = useState<Filter>({ asOf: '', customerId: '', orderId, deliveryId: '', due: '', overdue: '' })
+  const [filter, setFilter] = useState<Filter>({
+    asOf: '', customerId: '', orderId, orderLineId: '', deliveryId: '', due: '', overdue: '',
+  })
   const [report, setReport] = useState<Report | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [error, setError] = useState('')
@@ -155,11 +162,17 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
     <form className="panel panel-content sales-filter" onSubmit={event => {
       event.preventDefault()
       const data = new FormData(event.currentTarget)
+      const orderLineId = String(data.get('orderLineId') ?? '').trim()
+      if (orderLineId && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(orderLineId)) {
+        setError('Nhập mã dòng đơn A theo định dạng UUID.')
+        return
+      }
       setBusy(true)
       setReport(null)
       setError('')
       setFilter({ asOf: String(data.get('asOf') ?? '').trim(), customerId: String(data.get('customerId') ?? ''),
         orderId: String(data.get('orderId') ?? '').trim(), deliveryId: String(data.get('deliveryId') ?? '').trim(),
+        orderLineId,
         due: String(data.get('due') ?? ''), overdue: String(data.get('overdue') ?? '') })
     }}>
       <label className="field">Khách hàng
@@ -168,6 +181,7 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
         </select>
       </label>
       <Field name="orderId" label="Mã đơn A" defaultValue={orderId} />
+      <Field name="orderLineId" label="Mã dòng đơn A" />
       <Field name="deliveryId" label="Mã lần giao" />
       <Field name="due" label="Ngày đến hạn" type="date" />
       <label className="field">Trạng thái hạn

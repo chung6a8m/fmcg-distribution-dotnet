@@ -5,7 +5,8 @@ using Dapper;
 
 namespace FmcgDms.Api.Persistence;
 
-public sealed record C5ArSource(Guid CommandId, Guid OrderId, Guid CustomerId, string Customer, string Trip,
+public sealed record C5ArSource(Guid CommandId, Guid OrderId, Guid OrderLineId, Guid CustomerId, string Customer,
+    string OriginTrip, string Trip,
     string Owner, DateTimeOffset OccurredAtUtc, Guid? SourceId, Guid? DeliveryId, Guid? LoadSourceId,
     Guid? ConfirmSourceId, Guid? ShipToSnapshotId, int ShipToVersion, string? ShipTo,
     int? PolicyVersion, int? TermsDays, DateTime? BusinessDate, DateTime? DueBusinessDate,
@@ -20,7 +21,8 @@ public sealed record C5ArCustomer(Guid CustomerId, string Customer, int Reconcil
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal? KnownBalance,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal? KnownOverdue);
 
-public sealed record C5ArFilter(Guid? CustomerId, Guid? OrderId, Guid? DeliveryId, DateOnly? Due, bool? Overdue);
+public sealed record C5ArFilter(Guid? CustomerId, Guid? OrderId, Guid? DeliveryId, DateOnly? Due, bool? Overdue,
+    Guid? OrderLineId = null);
 
 public sealed record C5ArReport(DateTime AsOf, C5ArFilter Filter,
     int Reconciled, int? Expected, IReadOnlyList<C5ArCustomer> Customers, IReadOnlyList<C5ArSource> Sources,
@@ -43,7 +45,7 @@ public sealed partial class App01a2CommandService
             var cutoff = requestedCutoff ?? now;
             var parameters = new DynamicParameters(new
             {
-                Tenant = tenant, Actor = actor, filter.CustomerId, filter.OrderId, filter.DeliveryId
+                Tenant = tenant, Actor = actor, filter.CustomerId, filter.OrderId, filter.DeliveryId, filter.OrderLineId
             });
             parameters.Add("Due", filter.Due?.ToDateTime(TimeOnly.MinValue), DbType.Date);
             parameters.Add("Overdue", filter.Overdue, DbType.Boolean);
@@ -67,8 +69,8 @@ public sealed partial class App01a2CommandService
     }
 
     private const string C5ReportSql = """
-        SELECT e.ClientCommandId AS CommandId, o.Id AS OrderId, c.Id AS CustomerId,
-            c.Code + N' · ' + c.Name AS Customer, t.Code AS Trip,
+        SELECT e.ClientCommandId AS CommandId, o.Id AS OrderId, frozen.AOrderLineId AS OrderLineId, c.Id AS CustomerId,
+            c.Code + N' · ' + c.Name AS Customer, origin.Code AS OriginTrip, t.Code AS Trip,
             e.ActorId AS Owner, TODATETIMEOFFSET(e.OccurredAtUtc,'+00:00') AS OccurredAtUtc, src.Id AS SourceId, d.Id AS DeliveryId,
             ml.LoadBusinessSourceId AS LoadSourceId, cf.ConfirmSourceId, d.ShipToSnapshotId,
             e.ShipToVersion, adr.Address AS ShipTo, p.PolicyVersion, frozen.TermsDaysSnapshot AS TermsDays,
@@ -90,6 +92,7 @@ public sealed partial class App01a2CommandService
         JOIN dbo.AReservation r ON r.TenantId=ml.TenantId AND r.StockRightId=ml.StockRightId
         JOIN dbo.AConfirmedLineSnapshot frozen ON frozen.TenantId=r.TenantId AND frozen.AOrderLineId=r.AOrderLineId
         JOIN dbo.AOrder o ON o.TenantId=frozen.TenantId AND o.Id=frozen.AOrderId AND o.TripId=e.TripId
+        JOIN dbo.Trip origin ON origin.TenantId=frozen.TenantId AND origin.Id=frozen.TripId
         JOIN dbo.Customer c ON c.TenantId=o.TenantId AND c.Id=o.CustomerId
         JOIN dbo.C2Confirmation cf ON cf.TenantId=o.TenantId AND cf.OrderId=o.Id
         JOIN dbo.C2LinePolicy p ON p.TenantId=frozen.TenantId AND p.OrderLineId=frozen.AOrderLineId
@@ -139,6 +142,7 @@ public sealed partial class App01a2CommandService
         ) aging
         WHERE e.TenantId=@Tenant AND e.OccurredAtUtc<=@AsOf
             AND (@CustomerId IS NULL OR c.Id=@CustomerId) AND (@OrderId IS NULL OR o.Id=@OrderId)
+            AND (@OrderLineId IS NULL OR frozen.AOrderLineId=@OrderLineId)
             AND (@DeliveryId IS NULL OR d.Id=@DeliveryId)
             AND (reconciled.Ok=0 OR ((@Due IS NULL OR ar.DueBusinessDate=@Due)
                 AND (@Overdue IS NULL OR aging.Overdue=@Overdue)))
