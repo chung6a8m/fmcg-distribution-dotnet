@@ -1,6 +1,7 @@
 import base from './playwright.app02c5.config'
 
-const artifacts = `../TestResults/app05-2/${process.env.APP02C1_RUN_ID}`
+const increment = process.env.APP05_SUCCESSOR_EVIDENCE ? 'app05-3' : 'app05-2'
+const artifacts = `../TestResults/${increment}/${process.env.APP02C1_RUN_ID}`
 const stage = process.env.APP05_CLOSURE_STAGE
 export default {
   ...base,

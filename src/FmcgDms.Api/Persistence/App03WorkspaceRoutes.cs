@@ -73,6 +73,7 @@ internal static class App03WorkspaceRoutes
                 Owner = owner is not null,
                 TripClose = await closeReadinessAccess,
                 TripClosure = connections.UsesApp05TripClosure && await closeReadinessAccess,
+                ASuccessor = connections.UsesApp05Successor && await closeReadinessAccess,
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt
             });

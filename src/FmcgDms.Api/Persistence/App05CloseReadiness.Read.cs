@@ -16,10 +16,10 @@ internal static partial class App05CloseReadiness
     }
 
     internal static async Task<Preview> Read(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId, bool ops,
-        CancellationToken ct, bool closing = false)
+        CancellationToken ct, bool closing = false, bool successor = false)
     {
         var scope = new { Tenant = tenant, Trip = tripId };
-        var trip = await db.QuerySingleAsync<Trip>(App02a3Sql.Cmd(TripSql + " AND t.Id=@Trip;", scope, tx, ct));
+        var trip = await db.QuerySingleAsync<Trip>(App02a3Sql.Cmd(TripSql(successor) + " AND t.Id=@Trip;", scope, tx, ct));
         var asOf = await db.ExecuteScalarAsync<DateTimeOffset>(App02a3Sql.Cmd(
             $"SELECT TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00');", null, tx, ct));
         Guid[] drafts, pending, unprovenOrders, heldB, manifests;
@@ -71,10 +71,27 @@ internal static partial class App05CloseReadiness
         if (!loadScopeProven)
             blockers.Add(new("MANIFEST_SCOPE_UNKNOWN", D3, tripId, "Xác minh phạm vi manifest thuộc chuyến"));
 
+        var scheduled = new Dictionary<Guid, decimal>();
+        if (successor)
+        {
+            var incoming = (await db.QueryAsync<Guid>(App02a3Sql.Cmd("""
+                SELECT BindingId FROM dbo.App05ASuccessor WHERE TenantId=@Tenant AND DestinationTripId=@Trip;
+                """, scope, tx, ct))).ToArray();
+            if (incoming.Length > 0)
+            {
+                blockers.AddRange(incoming.Select(id => new Blocker("A_SUCCESSOR_FULFILLMENT_PENDING", A, id,
+                    "Còn phần đơn A kế nhiệm chờ thực hiện")));
+            }
+            scheduled = (await db.QueryAsync<(Guid Line, decimal Quantity)>(App02a3Sql.Cmd("""
+                SELECT OrderLineId,SUM(Quantity) FROM dbo.App05ASuccessor
+                WHERE TenantId=@Tenant AND OriginTripId=@Trip GROUP BY OrderLineId;
+                """, scope, tx, ct))).ToDictionary(row => row.Line, row => row.Quantity);
+        }
+
         var aLines = new List<ALine>();
         foreach (var row in aRows)
         {
-            var line = row.ToView();
+            var line = row.ToView() with { Scheduled = scheduled.GetValueOrDefault(row.OrderLineId) };
             if (!row.Proven || row.Granted > row.Confirmed || row.Consumed != row.Delivered ||
                 line.Remaining < 0 || line.Held < 0 || line.OnVehicle < 0)
             {

@@ -209,15 +209,16 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   const unused = await read(request, zero)
   expect(unused).toMatchObject({ state: 'UNUSED', canClose: false })
   const held = await fixture.order(zero, 5)
-  await fixture.reserve(held, 5)
+  const heldQuantity = process.env.APP05_SUCCESSOR_EVIDENCE ? 4 : 5
+  await fixture.reserve(held, heldQuantity)
   const unreserved = await fixture.order(zero, 5)
   const before = await read(request, zero)
   expect(before).toMatchObject({ state: 'BLOCKED', canClose: false })
   expect(before.aLines).toEqual(expect.arrayContaining([
-    expect.objectContaining({ orderId: held.orderId, held: 5, remaining: 5, loaded: 0 }),
+    expect.objectContaining({ orderId: held.orderId, held: heldQuantity, remaining: 5, loaded: 0 }),
     expect.objectContaining({ orderId: unreserved.orderId, held: 0, remaining: 5, loaded: 0 }),
   ]))
-  await checkpoint('shared-pool-fault', { trip: zero, original: 20, fault: 5 })
+  await checkpoint('shared-pool-fault', { trip: zero, original: 15 + heldQuantity, fault: 5 })
   const fixtureCheck = await request.post(d3 + '/unload', {
     headers: auth('RECEIVER'),
     data: { producerId: 'f05-receiver', commandId: crypto.randomUUID(),
@@ -227,7 +228,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   expect(await fixtureCheck.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'LOADED_MANIFEST_NOT_ELIGIBLE' })
   expect(await history(request, zero)).toMatchObject({ closure: null })
   await checkpoint('shared-pool-rejected')
-  await checkpoint('before-zero-handoff', { zero, held, unreserved })
+  await checkpoint('before-zero-handoff', { zero, held, unreserved, heldQuantity })
 
   const warehouse = await open(context, 'RECEIVER', 'settlement?trip=' + zero)
   const response = warehouse.waitForResponse(result => result.url().endsWith(d3 + '/unload') && result.request().method() === 'POST')
@@ -297,4 +298,201 @@ test('day-three blocks unsettled custody and a waiting Close rechecks a concurre
   await expect(record.getByTestId('closure-open-at-close')).toHaveText('3')
   await ops.screenshot({ path: info.outputPath('fresh-close-after-accounting-post.png') })
   await checkpoint('after-accounting-source-fresh-close', receipt)
+})
+type SuccessorRead = {
+  followUpId: string; revision: string; remaining: number; unheld: number; unscheduled: number
+  bindings: { bindingId: string; destinationTripId: string; quantity: number; transferred: number }[]
+  rights: { rightId: string; held: number; neverLoaded: number; returned: number }[]
+}
+type SourceOrder = { orderLineId: string; confirmSourceId: string }
+
+test('successor schedules frozen A lines and transfers backed HELD with rollback, replay and races', async ({ context, request }, info) => {
+  const { main, order } = JSON.parse(await readFile(join(evidence, 'arm-failure.json'), 'utf8')) as { main: string; order: SourceOrder }
+  const { zero, held, unreserved } = JSON.parse(await readFile(join(evidence, 'before-zero-handoff.json'), 'utf8')) as {
+    zero: string; held: SourceOrder; unreserved: SourceOrder
+  }
+  const fixture = await setup(request)
+  const first = fixture.trip('DEV-20261126-A')
+  const second = fixture.trip('DEV-20261126-B')
+  const base = (trip: string, source: SourceOrder) => app + '/' + trip + '/a-remainders/' + source.orderLineId
+  const readSuccessors = (trip: string, source: SourceOrder) => get<SuccessorRead>(request, base(trip, source) + '/successors')
+  const body = (source: SourceOrder, destinationTripId: string, quantity: number) => ({
+    commandId: crypto.randomUUID(), destinationTripId, confirmSourceId: source.confirmSourceId, quantity,
+  })
+  const send = async (path: string, data: ReturnType<typeof body> & {
+    bindingId?: string; originalRightId?: string; followUpId?: string; expectedRevision?: string
+  }, role = 'OPS') => {
+    if (!data.expectedRevision) {
+      const state = await get<SuccessorRead>(request, path.replace(/(assign-successor|transfer-held)$/, 'successors'))
+      data = { ...data, followUpId: state.followUpId, expectedRevision: state.revision }
+    }
+    return request.post(path, { headers: auth(role), data })
+  }
+  const assignSuccessor = async (path: string, data: ReturnType<typeof body>) => {
+    const response = await send(path, data)
+    expect(response.status(), await response.text()).toBe(200)
+    return await response.json() as { bindingId: string }
+  }
+  const assignPath = base(main, order) + '/assign-successor'
+  const transferPath = base(main, order) + '/transfer-held'
+  const heldReport = async () => {
+    const report = await get<{ metrics: { metric: string; unit: string; value: string;
+      sources: { relatedId: string; value: string }[] }[] }>(request, '/api/synthetic/app03/owner-overview', 'OWNER')
+    return report.metrics.find(metric => metric.metric === 'a-hold' && metric.unit === 'EA')!
+  }
+  const originalReport = await heldReport()
+  const totalFor = (report: Awaited<ReturnType<typeof heldReport>>, trip: string) =>
+    report.sources.filter(row => row.relatedId === trip).reduce((sum, row) => sum + Number(row.value), 0)
+  const prior = (await history(request, main)).closure
+  const right = (await readSuccessors(main, order)).rights[0]
+  expect(right).toMatchObject({ held: 15, returned: 15, neverLoaded: 0 })
+  await checkpoint('successor-before', { main, zero, order, held, unreserved })
+
+  expect((await send(assignPath, body(order, first, 1), 'PEER_OPS')).status()).toBe(403)
+  expect((await send(assignPath, body(order, first, 1), 'ASSIGNEE')).status()).toBe(403)
+  expect(await (await send(assignPath, body(held, first, 1))).json()).toMatchObject({ code: 'A_SUCCESSOR_SOURCE_INVALID' })
+  expect(await (await send(assignPath, body(order, zero, 1))).json()).toMatchObject({ code: 'A_SUCCESSOR_TRIP_NOT_ELIGIBLE' })
+
+  const page = await open(context, 'OPS', 'trip-close?trip=' + main)
+  const source = page.locator('[data-source-id="' + order.orderLineId + '"]')
+  const assignment = source.getByRole('form', { name: 'Xếp chuyến kế nhiệm' })
+  await assignment.getByLabel('Chuyến đích').selectOption(first)
+  await assignment.getByLabel('Lượng xếp chuyến (EA)').fill('0000000000000015')
+  const assignmentUrl = '**' + assignPath
+  const assignRequest = page.waitForRequest(req => req.url().endsWith(assignPath) && req.method() === 'POST')
+  await page.route(assignmentUrl, async route => {
+    const completed = await route.fetch()
+    expect(completed.status()).toBe(200)
+    await route.fulfill({ response: completed, json: {} })
+  }, { times: 1 })
+  await assignment.getByRole('button', { name: 'Xếp chuyến' }).click()
+  const assignOriginal = (await assignRequest).postDataJSON()
+  expect(assignOriginal.quantity).toBe('0000000000000015')
+  await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+  await page.reload()
+  const assignReplay = page.waitForResponse(res => res.url().endsWith(assignPath) && res.request().method() === 'POST')
+  await source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' }).click()
+  const assigned = await assignReplay
+  expect(assigned.status()).toBe(200)
+  expect(assigned.request().postDataJSON()).toEqual(assignOriginal)
+  await expect(source.getByText('Đã xếp chuyến kế nhiệm.')).toBeVisible()
+  const assignedBindings = (await readSuccessors(main, order)).bindings
+  expect(assignedBindings).toHaveLength(1)
+  const [binding] = assignedBindings
+  expect(binding).toMatchObject({ destinationTripId: first, quantity: 15, transferred: 0 })
+  expect(await (await send(assignPath, body(order, second, 1))).json()).toMatchObject({ code: 'A_SUCCESSOR_QUANTITY_EXCEEDED' })
+  const revision = await readSuccessors(main, order)
+  const fault = { ...body(order, first, 5), bindingId: binding.bindingId, originalRightId: right.rightId,
+    followUpId: revision.followUpId, expectedRevision: revision.revision }
+  expect(await (await send(transferPath, { ...fault, commandId: crypto.randomUUID(), followUpId: crypto.randomUUID() })).json())
+    .toMatchObject({ code: 'A_SUCCESSOR_SOURCE_INVALID' })
+  expect(await (await send(transferPath, { ...fault, commandId: crypto.randomUUID(), originalRightId: crypto.randomUUID() })).json())
+    .toMatchObject({ code: 'A_HELD_RIGHT_INVALID' })
+  expect(await (await send(transferPath, { ...fault, commandId: crypto.randomUUID(), quantity: 16 })).json())
+    .toMatchObject({ code: 'A_HELD_QUANTITY_EXCEEDED' })
+
+  await checkpoint('successor-arm', { commandId: fault.commandId })
+  expect((await send(transferPath, fault)).status()).toBe(500)
+  expect((await readSuccessors(main, order)).bindings[0].transferred).toBe(0)
+  await checkpoint('successor-rollback')
+  const transferred = await (await send(transferPath, fault)).json()
+  expect(transferred).toMatchObject({ quantity: 5, returned: 5, neverLoaded: 0 })
+  expect(await (await send(transferPath, fault)).json()).toEqual(transferred)
+  expect(await (await send(transferPath, { ...fault, quantity: 6 })).json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
+
+  await page.reload()
+  const transferForm = source.getByRole('form', { name: 'Chuyển HELD' })
+  await transferForm.getByLabel('Phần đã xếp').selectOption(binding.bindingId)
+  await transferForm.getByLabel('Quyền giữ gốc').selectOption(right.rightId)
+  await transferForm.getByLabel('Lượng chuyển HELD (EA)').fill('4')
+  const writeUrl = '**' + transferPath
+  const originalRequest = page.waitForRequest(req => req.url().endsWith(transferPath) && req.method() === 'POST')
+  await page.route(writeUrl, async route => {
+    const completed = await route.fetch()
+    expect(completed.status(), await completed.text()).toBe(200)
+    await route.abort('failed')
+  }, { times: 1 })
+  await transferForm.getByRole('button', { name: 'Chuyển HELD', exact: true }).click()
+  const original = (await originalRequest).postDataJSON() as { commandId: string }
+  await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+  await checkpoint('successor-revoke', { tripId: first, commandId: original.commandId })
+  expect((await readSuccessors(main, order)).bindings).toEqual([{
+    bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9,
+  }])
+
+  const replayButton = source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' })
+  async function replay(status: number) {
+    const response = page.waitForResponse(res => res.url().endsWith(transferPath) && res.request().method() === 'POST')
+    await replayButton.click()
+    const result = await response
+    expect(result.status()).toBe(status)
+    expect(result.request().postDataJSON()).toEqual(original)
+  }
+
+  await page.reload()
+  await replay(403)
+  await expect(replayButton).toBeEnabled()
+  await page.reload()
+  await expect(replayButton).toBeEnabled()
+  await checkpoint('successor-restore')
+  await page.route(writeUrl, async route => {
+    const completed = await route.fetch()
+    expect(completed.status()).toBe(200)
+    await route.fulfill({ status: 409, json: { code: 'A_HELD_QUANTITY_EXCEEDED' } })
+  }, { times: 1 })
+  await replay(409)
+  await expect(replayButton).toBeEnabled()
+  await page.reload()
+  for (const invalidAck of [
+    () => ({}),
+    (receipt: Record<string, unknown>) => ({ ...receipt, bindingId: crypto.randomUUID() }),
+    (receipt: Record<string, unknown>) => ({
+      ...receipt, request: { ...(receipt.request as object), commandId: crypto.randomUUID() },
+    }),
+    (receipt: Record<string, unknown>) => ({ ...receipt, returned: 3, returnedBase: '3.000' }),
+  ]) {
+    await page.route(writeUrl, async route => {
+      const completed = await route.fetch()
+      expect(completed.status()).toBe(200)
+      await route.fulfill({ response: completed, json: invalidAck(await completed.json()) })
+    }, { times: 1 })
+    await replay(200)
+    await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+    await page.reload()
+  }
+  await replay(200)
+  await expect(source.getByText('Đã chuyển lượng HELD.')).toBeVisible()
+  await expect(source.getByText(/Đã chuyển HELD 9 EA/)).toBeVisible()
+  expect((await readSuccessors(main, order)).rights[0].held).toBe(6)
+  const updatedReport = await heldReport()
+  expect(updatedReport.value).toBe(originalReport.value)
+  expect(totalFor(updatedReport, main)).toBe(totalFor(originalReport, main) - 9)
+  expect(totalFor(updatedReport, first)).toBe(totalFor(originalReport, first) + 9)
+
+  const unheldPath = base(zero, unreserved) + '/assign-successor'
+  await assignSuccessor(unheldPath, body(unreserved, second, 5))
+  expect(await readSuccessors(zero, unreserved)).toMatchObject({ remaining: 5, unheld: 5, unscheduled: 0, rights: [] })
+  const heldPath = base(zero, held)
+  const firstBinding = await assignSuccessor(heldPath + '/assign-successor', body(held, first, 3))
+  const secondBinding = await assignSuccessor(heldPath + '/assign-successor', body(held, second, 2))
+  const heldState = await readSuccessors(zero, held)
+  const heldRight = heldState.rights[0]
+  expect(heldRight).toMatchObject({ held: 4, returned: 0, neverLoaded: 4 })
+  const intent = (target: string, bindingId: string, quantity: number) => ({
+    ...body(held, target, quantity), bindingId, originalRightId: heldRight.rightId,
+  })
+  const candidates = [intent(first, firstBinding.bindingId, 3), intent(second, secondBinding.bindingId, 2)]
+  const race = await Promise.all(candidates.map(candidate => send(heldPath + '/transfer-held', {
+    ...candidate, followUpId: heldState.followUpId, expectedRevision: heldState.revision,
+  })))
+  expect(race.map(response => response.status()).sort()).toEqual([200, 409])
+  expect(await race.find(response => !response.ok())!.json()).toMatchObject({ code: 'A_SUCCESSOR_REVISION_CHANGED' })
+  const lost = candidates[race.findIndex(response => !response.ok())]
+  expect(await (await send(heldPath + '/transfer-held', { ...lost, commandId: crypto.randomUUID() })).json())
+    .toMatchObject({ code: 'A_HELD_QUANTITY_EXCEEDED' })
+  const winner = await race.find(response => response.ok())!.json() as { quantity: number }
+  expect(await readSuccessors(zero, held)).toMatchObject({ unheld: 1, rights: [{ held: 4 - winner.quantity }] })
+  expect((await history(request, main)).closure).toEqual(prior)
+  await checkpoint('successor-after', { winner: winner.quantity })
+  await page.screenshot({ path: info.outputPath('successor-partial-transfer.png') })
 })

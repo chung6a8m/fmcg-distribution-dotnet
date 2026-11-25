@@ -41,7 +41,7 @@ internal static partial class App05CloseReadiness
                 return Results.BadRequest(new { Code = "TRIP_CLOSE_INPUT_INVALID" });
 
             return await Run(connections, context.User, tripId, true, input.CommandId, (db, tx, tenant, actor, _) =>
-                Close(db, tx, tenant, actor, tripId, input.CommandId, revision.ToUpperInvariant(), ct), ct);
+                Close(db, tx, tenant, actor, tripId, input.CommandId, revision.ToUpperInvariant(), connections.UsesApp05Successor, ct), ct);
         });
         routes.MapGet("/{tripId:guid}/closure", async (Guid tripId, HttpContext context, TenantConnections connections,
             CancellationToken ct) =>
@@ -51,7 +51,7 @@ internal static partial class App05CloseReadiness
             {
                 var row = await db.QuerySingleOrDefaultAsync<ClosureRow>(App02a3Sql.Cmd(
                     ClosureSql + " AND TripId=@Trip;", new { Tenant = tenant, Trip = tripId }, tx, ct));
-                var preview = await Read(db, tx, tenant, tripId, ops, ct);
+                var preview = await Read(db, tx, tenant, tripId, ops, ct, successor: connections.UsesApp05Successor);
                 return new { Closure = row?.Receipt(), CurrentOpenWorkCount = preview.Work.Length };
             }, ct));
         });
@@ -70,7 +70,7 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<IResult> Close(SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid trip,
-        Guid commandId, string expectedRevision, CancellationToken ct)
+        Guid commandId, string expectedRevision, bool successor, CancellationToken ct)
     {
         var payloadHash = Digest(new { Trip = trip, ExpectedRevision = expectedRevision });
         var scope = new { Tenant = tenant, Actor = actor, CommandId = commandId, Trip = trip };
@@ -95,7 +95,10 @@ internal static partial class App05CloseReadiness
             """, scope, tx, ct)))
             return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
-        var preview = await Read(db, tx, tenant, trip, true, ct, closing: true);
+        if (successor && await SuccessorCommandUsed(db, tx, tenant, actor, commandId, ct))
+            return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
+
+        var preview = await Read(db, tx, tenant, trip, true, ct, closing: true, successor: successor);
         string? target = CloseTarget(preview.Status, preview.State, preview.Coverage, preview.HandoffId);
         string? code = preview.Status is "CLOSED" or "CLOSED_WITH_OPEN_CASES" ? "TRIP_ALREADY_CLOSED"
             : preview.Revision != expectedRevision ? "READINESS_CHANGED"

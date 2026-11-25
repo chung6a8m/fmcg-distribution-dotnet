@@ -74,8 +74,8 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | --- | --- | --- | --- |
 | **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `MERGED / MAIN_CI_VERIFIED` (CI-only; còn investigation riêng) |
 | **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `MERGED / FINAL_HEAD_CI_VERIFIED` |
-| **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
-| **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `NOT_STARTED` |
+| **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `MERGED / LOCAL_DEV_VERIFIED / PR_CI_INCOMPLETE` (#153) |
+| **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `NOT_STARTED` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `NOT_STARTED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
@@ -93,8 +93,8 @@ Các tên dưới đây là **tên logic dự kiến**, chưa phải route/type 
 | `TripCloseReadiness` | Trip, business date, asOf, source revision/digest, độ phủ n/N hoặc unknown, blockers, nghĩa vụ và liên kết A/D/F; phân biệt remaining/held/scheduled/loaded/delivered/closed remainder | .1 |
 | `AssignTripFollowUp` | CommandId, TripId, typed source ref, assignee, DueAt có offset, next action, reason, expected revision; trả stable FollowUpId và audit | .1 |
 | `CloseTrip` | CommandId, TripId, expected revision; server tự suy CLOSED/CLOSED_WITH_OPEN_CASES, lưu một ClosureId, snapshot nguồn, người/hạn lúc chốt và outcome | .2 |
-| `AssignASuccessor` | CommandId, FollowUpId, exact OrderLine/Confirm source, SuccessorTripId, QuantityBase, expected revision; tạo binding kế nhiệm có ID ổn định kể cả HELD=0, không cần StockRight, không cấp giữ hoặc tạo physical/financial effect | .3 |
-| `TransferARemainder` | CommandId, FollowUpId, binding kế nhiệm, exact source/right generation, QuantityBase, expected revision; trả nguồn transfer bảo toàn HELD, không tạo physical/financial effect | .3 |
+| `AssignASuccessor` (`POST /assign-successor`) | CommandId, FollowUpId, exact OrderLine/Confirm source, SuccessorTripId, QuantityBase, expected revision; tạo binding kế nhiệm có ID ổn định kể cả HELD=0, không cần StockRight, không cấp giữ hoặc tạo physical/financial effect | .3 |
+| `TransferARemainder` (`POST /transfer-held`) | CommandId, FollowUpId, binding kế nhiệm, exact source/right generation, QuantityBase, expected revision; trả nguồn transfer bảo toàn HELD, không tạo physical/financial effect | .3 |
 | `ReserveARemainder` | CommandId, FollowUpId, liên kết thực hiện kế nhiệm, QuantityBase, expected revision; cấp giữ từ free pool đúng scope hoặc từ chối không có effect | .4a |
 | Load/Delivery kế nhiệm | Dùng command C.3/C.4 với binding kế nhiệm hợp lệ, quyền chuyến mới và nguồn đơn cũ; tổng lượng/tiền kiểm toàn dòng | .4b |
 | `Propose/ApproveCloseARemainder` | Source line/link, quantity, reason, request identity; approval actor độc lập và version/payload được duyệt; trả nguồn đóng phần còn và release hợp lệ | .5 |
@@ -232,13 +232,27 @@ Lượt `2d88fb52e850491db819809fceab4a6b` trên working tree đạt Chromium 3/
 
 ### APP-05.3 — Liên kết kế nhiệm và chuyển HELD
 
-**Files:** `src/FmcgDms.Api/Persistence/App01a2CommandService.cs`, `App02c2Commands.cs`, `App02c2Reads.cs`, `App02c3Schema.cs`, `App01b1PhysicalStock.cs`, `App02c4Schema.cs`, `App01c1PostingSchema.cs`, `App02DevF03Lots.cs`; migration và `App05AFulfillment.cs` dự kiến. UI chọn chuyến thuộc `TripCloseWorkspace`/chi tiết follow-up; test mới `App05AFulfillmentTests.cs`.
+Migration tiến `202611250003` thêm binding nguồn cùng thế hệ quyền HELD kế nhiệm, chi tiết lô và biên nhận lệnh. Bindings tham chiếu hồ sơ A lúc đóng, Trip gốc/đích và exact OrderLine/Confirm/SKU. Quyền kế nhiệm tham chiếu AReservation và StockRight gốc qua cùng tenant, Trip, kho, SKU và loại A. Chọn Trip có thể xếp một phần lượng còn lại, kể cả Confirm chưa từng Reserve. Tenant Ops cần phân công hiện hành ở cả hai Trip. Chuyến đích phải PREPARED, mới hơn chuyến gốc và thuộc ngày nghiệp vụ DEV đang mở.
 
-- [ ] Lập bảng FK/trigger/query trước khi sửa: `FK_SaleDelivery_AOrderIdentity` có TripId, manifest/right binding, C.3 join Trip của order/right và filter nguồn `STOCK_ALLOC`, C.4 posting join, công thức tổng nạp của F03. `FK_SaleDelivery_FrozenAConfirm` giữ exact Order/Line/SKU; không nhầm nó thành FK Trip và không bỏ bảo vệ Confirm. Đối chiếu thêm `IntegratedSchema.cs`, `App02d3UnloadSchema.cs` và `App03SettlementSchema.cs`; áp dụng migration tiến, giữ nhánh legacy.
-- [ ] Viết ca đỏ hai chuyến đích tranh HELD, partial transfer, rollback/replay, sai right/source/tenant và HELD chưa nạp so với đã trả. Thêm Confirm chưa từng Reserve: có thể gán chuyến bằng nguồn OrderLine/Confirm, không yêu cầu một right chưa tồn tại. Chốt phương trình triệt tiêu old/new right generation trước migration.
-- [ ] Thêm binding thực hiện có nguồn và FK/check tương ứng, giữ bản ghi cũ. `AssignASuccessor` chỉ xếp chuyến kể cả HELD=0, không cần right giả hay transfer số lượng 0; không nhân nghĩa vụ khi gán một phần hoặc cạnh tranh hai chuyến. Command transfer riêng dùng binding để chuyển đúng HELD, giữ tổng allocated MAIN và quantity/cost; không chạm physical/financial ledger. Không nới JOIN/FK chung chỉ để cho một Trip khác qua.
-- [ ] UI chọn Trip đủ quyền/ngày/trạng thái, lượng chuyển không quá HELD; thể hiện còn phải giao và còn chờ giữ. Chọn Trip không hoàn tất công việc. Phần chưa chuyển vẫn có người/hạn.
-- [ ] Kiểm upgrade dữ liệu trước migration, hai tenant, conservation và report không cộng mọi Granted qua thế hệ; commit đề xuất: `feat: transfer held A quantities to successor trips`.
+| Đường hiện hành | Ràng buộc giữ trong .3 và điểm nối tiếp |
+| --- | --- |
+| `IntegratedSchema`, `App01b1PhysicalStock`, `App01c1PostingSchema` | Giữ quyền tồn và manifest cùng tenant/Trip/kho/SKU/loại quyền. Binding và thế hệ mới có FK riêng. |
+| `App02c2Commands` / `App02c2Reads` | Reserve legacy tiếp tục theo đơn gốc. Đọc HELD toàn dòng chỉ đếm quyền tồn vật lý làm nguồn đảm bảo, một lần. Reserve trên binding thuộc .4a. |
+| `App02c3Load` / `App02c3Schema` | JOIN đơn/quyền cùng Trip, nguồn `STOCK_ALLOC` và khóa manifest legacy giữ nguyên. Nạp trên quyền kế nhiệm thuộc .4b. |
+| `App02c4Schema` / `App02c4Delivery` | `FK_SaleDelivery_AOrderIdentity` giữ Trip gốc. `FK_SaleDelivery_FrozenAConfirm` giữ exact Order/Line/SKU. Nhánh posting kế nhiệm cần đường ràng buộc riêng ở .4b. |
+| `App02d3UnloadSchema`, `App03SettlementSchema`, `App02DevF03Lots` | Transfer đọc lượng chưa nạp và đã trả từ nguồn quyền, nạp và D.3/F03 trả lô. D.3 tiếp tục bàn giao nguồn cũ. Close chuyến đích nhận blocker trong lúc binding chờ thực hiện. |
+
+**Bảo toàn.** HELD còn ở Trip gốc bằng lượng chưa từng nạp cộng lượng D.3 đã trả, trừ toàn bộ lượng đã chuyển theo từng nguồn. HELD của Trip đích là tổng các thế hệ trên binding của nó. Hai vế bù trừ từng lượng chuyển. StockRight gốc tiếp tục đảm bảo tồn MAIN và giữ lịch sử physical/cost. Chuyến gốc đã đóng nên C.2/C.3/C.4 legacy không thể sử dụng quyền đó. Báo cáo Owner trừ lượng đã chuyển ở Trip gốc và cộng cùng lượng ở chuyến đích. Lô còn hạn được chọn theo FEFO và lưu riêng hai phần chưa nạp/đã trả. Command lock đến trước lock hai Trip theo thứ tự ID, sau đó transaction Serializable kiểm quyền, revision, số lượng, nguồn và pool MAIN. Biên nhận ghi cùng giao dịch với binding hoặc quyền kế nhiệm.
+
+**Thao tác DEV.** Dùng `./scripts/Run-App03Dev.ps1 -Action Start -ASuccessor` hoặc `-Action Resume -RunId <nonce> -ASuccessor` để mở profile `APP-05.3-v1`. Từ **Chuẩn bị đóng chuyến**, mở việc A trên chuyến đã đóng, xếp chuyến rồi chọn quyền gốc và lượng HELD để chuyển. Việc còn mở giữ người và hạn lúc đóng. Dưới `/api/synthetic/app05/trip-close/trips/{tripId}/a-remainders/{lineId}`, các route là `GET /successors`, `POST /assign-successor` và `POST /transfer-held`. Hai POST nhận FollowUpId, ConfirmSourceId, DestinationTripId, Quantity, ExpectedRevision và CommandId. Transfer nhận thêm BindingId và OriginalRightId.
+
+**Kiểm chứng.** `./scripts/Run-App03Dev.ps1 -Action VerifyASuccessor` chạy hành trình .2, nâng cặp LocalDB synthetic lên .3 rồi chạy Chromium và đối chiếu SQL trong `TestResults/app05-3/`. Ca kiểm gồm chuyển một phần HELD đã trả, hai đích tranh quyền chưa nạp, Confirm chưa Reserve, lỗi trước commit, mất ACK, replay và thu hồi quyền. Nạp/giao tiếp và Reserve mới thuộc APP-05.4a/b.
+
+**Biên nhận local.** Lượt `c92d8f79016e4ce5856ac93708bc22fa` trên working tree của `807f250` đạt Chromium 4/4, 71/71 đối chiếu SQL, zero diff. Lượng đã trả chuyển 9/15 EA qua hai lệnh, báo cáo giữ nguyên tổng HELD và chuyển đúng 9 EA sang Trip đích. Hai Trip tranh quyền chưa nạp 4 EA với yêu cầu 3 và 2, chỉ một lệnh thành công. Confirm 5 EA chưa Reserve xếp được chuyến và không có right/lô giám sát mới. Hai DB scratch được dọn theo nonce. SHA256 `run.json` `81F7E7C068589981FFF9CADFAA817EB12A805061706F0B5CA18A2FE0329C3100`. Rà soát độc lập đã kiểm lại năm findings về FollowUp/revision, thu hồi quyền, FK SKU, báo cáo HELD và D.3.
+
+Lỗi ma trận D.3 trên final source của PR #153 vẫn là lịch sử hosted CI. Lượt hồi quy D.3 local `cf67a8869bf448fba8dca2b4959beb04` đạt Chromium 2/2 và 36/36 ca. Workflow APP-00A chạy `VerifyASuccessor` trên PR .3, bao gồm hành trình đóng chuyến .2 và nâng cấp sang .3.
+
+**Bổ sung theo review PR #154.** Giao diện giữ nguyên CommandId và payload đang chờ khi mất ACK, bị từ chối truy cập hoặc nhận phản hồi thiếu biên nhận khớp nguồn. Server gửi lại mã lệnh, nguồn, binding và lượng từ biên nhận đã lưu sau khi kiểm quyền hiện hành và payload. Giao diện kiểm exact lượng và tổng hai phần chưa nạp/đã trả trước khi xác nhận thành công. Lượt local `cfcda3eeaa7e49658b16f4b91b2b2947` đạt Chromium 4/4 và 75/75 đối chiếu SQL, zero diff. Ca kiểm thu hồi rồi cấp lại quyền sau commit mất ACK, JSON thành công rỗng hoặc sai nguồn/số lượng và xếp chuyến với lượng có số 0 đầu. Cùng lệnh gửi lại giữ một binding và đúng một thế hệ quyền tương ứng. SHA256 `run.json` `F165EE85980B9C564E1327A0D47920D00DF9BFF8AE083B79DE6F7E44AE693E0F`.
 
 ### APP-05.4a — Reserve riêng cho phần chưa giữ
 
@@ -353,4 +367,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Bước tiếp theo:** **APP-05.2 — Quyết định đóng chuyến và lịch sử**. APP-05.1 đã merge với full CI trên source cuối và review độc lập. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.
+**Increment hiện tại:** **APP-05.3 — Liên kết kế nhiệm và chuyển HELD**. APP-05.2 đã merge qua PR #153. CI của PR #153 còn lỗi ở ma trận D.3. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.

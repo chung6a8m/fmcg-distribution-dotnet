@@ -121,7 +121,7 @@ internal static class App03DayBootstrap
         await tx.CommitAsync(ct);
     }
 
-    internal static async Task PrepareDay(DemoRun run, string tenant, DateOnly date, CancellationToken ct)
+    internal static async Task PrepareDay(DemoRun run, string tenant, DateOnly date, CancellationToken ct, bool secondTrip = false)
     {
         await run.Verify(tenant, app03Session: true);
         await using var db = new SqlConnection(run.Connection(tenant));
@@ -134,7 +134,7 @@ internal static class App03DayBootstrap
             """, args, tx, cancellationToken: ct));
         string prefix = "DEV-" + date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         await PrepareTrip("A");
-        if (date == FirstDay) await PrepareTrip("B");
+        if (date == FirstDay || secondTrip) await PrepareTrip("B");
         await tx.CommitAsync(ct);
 
         Task PrepareTrip(string slot) => db.ExecuteAsync(new CommandDefinition("""

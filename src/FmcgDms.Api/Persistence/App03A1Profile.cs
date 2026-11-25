@@ -10,6 +10,7 @@ public static class App03A1Profile
     public const string SettlementName = "APP-03.6-v1";
     public const string FinanceName = "APP-03.7-v1";
     public const string CloseReadinessName = "APP-05.1-v1";
+    public const string SuccessorName = "APP-05.3-v1";
     public const string TripClosureName = "APP-05.2-v1";
     public const string CloseReadinessBootstrapVersion = "APP-05.1-DAILY-CLOSE-v1";
     public const string FieldName = "APP-03.5-v1";
@@ -30,7 +31,7 @@ public static class App03A1Profile
     {
         var profile = config[ConfigurationKey];
         var bootstrap = config[DayBootstrapKey];
-        bool supported = profile is Name or FieldName or SettlementName or FinanceName or CloseReadinessName or TripClosureName;
+        bool supported = profile is Name or FieldName or SettlementName or FinanceName or CloseReadinessName or TripClosureName or SuccessorName;
         if (bootstrap is not null && (bootstrap != DayBootstrapVersion || !supported
             || App02c6Clock.GetConfiguredPath(config, host) is null))
             throw new InvalidOperationException("APP-03.2 requires its supported bootstrap version and a dedicated APP-03 clock.");
@@ -48,7 +49,7 @@ public static class App03A1Profile
             || Enumerable.Range(1, 5).Any(i => !config.GetValue<bool>($"App02C{i}:Enabled"))
             || Features.Any(f => !config.GetValue<bool>($"{f.Tag}:Enabled")))
             throw new InvalidOperationException($"{Name} requires synthetic auth, dedicated C.1–C.5 and DEV-F01/F03/F04/F05.");
-        bool finance = profile is FinanceName or CloseReadinessName or TripClosureName;
+        bool finance = profile is FinanceName or CloseReadinessName or TripClosureName or SuccessorName;
         bool settlement = finance || profile == SettlementName;
         bool field = settlement || profile == FieldName;
         if (field && (bootstrap != DayBootstrapVersion || !config.GetValue<bool>("App03:Workspace")
@@ -78,7 +79,7 @@ public static class App03A1Profile
             var state = await ReadSchema(db, nonce, ct);
             RequireSchema(state, complete: true, field: connections.UsesApp03Field, settlement: connections.UsesApp03Settlement,
                 finance: connections.UsesApp03Finance, closeReadiness: connections.UsesApp05CloseReadiness,
-                tripClosure: connections.UsesApp05TripClosure);
+                tripClosure: connections.UsesApp05TripClosure, successor: connections.UsesApp05Successor);
             if (connections.UsesApp03Settlement) await VerifySettlementSchema(db, ct);
             if (connections.UsesApp03Finance && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
                 SELECT CONVERT(bit, CASE WHEN OBJECT_ID(N'd4app.FinanceQueueProvenance',N'V') IS NOT NULL
@@ -118,6 +119,13 @@ public static class App03A1Profile
                     AND OBJECT_ID(N'dbo.App05ZeroStockHandoffLine',N'U') IS NOT NULL THEN 1 ELSE 0 END);
                 """, cancellationToken: ct)))
                 throw new InvalidOperationException($"{TripClosureName} requires its complete closure schema in both tenant databases.");
+            if (connections.UsesApp05Successor && !await db.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT CONVERT(bit,CASE WHEN OBJECT_ID(N'dbo.App05ASuccessor',N'U') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.App05AHeldTransfer',N'U') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.App05AHeldTransferLot',N'U') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.App05ASuccessorCommand',N'U') IS NOT NULL THEN 1 ELSE 0 END);
+                """, cancellationToken: ct)))
+                throw new InvalidOperationException($"{SuccessorName} requires the complete successor schema in both tenant databases.");
         }
     }
 
@@ -135,8 +143,10 @@ public static class App03A1Profile
     }
 
     internal static IEnumerable<(string? Tag, long Version)> MigrationSteps(bool field, bool settlement, bool finance,
-        bool closeReadiness = false, bool tripClosure = false)
+        bool closeReadiness = false, bool tripClosure = false, bool successor = false)
     {
+        if (successor && !tripClosure)
+            throw new InvalidOperationException($"{SuccessorName} requires the {TripClosureName} predecessor.");
         if (tripClosure && !closeReadiness)
             throw new InvalidOperationException($"{TripClosureName} requires the {CloseReadinessName} predecessor.");
         if (closeReadiness && !(field && settlement && finance))
@@ -161,6 +171,7 @@ public static class App03A1Profile
         }
         if (closeReadiness) yield return (CloseReadinessName, App05FollowUpSchema.Version);
         if (tripClosure) yield return (TripClosureName, App05TripClosureSchema.Version);
+        if (successor) yield return (SuccessorName, App05AFulfillmentSchema.Version);
     }
 
     internal static Task<SchemaState> ReadSchema(SqlConnection db, string nonce, CancellationToken ct = default) =>
@@ -189,10 +200,10 @@ public static class App03A1Profile
             """, new { nonce, BaseVersion }, cancellationToken: ct));
 
     internal static void RequireSchema(SchemaState state, bool complete, bool field = false, bool settlement = false,
-        bool finance = false, bool closeReadiness = false, bool tripClosure = false)
+        bool finance = false, bool closeReadiness = false, bool tripClosure = false, bool successor = false)
     {
         var installed = state.FeatureVersions.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(long.Parse).ToHashSet();
-        var versions = MigrationSteps(field, settlement, finance, closeReadiness, tripClosure);
+        var versions = MigrationSteps(field, settlement, finance, closeReadiness, tripClosure, successor);
         if (!state.Owned || !state.HasBase || (field && !state.HasD1D2) || (complete && !state.HasFeatureTables) ||
             !installed.SetEquals((complete ? versions : versions.Take(installed.Count)).Select(f => f.Version)))
             throw new InvalidOperationException(complete

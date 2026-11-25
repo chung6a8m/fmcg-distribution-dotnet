@@ -35,7 +35,7 @@ internal static partial class App05CloseReadiness
                 ExpectedRevision = revision.ToUpperInvariant()
             };
             return await Run(connections, context.User, tripId, true, request.CommandId, (db, tx, tenant, actor, _) =>
-                Assign(db, tx, tenant, actor, tripId, request, dueAt, connections.UsesApp05TripClosure, ct), ct);
+                Assign(db, tx, tenant, actor, tripId, request, dueAt, connections.UsesApp05TripClosure, connections.UsesApp05Successor, ct), ct);
         });
 
     private static bool TextValid(string? value, int maximum) =>
@@ -53,7 +53,7 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<IResult> Assign(SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid trip,
-        AssignInput request, DateTimeOffset dueAt, bool closing, CancellationToken ct)
+        AssignInput request, DateTimeOffset dueAt, bool closing, bool successor, CancellationToken ct)
     {
         var scope = new { Tenant = tenant, Actor = actor, request.CommandId };
         var payloadHash = Digest(new
@@ -76,7 +76,10 @@ internal static partial class App05CloseReadiness
             """, scope, tx, ct)))
             return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
-        var preview = await Read(db, tx, tenant, trip, true, ct, closing);
+        if (successor && await SuccessorCommandUsed(db, tx, tenant, actor, request.CommandId, ct))
+            return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
+
+        var preview = await Read(db, tx, tenant, trip, true, ct, closing, successor);
         if (!preview.CanAssign || preview.Revision != request.ExpectedRevision)
             return Results.Conflict(new { Code = preview.CanAssign ? "READINESS_CHANGED" : "TRIP_ASSIGNMENT_NOT_OPEN" });
         if (!preview.Work.Any(row => row.SourceKind == request.SourceKind && row.SourceId == request.SourceId))
