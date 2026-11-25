@@ -1,3 +1,4 @@
+import { linkedRecord } from '../workspace/linked-record'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
@@ -101,8 +102,8 @@ export function RefundWorkspace() {
   </main>
 }
 
-export function RefundPanel({ session: { token, identity }, offline, integrated = false, canOpenReturn = false }: {
-  session: Session; offline: boolean; integrated?: boolean; canOpenReturn?: boolean
+export function RefundPanel({ session: { token, identity }, offline, integrated = false, canOpenReturn = false, linkedRefund }: {
+  session: Session; offline: boolean; integrated?: boolean; canOpenReturn?: boolean; linkedRefund?: string
 }) {
   const roleActions = actions[identity.role]
   const key = 'dev-f08.refund.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
@@ -255,7 +256,7 @@ export function RefundPanel({ session: { token, identity }, offline, integrated 
         <Button disabled={busy || offline} onClick={() => void resolve(pending, false)}>Gửi lại yêu cầu</Button>
       </div>}
     </section>
-    {ledger && <RefundHistory ledger={ledger} integrated={integrated} canOpenReturn={canOpenReturn} />}
+    {ledger && <RefundHistory ledger={ledger} integrated={integrated} canOpenReturn={canOpenReturn} linkedRefund={linkedRefund} />}
   </>
 }
 
@@ -297,7 +298,9 @@ const caseStatus = {
   ELIGIBLE: 'Chờ ghi credit',
 } as const
 
-function RefundHistory({ ledger, integrated, canOpenReturn }: { ledger: Ledger; integrated: boolean; canOpenReturn: boolean }) {
+function RefundHistory({ ledger, integrated, canOpenReturn, linkedRefund }: {
+  ledger: Ledger; integrated: boolean; canOpenReturn: boolean; linkedRefund?: string
+}) {
   return <>
     <section className="panel panel-content sales-pane" aria-label="Công nợ theo lần giao">
       <h2>Công nợ theo lần giao</h2>
@@ -347,7 +350,7 @@ function RefundHistory({ ledger, integrated, canOpenReturn }: { ledger: Ledger; 
     <section className="panel panel-content sales-pane" aria-label="Danh sách hoàn tiền">
       <h2>Danh sách hoàn tiền</h2>
       {ledger.refunds.length === 0 ? <p>Chưa có đề nghị chi hoàn tiền.</p> : <ul className="c1-rows">
-        {ledger.refunds.map(row => <li key={row.id}><div className="c3-source">
+        {ledger.refunds.map(row => <li key={row.id} {...linkedRecord(row.id, linkedRefund)}><div className="c3-source">
           <strong>{row.customer} · {statuses[row.status]}</strong>
           {integrated && row.status === 'APPROVED' && <p>{row.payoutWitnessed ? 'Đã xác minh chứng từ thực chi' : 'Chờ xác minh chứng từ thực chi'}</p>}
           <p>{vnd.format(row.amount)} VND</p>

@@ -8,9 +8,9 @@ public sealed partial class App01dCashierUnloadService
 {
     private sealed record D3Manifest(Guid Id, Guid WarehouseLocationId, Guid VehicleLocationId,
         bool IsC3, string Status, string WarehouseKind, bool WarehouseActive);
-    private sealed record D3Right(Guid Id, Guid Warehouse, Guid Sku, string Kind, decimal Granted,
+    internal sealed record D3Right(Guid Id, Guid Warehouse, Guid Sku, string Kind, decimal Granted,
         decimal Consumed, decimal Released, string Status, bool HasAllocationProof);
-    private sealed record D3LoadedLine(Guid Id, Guid TripManifestId, Guid? SourceLine, Guid RightId,
+    internal sealed record D3LoadedLine(Guid Id, Guid TripManifestId, Guid? SourceLine, Guid RightId,
         Guid Sku, string Kind, decimal Loaded, decimal Issued, bool HasMovementProof, bool HasValidIssues)
     {
         public decimal Remaining => Loaded - Issued;

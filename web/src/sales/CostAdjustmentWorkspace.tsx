@@ -1,3 +1,4 @@
+import { linkedRecord } from '../workspace/linked-record'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
@@ -90,7 +91,9 @@ export function CostAdjustmentWorkspace() {
   </main>
 }
 
-export function AdjustmentPanel({ session: { token, identity }, offline }: { session: Session; offline: boolean }) {
+export function AdjustmentPanel({ session: { token, identity }, offline, linkedProposal }: {
+  session: Session; offline: boolean; linkedProposal?: string
+}) {
   const mayPropose = identity.role === 'finance'
   const action = mayPropose ? 'Đề nghị điều chỉnh' : 'Duyệt điều chỉnh'
   const key = 'dev-f06.adjustment.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, identity.role])
@@ -254,7 +257,7 @@ export function AdjustmentPanel({ session: { token, identity }, offline }: { ses
       <h2>Danh sách điều chỉnh</h2>
       {ledger && ledger.proposals.length === 0 && <p>Chưa có đề nghị điều chỉnh.</p>}
       {ledger && ledger.proposals.length > 0 && <ul className="c1-rows">
-        {ledger.proposals.map(row => <li key={row.id}><div className="c3-source">
+        {ledger.proposals.map(row => <li key={row.id} {...linkedRecord(row.id, linkedProposal)}><div className="c3-source">
           <strong>{row.sku} · {row.status === 'APPROVED' ? 'Đã duyệt' : 'Chờ duyệt'}</strong>
           <dl className="sales-facts">
             <dt>Giá vốn gốc</dt><dd>{vnd.format(row.originalCost)} VND</dd>

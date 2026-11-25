@@ -39,7 +39,8 @@ internal static class App03WorkspaceRoutes
             var accountingAccess = finance ? WhenGranted(() => accountingService.FinanceRoles(user, ct)) : Task.FromResult<string[]?>(null);
             var ownerAccess = finance && user.HasClaim("synthetic_role", "owner")
                 ? WhenGranted(() => App03OwnerReport.Session(connections, user, ct)) : Task.FromResult<string?>(null);
-            await Task.WhenAll(orderAccess, returnAccess, handoffAccess, advanceAccess, giftAccess, adjustmentAccess, refundAccess, accountingAccess, ownerAccess);
+            var closeReadinessAccess = App05CloseReadiness.Session(connections, user, ct);
+            await Task.WhenAll(closeReadinessAccess, orderAccess, returnAccess, handoffAccess, advanceAccess, giftAccess, adjustmentAccess, refundAccess, accountingAccess, ownerAccess);
             var orders = await orderAccess;
             var returns = await returnAccess;
             var handoff = await handoffAccess;
@@ -50,7 +51,7 @@ internal static class App03WorkspaceRoutes
             var accounting = await accountingAccess;
             var owner = await ownerAccess;
             if (orders is null && returns is null && handoff is null && advance is null && gifts is null
-                && adjustment is null && refund is null && accounting is null && owner is null)
+                && adjustment is null && refund is null && accounting is null && owner is null && !await closeReadinessAccess)
                 return Results.Forbid();
 
             return Results.Ok(new
@@ -70,6 +71,7 @@ internal static class App03WorkspaceRoutes
                 RefundRole = refund?.Role,
                 AccountingRoles = accounting ?? [],
                 Owner = owner is not null,
+                TripClose = await closeReadinessAccess,
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt
             });

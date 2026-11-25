@@ -1068,6 +1068,12 @@ jobs:
       - name: APP-03.7 Finance queue, correction, costing and refund through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyFinance
+      - name: APP-05.1 trip readiness and audited assignment through Chromium and LocalDB
+        shell: pwsh
+        run: ./scripts/Run-App03Dev.ps1 -Action VerifyCloseReadiness
+      - name: APP-05.1 guarded predecessor upgrade and interrupted migration recovery
+        shell: pwsh
+        run: ./scripts/Run-App03Dev.ps1 -Action VerifyCloseReadinessUpgrade
       - name: Upload browser test evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -1082,6 +1088,8 @@ jobs:
             TestResults/app03-5/
             TestResults/app03-6/
             TestResults/app03-7/
+            TestResults/app05-1/
+            TestResults/app05-1-upgrade/
           if-no-files-found: warn
       - name: Upload test evidence
         if: always()

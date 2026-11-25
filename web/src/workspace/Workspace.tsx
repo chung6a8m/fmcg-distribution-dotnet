@@ -15,6 +15,7 @@ const BSale = lazy(() => import('../sales/BSaleWorkspace').then(m => ({ default:
 const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ScopedArReport })))
 const Returns = lazy(() => import('../sales/ReturnWorkspace').then(m => ({ default: m.ReturnWorkspace })))
 
+const TripClose = lazy(() => import('../sales/TripCloseWorkspace').then(m => ({ default: m.TripCloseWorkspace })))
 const Settlement = lazy(() => import('../sales/MixedTripWorkspace').then(m => ({ default: m.MixedTripWorkspace })))
 const Advances = lazy(() => import('../sales/AdvanceWorkspace').then(m => ({ default: m.AdvancePanel })))
 const Gifts = lazy(() => import('../sales/GiftWorkspace').then(m => ({ default: m.GiftPanel })))
@@ -38,6 +39,7 @@ type Access = Identity & {
   refundRole?: 'finance' | 'cashier' | 'case_checker' | null
   accountingRoles?: string[]
   owner?: boolean
+  tripClose?: boolean
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -52,6 +54,7 @@ const routes = [
   { id: 'delivery', label: 'Giao hàng A', group: 'Hiện trường', show: (a: Access) => a.sales },
   { id: 'b-sale', label: 'Bán và giao hàng B', group: 'Hiện trường', show: (a: Access) => !!a.fieldB && a.sales },
   { id: 'visits', label: 'Viếng thăm', group: 'Hiện trường', show: (a: Access) => a.sales },
+  { id: 'trip-close', label: 'Chuẩn bị đóng chuyến', group: 'Vận hành', show: (a: Access) => a.tripClose === true },
   { id: 'settlement', label: 'Đối soát chuyến và nộp tiền', group: '', show: (a: Access) => !!a.handoffRoles?.length },
   { id: 'advances', label: 'Tạm ứng và hoàn ứng', group: '', show: (a: Access) => !!a.advanceRole },
   { id: 'gifts', label: 'Quà khuyến mại', group: '', show: (a: Access) => !!a.giftRole },
@@ -106,6 +109,7 @@ export function WorkspaceEntry({ fallback, fieldRoute, settlementRoute }: {
       .then(health => {
         if (request.signal.aborted) return
         const settlement = health?.workspaceProfile === 'APP-03.6-v1' || health?.workspaceProfile === 'APP-03.7-v1'
+          || health?.workspaceProfile === 'APP-05.1-v1'
         const field = health?.workspaceProfile === 'APP-03.5-v1' || settlement
         if (settlement && settlementRoute) {
           location.replace(settlementRoute)
@@ -285,7 +289,8 @@ function Workspace() {
     {authorized && <WorkArea key={JSON.stringify([identityKey(authorized.access), authorized.access.sales,
       authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
       authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole,
-      authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole, authorized.access.owner])} {...authorized} offline={offline} />}
+      authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole, authorized.access.owner,
+      authorized.access.tripClose])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -368,6 +373,9 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
   const groups = [...new Set(allowed.map(groupOf))]
   const delivery = query.get('delivery') ?? ''
   const requestedOrder = query.get('order') ?? ''
+  const caseId = query.get('case') ?? ''
+  const linkedSource = query.get('source') ?? ''
+  const linkedId = guid.test(linkedSource) ? linkedSource : undefined
   const requestedSource = query.get('handoffSource') ?? ''
   const requestedTrace = query.get('handoffTrace') ?? ''
   const requestedTrip = query.get('trip') ?? ''
@@ -380,7 +388,7 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         <strong>{group}</strong>
         {allowed.filter(route => groupOf(route) === group).map(route => <a
           key={route.id} className="button button-secondary" href={'/work/' + route.id
-            + (trip && ['delivery', 'load', 'b-sale', 'b-stock', 'settlement'].includes(route.id) ? '?trip=' + trip : '')}
+            + (trip && ['delivery', 'load', 'b-sale', 'b-stock', 'settlement', 'trip-close'].includes(route.id) ? '?trip=' + trip : '')}
           aria-current={route.id === current?.id ? 'page' : undefined}>{route.label}</a>)}
       </div>)}
     </nav>
@@ -392,11 +400,19 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         : 'Màn hình này cần quyền phù hợp và profile DEV có hỗ trợ.'}</p>}
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
         {current?.id === 'owner' && (offline ? <p role="status">Kết nối lại để đọc số liệu Chủ NPP.</p> : <Owner key={token} token={token} />)}
+        {current?.id === 'trip-close' && <TripClose token={token} identity={access} offline={offline}
+          tripId={trip} onTripChange={saveTrip} access={{
+            orders: access.sales || access.warehouse, settlement: !!access.handoffRoles?.length,
+            finance: !!access.accountingRoles?.length, returns: access.returnRole !== null,
+            costs: !!access.adjustmentRole, refunds: !!access.refundRole,
+          }} />}
         {current?.id === 'finance' && <Accounting token={token} identity={access}
-          roles={access.accountingRoles ?? []} offline={offline} />}
-        {current?.id === 'cost-adjustments' && access.adjustmentRole && <Adjustment offline={offline}
+          roles={access.accountingRoles ?? []} offline={offline}
+          startSource={linkedId} startDelivery={guid.test(delivery) ? delivery : undefined}
+          startCase={guid.test(caseId) ? caseId : undefined} />}
+        {current?.id === 'cost-adjustments' && access.adjustmentRole && <Adjustment offline={offline} linkedProposal={linkedId}
           session={{ token, identity: { ...access, role: access.adjustmentRole } }} />}
-        {current?.id === 'refunds' && access.refundRole && <Refunds offline={offline} integrated canOpenReturn={access.returnRole != null}
+        {current?.id === 'refunds' && access.refundRole && <Refunds offline={offline} integrated canOpenReturn={access.returnRole != null} linkedRefund={linkedId}
           session={{ token, identity: { ...access, role: access.refundRole } }} />}
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
         {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr}
@@ -414,15 +430,19 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} requestedTrip={query.get('trip')}
           onTripChange={saveTrip} />}
         {current?.id === 'visits' && <Visit token={token} identity={access} startCustomer={customer} onCustomerChange={saveCustomer} />}
-        {current?.id === 'settlement' && access.handoffRoles && <Settlement
-          workspaceSession={settlementSession} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'settlement' && access.handoffRoles && <>
+          {access.tripClose && trip && <a className="button button-secondary" href={'/work/trip-close?trip=' + trip}>
+            Chuẩn bị đóng chuyến
+          </a>}
+          <Settlement workspaceSession={settlementSession} startTrip={trip} onTripChange={saveTrip} />
+        </>}
         {current?.id === 'advances' && access.advanceRole && <><h2>Tạm ứng và hoàn ứng</h2>
           <Advances session={{ token, identity: { ...access, role: access.advanceRole } }} /></>}
         {current?.id === 'gifts' && access.giftRole && <><h2>Quà khuyến mại</h2>
           <Gifts session={{ token, identity: { ...access, role: access.giftRole } }} offline={offline} /></>}
         {current?.id === 'returns' && access.returnRole && <Returns
           workspaceSession={{ token, identity: { ...access, role: access.returnRole } }}
-          startSource={source} startDelivery={access.returnRole === 'sales' && guid.test(delivery) ? delivery : undefined}
+          startSource={source} linkedCase={linkedId} startDelivery={access.returnRole === 'sales' && guid.test(delivery) ? delivery : undefined}
           onSourceChange={id => remember('source', id)} />}
       </Suspense>
     </div>

@@ -157,7 +157,7 @@ public sealed partial class App01dCashierUnloadService
             FROM Loaded l FULL OUTER JOIN Issued i ON i.LotId=l.LotId;
             """, new { Tenant = tenant, ManifestLine = manifestLine }, tx, ct));
 
-    private static async Task<D3Right[]> ReadD3Rights(SqlConnection db, SqlTransaction tx,
+    internal static async Task<D3Right[]> ReadD3Rights(SqlConnection db, SqlTransaction tx,
         string tenant, Guid trip, CancellationToken ct) =>
         (await db.QueryAsync<D3Right>(Sql("""
             SELECT r.Id,r.StockLocationId AS Warehouse,r.SkuId AS Sku,r.RightKind AS Kind,
@@ -182,7 +182,7 @@ public sealed partial class App01dCashierUnloadService
             WHERE r.TenantId=@Tenant AND r.TripId=@Trip;
             """, new { Tenant = tenant, Trip = trip }, tx, ct))).ToArray();
 
-    private static async Task<D3LoadedLine[]> ReadD3LoadedLines(SqlConnection db, SqlTransaction tx,
+    internal static async Task<D3LoadedLine[]> ReadD3LoadedLines(SqlConnection db, SqlTransaction tx,
         string tenant, Guid trip, CancellationToken ct) =>
         (await db.QueryAsync<D3LoadedLine>(Sql("""
             SELECT l.Id,l.TripManifestId,l.LoadSourceLineId AS SourceLine,l.StockRightId AS RightId,
