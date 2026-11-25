@@ -10,7 +10,43 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.classification.outputs.mode }}
+      receipt: ${{ steps.classification.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Classify complete source and integration changes
+        id: classification
+        env:
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/classify_app00a_pr.py
+      - name: Verify immutable business snapshot
+        shell: pwsh
+        run: ./scripts/Verify-Business.ps1
+      - name: Validate business contract and links
+        run: python tools/validate_business.py
+      - name: Validate E-SIM-01
+        run: python tools/validate_e_sim_01.py
+      - name: Upload APP-00A classification receipt
+        if: ${{ !cancelled() && steps.classification.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-classification-${{ github.run_attempt }}
+          path: TestResults/app00a-classification.json
+          if-no-files-found: error
+
   core_sql:
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -771,6 +807,8 @@ jobs:
           if-no-files-found: warn
 
   web_sales:
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -933,6 +971,8 @@ jobs:
           if-no-files-found: warn
 
   app03:
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -1052,6 +1092,8 @@ jobs:
           if-no-files-found: warn
 
   distribution:
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -1148,14 +1190,18 @@ jobs:
     name: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [core_sql, web_sales, app03, distribution]
+    needs: [classify, core_sql, web_sales, app03, distribution]
     if: ${{ always() }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Test APP-00A job result gate
         run: python3 -B -m unittest discover -s tests/ci -p 'test_*.py' -v
-      - name: Require all APP-00A execution jobs to succeed
+      - name: Verify APP-00A classification and execution results
         env:
           APP00A_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
         run: python3 -B tools/verify_app00a_jobs.py

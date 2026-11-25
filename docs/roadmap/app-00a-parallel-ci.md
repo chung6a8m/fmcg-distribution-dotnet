@@ -36,7 +36,7 @@ Workflow vẫn là `APP-00A foundation`, chạy trên mọi `pull_request` và p
 | `web_sales` | npm install và hai audit; Workbox/Tailwind/health/theme/tokens; build PWA, browser chung và kiểm tra PWA build; C.1–C.6; F01–F08 |
 | `app03` | App03A1; Verify, VerifyWorkspace, VerifyHandoff, VerifyField, VerifySettlement, VerifyFinance |
 | `distribution` | D.1–D.3 đầy đủ browser, SQL matrix, fault/rollback và restart recovery |
-| `validate` | Check tổng hợp phụ thuộc cả bốn worker, luôn đánh giá kết quả và chỉ thành công khi đủ bốn kết quả `success` |
+| `validate` | Check tổng hợp luôn đánh giá kết quả; đường full yêu cầu đủ bốn worker `success`; ngoại lệ PR tài liệu ở mục 8 yêu cầu proof phân loại và bốn worker `skipped` |
 
 Mỗi worker có checkout, toolchain, dependency và LocalDB setup phù hợp. Không truyền database hoặc build output giữa worker. Các runner C/D/F/APP-03 vẫn chạy tuần tự trong nhóm, giữ cổng API 5116, nonce, migration, cleanup và kiểm tra source của assembly như trước.
 
@@ -44,18 +44,19 @@ Giữ nguyên SDK `10.0.404`, Release, Node 26 và floor bảo mật `26.13.1`. 
 
 ## 3. Check tổng hợp và nguồn được kiểm chứng
 
-`validate` dùng `if: always()` và `needs: [core_sql, web_sales, app03, distribution]`. Gate nhận JSON kết quả qua biến môi trường, kiểm đủ đúng bốn job và từ chối mọi trạng thái khác `success`, dữ liệu sai kiểu, thiếu job/result hoặc JSON lỗi. Unit tests chạy trong check tổng hợp và kiểm cả CLI exit code.
+Thiết kế ban đầu dùng `if: always()` và `needs: [core_sql, web_sales, app03, distribution]`. Follow-up mục 8 thêm `classify` vào dependencies và proof riêng cho PR tài liệu; điều kiện đường full vẫn yêu cầu đủ bốn worker `success`. Gate từ chối dữ liệu sai kiểu, thiếu job/result hoặc JSON lỗi. Unit tests chạy trong check tổng hợp và kiểm cả CLI exit code.
 
-Một worker bị lỗi setup, fail assertion, bị hủy hoặc skip không thể tạo kết quả tổng hợp xanh. Job upload evidence giữ `always()` tại nơi tạo evidence; trạng thái aggregate không thay thế các verifier nội dung của từng worker.
+Ở đường full, một worker bị lỗi setup, fail assertion, bị hủy hoặc skip không thể tạo kết quả tổng hợp xanh. Đường docs chỉ chấp nhận cả bốn skip có proof hợp lệ; không được coi là runtime PASS. Job upload evidence giữ `always()` tại nơi tạo evidence; trạng thái aggregate không thay thế các verifier nội dung của từng worker.
 
 Giữ checkout mặc định của pull-request workflow. `SourceHeadSha` của bằng chứng .NET ghi PR head; `WorkflowSha` ghi `github.sha`. DEV runners tiếp tục lấy source thực sự checkout bằng `git rev-parse HEAD` và so với version assembly. Biên nhận PR phân biệt các SHA này; không đổi checkout sang PR head để làm các SHA trùng nhau.
 
 ## 4. Artifact và cách đọc evidence
 
-Toàn bộ evidence của APP-00A gồm các artifact dưới đây. Hai tên gốc được giữ cho worker tương ứng; evidence các nhóm được tách sang artifact riêng, nên không chỉ tải hai artifact tên cũ để kết luận đã đủ toàn workflow.
+Toàn bộ evidence của APP-00A gồm artifact phân loại và các artifact runtime dưới đây. Đường full có artifact phân loại cùng evidence từ bốn worker; đường PR tài liệu chỉ có artifact phân loại, còn các worker runtime là `NOT_RUN`. Hai tên gốc được giữ cho worker tương ứng; evidence các nhóm được tách sang artifact riêng, nên không chỉ tải hai artifact tên cũ để kết luận đã đủ toàn workflow.
 
 | Producer | Artifact | Nội dung |
 | --- | --- | --- |
+| `classify` | `app00a-classification-${{ github.run_attempt }}` | Proof phân loại PR; artifact duy nhất trên đường PR tài liệu thành công |
 | `core_sql` | `app00a-test-evidence` | TRX, coverage, oracle và provenance .NET; chẩn đoán LocalDB nếu bootstrap lỗi |
 | `web_sales` | `app00b-playwright-evidence` | Browser/PWA chung, C/F browser outputs trong các đường dẫn đang có |
 | `web_sales` | `app00a-test-evidence-web-sales` | `TestResults` của C/F và chẩn đoán LocalDB |
@@ -104,3 +105,14 @@ Follow-up mục 3 được Owner yêu cầu ngày 25/11/2026: [chính sách conc
 ## 7. Đo package cache và dùng lại build trong worker
 
 Follow-up mục 5 được Owner yêu cầu ngày 25/11/2026 trên main sau PR #147: [số đo và thiết kế build/cache](app-00a-build-cache.md). Sau thí nghiệm cold/exact-hit và đối chứng đường dẫn package, cải tiến được chọn là opt-in dùng lại Release build vừa tạo và NuGet global-packages dưới thư mục tạm của job; archive cache giữa các lượt bị bỏ vì lợi ích chưa rõ sau overhead. Hai launcher kiểm tra source và output trước khi bỏ build lặp; giữ sơ đồ bốn worker và toàn bộ gate, không truyền compiled artifact giữa worker. Đây là thay đổi kế tiếp so với phạm vi ban đầu ở mục 2; baseline, các giới hạn và negative evidence được ghi riêng.
+
+## 8. Phân loại PR tài liệu
+
+Follow-up mục 6 được Owner yêu cầu ngày 25/11/2026 trên main sau PR #148:
+[chính sách phân loại PR tài liệu](docs-pr-ci.md). Job Ubuntu `classify` giữ
+business/link/E-SIM checks và kiểm toàn bộ PR theo danh sách 16 đường dẫn văn
+bản đã rà soát. Bốn worker có prerequisite này nhưng vẫn độc lập với nhau;
+chỉ skip khi có quyết định docs-only thành công. `validate` giữ tên và
+`always()`, phân biệt rõ full runtime PASS với docs **runtime workers NOT_RUN**.
+Push `main`, file ngoài danh sách hoặc dữ liệu diff không đủ tin cậy đều chạy
+full. Các workflow đồng hành và toàn bộ steps trong bốn worker giữ nguyên.
