@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / APP05_0_SOURCE_CANDIDATE / CI_PENDING`. Commit lập roadmap là `DOCS_ONLY`; các checkbox chỉ ghi nhận công việc đã thực sự thực hiện; APP-05.1–.7 chưa triển khai.
+**Ngày chốt roadmap:** 24/11/2026. **Trạng thái:** `ROADMAP_APPROVED / APP05_0_MAIN_CI_VERIFIED / APP05_1_NEXT`. Commit lập roadmap là `DOCS_ONLY`; APP-05.0 đã hoàn thành trong phạm vi CI synthetic/nonproduction qua PR #144–#149, với biên nhận merge/main CI ngày 25/11/2026 ở mục 5; các checkbox chỉ ghi nhận công việc đã thực sự thực hiện; APP-05.1–.7 chưa triển khai.
 
 **Goal:** Owner tự hoàn tất một ca trên laptop Windows với dữ liệu mẫu APP-03: xử lý A chưa giao, đóng chuyến có bàn giao trách nhiệm, rồi tiếp tục đúng đơn và nguồn vào ngày sau trên cùng database.
 
@@ -72,8 +72,8 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 
 | Increment | Phụ thuộc | Đầu ra review được | Trạng thái |
 | --- | --- | --- | --- |
-| **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `SOURCE_CANDIDATE / CI_PENDING` |
-| **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 trước merge code | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `NOT_STARTED` |
+| **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `MERGED / MAIN_CI_VERIFIED` (CI-only; còn investigation riêng) |
+| **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt, CI final HEAD của .1 vẫn bắt buộc | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `NOT_STARTED / NEXT` |
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `NOT_STARTED` |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `NOT_STARTED` |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `NOT_STARTED` |
@@ -114,10 +114,10 @@ Follow-up ngày 25/11/2026, sau merge PR #147: Owner yêu cầu [đo rồi áp d
 
 - [x] Ghi thời lượng, step cuối và nguyên nhân hủy; tách lỗi môi trường/timeout khỏi assertion, chỉ ra các gate/artifact chưa chạy được.
 - [x] Chọn thay đổi nhỏ nhất đủ tin cậy: budget có căn cứ hoặc chia các runner độc lập thành job. Nếu tách, mỗi job giữ scratch/nonce riêng, setup cần thiết, source SHA và artifact không đè nhau. Không xóa test hoặc biến failure thành success.
-- [ ] Xác minh YAML/runner và chạy CI trên source cuối. Đối chiếu danh sách gate trước/sau, upload artifact cả khi fail và cleanup đúng phạm vi. Có lượt main hoàn tất trước khi đóng .0.
-- [ ] Commit đề xuất: `ci: stabilize LocalDB validation budget`; ghi run/source thật trong PR và hàng trạng thái, không đánh dấu .0 xong chỉ vì đổi timeout.
+- [x] Xác minh YAML/runner và chạy CI trên source cuối. Đối chiếu danh sách gate trước/sau, upload artifact cả khi fail và giữ cleanup/guard đúng phạm vi; đối chiếu full main trên merge #149. Xem biên nhận closeout dưới đây và phạm vi kiểm tra artifact tại từng PR.
+- [x] Commit `ci: stabilize LocalDB validation budget` đã merge trong PR #144; các cải tiến tiếp theo ở #145–#149. Ghi run/source thực và trạng thái trong roadmap; .0 đóng theo full main PASS cuối, không chỉ theo thay đổi timeout.
 
-#### Biên nhận APP-05.0 — thay đổi nguồn, chờ CI và review (24/11/2026)
+#### Biên nhận lịch sử APP-05.0 — thay đổi nguồn, chờ CI và review (24/11/2026)
 
 Đối chiếu tại `main` `a795b844dd45fa38edc17b6dfb2f9dde77c6fe36`, tree `e065ca2c2ed99a33423d88423a6ea755756ba402`. Thời lượng dưới đây là elapsed từ `run_started_at` tới `updated_at` của workflow, gồm cả phần kết thúc job; không phải riêng thời lượng test.
 
@@ -136,7 +136,50 @@ Các lượt PR 45369399575, 45367280154, 45365300779, 45360021334 và 453553011
 
 **Kiểm nguồn:** đối chiếu workflow trước/sau, hoàn nguyên đúng đoạn comment/budget mới cho kết quả byte-for-byte bằng text nguồn đã đọc; không thêm/xóa/đổi thứ tự step, tên hay artifact path. Đây là kiểm tra tĩnh, không phải execution Windows, YAML parser độc lập hoặc CI PASS.
 
-**Điều kiện còn mở:** PR final HEAD phải có APP-00A SUCCESS, kiểm step 72–75 đầy đủ, artifact và source/workflow SHA thực tế, cleanup đúng ownership/nonce; giữ toàn bộ regression và independent review. Sau merge cần một lượt main hoàn tất với budget mới trước khi close .0; không đánh dấu hoàn tất theo lượt PR cũ. Lỗi LocalDB login timeout riêng tại [B.3 run 45421920678](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45421920678) trên main roadmap là lỗi bootstrap, chưa có kết quả SQL test; không coi việc tăng budget APP-00A là bản vá B.3. Không thay đổi PREPROD/EV/P0/Pilot hay phạm vi nghiệm thu. Trạng thái hiện tại `SOURCE_CANDIDATE / CI_PENDING`.
+**Điều kiện còn mở tại thời điểm 24/11/2026 (lịch sử, trước các PR tiếp theo):** PR final HEAD phải có APP-00A SUCCESS, kiểm step 72–75 đầy đủ, artifact và source/workflow SHA thực tế, cleanup đúng ownership/nonce; giữ toàn bộ regression và independent review. Sau merge cần một lượt main hoàn tất với budget mới trước khi close .0; không đánh dấu hoàn tất theo lượt PR cũ. Lỗi LocalDB login timeout riêng tại [B.3 run 45421920678](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45421920678) trên main roadmap là lỗi bootstrap, chưa có kết quả SQL test; không coi việc tăng budget APP-00A là bản vá B.3. Không thay đổi PREPROD/EV/P0/Pilot hay phạm vi nghiệm thu. Trạng thái tại biên nhận lịch sử `SOURCE_CANDIDATE / CI_PENDING`.
+
+#### Biên nhận closeout APP-05.0 — 25/11/2026
+
+**Disposition: `MERGED / MAIN_CI_VERIFIED / SYNTHETIC_NONPRODUCTION_CI_ONLY`.** Phạm vi của .0 là ổn định budget, điều phối CI, bootstrap/diagnostics và giảm công việc lặp mà không bỏ kiểm chứng bắt buộc. Chuỗi PR nguồn đã merge; tiêu chí full CI trên main đã được đáp ứng trên merge cuối #149. Đây là closeout cho increment CI, không phải kết luận mọi failure gián đoạn đã được chữa.
+
+| PR sở hữu | Thay đổi đã merge | Reviewed source HEAD | Merge commit | Biên nhận APP-00A push main tại từng merge |
+| --- | --- | --- | --- | --- |
+| [PR #144](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/144) | Timeout 30 → 45 phút, giữ các step | [`ba219e5`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/ba219e5151ffb143bf580904e4ee0737b3f2b24d) | [`7aada55`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/7aada55d0889c4fd6d025816c76e7e4a83cd4102) | [45433288644](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45433288644) SUCCESS attempt 1; tổng 9/10 workflow (B4 SQL bootstrap FAIL [45433289084](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45433289084)) |
+| [PR #145](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/145) | 4 Windows worker song song, `validate` fail-closed, artifact riêng | [`c0952c9`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/c0952c9bf27a35dfe5ee8e4fe1bd5b0095b34b70) | [`dfa5937`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/dfa59378c871cbe8fcfcdaaf92c5f3bbdd5bcefd) | [45445278098](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45445278098) SUCCESS attempt 1; tổng 10/10 workflow, B5 SQL cần attempt 2 |
+| [PR #146](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/146) | Concurrency 16 workflow; hủy PR cũ cùng PR/workflow, giữ push main/manual độc lập | [`54484a3`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/54484a3ed9d705a17e84969dfb3d9f09151c245f) | [`ac2ca0d`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/ac2ca0d5f0f28b14cb7bc186ae3b8628b7a9bc59) | [45499265711](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45499265711) SUCCESS attempt 1; tổng 9/10 workflow (B4 SQL bootstrap FAIL [45499265441](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45499265441)) |
+| [PR #147](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/147) | Bootstrap LocalDB tường minh, bounded, diagnostics có provenance; không retry business assertion | [`9c68b3b`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/9c68b3b2d0c8c8ff55b02e9d12e7f8325ba25a04) | [`a7c8dc9`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/a7c8dc970d6aa15c9a3264b83c4c2e0f49a1434c) | [45514041244](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45514041244) FAIL (core test và distribution bootstrap, validate từ chối); tổng 8/10 workflow, B8 bootstrap FAIL [45514041187](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45514041187) |
+| [PR #148](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/148) | Reuse Release cùng job có guard; NuGet RUNNER_TEMP; không giữ archive cache; diagnostics/redaction .4/.5 | [`a5cf6fb`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/a5cf6fb3954ff664759ace69efcade794329f6c6) | [`bcdc5f5`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/bcdc5f54dc51e7201ce265fcb900b582ebdc8500) | [45541831309](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45541831309) SUCCESS attempt 2; tổng 10/10 workflow, 24/24 job sau rerun web_sales/validate |
+| [PR #149](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/149) | Classify PR tài liệu theo 16 đường dẫn chính xác, receipt và gate; main luôn full | [`1ead72c`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/1ead72c3c1caf789e18ff3e0b4a6dbd4a7072312) | [`f7d13a5`](https://github.com/chung6a8m/fmcg-distribution-dotnet/commit/f7d13a5a9f761055784cdd98ab4c8a75357e6a0b) | [45556640479](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45556640479) SUCCESS attempt 1; tổng **10/10 workflow, 25/25 checks**, không rerun |
+
+Các hồ sơ thiết kế/đo riêng được giữ nguyên: [parallel CI](app-00a-parallel-ci.md), [concurrency](pr-ci-concurrency.md), [LocalDB bootstrap](localdb-ci-bootstrap.md), [build/cache](app-00a-build-cache.md), [docs-only classifier](docs-pr-ci.md). Chứng minh concurrency A → B nằm tại [45496331271](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45496331271) (superseded, CANCELLED) và [45496489462](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45496489462) (16/16 workflow, 32/32 job PASS attempt 1); việc hủy PR cũ không phải mất acceptance của HEAD mới.
+
+**Final source và final main (điều kiện đóng .0):**
+
+- Reviewed PR #149 source `1ead72c3c1caf789e18ff3e0b4a6dbd4a7072312`, base `bcdc5f54dc51e7201ce265fcb900b582ebdc8500`, tested workflow SHA `ad39fd694a5ca8b5b8f6ecfbd135d24bc0ec5779`; tree `f89f581a17c442c07372e30e511b82b924f9f695` giống merge thật. [Independent review](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/149#pullrequestreview-6052518768): không còn finding mới cần xử lý; local 60/60 Python tests, actionlint 1.7.12, immutable-business, business/link, E-SIM và diff whitespace PASS. Đối chiếu 120 worker steps và 15 workflow khác giữ nguyên so với #148.
+- Final PR APP-00A [45550830467](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45550830467) SUCCESS attempt 2 (core_sql, distribution và validate rerun; giữ các worker đã PASS từ attempt 1); 10/10 workflow, 25/25 latest checks. Probe [PR #150](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/150) / [45553846784](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45553846784) SUCCESS attempt 1, closed without merge: classifier/validate PASS, 4 runtime workers SKIPPED với runner/steps rỗng, 19/19 companion jobs PASS. Receipt ghi `runtime workers NOT_RUN`, không phải runtime verification.
+- Merge `f7d13a5a9f761055784cdd98ab4c8a75357e6a0b`, source/workflow SHA của push main đều đúng merge SHA; APP-00A [45556640479](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45556640479) chọn `full / non_pull_request`. [Biên nhận post-merge đầy đủ](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/149#issuecomment-7154436463) xác nhận cả 6 APP-00A jobs và 19 companion jobs SUCCESS attempt 1; bốn worker thực thi đủ các bước, chỉ skip diagnostics startup theo điều kiện không có failure. `validate` 60/60 Python tests PASS, kiểm receipt và đủ worker success. Không hạ assertion, audit, SQL oracle, test selection hay gate; không tạo thêm runtime skip trên push main.
+- Core 355/355 .NET tests, 0 failed/skipped, TRX/coverage và oracle A.4 24/24 nhóm, 60/60 checkpoints, 1440/1440 SQL cells; web/C/F, APP-03 và D.1–D.3 hoàn tất. Đủ 8 artifact APP-00A đúng merge SHA; [classification ZIP](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45556640479/artifacts/14996241857) và [core ZIP](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45556640479/artifacts/14996635570) đã đối chiếu byte count, SHA-256, CRC; kiểm nội dung core có trọng tâm A11-09, không tuyên bố audit toàn bộ nội dung archive runtime khác. Guard/ownership/nonce và cleanup giữ phạm vi synthetic scratch. `VerifyAcceptance`/F09 All vẫn không được coi là gate APP-00A baseline.
+- GitHub branch metadata tại lần kiểm tra merge #149 không có enforced branch protection; ghi **hosted CI verified**, không ghi PROTECTED CI VERIFIED. Không thay rule, permission hay bypass để lấy PASS.
+
+**Số đo thời gian chờ (elapsed quan sát, không phải SLA):**
+
+| Mẫu | Elapsed |
+| --- | ---: |
+| Final PR #144 serial, [45424683631](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45424683631) (budget 45 phút) | 30m07s |
+| Main #145 parallel, [45445278098](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45445278098) (tới aggregate cuối) | 11m42s |
+| Final PR #148, [45540281582](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45540281582) (run creation → job cuối; attempt 1, 25 lần reuse) | 9m53s |
+| Main #149 full, [45556640479](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45556640479) (run creation → job cuối) | **10m54s** |
+| Docs probe #150, [45553846784](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45553846784) (run creation → job cuối) | **37s APP-00A / 2m13s toàn bộ 10 workflow** |
+
+Mục tiêu thử nghiệm full 10–14 phút đã quan sát được trên các lượt thành công; các mốc bắt đầu/kết thúc của mẫu cũ có khác biệt nhỏ, không dùng để công bố phần trăm tiết kiệm chính xác. Main #149 dùng 2147 runner-seconds cho 6 job APP-00A; song song giảm thời gian chờ, không đồng nghĩa giảm runner cost. Final PR #149 có 24m50s từ run creation đến validate cuối do lỗi/rerun; không loại failure khỏi lịch sử hoặc coi riêng thời gian attempt cuối là toàn bộ thời gian chờ. Cache archive NuGet không được chọn vì lợi ích sau overhead chưa đủ rõ; chỉ giữ RUNNER_TEMP và build reuse đã kiểm chứng. Không tự mở rộng allowlist sang roadmap/authority/evidence.
+
+**Nợ và giới hạn vẫn mở:**
+
+- Native LocalDB SQL 5173 / Event 528 chưa có nguyên nhân gốc; [LAB-E03/#75](localdb-ci-bootstrap.md) vẫn có investigation riêng. Các lượt bootstrap FAIL và core test FAIL ở các merge trung gian giữ nguyên disposition lịch sử; lượt main #149 xanh không hồi tố chúng thành PASS. Bootstrap guard bounded và diagnostics không tự sửa system DB, không retry assertion.
+- PR #148 ghi các lỗi chậm request ở APP-03.4/.5, D.1 và C.6 HttpClient 3s ở main attempt 1; PR #149 giữ lỗi A11-09 restart/outbox tenant-b và D.2 authenticated session GET (3s) trước acceptance ở attempt 1. Trong main #149 A11-09 PASS 48/48 SQL cells mỗi tenant và D.2 PASS ngay attempt 1; không tái hiện không chứng minh root cause đã được sửa. Giữ negative evidence và chẩn đoán theo source/run/attempt; không thêm retry tự động, không nới business assertion.
+- Không close LAB-E03/#75, không chấp thuận thêm security/operations debt hoặc thay trạng thái nghiệm thu APP-02B PREPROD, actual EV, production P0, Pilot/Go-Live, physical/owner-device hay scoped 125% exception. Closeout CI không chứng minh một ca APP-05 trên laptop đã thực hiện.
+
+**Exit .0:** đủ bằng chứng source và main full CI để kết thúc increment. APP-05.1 là increment tiếp theo theo roadmap đã duyệt; chưa triển khai .1 trong closeout này. Mọi PR .1 vẫn phải qua full CI trên final HEAD, review và cập nhật evidence của chính increment. Hồ sơ này chỉ ghi lại receipts đã tồn tại, không thay runtime/workflow và không phải bằng chứng CI của commit tài liệu tự thân.
 
 ### APP-05.1 — Readiness, việc tồn và fixture dùng chung
 
@@ -282,4 +325,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Bước tiếp theo:** kiểm chứng và review **APP-05.0** trên PR final HEAD, hoàn tất lượt main sau merge, rồi **APP-05.1**. Đích nghiệm thu là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày; các trạng thái này chỉ được công bố sau execution có bằng chứng.
+**Bước tiếp theo:** **APP-05.1 — Readiness, việc tồn và fixture dùng chung**. APP-05.0 đã MERGED / MAIN_CI_VERIFIED trong phạm vi CI-only; giữ các investigation riêng ở biên nhận mục 5. APP-05.1 chưa triển khai và cần kiểm chứng final HEAD theo gate hiện hành. Đích nghiệm thu là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày; các trạng thái này chỉ được công bố sau execution có bằng chứng.
