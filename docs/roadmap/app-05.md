@@ -252,6 +252,8 @@ Migration tiến `202611250003` thêm binding nguồn cùng thế hệ quyền H
 
 Lỗi ma trận D.3 trên final source của PR #153 vẫn là lịch sử hosted CI. Lượt hồi quy D.3 local `cf67a8869bf448fba8dca2b4959beb04` đạt Chromium 2/2 và 36/36 ca. Workflow APP-00A chạy `VerifyASuccessor` trên PR .3, bao gồm hành trình đóng chuyến .2 và nâng cấp sang .3.
 
+**Bổ sung theo review PR #154.** Giao diện giữ nguyên CommandId và payload đang chờ khi mất ACK, bị từ chối truy cập hoặc nhận phản hồi thiếu biên nhận khớp nguồn. Server gửi lại mã lệnh, nguồn, binding và lượng từ biên nhận đã lưu sau khi kiểm quyền hiện hành và payload. Giao diện kiểm exact lượng và tổng hai phần chưa nạp/đã trả trước khi xác nhận thành công. Lượt local `cfcda3eeaa7e49658b16f4b91b2b2947` đạt Chromium 4/4 và 75/75 đối chiếu SQL, zero diff. Ca kiểm thu hồi rồi cấp lại quyền sau commit mất ACK, JSON thành công rỗng hoặc sai nguồn/số lượng và xếp chuyến với lượng có số 0 đầu. Cùng lệnh gửi lại giữ một binding và đúng một thế hệ quyền tương ứng. SHA256 `run.json` `F165EE85980B9C564E1327A0D47920D00DF9BFF8AE083B79DE6F7E44AE693E0F`.
+
 ### APP-05.4a — Reserve riêng cho phần chưa giữ
 
 **Files:** `src/FmcgDms.Api/Persistence/App01a2CommandService.cs`, `App02c2Commands.cs`, `App02c2Reads.cs`, `App02DevF03Lots.cs` và binding .3; `web/src/sales/OrderWorkspace.tsx`, `LoadWorkspace.tsx`; mở rộng `App05AFulfillmentTests.cs` và hồi quy `App02c2Tests.cs`.

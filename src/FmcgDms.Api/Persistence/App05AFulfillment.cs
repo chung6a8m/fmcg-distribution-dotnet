@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Dapper;
 using FmcgDms.Api.Tenancy;
@@ -112,8 +113,9 @@ internal static partial class App05CloseReadiness
         Guid trip, Guid line, SuccessorInput input, bool transfer, CancellationToken ct)
     {
         // Hash the numeric value in canonical fixed-scale form for equivalent JSON decimals.
+        string quantityBase = input.Quantity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
         byte[] hash = Digest(new { Trip = trip, Line = line, Transfer = transfer, input.DestinationTripId,
-            input.ConfirmSourceId, Quantity = input.Quantity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture),
+            input.ConfirmSourceId, Quantity = quantityBase,
             input.BindingId, input.OriginalRightId, input.FollowUpId, input.ExpectedRevision });
         var scope = new { Tenant = tenant, Actor = actor, input.CommandId };
         var replay = await db.QuerySingleOrDefaultAsync<SuccessorReceipt>(App02a3Sql.Cmd("""
@@ -122,7 +124,7 @@ internal static partial class App05CloseReadiness
             """, scope, tx, ct));
         if (replay is not null)
             return CryptographicOperations.FixedTimeEquals(hash, replay.PayloadHash)
-                ? SuccessorResult(replay.Receipt, replay.Applied)
+                ? Respond(replay.Receipt, replay.Applied)
                 : Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
         if (await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
@@ -200,12 +202,32 @@ internal static partial class App05CloseReadiness
                 INSERT dbo.App05ASuccessorCommand(TenantId,ActorId,CommandId,PayloadHash,Receipt,Applied,RecordedAt)
                 VALUES(@Tenant,@Actor,@CommandId,@Hash,@Receipt,@Applied,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00'));
                 """, new { scope.Tenant, scope.Actor, scope.CommandId, Hash = hash, Receipt = receipt, Applied = applied }, tx, ct));
-            return SuccessorResult(receipt, applied);
+            return Respond(receipt, applied);
+        }
+
+        IResult Respond(string receipt, bool applied)
+        {
+            // Replay reaches here only after current authorization and an exact payload hash match.
+            // Enrich the response without rewriting receipts recorded before this contract.
+            var response = JsonNode.Parse(receipt)!.AsObject();
+            response["outcome"] = applied ? "APPLIED" : "REJECTED";
+            response["request"] = JsonSerializer.SerializeToNode(new
+            {
+                OriginTripId = trip, OrderLineId = line, input.CommandId, input.DestinationTripId,
+                input.ConfirmSourceId, input.FollowUpId, input.ExpectedRevision, input.BindingId, input.OriginalRightId, QuantityBase = quantityBase
+            }, ClosureJson);
+            if (applied)
+            {
+                response["quantityBase"] = response["quantity"]!.ToJsonString();
+                if (transfer)
+                {
+                    response["neverLoadedBase"] = response["neverLoaded"]!.ToJsonString();
+                    response["returnedBase"] = response["returned"]!.ToJsonString();
+                }
+            }
+            return Results.Json(response, statusCode: applied ? 200 : 409);
         }
     }
-
-    private static IResult SuccessorResult(string receipt, bool applied) =>
-        Results.Json(JsonSerializer.Deserialize<JsonElement>(receipt), statusCode: applied ? 200 : 409);
 
     private static Task<bool> SuccessorCommandUsed(SqlConnection db, SqlTransaction tx, string tenant, string actor,
         Guid commandId, CancellationToken ct) => db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""

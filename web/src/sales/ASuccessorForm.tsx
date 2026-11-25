@@ -16,13 +16,58 @@ type Command = {
 }
 
 const format = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
+const guid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 
-export function ASuccessorForm({ storageKey, load, apply, onApplied, unit }: {
+function isId(value: unknown): value is string {
+  return typeof value === 'string' && guid.test(value) && value !== '00000000-0000-0000-0000-000000000000'
+}
+
+function units(value: unknown) {
+  const match = typeof value === 'string' ? /^0*(\d{1,15})(?:\.(\d{1,3}))?$/.exec(value) : null
+  if (match === null) return null
+  const [, whole, fraction = ''] = match
+  return BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0'))
+}
+
+type Source = { originTripId: string; orderLineId: string }
+
+async function outcome(response: Response, command: Command, source: Source) {
+  if (response.status === 401 || response.status === 403) return 'access'
+  const body = await response.json().catch(() => null)
+  const request = body?.request
+  const expectedQuantity = units(command.quantity)
+  if (!request || request.originTripId !== source.originTripId || request.orderLineId !== source.orderLineId
+    || request.commandId !== command.commandId || request.destinationTripId !== command.destinationTripId
+    || request.confirmSourceId !== command.confirmSourceId || request.followUpId !== command.followUpId
+    || request.expectedRevision !== command.expectedRevision || expectedQuantity === null
+    || units(request.quantityBase) !== expectedQuantity
+    || request.bindingId !== (command.bindingId ?? null)
+    || request.originalRightId !== (command.originalRightId ?? null)) return 'unknown'
+
+  if (response.status === 409 && body.outcome === 'REJECTED'
+    && typeof body.code === 'string' && body.code.length > 0) return 'rejected'
+
+  const quantity = units(body.quantityBase)
+  if (response.status !== 200 || body.outcome !== 'APPLIED' || !isId(body.bindingId)
+    || quantity === null || quantity <= 0n || quantity !== expectedQuantity
+    || body.quantity !== Number(body.quantityBase)) return 'unknown'
+  if (command.bindingId) {
+    const neverLoaded = units(body.neverLoadedBase)
+    const returned = units(body.returnedBase)
+    if (body.bindingId !== command.bindingId || !isId(body.successorRightId)
+      || neverLoaded === null || returned === null || neverLoaded + returned !== quantity
+      || body.neverLoaded !== Number(body.neverLoadedBase) || body.returned !== Number(body.returnedBase)) return 'unknown'
+  } else if (body.successorRightId !== undefined) return 'unknown'
+  return 'applied'
+}
+
+export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, source }: {
   storageKey: string
   load: () => Promise<Successors>
-  apply: (command: Command) => Promise<void>
+  apply: (command: Command) => Promise<Response>
   onApplied: () => void
   unit: string
+  source: Source
 }) {
   const id = useId()
   const [data, setData] = useState<Successors>()
@@ -62,20 +107,27 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit }: {
     setPending(command)
     setNotice('')
     try {
-      await apply(command)
-      forgetPending(storageKey, command.commandId)
-      setPending(null)
-      setNotice(command.bindingId ? 'Đã chuyển lượng HELD.' : 'Đã xếp chuyến kế nhiệm.')
-      onApplied()
-    } catch (error) {
-      const status = (error as { status?: number }).status
-      if (status && status >= 400 && status < 500) {
+      const result = await outcome(await apply(command), command, source)
+      if (result === 'applied' || result === 'rejected') {
         forgetPending(storageKey, command.commandId)
         setPending(null)
-        setNotice('Yêu cầu bị từ chối. Kiểm tra chuyến, nguồn và số lượng hiện tại.')
-      } else {
-        setNotice('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')
       }
+      switch (result) {
+        case 'applied':
+          setNotice(command.bindingId ? 'Đã chuyển lượng HELD.' : 'Đã xếp chuyến kế nhiệm.')
+          onApplied()
+          break
+        case 'rejected':
+          setNotice('Yêu cầu bị từ chối. Kiểm tra chuyến, nguồn và số lượng hiện tại.')
+          break
+        case 'access':
+          setNotice('Chưa đủ quyền để xác nhận kết quả. Gửi lại cùng yêu cầu khi có quyền.')
+          break
+        case 'unknown':
+          setNotice('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')
+      }
+    } catch {
+      setNotice('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')
     } finally {
       writing.current = false
       setBusy(false)
@@ -87,10 +139,10 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit }: {
     event.preventDefault()
     if (!data?.canWrite || pending || busy) return
     const quantity = String(new FormData(event.currentTarget).get('quantity') ?? '')
-    const numericQuantity = Number(quantity)
+    const baseQuantity = units(quantity)
     const destinationTripId = transfer ? binding?.destinationTripId : target
-    if (!destinationTripId || !/^[0-9]+(?:\.[0-9]{1,3})?$/.test(quantity) || numericQuantity <= 0 ||
-        numericQuantity > (transfer ? limit : data.unscheduled)) return
+    if (!destinationTripId || baseQuantity === null || baseQuantity <= 0n ||
+        Number(quantity) > (transfer ? limit : data.unscheduled)) return
     void send({
       commandId: crypto.randomUUID(), destinationTripId, confirmSourceId: data.confirmSourceId, quantity,
       followUpId: data.followUpId, expectedRevision: data.revision,

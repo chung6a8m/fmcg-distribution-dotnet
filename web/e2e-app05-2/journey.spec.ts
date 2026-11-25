@@ -357,10 +357,28 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const source = page.locator('[data-source-id="' + order.orderLineId + '"]')
   const assignment = source.getByRole('form', { name: 'Xếp chuyến kế nhiệm' })
   await assignment.getByLabel('Chuyến đích').selectOption(first)
-  await assignment.getByLabel('Lượng xếp chuyến (EA)').fill('15')
+  await assignment.getByLabel('Lượng xếp chuyến (EA)').fill('0000000000000015')
+  const assignmentUrl = '**' + assignPath
+  const assignRequest = page.waitForRequest(req => req.url().endsWith(assignPath) && req.method() === 'POST')
+  await page.route(assignmentUrl, async route => {
+    const completed = await route.fetch()
+    expect(completed.status()).toBe(200)
+    await route.fulfill({ response: completed, json: {} })
+  }, { times: 1 })
   await assignment.getByRole('button', { name: 'Xếp chuyến' }).click()
+  const assignOriginal = (await assignRequest).postDataJSON()
+  expect(assignOriginal.quantity).toBe('0000000000000015')
+  await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+  await page.reload()
+  const assignReplay = page.waitForResponse(res => res.url().endsWith(assignPath) && res.request().method() === 'POST')
+  await source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' }).click()
+  const assigned = await assignReplay
+  expect(assigned.status()).toBe(200)
+  expect(assigned.request().postDataJSON()).toEqual(assignOriginal)
   await expect(source.getByText('Đã xếp chuyến kế nhiệm.')).toBeVisible()
-  const binding = (await readSuccessors(main, order)).bindings[0]
+  const assignedBindings = (await readSuccessors(main, order)).bindings
+  expect(assignedBindings).toHaveLength(1)
+  const [binding] = assignedBindings
   expect(binding).toMatchObject({ destinationTripId: first, quantity: 15, transferred: 0 })
   expect(await (await send(assignPath, body(order, second, 1))).json()).toMatchObject({ code: 'A_SUCCESSOR_QUANTITY_EXCEEDED' })
   const revision = await readSuccessors(main, order)
@@ -388,15 +406,61 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await transferForm.getByLabel('Quyền giữ gốc').selectOption(right.rightId)
   await transferForm.getByLabel('Lượng chuyển HELD (EA)').fill('4')
   const writeUrl = '**' + transferPath
+  const originalRequest = page.waitForRequest(req => req.url().endsWith(transferPath) && req.method() === 'POST')
   await page.route(writeUrl, async route => {
     const completed = await route.fetch()
     expect(completed.status(), await completed.text()).toBe(200)
     await route.abort('failed')
   }, { times: 1 })
   await transferForm.getByRole('button', { name: 'Chuyển HELD', exact: true }).click()
+  const original = (await originalRequest).postDataJSON() as { commandId: string }
   await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+  await checkpoint('successor-revoke', { tripId: first, commandId: original.commandId })
+  expect((await readSuccessors(main, order)).bindings).toEqual([{
+    bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9,
+  }])
+
+  const replayButton = source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' })
+  async function replay(status: number) {
+    const response = page.waitForResponse(res => res.url().endsWith(transferPath) && res.request().method() === 'POST')
+    await replayButton.click()
+    const result = await response
+    expect(result.status()).toBe(status)
+    expect(result.request().postDataJSON()).toEqual(original)
+  }
+
   await page.reload()
-  await source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' }).click()
+  await replay(403)
+  await expect(replayButton).toBeEnabled()
+  await page.reload()
+  await expect(replayButton).toBeEnabled()
+  await checkpoint('successor-restore')
+  await page.route(writeUrl, async route => {
+    const completed = await route.fetch()
+    expect(completed.status()).toBe(200)
+    await route.fulfill({ status: 409, json: { code: 'A_HELD_QUANTITY_EXCEEDED' } })
+  }, { times: 1 })
+  await replay(409)
+  await expect(replayButton).toBeEnabled()
+  await page.reload()
+  for (const invalidAck of [
+    () => ({}),
+    (receipt: Record<string, unknown>) => ({ ...receipt, bindingId: crypto.randomUUID() }),
+    (receipt: Record<string, unknown>) => ({
+      ...receipt, request: { ...(receipt.request as object), commandId: crypto.randomUUID() },
+    }),
+    (receipt: Record<string, unknown>) => ({ ...receipt, returned: 3, returnedBase: '3.000' }),
+  ]) {
+    await page.route(writeUrl, async route => {
+      const completed = await route.fetch()
+      expect(completed.status()).toBe(200)
+      await route.fulfill({ response: completed, json: invalidAck(await completed.json()) })
+    }, { times: 1 })
+    await replay(200)
+    await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+    await page.reload()
+  }
+  await replay(200)
   await expect(source.getByText('Đã chuyển lượng HELD.')).toBeVisible()
   await expect(source.getByText(/Đã chuyển HELD 9 EA/)).toBeVisible()
   expect((await readSuccessors(main, order)).rights[0].held).toBe(6)
@@ -429,11 +493,6 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const winner = await race.find(response => response.ok())!.json() as { quantity: number }
   expect(await readSuccessors(zero, held)).toMatchObject({ unheld: 1, rights: [{ held: 4 - winner.quantity }] })
   expect((await history(request, main)).closure).toEqual(prior)
-  await checkpoint('successor-revoke', { tripId: first })
-  expect((await send(transferPath, fault)).status()).toBe(403)
-  expect((await readSuccessors(main, order)).bindings).toEqual([{
-    bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9,
-  }])
   await checkpoint('successor-after', { winner: winner.quantity })
   await page.screenshot({ path: info.outputPath('successor-partial-transfer.png') })
 })

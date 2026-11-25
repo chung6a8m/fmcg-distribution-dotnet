@@ -382,14 +382,38 @@ internal static class App05TripClosureEvidence
 
             if (!await Wait("successor-revoke", exited)) return false;
             var revoke = await Read<SuccessorRevocation>("successor-revoke");
+            var accessScope = new { scope.Tenant, scope.Name, scope.Nonce, revoke.TripId, App05CloseBootstrap.Ops };
+            var originalTransfer = await ReadOriginalTransfer();
+            Check("dropped ACK follows a committed transfer of exactly 4 EA", Primary, 4m, originalTransfer.Quantity);
             Check("destination write assignment revoked", Primary, 1,
                 await db.ExecuteAsync(new CommandDefinition(verify + """
                      UPDATE dbo.App05TripOperator SET IsActive=0
                     WHERE TenantId=@Tenant AND TripId=@TripId AND ActorId=@Ops AND IsActive=1;
-                    """, new { scope.Tenant, scope.Name, scope.Nonce, revoke.TripId, App05CloseBootstrap.Ops }, cancellationToken: ct)));
+                    """, accessScope, cancellationToken: ct)));
             await Acknowledge("successor-revoke");
 
+            if (!await Wait("successor-restore", exited)) return false;
+            Check("authorization failure preserves the committed transfer receipt", Primary,
+                originalTransfer, await ReadOriginalTransfer());
+            Check("destination write assignment restored", Primary, 1,
+                await db.ExecuteAsync(new CommandDefinition(verify + """
+                     UPDATE dbo.App05TripOperator SET IsActive=1
+                    WHERE TenantId=@Tenant AND TripId=@TripId AND ActorId=@Ops AND IsActive=0;
+                    """, accessScope, cancellationToken: ct)));
+            await Acknowledge("successor-restore");
+
+            Task<SuccessorCommitted> ReadOriginalTransfer() =>
+                db.QuerySingleAsync<SuccessorCommitted>(new CommandDefinition("""
+                    SELECT x.SuccessorRightId,x.NeverLoaded+x.Returned AS Quantity,CONVERT(varchar(64),c.PayloadHash,2) AS PayloadHash,c.Receipt
+                    FROM dbo.App05ASuccessorCommand c
+                    JOIN dbo.App05AHeldTransfer x ON x.TenantId=c.TenantId
+                        AND x.SuccessorRightId=TRY_CONVERT(uniqueidentifier,JSON_VALUE(c.Receipt,'$.successorRightId'))
+                    WHERE c.TenantId=@Tenant AND c.ActorId=@Ops AND c.CommandId=@CommandId AND c.Applied=1;
+                    """, new { scope.Tenant, App05CloseBootstrap.Ops, revoke.CommandId }, cancellationToken: ct));
+
             if (!await Wait("successor-after", exited)) return false;
+            Check("same-ID recovery after invalid ACKs preserves the exact committed receipt", Primary,
+                originalTransfer, await ReadOriginalTransfer());
             var result = await Read<SuccessorRace>("successor-after");
             var actual = (await db.QueryAsync<SuccessorOracle>(new CommandDefinition("""
                 SELECT b.OrderLineId,SUM(b.Quantity) AS Scheduled,SUM(t.Returned) AS Returned,
@@ -545,7 +569,8 @@ internal static class App05TripClosureEvidence
     private sealed record TripImageRow(string Status, int Decisions);
     private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);
     private sealed record SuccessorFault(Guid CommandId);
-    private sealed record SuccessorRevocation(Guid TripId);
+    private sealed record SuccessorRevocation(Guid TripId, Guid CommandId);
+    private sealed record SuccessorCommitted(Guid SuccessorRightId, decimal Quantity, string PayloadHash, string Receipt);
     private sealed record SuccessorRace(decimal Winner);
     private sealed record SuccessorOracle(Guid OrderLineId, decimal Scheduled, decimal Returned,
         decimal NeverLoaded, decimal LotQuantity, int Rights);

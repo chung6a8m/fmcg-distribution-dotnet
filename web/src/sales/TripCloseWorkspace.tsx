@@ -389,7 +389,7 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
                 <dt>Lý do</dt><dd>{source.followUp.reason}</dd>
               </dl> : <p>Chưa giao người phụ trách và hạn xử lý.</p>}
               {aSuccessor && closed && source.sourceKind === 'A_REMAINDER' && source.followUp &&
-                <ASuccessorSection token={token} path={path + '/a-remainders/' + source.sourceId}
+                <ASuccessorSection token={token} originTripId={tripId} orderLineId={source.sourceId}
                   storageKey={storageKey + '.successor.' + source.sourceId}
                   unit={data.aLines.find(line => line.orderLineId === source.sourceId)?.unit ?? ''}
                   onApplied={refresh} />}
@@ -407,15 +407,17 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
   </>
 }
 
-function ASuccessorSection({ token, path, storageKey, unit, onApplied }: {
-  token: string; path: string; storageKey: string; unit: string; onApplied: () => void
+function ASuccessorSection({ token, originTripId, orderLineId, storageKey, unit, onApplied }: {
+  token: string; originTripId: string; orderLineId: string; storageKey: string; unit: string; onApplied: () => void
 }) {
+  const path = '/trips/' + originTripId + '/a-remainders/' + orderLineId
   type Props = Parameters<typeof ASuccessorForm>[0]
   const load = useCallback<Props['load']>(() => request(token, path + '/successors'), [token, path])
-  const apply = useCallback<Props['apply']>(async command => {
-    await request(token, path + (command.bindingId ? '/transfer-held' : '/assign-successor'), command)
-  }, [token, path])
-  return <ASuccessorForm load={load} apply={apply} storageKey={storageKey} unit={unit} onApplied={onApplied} />
+  const apply = useCallback<Props['apply']>(command =>
+    requestSalesApi(api, token, path + (command.bindingId ? '/transfer-held' : '/assign-successor'), JSON.stringify(command)),
+  [token, path])
+  return <ASuccessorForm load={load} apply={apply} storageKey={storageKey} unit={unit} onApplied={onApplied}
+    source={{ originTripId, orderLineId }} />
 }
 
 function TripCloseQuantities({ lines, tripId, access, atClose = false }: {
