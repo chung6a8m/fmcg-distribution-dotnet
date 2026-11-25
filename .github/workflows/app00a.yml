@@ -16,6 +16,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -771,6 +776,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -928,6 +938,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -1033,6 +1048,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:

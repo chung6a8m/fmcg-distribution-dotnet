@@ -39,12 +39,27 @@ Tải cache + restore mất 12s, chỉ thấp hơn **1s** so với riêng restor
 
 **Giới hạn của warm:** [job 138891045926](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45518899130/job/138891045926) thất bại ở APP-03.5 với `HttpClient.Timeout` 3s tại session proxy request; .6/.7 bị skip và `validate` thất bại. Chỉ các phase chuẩn bị hoàn tất được dùng so sánh. Job kết thúc sớm 244s **không** là tiết kiệm hay warm acceptance; không kết luận cache gây ra lỗi. Log và artifact của cold/warm được giữ bằng ID riêng trong PR #148.
 
-**Quyết định:** giữ cơ chế dùng lại build trong cùng job; **bỏ toàn bộ archive cache NuGet thử nghiệm**, kể cả override đường dẫn package, vì chưa chứng minh được lợi ích đủ rõ. Giữ đường dẫn package mặc định; không tuyên bố việc chuyển package sang RUNNER_TEMP có ích khi chưa có phép đo đối chứng riêng. Quyết định này không phủ nhận cache có thể hữu ích ở workload khác; chỉ chọn phần có căn cứ cho increment hiện tại.
+**Quyết định về archive:** giữ cơ chế dùng lại build trong cùng job; **bỏ toàn bộ archive cache NuGet thử nghiệm** vì chưa chứng minh được lợi ích đủ rõ. Quyết định này không phủ nhận cache có thể hữu ích ở workload khác; chỉ chọn phần có căn cứ cho increment hiện tại.
+
+### Đối chiếu riêng vị trí package trong job
+
+Candidate tiếp theo `a65a211952a76316ac9b01c407c231ffa6c03262` đã bỏ cả archive lẫn override đường dẫn. Các phase restore đã hoàn tất của [run 45522298067](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45522298067) quay về **35–39s** trên bốn worker. Đây là mẫu đối chứng bổ sung; trạng thái hoàn tất toàn workflow được ghi riêng, không suy từ các phase.
+
+| Nhóm mẫu restore đã hoàn tất | Vị trí package | n | Median | Khoảng |
+| --- | --- | ---: | ---: | ---: |
+| PR #147 và main cùng tree | Mặc định, không override | 7 | 38s | 35–49s |
+| 3d7d645, các browser worker; mọi cache read miss | RUNNER_TEMP | 3 | 16s | 12–23s |
+| fc2d79f, bốn worker cold; mọi cache read miss | RUNNER_TEMP | 4 | 12,5s | 12–15s |
+| a65a211, bỏ archive và override | Mặc định, không override | 4 | 36s | 35–39s |
+
+Đối chiếu Git xác nhận **30 đầu vào dependency được track** (SDK, solution, project, props/targets và config/lock nếu có) giống byte giữa các source trên; các log đã hoàn tất xác nhận Windows image `20261116.370.1`. Median initial build ở các nhóm vẫn khoảng 25–29s, khác với khoảng tách biệt của restore.
+
+Chuỗi default → temp/miss → default có khoảng restore không giao nhau, đủ căn cứ chọn **một cấu hình tối thiểu chỉ chuyển NuGet global-packages sang thư mục tạm của job**, không thêm archive. Các mẫu trong một lượt có tương quan và không được randomize; không tuyên bố nguyên nhân vật lý của chênh lệch hoặc SLA. Phải kiểm chứng lại cấu hình path-only này trên final source, giữ nguyên dependency inputs, restore thật và toàn bộ gate.
 
 ## Thiết kế được giữ lại
 
 1. Ba browser worker dùng lại **Release build vừa tạo trong cùng job**. Chỉ sau build thành công mới bật `FMCG_CI_PREBUILT_SHA` bằng SHA checkout thực tế. Hai launcher kiểm tra CI Windows, source sạch và trùng marker, đủ Demo/API DLL và runtime metadata, cùng ProductVersion đúng SHA. Kiểm cả bản API DLL được copy vào output Demo vì Demo nạp trực tiếp dependency này, ngoài bản API chạy server ở output API. Opt-in không hợp lệ phải fail trước khi start LocalDB/ứng dụng; thiếu opt-in giữ build mặc định. Marker kế thừa tới `NextDay`. Nhánh `Stop` độc lập không import helper hay cần checkout.
-2. Luôn chạy `dotnet restore`, build Release solution và toàn bộ test/evidence. Không cache `bin`, `obj`, database, receipt, TestResults, frontend dist, browser output hoặc dependency archive. Không thêm NuGet lockfile, không đổi resolution hay bỏ audit.
+2. Mỗi worker đặt `NUGET_PACKAGES` dưới `RUNNER_TEMP/app00a-nuget-packages` bằng `GITHUB_ENV` sau checkout. Package chỉ tồn tại trên worker đang chạy; không tải/lưu archive giữa các lượt. Luôn chạy `dotnet restore`, build Release solution và toàn bộ test/evidence. Không cache `bin`, `obj`, database, receipt, TestResults, frontend dist hoặc browser output. Không thêm NuGet lockfile, không đổi resolution hay bỏ audit.
 3. Giữ nguyên bốn worker, `validate`, concurrency, bootstrap LocalDB, scripts scenario, floors, audits, nonce/ownership và source evidence. Không đổi business/application/C# witness hoặc cách phục vụ Vite; không tăng timeout/retry để làm lượt warm thành công.
 4. Chưa áp dụng cache npm, Chromium hoặc chia sẻ compiled artifact giữa job. Chi phí install hiện nhỏ; chưa có bằng chứng transfer/extraction thắng chi phí đó. Không thêm job prebuild nối tiếp làm thay đổi đường găng. Các workflow B tiếp tục như cũ.
 
@@ -55,7 +70,7 @@ Tham chiếu cho thí nghiệm: [NuGet global-packages](https://learn.microsoft.
 - Regression thực thi kiểm tra opt-in vắng mặt, build failure, source bẩn/sai SHA, thiếu output, output lẫn commit, actual merge SHA, nested invocation và Stop độc lập; fixture chỉ mô phỏng ranh giới process, không tuyên bố thay thế Windows/SQL acceptance.
 - actionlint, Python aggregate-gate tests, business validators và kiểm tra diff bảo đảm mọi command/env/condition/evidence cũ vẫn có mặt.
 - Thí nghiệm miss/exact-hit ở trên được giữ như lịch sử đo, bao gồm negative evidence. Cache không đạt tiêu chí lợi ích đủ rõ nên bị loại; không chạy thêm vòng benchmark để tìm một mẫu đẹp.
-- Chạy lại toàn bộ CI trên **final source đã bỏ cache**. Đối chiếu đầy đủ 25 lần reuse/guard elapsed, không có build lặp, đủ scenario/audit/evidence, kể cả APP-03.5/.6/.7; một PASS tiền nhiệm không thay kết quả final HEAD.
+- Chạy lại toàn bộ CI trên **final source chỉ dùng thư mục package tạm và build reuse, không archive cache**. Đối chiếu phase restore với các nhóm mẫu trên, đầy đủ 25 lần reuse/guard elapsed, không có build lặp, đủ scenario/audit/evidence, kể cả APP-03.5/.6/.7; một PASS tiền nhiệm không thay kết quả final HEAD.
 - Ghi run/attempt, reviewed head, checkout SHA, runner image, SDK, phase elapsed, job/workflow elapsed và tổng runner time. Không gọi failed-path hoặc carried-forward job là lượt chạy nhanh hơn; không thêm retry tự động.
 - Biên nhận thực thi cuối ghi tại PR body, không tạo commit chỉ để ghi lại CI vừa chạy. Chưa merge không suy ra main đã được kiểm chứng. Vấn đề native LocalDB đang điều tra không được coi là đã giải quyết bởi cache.
 

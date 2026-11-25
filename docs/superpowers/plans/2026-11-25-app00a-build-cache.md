@@ -4,7 +4,7 @@
 
 **Goal:** Reduce APP-00A preparation overhead only where observed timings and complete CI justify it.
 
-**Architecture:** Measure NuGet caching and retain only demonstrated useful work. The completed experiment did not establish material archive-cache benefit, so the final implementation keeps same-job Release Demo/API reuse through an explicit source-bound CI opt-in, with all existing restores, builds, workflow gates and witnesses intact.
+**Architecture:** Measure NuGet caching and retain only demonstrated useful work. Archive-cache benefit was not material; the selected implementation keeps source-bound same-job Release Demo/API reuse and a fresh per-job NuGet package directory under RUNNER_TEMP after default→temp/miss→default observations. All existing restores, builds, gates and witnesses remain intact.
 
 **Tech Stack:** GitHub Actions, PowerShell, .NET SDK 10.0.404, Node 26, Python verification.
 
@@ -40,10 +40,11 @@
 
 **Files:** Modify `.github/workflows/app00a.yml`; update `docs/roadmap/app-00a-parallel-ci.md` with a substantive follow-up link.
 
-**Interfaces:** Produce Task 1's `FMCG_CI_PREBUILT_SHA` via `GITHUB_ENV` after successful initial Release build in web_sales/app03/distribution. The experimental NuGet configure/restore/save steps and path override are removed after the measured selection decision; dependency storage returns to its original defaults.
+**Interfaces:** Produce Task 1's `FMCG_CI_PREBUILT_SHA` via `GITHUB_ENV` after successful initial Release build in web_sales/app03/distribution. Remove archive restore/save steps. A step after checkout in each worker writes `NUGET_PACKAGES` under `RUNNER_TEMP` to `GITHUB_ENV`; no cross-run persistence. This isolates the separately observed package-path improvement from archive caching.
 
 - [x] Trial exact NuGet package caching without skipping restore/build/test; capture miss and exact-hit phases with archive overhead on source `fc2d79f`.
-- [ ] Remove all experimental NuGet configure/restore/save steps after the 12s warm path versus 13s cold restore did not establish material benefit; retain unconditional original commands and permissions.
+- [x] Remove all experimental NuGet configure/restore/save steps after the 12s warm path versus 13s cold restore did not establish material benefit; retain unconditional original commands and permissions.
+- [ ] Based on the subsequent default-path 35–39s restore cohort, restore only four per-job temporary-package directory steps; keep archive restore/save absent. Validate this bounded path-only candidate once with full CI and record the observational limits.
 - [ ] Add the guard regression to core_sql and opt-in setup after the existing builds in the three browser workers.
 - [ ] Run actionlint, 15 aggregate-gate tests and business validators; compare original step commands/env/conditions/evidence to base. Expect no gate removal and no application/business changes.
 
@@ -56,5 +57,5 @@
 - [ ] Fresh independent review the entire diff and concrete failure classes; fix important correctness findings with regression evidence.
 - [ ] Commit and publish exact verified tree on `ci/measured-build-cache`; create PR against current main.
 - [x] Complete experimental cold CI (24/24 jobs) and capture exact-hit phases from a fresh-worker same-source/key rerun. Warm APP-03.5 hit the existing 3s session-proxy timeout; .6/.7 skipped, so its 244s truncated job is not a performance result or acceptance.
-- [ ] Review the substantive cache-removal change, then complete full CI on that final source, including APP-03.5/.6/.7 and all25 reuse calls. Do not add retries/timeouts or change runtime witnesses to make the benchmark pass.
-- [ ] Keep only the demonstrated build-reuse optimization; update PR body with final source/runs, experimental negative evidence, timing limits and all gates. Leave open for Owner review/merge.
+- [ ] Review the substantive archive-removal and path-only selection, then complete full CI on that final source, including APP-03.5/.6/.7 and all25 reuse calls. Do not add retries/timeouts or change runtime witnesses to make the benchmark pass.
+- [ ] Keep build reuse and the temporary package directory only if final-source receipts support the selected behavior and restore benefit; update PR body with source/runs, experimental negative evidence, timing limits and all gates. Leave open for Owner review/merge.

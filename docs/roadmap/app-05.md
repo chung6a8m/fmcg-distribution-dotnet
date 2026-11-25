@@ -108,7 +108,7 @@ Revision từ read không thay thế recheck trong transaction. Close, assign/re
 
 **Cải tiến thời gian chờ đã được Owner yêu cầu ngày 24/11/2026:** [APP-00A — bốn nhóm CI song song](app-00a-parallel-ci.md) kế thừa baseline merge PR #144, giữ đầy đủ kiểm chứng và tách worker cùng check `validate` tổng hợp. Đây là follow-up triển khai có source/evidence riêng; lịch sử timeout và điều kiện closeout bên dưới vẫn được giữ.
 
-Follow-up ngày 25/11/2026, sau merge PR #147: Owner yêu cầu [đo rồi áp dụng build/cache có ích](app-00a-build-cache.md). Thí nghiệm đã đo cache package NuGet và dùng lại build trong cùng worker APP-00A; quyết định giữ build reuse, bỏ archive cache vì chưa chứng minh lợi ích đủ rõ sau overhead. Toàn bộ gate vẫn giữ. Biên nhận final source và lịch sử cold/warm, kể cả lỗi warm, ghi trong PR sở hữu; yêu cầu có lượt main hoàn tất trước closeout `.0` vẫn giữ nguyên.
+Follow-up ngày 25/11/2026, sau merge PR #147: Owner yêu cầu [đo rồi áp dụng build/cache có ích](app-00a-build-cache.md). Thí nghiệm đã đo cache package NuGet và dùng lại build trong cùng worker APP-00A; quyết định giữ build reuse và vị trí package tạm sau đối chứng đường dẫn, bỏ archive cache giữa các lượt vì chưa chứng minh lợi ích đủ rõ sau overhead. Toàn bộ gate vẫn giữ. Biên nhận final source và lịch sử cold/warm, kể cả lỗi warm, ghi trong PR sở hữu; yêu cầu có lượt main hoàn tất trước closeout `.0` vẫn giữ nguyên.
 
 **Files:** `.github/workflows/app00a.yml`; các script runner liên quan chỉ khi phép đo cho thấy cần sửa. Bắt đầu bằng thời lượng/job/step của run baseline và các lượt PR thành công. `VerifyAcceptance`/F09 All chưa được gọi bởi workflow APP-00A ở baseline; không gọi chúng là gate CI đang có.
 
