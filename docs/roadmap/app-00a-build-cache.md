@@ -75,3 +75,18 @@ Tham chiếu cho thí nghiệm: [NuGet global-packages](https://learn.microsoft.
 - Biên nhận thực thi cuối ghi tại PR body, không tạo commit chỉ để ghi lại CI vừa chạy. Chưa merge không suy ra main đã được kiểm chứng. Vấn đề native LocalDB đang điều tra không được coi là đã giải quyết bởi cache.
 
 Kế hoạch: [2026-11-25-app00a-build-cache](../superpowers/plans/2026-11-25-app00a-build-cache.md).
+
+## Bổ sung khi review PR #148: quan sát request chậm
+
+Owner yêu cầu review, xử lý findings, kiểm chứng và merge PR #148. Source `49d008e` đã sửa guard để Git luôn liệt kê file untracked. [APP-00A run 45530093289](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45530093289) thất bại tại .4 ở attempt 1 và tại .5 ở lần xác minh APP-03 duy nhất sau đó. .5 còn chờ D2 trip-list qua `route.fetch` khi assertion 5s kết thúc; SQL ghi cancellation quanh teardown. Chưa có thời gian chờ/blocker để xác định nguyên nhân. Các thất bại này và biên nhận riêng của từng attempt được giữ trong PR; không dùng PASS tiền nhiệm thay final-source acceptance.
+
+Lựa chọn kỹ thuật trong phạm vi xử lý findings là bổ sung quan sát chỉ đọc cho .4/.5. Log request đầy đủ hoặc Playwright trace có thể chứa token; một thay đổi API để nối request ID tới SQL session sẽ mở rộng source application. Phương án nhỏ hơn dùng lifecycle của Vite proxy và một SQL observer độc lập, giới hạn ở tenant-a của đúng run đã xác minh ownership/nonce. Nó phân biệt nhóm query đang thực thi/chờ và tiến trình HTTP, nhưng không chứng minh ánh xạ một-một HTTP request với SQL session khi có request trùng nhau. Đây là quyết định triển khai, không phải kết luận rằng contention gây lỗi.
+
+- Chỉ bật bằng `FMCG_APP03_READ_DIAGNOSTICS=1` ở hai bước CI .4/.5; giữ nguyên mục tiêu proxy, assertions, timeouts, retries 0, scripts scenario và C# witnesses.
+- HTTP ghi enum route, ID cục bộ, timestamp, elapsed, lifecycle/status. Không ghi URL/query, headers, credentials, payload hoặc raw exception. Không thay request/response.
+- SQL observer cố định `(localdb)\MSSQLLocalDB`, database `Fmcg_App00_<runId>_A`; xác minh owner/nonce, session và tenant binding trước khi lấy mẫu. Chỉ đọc request/lock metadata trong database đó, không DROP/reset/migrate hoặc đọc business rows ngoài marker. Không cấp quyền và không truy vấn database của blocker ngoài phạm vi.
+- Một connection không pooling, một query đang chạy; lấy mẫu khoảng 250ms, command timeout 1s, deadline 240s và giới hạn dữ liệu. Ghi rõ khoảng trống/không quan sát được; dừng và dọn tiến trình theo Playwright/parent lifecycle. Lỗi observer không được biến test FAIL thành PASS.
+- Bằng chứng SQL nằm trong thư mục evidence hiện có. JUnit/browser tạm của .4/.5 được ghi ngoài mọi đường dẫn upload; chỉ bản text đã che token synthetic đã biết và screenshot nguyên byte được đưa về vị trí evidence chuẩn. Reporter bị ngắt hoặc redaction thất bại không đưa bản raw vào artifact; ghi rõ bằng chứng không xuất được. Nội dung assertion và kết quả test được giữ. Không bật trace/HAR/verbose HTTP.
+- Một lần CI có diagnostics là phép kiểm chứng source mới, không phải thêm retry tự động. Nếu lỗi tái diễn, dùng bằng chứng mới để chọn sửa lỗi cụ thể; nếu không tái diễn, chỉ ghi PASS của source và giới hạn của việc chưa tái hiện, không tuyên bố root cause đã được sửa. Merge vẫn cần toàn bộ CI của HEAD cuối, rồi biên nhận push/main riêng.
+
+Kế hoạch bổ sung: [2026-11-25-app03-read-diagnostics](../superpowers/plans/2026-11-25-app03-read-diagnostics.md).
