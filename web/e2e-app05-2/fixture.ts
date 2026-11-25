@@ -45,16 +45,18 @@ export async function setup(request: APIRequestContext) {
   const locationId = catalog.warehouses.find(choice => choice.label === 'C2-MAIN')!.id
   const trip = (label: string) => catalog.trips.find(choice => choice.label === label)!.id
 
-  async function order(tripId: string, quantity: number) {
+  async function order(tripId: string, quantity: number, sharedPool = false) {
+    const chosenCustomer = sharedPool ? catalog.customers.find(c => c.label.startsWith('C2-FIXTURE'))!.id : customerId
+    const chosenSku = sharedPool ? catalog.skus.find(s => s.label.startsWith('Z-FIELD-EA'))!.id : skuId
     const detail = await get<{ registeredShipTos: { id: string; revision: number }[] }>(
-      request, c1 + '/customers/' + customerId, 'SOURCE',
+      request, c1 + '/customers/' + chosenCustomer, 'SOURCE',
     )
     expect(detail.registeredShipTos).toHaveLength(1)
     const address = detail.registeredShipTos[0]
     const selection = await post<{ id: string }>(request, c1 + '/ship-to-selections', {
-      commandId: crypto.randomUUID(), customerId, registeredId: address.id, revision: address.revision,
+      commandId: crypto.randomUUID(), customerId: chosenCustomer, registeredId: address.id, revision: address.revision,
     }, 'SOURCE')
-    const payload = { commandId: crypto.randomUUID(), customerId, tripId, selectionId: selection.id, lines: [{ skuId, quantity }] }
+    const payload = { commandId: crypto.randomUUID(), customerId: chosenCustomer, tripId, selectionId: selection.id, lines: [{ skuId: chosenSku, quantity }] }
     const orderId = await applied(request, c2 + '/drafts', payload, 'SOURCE')
     const confirm = { commandId: crypto.randomUUID(), orderId }
     const confirmSourceId = await applied(request, c2 + '/confirm', confirm, 'SOURCE')
@@ -70,11 +72,11 @@ export async function setup(request: APIRequestContext) {
     return { sourceId, payload }
   }
 
-  async function load(tripId: string, quantity: number) {
+  async function load(tripId: string, quantity: number, expectedWarehouseHeld = quantity) {
     const rights = await get<{ id: string }[]>(request, c3 + '/trips/' + tripId + '/rights', 'RECEIVER')
     expect(rights).toHaveLength(1)
     return applied(request, c3 + '/load', {
-      commandId: crypto.randomUUID(), tripId, lines: [{ rightId: rights[0].id, quantity, expectedWarehouseHeld: quantity }],
+      commandId: crypto.randomUUID(), tripId, lines: [{ rightId: rights[0].id, quantity, expectedWarehouseHeld }],
     }, 'RECEIVER')
   }
 

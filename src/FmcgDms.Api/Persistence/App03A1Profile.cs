@@ -123,7 +123,8 @@ public static class App03A1Profile
                 SELECT CONVERT(bit,CASE WHEN OBJECT_ID(N'dbo.App05ASuccessor',N'U') IS NOT NULL
                     AND OBJECT_ID(N'dbo.App05AHeldTransfer',N'U') IS NOT NULL
                     AND OBJECT_ID(N'dbo.App05AHeldTransferLot',N'U') IS NOT NULL
-                    AND OBJECT_ID(N'dbo.App05ASuccessorCommand',N'U') IS NOT NULL THEN 1 ELSE 0 END);
+                    AND OBJECT_ID(N'dbo.App05ASuccessorCommand',N'U') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.App05ASuccessorReserve',N'U') IS NOT NULL THEN 1 ELSE 0 END);
                 """, cancellationToken: ct)))
                 throw new InvalidOperationException($"{SuccessorName} requires the complete successor schema in both tenant databases.");
         }
@@ -171,7 +172,11 @@ public static class App03A1Profile
         }
         if (closeReadiness) yield return (CloseReadinessName, App05FollowUpSchema.Version);
         if (tripClosure) yield return (TripClosureName, App05TripClosureSchema.Version);
-        if (successor) yield return (SuccessorName, App05AFulfillmentSchema.Version);
+        if (successor)
+        {
+            yield return (SuccessorName, App05AFulfillmentSchema.Version);
+            yield return (SuccessorName, App05ASuccessorReserveSchema.Version);
+        }
     }
 
     internal static Task<SchemaState> ReadSchema(SqlConnection db, string nonce, CancellationToken ct = default) =>

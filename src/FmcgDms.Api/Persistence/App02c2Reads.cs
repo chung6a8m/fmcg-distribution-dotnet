@@ -23,12 +23,16 @@ public sealed record C2OrderLineView(Guid? LineId, string Sku, string BaseUom, d
     public F04PriceView? Pricing { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public C2LineHandoff? Handoff { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool CanReserveSuccessor { get; init; }
 }
 public sealed record C2OrderView(Guid Id, string Customer, string Trip, string ShipTo, DateTime? BusinessDate,
     Guid? ConfirmSourceId, string Status, IReadOnlyList<C2OrderLineView> Lines, Guid? ShipToSnapshotId, string ShipToOrigin)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? TripId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TripStatus { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public C2HandoffActions? Actions { get; init; }
 }
@@ -153,6 +157,9 @@ public sealed partial class App01a2CommandService
                 : null;
             var readyToLoad = access is null || confirmed.Length == 0 ? [] :
                 await OrdersReadyToLoad(db, tx, tenant, access.LoadTrips, ct);
+            var successorReserveLines = access?.Warehouse == true && connections.UsesApp05Successor
+                ? await ReadSuccessorReserveLines(db, tx, tenant, actor, ct)
+                : [];
             return headers.Select(h =>
             {
                 var orderLines = lines[h.Id].Select(l => new C2OrderLineView(
@@ -160,7 +167,8 @@ public sealed partial class App01a2CommandService
                     l.Delivered, l.Loaded, l.HeldOnTrip, l.PolicySourceHash)
                 {
                     Pricing = l.LineId is Guid id ? pricing.GetValueOrDefault(id)?.ToView() : null,
-                    Handoff = handoffLines?.View(l)
+                    Handoff = handoffLines?.View(l),
+                    CanReserveSuccessor = l.LineId is Guid lineId && l.Delivered < l.Ordered && successorReserveLines.Contains(lineId)
                 }).ToArray();
                 string status = h.ConfirmSourceId is null ? "DRAFT" :
                     orderLines.All(l => l.Delivered == l.Ordered) ? "FULFILLED" :
@@ -171,6 +179,7 @@ public sealed partial class App01a2CommandService
                     orderLines, h.ShipToSnapshotId, h.ShipToOrigin)
                 {
                     TripId = handoff ? h.TripId : null,
+                    TripStatus = handoff && connections.UsesApp05Successor ? h.TripStatus : null,
                     Actions = access?.Actions(h, orderLines, connections.UsesApp03BusinessDay, readyToLoad.Contains(h.Id))
                 };
             }).ToArray();

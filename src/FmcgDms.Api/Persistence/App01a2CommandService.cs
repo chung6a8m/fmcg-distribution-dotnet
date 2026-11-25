@@ -177,6 +177,20 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 && (loadTrip ?? deliveryTrip ?? d1GrantTrip) is Guid mixedTrip)
                 await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + mixedTrip.ToString("N"), ct);
 
+            if (connections.UsesApp05Successor)
+            {
+                if (request is GrantBQuotaCommand quota && quota.StockLocationId != Guid.Empty && quota.SkuId != Guid.Empty)
+                    await LockStockAllocation(db, tx, tenant, quota.StockLocationId, quota.SkuId, ct);
+                else if (request is ReserveAStockCommand reserve && reserve.StockLocationId != Guid.Empty)
+                {
+                    var sku = await db.ExecuteScalarAsync<Guid?>(Sql("""
+                        SELECT SkuId FROM dbo.AOrderLine WHERE TenantId=@Tenant AND AOrderId=@OrderId AND Id=@Line;
+                        """, new { Tenant = tenant, reserve.OrderId, Line = reserve.OrderLineId }, tx, ct));
+                    if (sku.HasValue)
+                        await LockStockAllocation(db, tx, tenant, reserve.StockLocationId, sku.Value, ct);
+                }
+            }
+
             var existing = await db.QuerySingleOrDefaultAsync<ExistingCommand>(Sql("""
                 SELECT Id,PayloadHashVersion,PayloadHash,Status,OutcomeCode,ReasonCode
                 FROM dbo.BusinessCommand WITH (UPDLOCK,HOLDLOCK)
@@ -328,6 +342,9 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
     private static bool IsPreparedTrip(Trip? trip) =>
         trip is { Status: "PREPARED", VehicleLocationId: not null,
             VehicleKind: "VEHICLE", VehicleActive: true };
+
+    internal static Task LockStockAllocation(SqlConnection db, SqlTransaction tx, string tenant, Guid warehouse, Guid sku,
+        CancellationToken ct) => App02a3Sql.Lock(db, tx, $"APP01A:STOCK-ALLOC:{tenant}:{warehouse:N}:{sku:N}", ct);
 
     private static async Task<string?> AllocateStock(SqlConnection db, SqlTransaction tx,
         string tenant, Guid locationId, Guid skuId, decimal quantity, CancellationToken ct)
@@ -502,34 +519,44 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                     request.StockLocationId, line.SkuId, request.BaseQuantity, token);
                 if (stockError is not null) return BusinessCommandOutcome.Rejected(stockError);
 
-                Guid source = await AddSource(db, tx, tenant, commandId, StockSourceKind,
-                    request.SourceNumber, actor, order.CustomerId, order.TripId, token);
-                Guid sourceLine = await AddLine(db, tx, tenant, source, 1,
-                    line.SkuId, request.BaseQuantity, null, token);
-                Guid rightId = Guid.NewGuid();
-                await db.ExecuteAsync(Sql("""
-                    INSERT dbo.StockRight(Id,TenantId,TripId,StockLocationId,SkuId,
-                        BusinessSourceLineId,RightKind,GrantedBaseQuantity)
-                    VALUES(@Id,@Tenant,@Trip,@Location,@Sku,@Line,'A',@Quantity)
-                    """, new
-                    {
-                        Id = rightId, Tenant = tenant, Trip = order.TripId.Value,
-                        Location = request.StockLocationId, Sku = line.SkuId,
-                        Line = sourceLine, Quantity = request.BaseQuantity
-                    }, tx, token));
-                await db.ExecuteAsync(Sql("""
-                    INSERT dbo.AReservation(Id,TenantId,StockRightId,AOrderLineId)
-                    VALUES(@Id,@Tenant,@Right,@Line)
-                    """, new
-                    {
-                        Id = Guid.NewGuid(), Tenant = tenant, Right = rightId, Line = line.Id
-                    }, tx, token));
-                if (lotPicks is not null)
-                    await RecordLotPicks(db, tx, tenant, rightId, lotPicks, "F03LotHold", "StockRightId", token);
-                await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_A",
-                    order.CustomerId, line.SkuId, request.StockLocationId, request.BaseQuantity, 0, token);
+                var (source, _) = await RecordAStockRight(db, tx, tenant, actor, commandId,
+                    request.SourceNumber, order.CustomerId, order.TripId.Value, line.Id, line.SkuId,
+                    request.StockLocationId, request.BaseQuantity, lotPicks, token);
                 return BusinessCommandOutcome.Applied("A_STOCK_RESERVED", source);
             }, ct, expectedConfirmSource.HasValue ? "warehouse" : null);
+
+    private static async Task<(Guid SourceId, Guid RightId)> RecordAStockRight(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, Guid commandId, string sourceNumber, Guid customer, Guid trip,
+        Guid orderLine, Guid sku, Guid warehouse, decimal quantity, IReadOnlyList<F03Pick>? lotPicks, CancellationToken token)
+    {
+        Guid source = await AddSource(db, tx, tenant, commandId, StockSourceKind,
+            sourceNumber, actor, customer, trip, token);
+        Guid sourceLine = await AddLine(db, tx, tenant, source, 1,
+            sku, quantity, null, token);
+        Guid rightId = Guid.NewGuid();
+        await db.ExecuteAsync(Sql("""
+            INSERT dbo.StockRight(Id,TenantId,TripId,StockLocationId,SkuId,
+                BusinessSourceLineId,RightKind,GrantedBaseQuantity)
+            VALUES(@Id,@Tenant,@Trip,@Location,@Sku,@Line,'A',@Quantity)
+            """, new
+            {
+                Id = rightId, Tenant = tenant, Trip = trip,
+                Location = warehouse, Sku = sku,
+                Line = sourceLine, Quantity = quantity
+            }, tx, token));
+        await db.ExecuteAsync(Sql("""
+            INSERT dbo.AReservation(Id,TenantId,StockRightId,AOrderLineId)
+            VALUES(@Id,@Tenant,@Right,@Line)
+            """, new
+            {
+                Id = Guid.NewGuid(), Tenant = tenant, Right = rightId, Line = orderLine
+            }, tx, token));
+        if (lotPicks is not null)
+            await RecordLotPicks(db, tx, tenant, rightId, lotPicks, "F03LotHold", "StockRightId", token);
+        await AddRightEffect(db, tx, tenant, sourceLine, "RIGHT_A",
+            customer, sku, warehouse, quantity, 0, token);
+        return (source, rightId);
+    }
 
     public Task<BusinessCommandOutcome> ConfirmAOrderAsync(
         ClaimsPrincipal principal, ConfirmAOrderCommand request, CancellationToken ct) =>

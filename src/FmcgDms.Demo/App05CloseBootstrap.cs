@@ -19,7 +19,7 @@ internal static class App05CloseBootstrap
     internal const string Version = App03A1Profile.CloseReadinessBootstrapVersion;
     private const string BootstrapActor = "app05-close-bootstrap";
 
-    internal static async Task Prepare(DemoRun run, string tenant, CancellationToken ct)
+    internal static async Task Prepare(DemoRun run, string tenant, CancellationToken ct, bool splitSuccessorLots = false)
     {
         await run.Verify(tenant, app03Session: true);
         await using var db = new SqlConnection(run.Connection(tenant));
@@ -39,7 +39,7 @@ internal static class App05CloseBootstrap
         if (installed is not null && installed != Version)
             throw new InvalidOperationException("Unsupported APP-05.1 fixture version.");
         if (installed is null)
-            await Seed(db, tx, tenant, ct);
+            await Seed(db, tx, tenant, splitSuccessorLots, ct);
 
         // Track prepared trips separately so Resume and NextDay preserve grant revocations,
         // including those on trips that already existed before the profile upgrade.
@@ -55,7 +55,7 @@ internal static class App05CloseBootstrap
         await tx.CommitAsync(ct);
     }
 
-    private static Task Seed(SqlConnection db, SqlTransaction tx, string tenant, CancellationToken ct)
+    private static Task Seed(SqlConnection db, SqlTransaction tx, string tenant, bool splitSuccessorLots, CancellationToken ct)
     {
         Guid customer = Guid.NewGuid(), outlet = Guid.NewGuid(), registered = Guid.NewGuid();
         var address = new C1Address("VN", "HCM", "Khu DEV", "05 Đường DEV", "Điểm nhận cuối ca DEV");
@@ -95,8 +95,19 @@ internal static class App05CloseBootstrap
             SELECT TenantId,StockLocationId,SkuId,BaseQuantity,CostAmount
             FROM dbo.PhysicalStockOpening WHERE TenantId=@tenant AND SkuId=@sku AND SnapshotCode=@Version;
             INSERT dbo.F03Unit(TenantId,SkuId,UomCode,Factor,[Step]) VALUES(@tenant,@sku,'EA',1,1);
-            INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn) VALUES(@tenant,@lot,@sku,'DAY-A-ORIGIN',@Expiry);
-            INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity) VALUES(@tenant,@lot,@main,60);
+            INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn) VALUES(@tenant,@lot,@sku,'DAY-A-ORIGIN',IIF(@SplitSuccessorLots=1,DATEADD(day,3,@FirstDay),@Expiry));
+            INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity)
+            VALUES(@tenant,@lot,@main,IIF(@SplitSuccessorLots=1,49,60));
+            IF @SplitSuccessorLots=1
+            BEGIN
+                DECLARE @early uniqueidentifier=NEWID(),@late uniqueidentifier=NEWID(),@expired uniqueidentifier=NEWID();
+                INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn)
+                VALUES(@tenant,@early,@sku,'DAY-A-EARLY',DATEADD(day,5,@FirstDay)),
+                    (@tenant,@late,@sku,'DAY-A-LATE',DATEADD(day,7,@FirstDay)),
+                    (@tenant,@expired,@sku,'DAY-A-EXPIRED',DATEADD(day,-1,@FirstDay));
+                INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity)
+                VALUES(@tenant,@early,@main,2),(@tenant,@late,@main,4),(@tenant,@expired,@main,5);
+            END;
 
             INSERT dbo.C2CommercialPolicy(TenantId,Id,CustomerId,SkuId,Version,Decision,EffectiveFromUtc,EffectiveUntilUtc,
                 Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
@@ -115,7 +126,8 @@ internal static class App05CloseBootstrap
             Opening = App03DayBootstrap.Clock(App03DayBootstrap.FirstDay),
             Starts = IctMidnight(App03DayBootstrap.FirstDay),
             Ends = IctMidnight(App03DayBootstrap.LastDay.AddDays(1)),
-            Expiry = App03DayBootstrap.LastDay.AddDays(1).ToDateTime(TimeOnly.MinValue)
+            Expiry = App03DayBootstrap.LastDay.AddDays(1).ToDateTime(TimeOnly.MinValue),
+            FirstDay = App03DayBootstrap.FirstDay.ToDateTime(TimeOnly.MinValue), SplitSuccessorLots = splitSuccessorLots
         }, tx, cancellationToken: ct));
     }
 

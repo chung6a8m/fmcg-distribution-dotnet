@@ -42,6 +42,7 @@ type Access = Identity & {
   tripClose?: boolean
   tripClosure?: boolean
   aSuccessor?: boolean
+  aSuccessorReserve?: boolean
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -418,7 +419,7 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         {current?.id === 'refunds' && access.refundRole && <Refunds offline={offline} integrated canOpenReturn={access.returnRole != null} linkedRefund={linkedId}
           session={{ token, identity: { ...access, role: access.refundRole } }} />}
         {current?.id === 'customers' && <Customer workspaceToken={token} startCustomer={customer} onCustomerChange={saveCustomer} />}
-        {current?.id === 'orders' && <Order workspaceToken={token} onOpenAr={openAr}
+        {current?.id === 'orders' && <Order workspaceToken={token} successorReserve={access.aSuccessorReserve === true} onOpenAr={openAr}
           selectedOrder={requestedOrder} selectedSource={guid.test(requestedSource) ? requestedSource : ''}
           selectedTrace={requestedTrace} recovering={query.get('recover') === '1'}
           onSelectOrder={(id, tripId) => { if (tripId) saveTrip(tripId); saveArOrder(id) }}

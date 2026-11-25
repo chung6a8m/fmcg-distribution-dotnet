@@ -52,6 +52,18 @@ public sealed partial class App01a2CommandService
         return new(sales, warehouse, date, trips.Select(trip => trip.Id).ToHashSet());
     }
 
+    private static async Task<HashSet<Guid>> ReadSuccessorReserveLines(SqlConnection db, SqlTransaction tx,
+        string tenant, string actor, CancellationToken ct) =>
+        (await db.QueryAsync<Guid>(Sql("""
+            SELECT f.SourceId FROM dbo.App05FollowUp f
+            JOIN dbo.App05TripClosure c ON c.TenantId=f.TenantId AND c.TripId=f.TripId
+                AND c.Status='CLOSED_WITH_OPEN_CASES'
+            JOIN dbo.Trip t ON t.TenantId=c.TenantId AND t.Id=c.TripId AND t.Status=c.Status
+            JOIN dbo.C3TripWriter w ON w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor
+            JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=f.TenantId AND s.TripId=f.TripId AND s.AOrderLineId=f.SourceId
+            WHERE f.TenantId=@Tenant AND f.SourceKind='A_REMAINDER';
+            """, new { Tenant = tenant, Actor = actor }, tx, ct))).ToHashSet();
+
     private sealed record HandoffLotRow(Guid LineId, int Stage, Guid SourceId, Guid EventId, Guid LotId, string LotCode,
         DateTime ExpiresOn, decimal Quantity)
     {
