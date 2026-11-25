@@ -75,7 +75,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.0 — Ổn định CI nền** | Baseline hiện tại | Chẩn đoán timeout, điều chỉnh budget hoặc tách job mà giữ coverage/artifact; CI main hoàn tất | `MERGED / MAIN_CI_VERIFIED` (CI-only; còn investigation riêng) |
 | **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `MERGED / FINAL_HEAD_CI_VERIFIED` |
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `MERGED / LOCAL_DEV_VERIFIED / PR_CI_INCOMPLETE` (#153) |
-| **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
+| **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `MERGED / MAIN_CI_VERIFIED` (#154) |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `NOT_STARTED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
@@ -254,6 +254,16 @@ Lỗi ma trận D.3 trên final source của PR #153 vẫn là lịch sử hoste
 
 **Bổ sung theo review PR #154.** Giao diện giữ nguyên CommandId và payload đang chờ khi mất ACK, bị từ chối truy cập hoặc nhận phản hồi thiếu biên nhận khớp nguồn. Server gửi lại mã lệnh, nguồn, binding và lượng từ biên nhận đã lưu sau khi kiểm quyền hiện hành và payload. Giao diện kiểm exact lượng và tổng hai phần chưa nạp/đã trả trước khi xác nhận thành công. Lượt local `cfcda3eeaa7e49658b16f4b91b2b2947` đạt Chromium 4/4 và 75/75 đối chiếu SQL, zero diff. Ca kiểm thu hồi rồi cấp lại quyền sau commit mất ACK, JSON thành công rỗng hoặc sai nguồn/số lượng và xếp chuyến với lượng có số 0 đầu. Cùng lệnh gửi lại giữ một binding và đúng một thế hệ quyền tương ứng. SHA256 `run.json` `F165EE85980B9C564E1327A0D47920D00DF9BFF8AE083B79DE6F7E44AE693E0F`.
 
+#### Closeout APP-05.3 — 25/11/2026
+
+**Disposition** `MERGED / MAIN_CI_VERIFIED / SYNTHETIC_DEV_ONLY`.
+
+- [PR #154](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/154) merge lúc 18:54 ICT. Final source `6a87bb9e835cbf632f86b7670b5d5c0096b5099b`. Merge `ad5ed70ca238aeca35fedb9b6c60ea65efa823e6`. Hai finding review đã được sửa về giữ nguyên lệnh UNKNOWN qua 403 và kiểm ACK khớp nguồn trước khi xác nhận.
+- Final source đạt 10/10 workflow và 25/25 checks. APP-00A đạt attempt 2 sau lỗi khởi động LocalDB của distribution ở lượt đầu. [CI final source](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45602682722).
+- Merge trên `main` đạt 10/10 workflow và 25/25 checks. APP-00A đạt attempt 2. Lượt đầu hết thời gian chờ dòng báo cáo trong ca Chromium APP-03.7 accounting, trước bước .3. [CI main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45608725142).
+- Artifact `VerifyASuccessor` trên đúng merge `ad5ed70`, tree `9c28082d163920ef09c527fd42ec2583c963e8a3`, lượt `6066ca8d2587419397b7dea75408b1ea` đạt Chromium 4/4 và SQL 75/75, zero diff. SHA256 `run.json` `46E222450689706BD29E0EF536131B2DEE93B5E3BFC9004316F93AF9218B21A6`.
+- Kết quả thuộc LocalDB synthetic DEV. Reserve phần chưa giữ chuyển sang .4a. Nạp/giao kế nhiệm thuộc .4b. Nghiệm thu ca tích hợp của Owner tại .7, các gate physical/PREPROD/EV/P0/Pilot/Go-Live theo mốc riêng.
+
 ### APP-05.4a — Reserve riêng cho phần chưa giữ
 
 Migration tiến `202611250004` bổ sung liên kết bất biến từ quyền Reserve tới binding, dòng A, SKU, kho và chuyến đích. Dùng `-ASuccessor` trên phiên mới hoặc Resume phiên DEV đã có. Kho cần quyền hiện hành và phân công C.3 trên cả chuyến gốc lẫn chuyến đích. Từ **Đơn hàng**, mở dòng trên chuyến gốc đã đóng, chọn binding và kho rồi **Giữ bổ sung**. UI hiển thị lượng đã xếp, đã giữ và còn chờ giữ. Nạp/giao quyền kế nhiệm thuộc APP-05.4b.
@@ -365,4 +375,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Increment hiện tại:** **APP-05.3 — Liên kết kế nhiệm và chuyển HELD**. APP-05.2 đã merge qua PR #153. CI của PR #153 còn lỗi ở ma trận D.3. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.
+**Increment hiện tại:** **APP-05.4a — Reserve phần chưa giữ trên chuyến kế nhiệm**. APP-05.3 đã merge qua PR #154 và có CI thành công trên commit merge. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.
