@@ -20,11 +20,11 @@ if (args is ["App03Session", var sessionAction, var sessionRoot, var sessionSour
     await App03DevSession.Run(sessionAction, sessionRoot, sessionSource, sessionId == "-" ? null : sessionId, settlement: true, finance: true);
     return;
 }
-if (args is ["App03Session", var closeAction, var closeRoot, var closeSource, var closeId, "CloseReadiness"]
-    && closeAction is "Start" or "Resume")
+if (args is ["App03Session", var closeAction, var closeRoot, var closeSource, var closeId, var closeScope]
+    && closeAction is ("Start" or "Resume") && closeScope is ("CloseReadiness" or "TripClosure"))
 {
     await App03DevSession.Run(closeAction, closeRoot, closeSource, closeId == "-" ? null : closeId,
-        closeReadiness: true);
+        closeReadiness: true, tripClosure: closeScope == "TripClosure");
     return;
 }
 if (args is ["App03Session", "NextDay", var dayRoot, var daySource, var dayId, var day])

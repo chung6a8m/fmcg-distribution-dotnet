@@ -35,7 +35,7 @@ internal static partial class App05CloseReadiness
                 ExpectedRevision = revision.ToUpperInvariant()
             };
             return await Run(connections, context.User, tripId, true, request.CommandId, (db, tx, tenant, actor, _) =>
-                Assign(db, tx, tenant, actor, tripId, request, dueAt, ct), ct);
+                Assign(db, tx, tenant, actor, tripId, request, dueAt, connections.UsesApp05TripClosure, ct), ct);
         });
 
     private static bool TextValid(string? value, int maximum) =>
@@ -53,7 +53,7 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<IResult> Assign(SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid trip,
-        AssignInput request, DateTimeOffset dueAt, CancellationToken ct)
+        AssignInput request, DateTimeOffset dueAt, bool closing, CancellationToken ct)
     {
         var scope = new { Tenant = tenant, Actor = actor, request.CommandId };
         var payloadHash = Digest(new
@@ -68,8 +68,15 @@ internal static partial class App05CloseReadiness
         if (replay is not null)
             return CryptographicOperations.FixedTimeEquals(replay.PayloadHash, payloadHash)
                 ? Results.Ok(new { replay.FollowUpId }) : Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
+        if (closing && await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
+            SELECT CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM dbo.App05TripClosure
+                    WHERE TenantId=@Tenant AND ActorId=@Actor AND CommandId=@CommandId)
+                OR EXISTS(SELECT 1 FROM dbo.App05TripCloseRejection
+                    WHERE TenantId=@Tenant AND ActorId=@Actor AND CommandId=@CommandId) THEN 1 ELSE 0 END);
+            """, scope, tx, ct)))
+            return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
-        var preview = await Read(db, tx, tenant, trip, true, ct);
+        var preview = await Read(db, tx, tenant, trip, true, ct, closing);
         if (!preview.CanAssign || preview.Revision != request.ExpectedRevision)
             return Results.Conflict(new { Code = preview.CanAssign ? "READINESS_CHANGED" : "TRIP_ASSIGNMENT_NOT_OPEN" });
         if (!preview.Work.Any(row => row.SourceKind == request.SourceKind && row.SourceId == request.SourceId))

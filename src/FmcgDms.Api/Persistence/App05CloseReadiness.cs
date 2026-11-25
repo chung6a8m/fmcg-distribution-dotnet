@@ -54,7 +54,8 @@ internal static partial class App05CloseReadiness
     internal sealed record Coverage(int Known, int Expected);
     internal sealed record Preview(Guid TripId, string Code, DateOnly BusinessDate, DateTimeOffset AsOf, string Status,
         string State, string Revision, Coverage Coverage, bool CanAssign, string[] Assignees,
-        Blocker[] Blockers, ALine[] ALines, Receivable[] Receivables, Work[] Work);
+        Blocker[] Blockers, ALine[] ALines, Receivable[] Receivables, Work[] Work,
+        Guid? HandoffId, bool CanClose);
 
     internal static void Map(WebApplication app)
     {
@@ -75,9 +76,11 @@ internal static partial class App05CloseReadiness
         {
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(await Run(connections, context.User, tripId, false, null,
-                (db, tx, tenant, _, ops) => Read(db, tx, tenant, tripId, ops, ct), ct));
+                (db, tx, tenant, _, ops) => Read(db, tx, tenant, tripId, ops, ct, closing: connections.UsesApp05TripClosure), ct));
         });
         MapFollowUps(routes);
+        if (app.Services.GetRequiredService<TenantConnections>().UsesApp05TripClosure)
+            MapClosures(routes);
     }
 
     internal static async Task<bool> Session(TenantConnections connections, ClaimsPrincipal user, CancellationToken ct)

@@ -15,6 +15,7 @@ internal sealed class App03DevSession
     private const string SettlementSchemaVersion = "C5+F01-F05+F07+D1-D3+Field+Settlement/v1";
     private const string FinanceSchemaVersion = "APP-03.6+D4+F06+F08/v1";
     private const string CloseReadinessSchemaVersion = "APP-03.7+APP-05.1/v1";
+    private const string TripClosureSchemaVersion = "APP-05.1+APP-05.2/v1";
     internal static readonly DateOnly FinanceRollover = new(2026, 12, 1);
     private const string LegacySeedVersion = "APP-03-C2-F05-v1";
     private readonly string folder;
@@ -33,26 +34,31 @@ internal sealed class App03DevSession
     internal bool UsesSettlement { get; private set; }
     internal bool UsesFinance { get; private set; }
     internal bool UsesCloseReadiness { get; private set; }
-    internal string Profile => UsesCloseReadiness ? App03A1Profile.CloseReadinessName
+    internal bool UsesTripClosure { get; private set; }
+    internal string Profile => UsesTripClosure ? App03A1Profile.TripClosureName
+        : UsesCloseReadiness ? App03A1Profile.CloseReadinessName
         : UsesFinance ? App03A1Profile.FinanceName : UsesSettlement ? App03A1Profile.SettlementName
         : UsesField ? App03A1Profile.FieldName : App03A1Profile.Name;
-    private string Schema => UsesCloseReadiness ? CloseReadinessSchemaVersion
+    private string Schema => UsesTripClosure ? TripClosureSchemaVersion
+        : UsesCloseReadiness ? CloseReadinessSchemaVersion
         : UsesFinance ? FinanceSchemaVersion : UsesSettlement ? SettlementSchemaVersion
         : UsesField ? FieldSchemaVersion : SchemaVersion;
     internal string ClockPath => Path.Combine(folder, "clock.utc");
     internal int WebPort { get; private set; }
     internal CancellationToken StopToken { get; private set; }
 
-    private App03DevSession(string id, string source, bool resume, bool startBeforeField, bool settlement, bool finance, bool closeReadiness)
+    private App03DevSession(string id, string source, bool resume, bool startBeforeField,
+        bool settlement, bool finance, bool closeReadiness, bool tripClosure)
     {
         this.source = source;
         Resume = resume;
         UsesField = !startBeforeField;
-        if (startBeforeField && closeReadiness)
-            throw new ArgumentException("APP-05.1 requires the APP-03 finance predecessor.");
-        UsesSettlement = UsesField && (settlement || closeReadiness);
-        UsesFinance = UsesSettlement && (finance || closeReadiness);
-        UsesCloseReadiness = closeReadiness;
+        UsesTripClosure = tripClosure;
+        UsesCloseReadiness = closeReadiness || UsesTripClosure;
+        if (startBeforeField && UsesCloseReadiness)
+            throw new ArgumentException("APP-05 requires the APP-03 finance predecessor.");
+        UsesSettlement = UsesField && (settlement || UsesCloseReadiness);
+        UsesFinance = UsesSettlement && (finance || UsesCloseReadiness);
         RunId = new DemoRun(id);
         string home = Directory.CreateDirectory(Home).FullName;
         folder = Path.Combine(home, id);
@@ -72,7 +78,8 @@ internal sealed class App03DevSession
 
     internal static async Task Run(string operation, string root, string source, string? id = null,
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
-        bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false, bool closeReadiness = false)
+        bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false,
+        bool closeReadiness = false, bool tripClosure = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
@@ -94,6 +101,12 @@ internal sealed class App03DevSession
             await App05UpgradeEvidence.Run(root, source);
             return;
         }
+        if (operation == "VerifyTripClosure")
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-05.2 requires Windows LocalDB.");
+            await App05TripClosureEvidence.Run(root, source);
+            return;
+        }
         if (operation == "VerifyFinance") { await App03FinanceEvidence.Run(root, source); return; }
         if (operation == "VerifySettlement") { await App03WorkspaceEvidence.Run(root, source, settlement: true); return; }
         if (operation == "VerifyField") { await App03WorkspaceEvidence.Run(root, source, field: true); return; }
@@ -101,7 +114,8 @@ internal sealed class App03DevSession
         if (operation is not ("Start" or "Resume" or "Remove" or "NextDay") || (id is null && operation != "Start")
             || (operation == "NextDay") != businessDate.HasValue)
             throw new ArgumentException("Expected Start, Resume, Remove or NextDay. NextDay requires the target business date.");
-        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume", startBeforeField, settlement, finance, closeReadiness)
+        var session = new App03DevSession(id ?? Guid.NewGuid().ToString("N"), source, operation == "Resume",
+            startBeforeField, settlement, finance, closeReadiness, tripClosure)
         {
             VerifyHandoff = verifyHandoff,
             VerifyField = verifyField
@@ -175,7 +189,7 @@ internal sealed class App03DevSession
         if (!UsesBusinessDay)
         {
             if (UsesCloseReadiness)
-                throw new InvalidOperationException("APP-05.1 requires the APP-03 business day seed.");
+                throw new InvalidOperationException("APP-05 requires the APP-03 business day seed.");
             UsesField = false;
             UsesSettlement = false;
             UsesFinance = false;
@@ -228,7 +242,8 @@ internal sealed class App03DevSession
 
     private void UseManifestProfile(Manifest value)
     {
-        UsesCloseReadiness |= value.Profile == App03A1Profile.CloseReadinessName;
+        UsesTripClosure |= value.Profile == App03A1Profile.TripClosureName;
+        UsesCloseReadiness |= UsesTripClosure || value.Profile == App03A1Profile.CloseReadinessName;
         UsesFinance |= UsesCloseReadiness || value.Profile == App03A1Profile.FinanceName;
         UsesSettlement |= UsesFinance || value.Profile == App03A1Profile.SettlementName;
         UsesField |= UsesSettlement || value.Profile == App03A1Profile.FieldName;
@@ -249,7 +264,7 @@ internal sealed class App03DevSession
         {
             var day = DateOnly.FromDateTime(clock);
             ScratchMigrator.MigrateApp03A1(RunId.Connection(tenant), tenant, RunId.Id, LogLevel.Warning, field: true,
-                settlement: UsesSettlement, finance: UsesFinance, closeReadiness: UsesCloseReadiness);
+                settlement: UsesSettlement, finance: UsesFinance, closeReadiness: UsesCloseReadiness, tripClosure: UsesTripClosure);
             if (day <= App03DayBootstrap.LastDay)
             {
                 await App03DayBootstrap.PrepareDay(RunId, tenant, day, StopToken);
@@ -290,7 +305,8 @@ internal sealed class App03DevSession
         or { Profile: App03A1Profile.FieldName, Schema: FieldSchemaVersion, Seed: App03DayBootstrap.Version }
         or { Profile: App03A1Profile.SettlementName, Schema: SettlementSchemaVersion, Seed: App03DayBootstrap.Version }
         or { Profile: App03A1Profile.FinanceName, Schema: FinanceSchemaVersion, Seed: App03DayBootstrap.Version }
-        or { Profile: App03A1Profile.CloseReadinessName, Schema: CloseReadinessSchemaVersion, Seed: App03DayBootstrap.Version };
+        or { Profile: App03A1Profile.CloseReadinessName, Schema: CloseReadinessSchemaVersion, Seed: App03DayBootstrap.Version }
+        or { Profile: App03A1Profile.TripClosureName, Schema: TripClosureSchemaVersion, Seed: App03DayBootstrap.Version };
 
     private static bool ValidClock(Manifest metadata)
     {
@@ -299,7 +315,7 @@ internal sealed class App03DevSession
         var date = DateOnly.FromDateTime(metadata.ClockUtc);
         return metadata.Seed == App03DayBootstrap.Version
             && date >= App03DayBootstrap.FirstDay
-            && date <= (metadata.Profile is App03A1Profile.FinanceName or App03A1Profile.CloseReadinessName
+            && date <= (metadata.Profile is App03A1Profile.FinanceName or App03A1Profile.CloseReadinessName or App03A1Profile.TripClosureName
                 ? FinanceRollover : App03DayBootstrap.LastDay)
             && (metadata.Ready || date == App03DayBootstrap.FirstDay)
             && metadata.ClockUtc == App03DayBootstrap.Clock(date);

@@ -114,7 +114,8 @@ internal static class App02c1Dev
                 await run.Verify(tenant, app03Session: persistent is not null);
                 if (persistent is not null)
                 {
-                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning, field, settlement, finance, closeReadiness);
+                    ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning,
+                        field, settlement, finance, closeReadiness, tripClosure: persistent.UsesTripClosure);
                     await App03DayBootstrap.Seed(run, tenant, lifetime.Token, persistent.VerifyHandoff && tenant == "tenant-a");
                     await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
@@ -372,7 +373,7 @@ internal static class App02c1Dev
                     Console.WriteLine("Enter source, receiver, finance, qa or peer to copy a fresh credential.");
                     if (finance) Console.WriteLine("Finance roles: accountant, reconciler, maker, checker, refund-checker.");
                     if (finance) Console.WriteLine("Enter owner or peer-owner for the read-only distributor overview.");
-                    if (closeReadiness) Console.WriteLine("Enter ops, peer-ops or assignee for APP-05.1 readiness.");
+                    if (closeReadiness) Console.WriteLine("Enter ops, peer-ops or assignee for the trip readiness workspace.");
                     if (settlement) Console.WriteLine("Enter cashier for trip custody and employee advance returns.");
                     Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
                     while (!Console.IsInputRedirected)
