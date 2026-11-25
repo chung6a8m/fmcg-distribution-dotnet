@@ -52,7 +52,7 @@ Candidate tiếp theo `a65a211952a76316ac9b01c407c231ffa6c03262` đã bỏ cả 
 | fc2d79f, bốn worker cold; mọi cache read miss | RUNNER_TEMP | 4 | 12,5s | 12–15s |
 | a65a211, bỏ archive và override | Mặc định, không override | 4 | 36s | 35–39s |
 
-Đối chiếu Git xác nhận **30 đầu vào dependency được track** (SDK, solution, project, props/targets và config/lock nếu có) giống byte giữa các source trên; các log đã hoàn tất xác nhận Windows image `20261116.370.1`. Median initial build ở các nhóm vẫn khoảng 25–29s, khác với khoảng tách biệt của restore.
+Đối chiếu Git xác nhận **30 đầu vào dependency được track** (SDK, solution, project, props/targets và config/lock nếu có) giống byte giữa các source trên; các log lấy được xác nhận Windows image `20261116.370.1`. Riêng log image của main core trong nhóm baseline không lấy được, nên chưa xác định image của mẫu đó. Median initial build ở các nhóm vẫn khoảng 25–29s, khác với khoảng tách biệt của restore.
 
 Chuỗi default → temp/miss → default có khoảng restore không giao nhau, đủ căn cứ chọn **một cấu hình tối thiểu chỉ chuyển NuGet global-packages sang thư mục tạm của job**, không thêm archive. Các mẫu trong một lượt có tương quan và không được randomize; không tuyên bố nguyên nhân vật lý của chênh lệch hoặc SLA. Phải kiểm chứng lại cấu hình path-only này trên final source, giữ nguyên dependency inputs, restore thật và toàn bộ gate.
 

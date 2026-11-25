@@ -72,7 +72,7 @@ Push-Location -LiteralPath $repo
 try {
     $source = git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source commit.' }
-    $changes = git status --porcelain
+    $changes = git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
     if ($Action -eq 'VerifyAcceptance') {

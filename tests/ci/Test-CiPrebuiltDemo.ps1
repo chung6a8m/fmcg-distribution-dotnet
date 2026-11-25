@@ -107,7 +107,7 @@ function git {
     $global:LASTEXITCODE = 0
     switch ($args -join ' ') {
         'rev-parse HEAD' { return $global:FmcgCiPrebuiltTestState.GitHead }
-        'status --porcelain' { return $global:FmcgCiPrebuiltTestState.GitChanges }
+        'status --porcelain --untracked-files=all' { return $global:FmcgCiPrebuiltTestState.GitChanges }
         default { throw "Unexpected Git command: $args" }
     }
 }
@@ -291,7 +291,7 @@ function git {
     $global:LASTEXITCODE = 0
     switch ($args -join ' ') {
         'rev-parse HEAD' { return $SourceCommit }
-        'status --porcelain' { return }
+        'status --porcelain --untracked-files=all' { return }
         default { throw "Unexpected Git command: $args" }
     }
 }
