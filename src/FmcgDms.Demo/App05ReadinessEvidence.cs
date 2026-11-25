@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.Versioning;
@@ -74,6 +75,8 @@ internal static class App05ReadinessEvidence
 
             await Stop();
             await VerifyVehicleAndCutoff();
+            await Stop();
+            await VerifyRefundReservation();
         }
         finally
         {
@@ -205,6 +208,98 @@ internal static class App05ReadinessEvidence
             static bool HasVehicleBlocker(JsonElement preview) =>
                 preview.GetProperty("blockers").EnumerateArray().Any(item =>
                     item.GetProperty("code").GetString() is "VEHICLE_STOCK_OUTSTANDING" or "VEHICLE_SOURCE_DRIFT");
+        }
+
+        async Task VerifyRefundReservation()
+        {
+            const string tenant = "tenant-a", peerTenant = "tenant-b";
+            const long saleAmount = 24000, refundAmount = 12000;
+            const string f05 = "/api/synthetic/dev-f05/commands", f08 = "/api/synthetic/dev-f08/commands";
+            await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(2),
+                settlement: true, finance: true, closeReadiness: true);
+            var host = await Open("Resume");
+            var peer = await Image(run, peerTenant, ct);
+            var (_, delivery) = await App05UpgradeEvidence.PostFullDelivery(host, "DEV-20261125-A", "Z-REFUND-EA", ct);
+            var deliveryReceipt = await Request(host,
+                $"/api/synthetic/app02c4/trips/{delivery.TripId}/commands/{delivery.CommandId}", host.SourceToken, ct);
+            await using var db = await Own(tenant);
+            var (deliveryId, lotId) = await db.QuerySingleAsync<(Guid, Guid)>(new CommandDefinition("""
+                SELECT d.Id, i.LotId FROM dbo.SaleDelivery d
+                JOIN dbo.F03LotIssue i ON i.TenantId=d.TenantId AND i.DeliveryId=d.Id
+                WHERE d.TenantId=@tenant AND d.TripId=@TripId AND d.BusinessSourceId=@sourceId
+                    AND d.BaseQuantity=2 AND d.PayableAmount=@saleAmount;
+                """, new { tenant, delivery.TripId, sourceId = deliveryReceipt.GetProperty("sourceId").GetGuid(), saleAmount },
+                cancellationToken: ct));
+
+            Guid caseId = await Apply(f05, host.SourceToken,
+                new { action = "REQUEST", deliveryId, lotId, quantity = 1, reason = "APP05 F08 reservation" });
+            await Apply(f05, host.ReceiverToken,
+                new { action = "RECEIVE", caseId, quantity = 1, reason = "APP05 F08 reservation", evidence = "APP05-F08-QA-RECEIVE" });
+            await Apply(f05, host.FinanceToken,
+                new { action = "APPROVE", caseId, reason = "APP05 F08 reservation", evidence = "APP05-F08-QA-APPROVE" });
+            await Apply(f05, host.QaToken,
+                new { action = "RELEASE", caseId, reason = "APP05 F08 reservation", evidence = "APP05-F08-QA-RELEASE" });
+            await Refund(host.QaToken, "WITNESS_PAYMENT", "APP05-F08-PAYMENT", deliveryId: deliveryId, amount: saleAmount);
+            await Refund(host.FinanceToken, "SETTLE", "APP05-F08-PAYMENT", deliveryId: deliveryId, amount: saleAmount);
+            Guid creditId = await Refund(host.FinanceToken, "CREDIT", "APP05-F08-CREDIT", caseId: caseId);
+            Guid first = await Refund(host.FinanceToken, "PROPOSE", "APP05-F08-R1", creditId: creditId, amount: refundAmount);
+            Guid second = await Refund(host.FinanceToken, "PROPOSE", "APP05-F08-R2", creditId: creditId, amount: refundAmount);
+            string checker = host.FinanceCredentials!["REFUND_CHECKER"];
+            await Check("before either approval", false, false, first, second);
+
+            await Refund(checker, "APPROVE", "APP05-F08-APPROVE-R1", refundId: first);
+            var denied = await Request(host, f08, checker, ct,
+                new { commandId = Guid.NewGuid(), action = "APPROVE", refundId = second,
+                    reason = "APP05 F08 reservation", evidence = "APP05-F08-APPROVE-R2" },
+                HttpStatusCode.UnprocessableEntity);
+            Compare("F08 competing approval refused by command", tenant, "F08_CREDIT_EXCEEDED", denied.GetProperty("reasonCode").GetString());
+            await Check("approved and unpaid", true, false, first);
+
+            await Refund(host.QaToken, "WITNESS_PAYOUT", "APP05-F08-PAYOUT", refundId: first, amount: refundAmount);
+            await Refund(host.CashierToken, "DISBURSE", "APP05-F08-PAYOUT", refundId: first, amount: refundAmount);
+            await Check("after disbursement", true, true);
+
+            Task<Guid> Refund(string token, string action, string evidence, Guid? deliveryId = null, Guid? caseId = null,
+                Guid? creditId = null, Guid? refundId = null, long? amount = null) =>
+                Apply(f08, token, new { action, evidence, deliveryId, caseId, creditId, refundId, amount, reason = "APP05 F08 reservation" });
+
+            async Task<Guid> Apply(string path, string token, object input)
+            {
+                var payload = JsonSerializer.SerializeToNode(input, Json)!.AsObject();
+                payload["commandId"] = Guid.NewGuid();
+                var outcome = await Request(host, path, token, ct, payload);
+                return outcome.GetProperty("sourceId").GetGuid();
+            }
+
+            async Task Check(string phase, bool approved, bool paid, params Guid[] expectedWork)
+            {
+                var actual = await db.QueryAsync<RefundState>(new CommandDefinition("""
+                    SELECT r.Id, r.Amount, CONVERT(bit,IIF(a.Id IS NULL,0,1)) AS Approved, p.Amount AS Paid
+                    FROM dbo.F08ReturnCredit c JOIN dbo.F08Refund r ON r.TenantId=c.TenantId AND r.CreditId=c.Id
+                    LEFT JOIN dbo.F08RefundApproval a ON a.TenantId=r.TenantId AND a.RefundId=r.Id
+                    LEFT JOIN dbo.F08Disbursement p ON p.TenantId=r.TenantId AND p.RefundId=r.Id
+                    WHERE c.TenantId=@tenant AND c.Id=@creditId AND c.CaseId=@caseId AND c.DeliveryId=@deliveryId
+                      AND c.GrossAmount=@refundAmount;
+                    """, new { tenant, creditId, caseId, deliveryId, refundAmount }, cancellationToken: ct));
+                var states = actual.ToDictionary(row => row.Id);
+                Compare($"F08 SQL original proposals {phase}", tenant, 2, states.Count);
+                Compare($"F08 SQL R1 state {phase}", tenant, new RefundState(first, refundAmount, approved, paid ? refundAmount : null), states[first]);
+                Compare($"F08 SQL R2 state {phase}", tenant, new RefundState(second, refundAmount, false, null), states[second]);
+                var preview = await Request(host, "/api/synthetic/app05/trip-close/trips/" + delivery.TripId,
+                    host.CloseCredentials!["OPS"], ct);
+                var work = preview.GetProperty("work").EnumerateArray()
+                    .Where(row => row.GetProperty("sourceKind").GetString() == "F08_REFUND").ToArray();
+                Compare($"F08 work IDs {phase}", tenant, string.Join(",", expectedWork.Order()),
+                    string.Join(",", work.Select(row => row.GetProperty("sourceId").GetGuid()).Order()));
+                Compare($"F08 work references exact delivery {phase}", tenant, true,
+                    work.All(row => row.GetProperty("relatedId").GetGuid() == deliveryId));
+                var missing = preview.GetProperty("blockers").EnumerateArray()
+                    .Where(row => row.GetProperty("code").GetString() == "FOLLOW_UP_REQUIRED"
+                        && row.GetProperty("sourceKind").GetString() == "F08_REFUND");
+                Compare($"F08 assignment blocker IDs {phase}", tenant, string.Join(",", expectedWork.Order()),
+                    string.Join(",", missing.Select(row => row.GetProperty("sourceId").GetGuid()).Order()));
+                Compare($"F08 contrast tenant unchanged {phase}", peerTenant, peer, await Image(run, peerTenant, ct));
+            }
         }
 
         async Task<bool> Coordinate(Task exited, Snapshot peer)
@@ -364,13 +459,14 @@ internal static class App05ReadinessEvidence
     }
 
     private static async Task<JsonElement> Request(App03DevHost host, string path, string token, CancellationToken ct,
-        object? payload = null)
+        object? payload = null, HttpStatusCode? expectedStatus = null)
     {
         using var request = new HttpRequestMessage(payload is null ? HttpMethod.Get : HttpMethod.Post, host.WebUrl + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         if (payload is not null) request.Content = JsonContent.Create(payload);
         using var response = await host.Client.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        if (expectedStatus is { } status ? response.StatusCode != status : !response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"{path} returned {(int)response.StatusCode}: {await response.Content.ReadAsStringAsync(ct)}");
         return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
     }
 
@@ -399,7 +495,12 @@ internal static class App05ReadinessEvidence
                         JSON_QUERY((SELECT c.* FROM dbo.BusinessCommand c WHERE c.TenantId=@tenant ORDER BY c.Id FOR JSON PATH)) AS Commands,
                         JSON_QUERY((SELECT s.* FROM dbo.BusinessSource s WHERE s.TenantId=@tenant ORDER BY s.Id FOR JSON PATH)) AS Sources,
                         JSON_QUERY((SELECT e.* FROM dbo.LedgerEffect e WHERE e.TenantId=@tenant ORDER BY e.Id FOR JSON PATH)) AS Effects,
-                        JSON_QUERY((SELECT t.* FROM dbo.Trip t WHERE t.TenantId=@tenant ORDER BY t.Id FOR JSON PATH)) AS Trips
+                        JSON_QUERY((SELECT t.* FROM dbo.Trip t WHERE t.TenantId=@tenant ORDER BY t.Id FOR JSON PATH)) AS Trips,
+                        JSON_QUERY((SELECT c.* FROM dbo.F08ReturnCredit c WHERE c.TenantId=@tenant ORDER BY c.Id FOR JSON PATH)) AS Credits,
+                        JSON_QUERY((SELECT r.* FROM dbo.F08Refund r WHERE r.TenantId=@tenant ORDER BY r.Id FOR JSON PATH)) AS Refunds,
+                        JSON_QUERY((SELECT a.* FROM dbo.F08RefundApproval a WHERE a.TenantId=@tenant ORDER BY a.Id FOR JSON PATH)) AS RefundApprovals,
+                        JSON_QUERY((SELECT p.* FROM dbo.F08Disbursement p WHERE p.TenantId=@tenant ORDER BY p.Id FOR JSON PATH)) AS Disbursements,
+                        JSON_QUERY((SELECT f.* FROM dbo.F08Treasury f WHERE f.TenantId=@tenant FOR JSON PATH)) AS Treasury
                     FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)),2) AS HistoryDigest;
             """, new { tenant }, cancellationToken: ct));
     }
@@ -417,6 +518,7 @@ internal static class App05ReadinessEvidence
         string Reason, string ExpectedRevision);
     private sealed record FollowUpResult(Guid FollowUpId);
     private sealed record DayTwo(bool SameVehicle, decimal VehicleQuantity, string ReportStatus);
+    private sealed record RefundState(Guid Id, long Amount, bool Approved, long? Paid);
     private sealed record TypedAssignment(Guid TripId, Guid FollowUpId, string SourceKind, Guid SourceId);
     private sealed record AssignmentCheckpoint(FollowUpCommand Command, FollowUpResult Assigned,
         TypedAssignment AccountingAssignment, TypedAssignment ReturnAssignment);

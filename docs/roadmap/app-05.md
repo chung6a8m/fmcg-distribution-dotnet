@@ -202,6 +202,8 @@ Mục tiêu thử nghiệm full 10–14 phút đã quan sát được trên các
 - Upgrade `216bb2fb10264450877107c2106862c6` quan sát migration A/B từ [1,0] đến [1,1] sau Resume. Order `59f426bb-b6a3-49d8-a1cd-0dbe2875c801` và command giao `9128e846-13af-4036-bd0c-bdf7b5e5ef3c` có trước lần nâng. SHA256 `upgrade-result.json` `3CF4ED08BDC58B12014839D442CB0C58911E1C69D48DF18DA68E429EB92BBCC3`.
 
 
+**Review F08, PR #152.** Readiness dùng phần credit còn có thể duyệt sau khi trừ thực chi và các khoản đã duyệt đang giữ chỗ. Đề nghị đã duyệt tiếp tục hiện đến khi thực chi. Lượt local `3cda9679e8134f159484ee3ca40ac035` tái hiện đề nghị thứ hai vẫn hiện dù lệnh duyệt trả `F08_CREDIT_EXCEEDED`. Sau sửa, lượt `3147424f1abe46ccaff8aacaa740080a` đạt Chromium 1/1 và 61 đối chiếu, zero diff. Ca dùng lệnh thật qua ba mốc trước duyệt, đã duyệt chưa chi, và sau chi. Kiểm đúng ID việc và điều kiện cần giao việc, lịch sử hai đề nghị và tenant đối chứng. SHA256 `run.json` `1AD297EFB280CF2F763147168BE5012780FA48CE9D1709002AA28A2866880E63`.
+
 ### APP-05.2 — Quyết định đóng chuyến và lịch sử
 
 **Files:** phần mới .1; `src/FmcgDms.Api/Persistence/App01dD3Unload.cs`, `App01dD3UnloadPlan.cs`, `App01dCashierUnloadService.cs`, `App02d3Cash.cs`, `App02d3Routes.cs`, `App01a2CommandService.cs`, các route/command kiểm trạng thái Trip; `web/src/sales/TripCloseWorkspace.tsx` dự kiến. Tạo `App05TripClosure.cs`/migration và `tests/FmcgDms.Api.Tests/App05TripClosureTests.cs` khi phù hợp.

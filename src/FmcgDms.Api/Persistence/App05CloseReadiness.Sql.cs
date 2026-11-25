@@ -127,15 +127,17 @@ internal static partial class App05CloseReadiness
             SELECT 'F08_REFUND',r.Id,N'Hoàn tiền đang xử lý',N'Mở đề nghị hoàn tiền và xử lý bước đang chờ'
             FROM dbo.F08ReturnCredit c JOIN dbo.F08Refund r ON r.TenantId=c.TenantId AND r.CreditId=c.Id
             LEFT JOIN dbo.F08RefundApproval a ON a.TenantId=r.TenantId AND a.RefundId=r.Id
+            LEFT JOIN dbo.F08Disbursement disbursed ON disbursed.TenantId=r.TenantId AND disbursed.RefundId=r.Id
             OUTER APPLY (
-                SELECT SUM(p.Amount) AS Amount FROM dbo.F08Refund proposal
-                JOIN dbo.F08Disbursement p ON p.TenantId=proposal.TenantId AND p.RefundId=proposal.Id
+                SELECT COALESCE(SUM(p.Amount),0) AS Paid,
+                    COALESCE(SUM(CASE WHEN approval.Id IS NOT NULL AND p.Id IS NULL THEN proposal.Amount ELSE 0 END),0) AS Reserved
+                FROM dbo.F08Refund proposal
+                LEFT JOIN dbo.F08RefundApproval approval ON approval.TenantId=proposal.TenantId AND approval.RefundId=proposal.Id
+                LEFT JOIN dbo.F08Disbursement p ON p.TenantId=proposal.TenantId AND p.RefundId=proposal.Id
                 WHERE proposal.TenantId=c.TenantId AND proposal.CreditId=c.Id
-            ) paid
-            WHERE c.TenantId=d.TenantId AND c.DeliveryId=d.Id
-                AND (a.Id IS NOT NULL OR r.Amount<=c.GrossAmount-COALESCE(paid.Amount,0))
-                AND NOT EXISTS(
-                SELECT 1 FROM dbo.F08Disbursement p WHERE p.TenantId=r.TenantId AND p.RefundId=r.Id)
+            ) credit
+            WHERE c.TenantId=d.TenantId AND c.DeliveryId=d.Id AND disbursed.Id IS NULL
+                AND (a.Id IS NOT NULL OR r.Amount<=c.GrossAmount-credit.Paid-credit.Reserved)
         ) f
         WHERE d.TenantId=@Tenant AND d.TripId=@Trip ORDER BY f.SourceKind,f.SourceId;
 

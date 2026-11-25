@@ -39,7 +39,7 @@ internal static class App05UpgradeEvidence
         {
             var first = await Open("Start");
             Require(first.CloseCredentials is null, "Predecessor unexpectedly exposed APP-05.1 credentials.");
-            var (orderId, deliveryCommand) = await PostOriginalDelivery(first, ct);
+            var (orderId, deliveryCommand) = await PostFullDelivery(first, "DEV-20261123-A", "R-05", ct);
             await Stop();
             var before = await DevF01Evidence.Capture(run, BusinessTables);
             Require(before.Single(row => row.Tenant == TenantA && row.Table == "SaleDelivery").Rows == 1,
@@ -229,13 +229,13 @@ internal static class App05UpgradeEvidence
             "APP-05.1 fixture did not match the predeclared synthetic opening, lot or policy.");
     }
 
-    private static async Task<(Guid OrderId, C4DeliveryInput Delivery)> PostOriginalDelivery(App03DevHost host,
-        CancellationToken ct)
+    internal static async Task<(Guid OrderId, C4DeliveryInput Delivery)> PostFullDelivery(App03DevHost host,
+        string tripCode, string skuCode, CancellationToken ct)
     {
         var catalog = await Read<C2Catalog>(host, C2 + "/catalog", ct);
         var customer = catalog.Customers.Single(row => row.Label.StartsWith("C2-FIXTURE", StringComparison.Ordinal));
-        var trip = catalog.Trips.Single(row => row.Label == "DEV-20261123-A");
-        var sku = catalog.Skus.Single(row => row.Label.StartsWith("R-05 ·", StringComparison.Ordinal));
+        var trip = catalog.Trips.Single(row => row.Label == tripCode);
+        var sku = catalog.Skus.Single(row => row.Label.StartsWith(skuCode + " ·", StringComparison.Ordinal));
         var warehouse = catalog.Warehouses.Single(row => row.Label == "C2-MAIN");
         var master = await Read<C1Detail>(host, C1 + $"/customers/{customer.Id}", ct);
         var registered = master.RegisteredShipTos.Single();
