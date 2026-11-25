@@ -1,4 +1,5 @@
-import { expect, test, type APIResponse, type Page } from '@playwright/test'
+import { expect, type APIResponse, type Page } from '@playwright/test'
+import { test } from '../ci/app03-read-test.mjs'
 import { verifySettlement } from './settlement'
 
 const c1 = '/api/synthetic/app02c1'

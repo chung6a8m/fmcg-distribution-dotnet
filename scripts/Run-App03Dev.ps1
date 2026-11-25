@@ -72,7 +72,7 @@ Push-Location -LiteralPath $repo
 try {
     $source = git rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve source commit.' }
-    $changes = git status --porcelain
+    $changes = git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
     if ($Action -eq 'VerifyAcceptance') {
@@ -83,7 +83,9 @@ try {
     }
 
     $demo = 'src/FmcgDms.Demo/bin/Release/net10.0/FmcgDms.Demo.dll'
-    if ($Action -ne 'Remove' -or !(Test-Path -LiteralPath $demo)) {
+    . (Join-Path $PSScriptRoot 'Use-CiPrebuiltDemo.ps1')
+    $usePrebuilt = Test-CiPrebuiltDemo -RepositoryRoot $repo -SourceCommit $source
+    if (!$usePrebuilt -and ($Action -ne 'Remove' -or !(Test-Path -LiteralPath $demo))) {
         dotnet build src/FmcgDms.Demo/FmcgDms.Demo.csproj -c Release
         if ($LASTEXITCODE -ne 0) { throw 'APP-03 DEV host build failed.' }
     }

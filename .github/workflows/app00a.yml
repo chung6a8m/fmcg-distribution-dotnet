@@ -16,6 +16,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -34,6 +39,9 @@ jobs:
       - name: Verify deterministic LocalDB bootstrap regressions
         shell: pwsh
         run: pwsh -NoProfile -File tests/ci/Test-LocalDbBootstrap.ps1
+      - name: Verify same-job Demo build reuse regressions
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/ci/Test-CiPrebuiltDemo.ps1
       - name: Start SQL Server LocalDB
         id: localdb
         shell: pwsh
@@ -768,6 +776,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -806,6 +819,17 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Enable same-job Demo build reuse
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the built checkout SHA.' }
+          $sourceCommit = "$sourceCommit".Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full git commit SHA for the built checkout.' }
+          $sourceStatus = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the built checkout is clean.' }
+          if ($sourceStatus) { throw 'Cannot reuse the Demo build from a dirty checkout.' }
+          "FMCG_CI_PREBUILT_SHA=$sourceCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install web dependencies
         working-directory: web
         run: npm ci --no-audit --no-fund
@@ -914,6 +938,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -952,12 +981,28 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Enable same-job Demo build reuse
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the built checkout SHA.' }
+          $sourceCommit = "$sourceCommit".Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full git commit SHA for the built checkout.' }
+          $sourceStatus = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the built checkout is clean.' }
+          if ($sourceStatus) { throw 'Cannot reuse the Demo build from a dirty checkout.' }
+          "FMCG_CI_PREBUILT_SHA=$sourceCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install web dependencies
         working-directory: web
         run: npm ci --no-audit --no-fund
       - name: Install Playwright Chromium
         working-directory: web
         run: npx playwright install chromium
+      - name: Verify APP-03 read diagnostics boundaries
+        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs
+      - name: Verify APP-03 SQL observer error classification
+        shell: powershell
+        run: ./tests/ci/Test-App03SqlReadErrors.ps1
       - name: APP-03.1a DEV-F05 upgrade and integrated A/F journey through Chromium and LocalDB
         shell: pwsh
         run: ./scripts/Run-App02C1.ps1 -Increment App03A1 -Verify
@@ -969,9 +1014,13 @@ jobs:
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyWorkspace
       - name: APP-03.4 Sales to Warehouse handoff and competing lot operations
         shell: pwsh
+        env:
+          FMCG_APP03_READ_DIAGNOSTICS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyHandoff
       - name: APP-03.5 Warehouse to Field handoff, Mixed and B source recovery
         shell: pwsh
+        env:
+          FMCG_APP03_READ_DIAGNOSTICS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyField
       - name: APP-03.6 Field to Cashier and Warehouse handoff through Chromium and LocalDB
         shell: pwsh
@@ -1008,6 +1057,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v6
         with:
@@ -1046,6 +1100,17 @@ jobs:
         run: dotnet restore FmcgDms.slnx
       - name: Build .NET solution
         run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Enable same-job Demo build reuse
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the built checkout SHA.' }
+          $sourceCommit = "$sourceCommit".Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full git commit SHA for the built checkout.' }
+          $sourceStatus = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the built checkout is clean.' }
+          if ($sourceStatus) { throw 'Cannot reuse the Demo build from a dirty checkout.' }
+          "FMCG_CI_PREBUILT_SHA=$sourceCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install web dependencies
         working-directory: web
         run: npm ci --no-audit --no-fund

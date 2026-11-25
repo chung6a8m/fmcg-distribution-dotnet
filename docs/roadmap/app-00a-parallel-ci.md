@@ -100,3 +100,7 @@ Kế hoạch triển khai: [2026-11-24-app00a-parallel-ci](../superpowers/plans/
 ## 6. Hủy lượt PR bị thay thế
 
 Follow-up mục 3 được Owner yêu cầu ngày 25/11/2026: [chính sách concurrency cho PR CI](pr-ci-concurrency.md). Chính sách ở cấp workflow giữ bốn worker song song, yêu cầu hủy lượt PR bị thay thế trong cùng workflow và dùng group riêng cho từng lượt push `main`/manual. Tài liệu liên kết ghi phạm vi 16 workflow, giới hạn khi re-run HEAD cũ và cách kiểm chứng tự hủy; biên nhận thực thi nằm trong PR tương ứng.
+
+## 7. Đo package cache và dùng lại build trong worker
+
+Follow-up mục 5 được Owner yêu cầu ngày 25/11/2026 trên main sau PR #147: [số đo và thiết kế build/cache](app-00a-build-cache.md). Sau thí nghiệm cold/exact-hit và đối chứng đường dẫn package, cải tiến được chọn là opt-in dùng lại Release build vừa tạo và NuGet global-packages dưới thư mục tạm của job; archive cache giữa các lượt bị bỏ vì lợi ích chưa rõ sau overhead. Hai launcher kiểm tra source và output trước khi bỏ build lặp; giữ sơ đồ bốn worker và toàn bộ gate, không truyền compiled artifact giữa worker. Đây là thay đổi kế tiếp so với phạm vi ban đầu ở mục 2; baseline, các giới hạn và negative evidence được ghi riêng.
