@@ -27,7 +27,7 @@ internal static partial class App03OwnerReport
     internal static Task<object> Read(TenantConnections connections, ClaimsPrincipal user, CancellationToken ct) =>
         WithOwner<object>(connections, user, async (db, tx, tenant) =>
         {
-            using var result = await db.QueryMultipleAsync(App02a3Sql.Cmd(ReportSql + "\n" + TripStockSql + "\n" +
+            using var result = await db.QueryMultipleAsync(App02a3Sql.Cmd(ReportSql(connections.UsesApp05Successor) + "\n" + TripStockSql + "\n" +
                 $"SELECT TODATETIMEOFFSET(SYSUTCDATETIME(),'+00:00'), TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00');",
                 new { Tenant = tenant, Employee = (string?)null }, tx, ct));
             var rows = (await result.ReadAsync<OwnerSource>()).AsList();

@@ -2,7 +2,7 @@ namespace FmcgDms.Api.Persistence;
 
 internal static partial class App03OwnerReport
 {
-    private static readonly string ReportSql = $$"""
+    private static string ReportSql(bool successor) => $$"""
         WITH Advance AS (
             {{App02c1Service.AdvanceSummarySql}}
         ), Delivery AS (
@@ -99,8 +99,23 @@ internal static partial class App03OwnerReport
             UNION ALL
             SELECT CASE r.RightKind WHEN 'A' THEN 'a-hold' ELSE 'b-quota' END,k.BaseUom,r.Id,r.TripId,
                 t.Code+N' · '+k.Code,'RIGHT_REMAINING',r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity
+                {{(successor ? "-transferred.Quantity" : "")}}
             FROM dbo.StockRight r JOIN dbo.Trip t ON t.TenantId=r.TenantId AND t.Id=r.TripId
-            JOIN dbo.Sku k ON k.TenantId=r.TenantId AND k.Id=r.SkuId WHERE r.TenantId=@Tenant
+            JOIN dbo.Sku k ON k.TenantId=r.TenantId AND k.Id=r.SkuId
+            {{(successor ? """
+                CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(h.NeverLoaded+h.Returned),0)) AS Quantity
+                    FROM dbo.App05AHeldTransfer h WHERE h.TenantId=r.TenantId AND h.OriginalRightId=r.Id) transferred
+                """ : "")}}
+            WHERE r.TenantId=@Tenant
+            {{(successor ? """
+                UNION ALL
+                SELECT 'a-hold',k.BaseUom,h.SuccessorRightId,b.DestinationTripId,
+                    t.Code+N' · '+k.Code,'SUCCESSOR_HELD',h.NeverLoaded+h.Returned
+                FROM dbo.App05AHeldTransfer h
+                JOIN dbo.App05ASuccessor b ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
+                JOIN dbo.Trip t ON t.TenantId=b.TenantId AND t.Id=b.DestinationTripId
+                JOIN dbo.Sku k ON k.TenantId=b.TenantId AND k.Id=b.SkuId WHERE h.TenantId=@Tenant
+                """ : "")}}
             UNION ALL
             SELECT 'ar-'+LOWER(d.RightKind),d.Unit,i.Id,d.Id,c.Name,
                 CASE WHEN i.Id IS NULL THEN 'MISSING_OPEN_ITEM' WHEN proof.Matched=0 THEN 'RECONCILIATION_REQUIRED'

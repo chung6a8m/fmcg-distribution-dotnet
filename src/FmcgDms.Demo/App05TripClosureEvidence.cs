@@ -14,12 +14,12 @@ internal static class App05TripClosureEvidence
     private const string Primary = "tenant-a";
     private const string Peer = "tenant-b";
 
-    internal static async Task Run(string root, string source)
+    internal static async Task Run(string root, string source, bool successor = false)
     {
         var run = new DemoRun(Guid.NewGuid().ToString("N"));
-        string folder = Directory.CreateDirectory(Path.Combine(root, "TestResults", "app05-2", run.Id)).FullName;
-        Console.WriteLine($"APP-05.2 evidence: {folder}");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+        string folder = Directory.CreateDirectory(Path.Combine(root, "TestResults", successor ? "app05-3" : "app05-2", run.Id)).FullName;
+        Console.WriteLine($"APP-05.{(successor ? 3 : 2)} evidence: {folder}");
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(successor ? 10 : 6));
         var ct = deadline.Token;
         var checks = new List<Comparison>();
         Task? session = null;
@@ -44,6 +44,14 @@ internal static class App05TripClosureEvidence
             var third = await Open("Resume");
             Guid thirdTrip = await App03SettlementEvidence.PrepareB(third, "DEV-20261125-A", load: true, ct);
             await Browser(third, "day-three", exited => sources.VerifySourceRaceAndCash(exited, thirdTrip));
+            if (successor)
+            {
+                await Stop();
+                await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(3),
+                    tripClosure: true);
+                var upgraded = await Open("Resume", upgrade: true);
+                await Browser(upgraded, "successor", VerifySuccessor);
+            }
             Check("contrast tenant business rows preserved across three synthetic days", Peer, originalPeer, await EffectDigest(Peer));
         }
         finally
@@ -67,20 +75,20 @@ internal static class App05TripClosureEvidence
         await File.WriteAllTextAsync(Path.Combine(folder, "run.json"), JsonSerializer.Serialize(new
         {
             source, tree = Environment.GetEnvironmentVariable("APP05_EVIDENCE_TREE"), runId = run.Id,
-            command = "pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action VerifyTripClosure",
+            command = "pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action " + (successor ? "VerifyASuccessor" : "VerifyTripClosure"),
             os = Environment.OSVersion.VersionString, runtime = Environment.Version.ToString(),
             instance = DemoRun.Instance, scope = "synthetic DEV", result = "PASS", artifacts
         }, Json), ct);
-        Console.WriteLine($"APP-05.2 trip closure verified: {folder}");
+        Console.WriteLine($"APP-05.{(successor ? 3 : 2)} evidence verified: {folder}");
 
-        async Task<App03DevHost> Open(string operation)
+        async Task<App03DevHost> Open(string operation, bool upgrade = false)
         {
             var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
             session = App03DevSession.Run(operation, root, source, run.Id, host =>
             {
                 ready.SetResult(host);
                 return Task.CompletedTask;
-            }, tripClosure: true);
+            }, tripClosure: true, successor: upgrade);
             if (await Task.WhenAny(session, ready.Task).WaitAsync(ct) == session) await session;
             return await ready.Task.WaitAsync(ct);
         }
@@ -107,6 +115,7 @@ internal static class App05TripClosureEvidence
             start.Environment["APP02C1_WEB_URL"] = active.WebUrl;
             start.Environment["APP02C1_RUN_ID"] = run.Id;
             start.Environment["APP05_CLOSURE_STAGE"] = stage;
+            if (successor) start.Environment["APP05_SUCCESSOR_EVIDENCE"] = "1";
             start.Environment["APP05_EVIDENCE_DIR"] = folder;
             foreach (var (role, token) in active.CloseCredentials!)
                 start.Environment["APP03_" + role + "_TOKEN"] = token;
@@ -115,6 +124,7 @@ internal static class App05TripClosureEvidence
             start.Environment["APP03_CASHIER_TOKEN"] = active.CashierToken;
             start.Environment["APP03_ACCOUNTANT_TOKEN"] = active.FinanceCredentials!["ACCOUNTANT"];
             start.Environment["APP03_RECONCILER_TOKEN"] = active.FinanceCredentials["RECONCILER"];
+            start.Environment["APP03_OWNER_TOKEN"] = active.FinanceCredentials["OWNER"];
 
             using var browser = Process.Start(start) ?? throw new InvalidOperationException("Cannot start APP-05.2 Chromium.");
             var stdout = browser.StandardOutput.ReadToEndAsync();
@@ -213,7 +223,7 @@ internal static class App05TripClosureEvidence
             if (!await Wait("before-zero-handoff", exited)) return false;
             var zero = await Read<ZeroFixture>("before-zero-handoff");
             string beforeZero = await EffectDigest(Primary, includeHandoffSources: false);
-            Check("no manifest, no handoff, no closure for new trip", Primary, new ZeroState(0, 0, 0, 5, 0), await ZeroImage(zero));
+            Check("no manifest, no handoff, no closure for new trip", Primary, new ZeroState(0, 0, 0, zero.HeldQuantity, 0), await ZeroImage(zero));
             await Acknowledge("before-zero-handoff");
 
             if (!await Wait("after-zero-close", exited)) return false;
@@ -221,8 +231,8 @@ internal static class App05TripClosureEvidence
             await VerifyReceipt(zeroReceipt.ZeroReceipt, "CLOSED_WITH_OPEN_CASES", 2, zeroReceipt.ZeroReceipt.HandoffId);
             Check("one source-bound handoff and closure, with no manifest or stock/AR effect", Primary,
                 new TripImageRow("CLOSED_WITH_OPEN_CASES", 1), await TripImage(zero.Zero));
-            Check("zero handoff leaves actual held 5 and no right for the unreserved Confirm", Primary,
-                new ZeroState(0, 1, 0, 5, 0), await ZeroImage(zero));
+            Check("zero handoff leaves actual HELD and no right for the unreserved Confirm", Primary,
+                new ZeroState(0, 1, 0, zero.HeldQuantity, 0), await ZeroImage(zero));
             Check("zero handoff and close preserve all physical and financial rows", Primary, beforeZero,
                 await EffectDigest(Primary, includeHandoffSources: false));
 
@@ -232,7 +242,7 @@ internal static class App05TripClosureEvidence
                 """, new { Tenant = Primary, zero.Zero, zeroReceipt.ZeroReceipt.HandoffId }, cancellationToken: ct))).ToDictionary(row => row.OrderLineId);
             Check("zero handoff references exactly two source Confirm lines", Primary, 2, proofs.Count);
             Check("zero handoff proves MAIN HELD for the first original Confirm", Primary,
-                new ZeroProof(zero.Held.OrderLineId, zero.Held.ConfirmSourceId, 5), proofs.GetValueOrDefault(zero.Held.OrderLineId));
+                new ZeroProof(zero.Held.OrderLineId, zero.Held.ConfirmSourceId, zero.HeldQuantity), proofs.GetValueOrDefault(zero.Held.OrderLineId));
             Check("zero handoff proves no Reserve for the second original Confirm", Primary,
                 new ZeroProof(zero.Unreserved.OrderLineId, zero.Unreserved.ConfirmSourceId, 0), proofs.GetValueOrDefault(zero.Unreserved.OrderLineId));
             await Acknowledge("after-zero-close");
@@ -252,6 +262,14 @@ internal static class App05TripClosureEvidence
             await using var peer = await OpenDatabase(Peer);
             Check("no closure in contrast tenant", Peer, 0,
                 await peer.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM dbo.App05TripClosure;", cancellationToken: ct)));
+            if (successor)
+                Check("restore fixture scope after checking revocation", Primary, 1,
+                    await db.ExecuteAsync(new CommandDefinition("""
+                        UPDATE o SET IsActive=1 FROM dbo.App05TripOperator o
+                        JOIN dbo.LocalApp03Session s ON s.TenantId=o.TenantId AND s.RunId=@Nonce
+                        WHERE o.TenantId=@Tenant AND o.TripId=@Trip AND o.ActorId=@Ops AND DB_NAME()=@Name AND o.IsActive=0;
+                        """, new { Tenant = Primary, Trip = fixture.Main, App05CloseBootstrap.Ops, Nonce = run.Id,
+                            Name = run.Name(Primary) }, cancellationToken: ct)));
             await Acknowledge("after-revocation");
             return true;
         }
@@ -315,6 +333,91 @@ internal static class App05TripClosureEvidence
                 await SetPool(fault, fault.Fault, fault.Original);
             }
             await Acknowledge(phase + "-rejected");
+            return true;
+        }
+
+        async Task<bool> VerifySuccessor(Task exited)
+        {
+            if (!await Wait("successor-before", exited)) return false;
+            var fixture = await Read<SuccessorFixture>("successor-before");
+            string before = await EffectDigest(Primary);
+            await using var db = await OpenDatabase(Primary);
+            var scope = new { Tenant = Primary, Name = run.Name(Primary), Nonce = run.Id,
+                MainLine = fixture.Order.OrderLineId, HeldLine = fixture.Held.OrderLineId,
+                UnreservedLine = fixture.Unreserved.OrderLineId };
+            Check("forward migration preserves closed sources and starts with no bindings", Primary, 0,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM dbo.App05ASuccessor;", scope, cancellationToken: ct)));
+            await Acknowledge("successor-before");
+
+            if (!await Wait("successor-arm", exited)) return false;
+            var fault = await Read<SuccessorFault>("successor-arm");
+            const string verify = """
+                IF DB_NAME()<>@Name OR NOT EXISTS(SELECT 1 FROM dbo.LocalDemoOwner WHERE RunId=@Nonce)
+                    OR NOT EXISTS(SELECT 1 FROM dbo.App00ScratchMarker WHERE Nonce=@Nonce)
+                    OR NOT EXISTS(SELECT 1 FROM dbo.LocalApp03Session WHERE RunId=@Nonce AND TenantId=@Tenant)
+                    THROW 51925,'APP-05.3 evidence scope mismatch.',1;
+                """;
+            string statement = $"""
+                CREATE TRIGGER dbo.TR_App05EvidenceFailSuccessor ON dbo.App05ASuccessorCommand AFTER INSERT AS
+                BEGIN
+                    SET NOCOUNT ON;
+                    IF EXISTS(SELECT 1 FROM inserted WHERE TenantId=N'tenant-a' AND CommandId='{fault.CommandId:D}')
+                        THROW 51926,'APP-05.3 synthetic precommit fault.',1;
+                END;
+                """;
+            await db.ExecuteAsync(new CommandDefinition(verify + " EXEC(@Statement);",
+                new { scope.Tenant, scope.Name, scope.Nonce, Statement = statement }, cancellationToken: ct));
+            await Acknowledge("successor-arm");
+
+            if (!await Wait("successor-rollback", exited)) return false;
+            Check("fault before commit rolls back successor right, lot and receipt", Primary, 0,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT (SELECT COUNT(*) FROM dbo.App05AHeldTransfer)
+                         + (SELECT COUNT(*) FROM dbo.App05AHeldTransferLot)
+                         + (SELECT COUNT(*) FROM dbo.App05ASuccessorCommand WHERE CommandId=@CommandId);
+                    """, fault, cancellationToken: ct)));
+            await db.ExecuteAsync(new CommandDefinition(verify + " DISABLE TRIGGER dbo.TR_App05EvidenceFailSuccessor ON dbo.App05ASuccessorCommand;",
+                scope, cancellationToken: ct));
+            await Acknowledge("successor-rollback");
+
+            if (!await Wait("successor-revoke", exited)) return false;
+            var revoke = await Read<SuccessorRevocation>("successor-revoke");
+            Check("destination write assignment revoked", Primary, 1,
+                await db.ExecuteAsync(new CommandDefinition(verify + """
+                     UPDATE dbo.App05TripOperator SET IsActive=0
+                    WHERE TenantId=@Tenant AND TripId=@TripId AND ActorId=@Ops AND IsActive=1;
+                    """, new { scope.Tenant, scope.Name, scope.Nonce, revoke.TripId, App05CloseBootstrap.Ops }, cancellationToken: ct)));
+            await Acknowledge("successor-revoke");
+
+            if (!await Wait("successor-after", exited)) return false;
+            var result = await Read<SuccessorRace>("successor-after");
+            var actual = (await db.QueryAsync<SuccessorOracle>(new CommandDefinition("""
+                SELECT b.OrderLineId,SUM(b.Quantity) AS Scheduled,SUM(t.Returned) AS Returned,
+                    SUM(t.NeverLoaded) AS NeverLoaded,SUM(t.LotQuantity) AS LotQuantity,SUM(t.Rights) AS Rights
+                FROM dbo.App05ASuccessor b
+                CROSS APPLY (
+                    SELECT COALESCE(SUM(x.Returned),0) AS Returned,COALESCE(SUM(x.NeverLoaded),0) AS NeverLoaded,
+                        COALESCE(SUM(l.Quantity),0) AS LotQuantity,COUNT(*) AS Rights
+                    FROM dbo.App05AHeldTransfer x CROSS APPLY(
+                        SELECT SUM(l.NeverLoaded+l.Returned) AS Quantity FROM dbo.App05AHeldTransferLot l
+                        WHERE l.TenantId=x.TenantId AND l.SuccessorRightId=x.SuccessorRightId
+                    ) l WHERE x.TenantId=b.TenantId AND x.BindingId=b.BindingId
+                ) t WHERE b.TenantId=@Tenant GROUP BY b.OrderLineId;
+                """, scope, cancellationToken: ct))).ToDictionary(row => row.OrderLineId);
+            Check("returned right transferred exactly twice with matching lot provenance", Primary,
+                new SuccessorOracle(scope.MainLine, 15, 9, 0, 9, 2), actual[scope.MainLine]);
+            Check("never-loaded right race creates one conserved generation", Primary,
+                new SuccessorOracle(scope.HeldLine, 5, 0, result.Winner, result.Winner, 1), actual[scope.HeldLine]);
+            Check("unreserved Confirm scheduled with no right or lot", Primary,
+                new SuccessorOracle(scope.UnreservedLine, 5, 0, 0, 0, 0), actual[scope.UnreservedLine]);
+            Check("allocation, original rights, confirmed snapshots, physical stock and financial ledger conserved", Primary,
+                before, await EffectDigest(Primary));
+            await using var peer = await OpenDatabase(Peer);
+            Check("no bindings or successor rights in contrast tenant", Peer, 0,
+                await peer.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT (SELECT COUNT(*) FROM dbo.App05ASuccessor)+(SELECT COUNT(*) FROM dbo.App05AHeldTransfer);
+                    """, cancellationToken: ct)));
+            await Acknowledge("successor-after");
             return true;
         }
 
@@ -440,7 +543,13 @@ internal static class App05TripClosureEvidence
     private sealed record Persisted(Guid ClosureId, string ActorId, Guid CommandId, string Status,
         DateTimeOffset ClosedAt, int OpenWorkCount, Guid HandoffId, string Snapshot);
     private sealed record TripImageRow(string Status, int Decisions);
-    private sealed record ZeroFixture(Guid Zero, Order Held, Order Unreserved);
+    private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);
+    private sealed record SuccessorFault(Guid CommandId);
+    private sealed record SuccessorRevocation(Guid TripId);
+    private sealed record SuccessorRace(decimal Winner);
+    private sealed record SuccessorOracle(Guid OrderLineId, decimal Scheduled, decimal Returned,
+        decimal NeverLoaded, decimal LotQuantity, int Rights);
+    private sealed record ZeroFixture(Guid Zero, Order Held, Order Unreserved, decimal HeldQuantity);
     private sealed record ZeroProof(Guid OrderLineId, Guid ConfirmSourceId, decimal HeldBaseQuantity);
     private sealed record ZeroState(int Manifests, int Handoffs, int ReturnLines, decimal Held, int UnreservedRights);
     private sealed record OpenInventory(string Status, decimal MainStock, decimal MainCost, decimal Delivered, decimal Cogs,

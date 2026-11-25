@@ -21,10 +21,10 @@ if (args is ["App03Session", var sessionAction, var sessionRoot, var sessionSour
     return;
 }
 if (args is ["App03Session", var closeAction, var closeRoot, var closeSource, var closeId, var closeScope]
-    && closeAction is ("Start" or "Resume") && closeScope is ("CloseReadiness" or "TripClosure"))
+    && closeAction is ("Start" or "Resume") && closeScope is ("CloseReadiness" or "TripClosure" or "ASuccessor"))
 {
     await App03DevSession.Run(closeAction, closeRoot, closeSource, closeId == "-" ? null : closeId,
-        closeReadiness: true, tripClosure: closeScope == "TripClosure");
+        closeReadiness: true, tripClosure: closeScope == "TripClosure", successor: closeScope == "ASuccessor");
     return;
 }
 if (args is ["App03Session", "NextDay", var dayRoot, var daySource, var dayId, var day])

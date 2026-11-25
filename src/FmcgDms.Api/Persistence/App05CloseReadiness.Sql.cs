@@ -2,13 +2,16 @@ namespace FmcgDms.Api.Persistence;
 
 internal static partial class App05CloseReadiness
 {
-    private const string TripSql = """
+    private static string TripSql(bool successor) => $$"""
         SELECT t.Id AS TripId,t.Code,t.BusinessDate,t.Status,u.Id AS UnloadId,
             CONVERT(bit,CASE WHEN t.Status<>'PREPARED'
                 OR EXISTS(SELECT 1 FROM dbo.BusinessSource s WHERE s.TenantId=t.TenantId AND s.TripId=t.Id)
                 OR EXISTS(SELECT 1 FROM dbo.TripManifest m WHERE m.TenantId=t.TenantId AND m.TripId=t.Id)
                 OR EXISTS(SELECT 1 FROM dbo.C4DeliveryEvidence e WHERE e.TenantId=t.TenantId AND e.TripId=t.Id)
                 OR EXISTS(SELECT 1 FROM dbo.StockRight r WHERE r.TenantId=t.TenantId AND r.TripId=t.Id)
+                {{(successor ? """
+                    OR EXISTS(SELECT 1 FROM dbo.App05ASuccessor b WHERE b.TenantId=t.TenantId AND b.DestinationTripId=t.Id)
+                    """ : "")}}
                 THEN 1 ELSE 0 END) AS Used
         FROM dbo.Trip t
         LEFT JOIN dbo.D3TripUnload u ON u.TenantId=t.TenantId AND u.TripId=t.Id

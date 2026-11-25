@@ -41,6 +41,7 @@ type Access = Identity & {
   owner?: boolean
   tripClose?: boolean
   tripClosure?: boolean
+  aSuccessor?: boolean
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -111,6 +112,7 @@ export function WorkspaceEntry({ fallback, fieldRoute, settlementRoute }: {
         if (request.signal.aborted) return
         const settlement = health?.workspaceProfile === 'APP-03.6-v1' || health?.workspaceProfile === 'APP-03.7-v1'
           || health?.workspaceProfile === 'APP-05.1-v1' || health?.workspaceProfile === 'APP-05.2-v1'
+          || health?.workspaceProfile === 'APP-05.3-v1'
         const field = health?.workspaceProfile === 'APP-03.5-v1' || settlement
         if (settlement && settlementRoute) {
           location.replace(settlementRoute)
@@ -291,7 +293,7 @@ function Workspace() {
       authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
       authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole,
       authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole, authorized.access.owner,
-      authorized.access.tripClose, authorized.access.tripClosure])} {...authorized} offline={offline} />}
+      authorized.access.tripClose, authorized.access.tripClosure, authorized.access.aSuccessor])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -402,7 +404,7 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
         {current?.id === 'owner' && (offline ? <p role="status">Kết nối lại để đọc số liệu Chủ NPP.</p> : <Owner key={token} token={token} />)}
         {current?.id === 'trip-close' && <TripClose token={token} identity={access} offline={offline}
-          tripId={trip} onTripChange={saveTrip} tripClosure={access.tripClosure === true} access={{
+          tripId={trip} onTripChange={saveTrip} tripClosure={access.tripClosure === true} aSuccessor={access.aSuccessor === true} access={{
             orders: access.sales || access.warehouse, settlement: !!access.handoffRoles?.length,
             finance: !!access.accountingRoles?.length, returns: access.returnRole !== null,
             costs: !!access.adjustmentRole, refunds: !!access.refundRole,

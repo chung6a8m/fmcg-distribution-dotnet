@@ -64,7 +64,7 @@ internal static partial class App05CloseReadiness
         {
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(await Run(connections, context.User, null, false, null, async (db, tx, tenant, actor, _) =>
-                (await db.QueryAsync<Trip>(App02a3Sql.Cmd(TripSql + "\n" + """
+                (await db.QueryAsync<Trip>(App02a3Sql.Cmd(TripSql(connections.UsesApp05Successor) + "\n" + """
                     AND EXISTS(SELECT 1 FROM dbo.App05TripOperator scope
                         WHERE scope.TenantId=t.TenantId AND scope.TripId=t.Id AND scope.ActorId=@Actor AND scope.IsActive=1)
                     ORDER BY t.BusinessDate DESC,t.Code;
@@ -76,11 +76,12 @@ internal static partial class App05CloseReadiness
         {
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(await Run(connections, context.User, tripId, false, null,
-                (db, tx, tenant, _, ops) => Read(db, tx, tenant, tripId, ops, ct, closing: connections.UsesApp05TripClosure), ct));
+                (db, tx, tenant, _, ops) => Read(db, tx, tenant, tripId, ops, ct, closing: connections.UsesApp05TripClosure, successor: connections.UsesApp05Successor), ct));
         });
         MapFollowUps(routes);
-        if (app.Services.GetRequiredService<TenantConnections>().UsesApp05TripClosure)
-            MapClosures(routes);
+        var catalog = app.Services.GetRequiredService<TenantConnections>();
+        if (catalog.UsesApp05TripClosure) MapClosures(routes);
+        if (catalog.UsesApp05Successor) MapSuccessors(routes);
     }
 
     internal static async Task<bool> Session(TenantConnections connections, ClaimsPrincipal user, CancellationToken ct)
@@ -100,7 +101,7 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<T> Run<T>(TenantConnections connections, ClaimsPrincipal user, Guid? trip, bool write, Guid? command,
-        Func<SqlConnection, SqlTransaction, string, string, bool, Task<T>> operation, CancellationToken ct)
+        Func<SqlConnection, SqlTransaction, string, string, bool, Task<T>> operation, CancellationToken ct, Guid? destination = null)
     {
         var ops = user.HasClaim("synthetic_role", OpsRole);
         if (!connections.UsesApp05CloseReadiness || (!ops && (write || !user.HasClaim("synthetic_role", AssigneeRole))))
@@ -112,14 +113,15 @@ internal static partial class App05CloseReadiness
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         if (command.HasValue)
             await App02a3Sql.Lock(db, tx, App02a3Sql.IdentityLock(tenant, "APP05:" + actor, command.Value.ToString("N")), ct);
-        if (trip.HasValue)
-            await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + trip.Value.ToString("N"), ct);
+        Guid[] trips = destination.HasValue ? [trip!.Value, destination.Value] : trip.HasValue ? [trip.Value] : [];
+        foreach (Guid id in trips.Order())
+            await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + id.ToString("N"), ct);
 
         await App02a3Sql.RequireRole(db, tx, tenant, actor, ops ? OpsRole : AssigneeRole, ct);
-        if (trip.HasValue && !await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
-            SELECT CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM dbo.App05TripOperator
-                WHERE TenantId=@Tenant AND TripId=@Trip AND ActorId=@Actor AND IsActive=1) THEN 1 ELSE 0 END);
-            """, new { Tenant = tenant, Trip = trip, Actor = actor }, tx, ct)))
+        if (trips.Length > 0 && await db.ExecuteScalarAsync<int>(App02a3Sql.Cmd("""
+            SELECT COUNT(*) FROM dbo.App05TripOperator
+            WHERE TenantId=@Tenant AND TripId IN @Trips AND ActorId=@Actor AND IsActive=1;
+            """, new { Tenant = tenant, Trips = trips, Actor = actor }, tx, ct)) != trips.Length)
             throw new UnauthorizedAccessException("Current trip assignment required.");
 
         var result = await operation(db, tx, tenant, actor, ops);

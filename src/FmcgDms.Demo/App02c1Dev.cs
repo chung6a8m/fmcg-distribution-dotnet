@@ -115,7 +115,7 @@ internal static class App02c1Dev
                 if (persistent is not null)
                 {
                     ScratchMigrator.MigrateApp03A1(run.Connection(tenant), tenant, run.Id, LogLevel.Warning,
-                        field, settlement, finance, closeReadiness, tripClosure: persistent.UsesTripClosure);
+                        field, settlement, finance, closeReadiness, tripClosure: persistent.UsesTripClosure, successor: persistent.UsesSuccessor);
                     await App03DayBootstrap.Seed(run, tenant, lifetime.Token, persistent.VerifyHandoff && tenant == "tenant-a");
                     await App03DayBootstrap.PrepareDay(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
