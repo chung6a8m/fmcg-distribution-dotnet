@@ -2,7 +2,7 @@ import { access, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { auth, open } from '../e2e-app03-7/return-refund'
-import { accounting, app, c2, c4, d3, get, post, setup, type Closure, type ClosureHistory,
+import { accounting, app, c2, c3, c4, d3, get, post, setup, type Closure, type ClosureHistory,
   type CloseInput, type Preview, type Work } from './fixture'
 import { resolvePendingDelivery, runAccountingSourceRace, verifyCustodyAndOffer } from './source-guards'
 
@@ -212,6 +212,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   const heldQuantity = process.env.APP05_SUCCESSOR_EVIDENCE ? 4 : 5
   await fixture.reserve(held, heldQuantity)
   const unreserved = await fixture.order(zero, 5)
+  const shared = process.env.APP05_SUCCESSOR_EVIDENCE ? await fixture.order(zero, 2, true) : undefined
   const before = await read(request, zero)
   expect(before).toMatchObject({ state: 'BLOCKED', canClose: false })
   expect(before.aLines).toEqual(expect.arrayContaining([
@@ -228,7 +229,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   expect(await fixtureCheck.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'LOADED_MANIFEST_NOT_ELIGIBLE' })
   expect(await history(request, zero)).toMatchObject({ closure: null })
   await checkpoint('shared-pool-rejected')
-  await checkpoint('before-zero-handoff', { zero, held, unreserved, heldQuantity })
+  await checkpoint('before-zero-handoff', { zero, held, unreserved, heldQuantity, shared })
 
   const warehouse = await open(context, 'RECEIVER', 'settlement?trip=' + zero)
   const response = warehouse.waitForResponse(result => result.url().endsWith(d3 + '/unload') && result.request().method() === 'POST')
@@ -239,7 +240,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   expect(zeroHandoff).toBeTruthy()
   const zeroPreview = await read(request, zero)
   expect(zeroPreview).toMatchObject({ state: 'NEEDS_ASSIGNMENT', status: 'RECONCILING', canClose: false })
-  expect(zeroPreview.work).toHaveLength(2)
+  expect(zeroPreview.work).toHaveLength(shared ? 3 : 2)
   for (const work of zeroPreview.work) await assign(request, zero, work)
   const beforeRace = await read(request, zero)
   const competingAssignment = request.post(app + '/' + zero + '/follow-ups', {
@@ -258,7 +259,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
     expect(await assignment.json()).toMatchObject({ code: 'TRIP_ASSIGNMENT_NOT_OPEN' })
   }
   const zeroReceipt = (await history(request, zero)).closure!
-  expect(zeroReceipt).toMatchObject({ status: 'CLOSED_WITH_OPEN_CASES', openWorkCount: 2, handoffId: zeroHandoff })
+  expect(zeroReceipt).toMatchObject({ status: 'CLOSED_WITH_OPEN_CASES', openWorkCount: shared ? 3 : 2, handoffId: zeroHandoff })
   await checkpoint('after-zero-close', { zeroReceipt })
   await checkpoint('revoke-close-scope', { main: dayOne.main })
   expect((await close(request, dayOne.main, { commandId: receipt.commandId,
@@ -271,10 +272,12 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
 test('day-three blocks unsettled custody and a waiting Close rechecks a concurrent D.4 posting', async ({ context, request }, info) => {
   const fixture = await setup(request)
   const trip = fixture.trip('DEV-20261125-A')
-  const order = await fixture.order(trip, 3)
-  await fixture.reserve(order, 3)
-  await fixture.load(trip, 3)
-  await fixture.deliver(trip, 2)
+  const successorEvidence = Boolean(process.env.APP05_SUCCESSOR_EVIDENCE)
+  const order = await fixture.order(trip, successorEvidence ? 5 : 3)
+  await fixture.reserve(order, successorEvidence ? 4 : 3)
+  await fixture.load(trip, 3, successorEvidence ? 4 : 3)
+  await fixture.deliver(trip, successorEvidence ? 1 : 2)
+  if (successorEvidence) await writeFile(join(evidence, 'mixed-reserve-order.json'), JSON.stringify({ trip, order }))
   await verifyCustodyAndOffer(request, trip, checkpoint)
   await fixture.unload(trip)
 
@@ -308,8 +311,8 @@ type SourceOrder = { orderLineId: string; confirmSourceId: string }
 
 test('successor schedules frozen A lines and transfers backed HELD with rollback, replay and races', async ({ context, request }, info) => {
   const { main, order } = JSON.parse(await readFile(join(evidence, 'arm-failure.json'), 'utf8')) as { main: string; order: SourceOrder }
-  const { zero, held, unreserved } = JSON.parse(await readFile(join(evidence, 'before-zero-handoff.json'), 'utf8')) as {
-    zero: string; held: SourceOrder; unreserved: SourceOrder
+  const { zero, held, unreserved, shared } = JSON.parse(await readFile(join(evidence, 'before-zero-handoff.json'), 'utf8')) as {
+    zero: string; held: SourceOrder; unreserved: SourceOrder; shared: SourceOrder
   }
   const fixture = await setup(request)
   const first = fixture.trip('DEV-20261126-A')
@@ -417,7 +420,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
   await checkpoint('successor-revoke', { tripId: first, commandId: original.commandId })
   expect((await readSuccessors(main, order)).bindings).toEqual([{
-    bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9,
+    bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9, reserved: 0,
   }])
 
   const replayButton = source.getByRole('button', { name: 'Gửi lại yêu cầu kế nhiệm' })
@@ -495,4 +498,103 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect((await history(request, main)).closure).toEqual(prior)
   await checkpoint('successor-after', { winner: winner.quantity })
   await page.screenshot({ path: info.outputPath('successor-partial-transfer.png') })
+
+  const { trip: mixedTrip, order: mixed } = JSON.parse(await readFile(join(evidence, 'mixed-reserve-order.json'), 'utf8')) as {
+    trip: string; order: SourceOrder & { orderId: string }
+  }
+  const mixedPath = base(mixedTrip, mixed)
+  const mixedState = await readSuccessors(mixedTrip, mixed)
+  expect(mixedState).toMatchObject({ remaining: 4, unheld: 1, rights: [{ held: 3, neverLoaded: 1, returned: 2 }] })
+  const mixedBinding = await assignSuccessor(mixedPath + '/assign-successor', body(mixed, first, 4))
+  const transfer = { ...body(mixed, first, 4), bindingId: mixedBinding.bindingId, originalRightId: mixedState.rights[0].rightId }
+  expect(await (await send(mixedPath + '/transfer-held', transfer)).json()).toMatchObject({ code: 'A_HELD_QUANTITY_EXCEEDED' })
+  expect(await (await send(mixedPath + '/transfer-held', { ...transfer, commandId: crypto.randomUUID(), quantity: 3 })).json())
+    .toMatchObject({ quantity: 3, neverLoaded: 1, returned: 2 })
+  expect(await readSuccessors(mixedTrip, mixed)).toMatchObject({ unheld: 1 })
+
+  const catalog = await get<{ warehouses: { id: string; label: string }[]; skus: { id: string; label: string }[] }>(request, c2 + '/catalog', 'RECEIVER')
+  const warehouseId = catalog.warehouses.find(w => w.label === 'C2-MAIN')!.id
+  const skuId = catalog.skus.find(sku => sku.label.startsWith('DAY-A-EA'))!.id
+  const reserveOptions = (path: string) => get<{
+    revision: string; followUpId: string; unheld: number; bindings: { bindingId: string; destinationTripId: string; unfilled: number }[]
+  }>(request, path + '/reserve-options', 'RECEIVER')
+  const makeReserve = async (path: string, original: SourceOrder, bindingId: string, destination: string, quantity: number) => {
+    const options = await reserveOptions(path)
+    return { ...body(original, destination, quantity), warehouseId, bindingId,
+      expectedRevision: options.revision, followUpId: options.followUpId }
+  }
+  const reserve = (path: string, data: unknown, role = 'RECEIVER') =>
+    request.post(path + '/reserve-unheld', { headers: auth(role), data })
+  const oversized = await makeReserve(mixedPath, mixed, mixedBinding.bindingId, first, 2)
+  expect(await (await reserve(mixedPath, oversized)).json()).toMatchObject({ code: 'A_UNHELD_QUANTITY_EXCEEDED' })
+  expect((await reserve(mixedPath, oversized, 'OPS')).status()).toBe(403)
+  await checkpoint('reserve-before', { warehouseId, skuId, secondTrip: second, mixedLine: mixed.orderLineId, unreservedLine: unreserved.orderLineId, heldLine: held.orderLineId })
+
+  const reservePage = await open(context, 'RECEIVER', 'orders?order=' + mixed.orderId + '&trip=' + mixedTrip)
+  const orderCard = reservePage.locator('[data-order-id="' + mixed.orderId + '"]')
+  await orderCard.getByRole('button', { name: 'Giữ hàng trên chuyến kế nhiệm' }).click()
+  const reserveForm = orderCard.getByRole('form', { name: 'Giữ bổ sung' })
+  await reserveForm.getByLabel('Chuyến kế nhiệm').selectOption(mixedBinding.bindingId)
+  await reserveForm.getByLabel('Kho giữ').selectOption(warehouseId)
+  await reserveForm.getByLabel('Lượng giữ bổ sung').fill('1')
+  const actual = reservePage.waitForResponse(response => response.url().endsWith(mixedPath + '/reserve-unheld'))
+  await reserveForm.getByRole('button', { name: 'Giữ bổ sung' }).click()
+  const actualResponse = await actual
+  expect(actualResponse.status(), await actualResponse.text()).toBe(200)
+  const receipt = await actualResponse.json()
+  expect(await (await reserve(mixedPath, actualResponse.request().postDataJSON())).json()).toEqual(receipt)
+  await expect(orderCard.getByText('Đã giữ bổ sung cho chuyến kế nhiệm.')).toBeVisible()
+  expect(await readSuccessors(mixedTrip, mixed)).toMatchObject({ unheld: 0, bindings: [{ transferred: 3, reserved: 1 }] })
+
+  const never = base(zero, unreserved)
+  const initial = await reserveOptions(never)
+  expect(initial).toMatchObject({ unheld: 5, bindings: [{ unfilled: 5 }] })
+  const noRight = await makeReserve(never, unreserved, initial.bindings[0].bindingId, second, 5)
+  await checkpoint('reserve-arm', { commandId: noRight.commandId })
+  expect((await reserve(never, noRight)).status()).toBe(500)
+  expect(await reserveOptions(never)).toMatchObject({ unheld: 5, bindings: [{ unfilled: 5, reserved: 0 }] })
+  await checkpoint('reserve-rollback')
+  const firstReserve = await reserve(never, noRight)
+  expect(firstReserve.status()).toBe(200)
+  const firstReceipt = await firstReserve.json()
+  expect(await (await reserve(never, noRight)).json()).toEqual(firstReceipt)
+  expect(await reserveOptions(never)).toMatchObject({ unheld: 0, bindings: [{ unfilled: 0, reserved: 5 }] })
+
+  expect(await get<{ id: string }[]>(request, c3 + '/trips/' + second + '/rights', 'RECEIVER'))
+    .not.toContainEqual(expect.objectContaining({ id: firstReceipt.rightId }))
+  await checkpoint('reserve-cross-trip')
+
+  const sharedPath = base(zero, shared)
+  const sharedBinding = await assignSuccessor(sharedPath + '/assign-successor', body(shared, first, 2))
+  const stockA = await makeReserve(sharedPath, shared, sharedBinding.bindingId, first, 1)
+  const sharedSkuId = catalog.skus.find(sku => sku.label.startsWith('Z-FIELD-EA'))!.id
+  const grantB = (baseQuantity: number, target = second, role = 'SOURCE') => {
+    const commandId = crypto.randomUUID()
+    return request.post('/api/synthetic/app02d1/quota', { headers: auth(role), data: {
+      commandId, sourceNumber: 'APP05-4A-B-' + commandId, producerId: 'ignored',
+      tripId: target, stockLocationId: warehouseId, skuId: sharedSkuId, baseQuantity,
+    } })
+  }
+  const [tooMuchA, tooMuchB] = await Promise.all([
+    reserve(sharedPath, { ...stockA, commandId: crypto.randomUUID(), quantity: 3 }),
+    grantB(10, first, 'RECEIVER'),
+  ])
+  expect(tooMuchA.status()).toBe(409)
+  expect(await tooMuchA.json()).toMatchObject({ code: 'A_UNHELD_QUANTITY_EXCEEDED' })
+  expect(await tooMuchB.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'STOCK_INSUFFICIENT' })
+  const [holdA, quotaB] = await Promise.all([reserve(sharedPath, stockA), grantB(9)])
+  const bOutcome = await quotaB.json() as { status: string; reasonCode?: string }
+  expect(Number(holdA.ok()) + Number(bOutcome.status === 'APPLIED')).toBe(1)
+  if (holdA.ok()) {
+    expect(bOutcome).toMatchObject({ status: 'REJECTED', reasonCode: 'STOCK_INSUFFICIENT' })
+    expect(await (await grantB(8)).json()).toMatchObject({ status: 'APPLIED' })
+  } else {
+    expect(await holdA.json()).toMatchObject({ code: 'STOCK_INSUFFICIENT' })
+  }
+  const shortage = await makeReserve(sharedPath, shared, sharedBinding.bindingId, first, 1)
+  const unavailable = await reserve(sharedPath, shortage)
+  expect(unavailable.status()).toBe(409)
+  expect(await unavailable.json()).toMatchObject({ code: 'STOCK_INSUFFICIENT' })
+  expect(await reserveOptions(sharedPath)).toMatchObject({ unheld: holdA.ok() ? 1 : 2 })
+  await checkpoint('reserve-after', { winnerA: holdA.ok(), sharedSkuId, sharedLine: shared.orderLineId })
 })

@@ -101,24 +101,33 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<T> Run<T>(TenantConnections connections, ClaimsPrincipal user, Guid? trip, bool write, Guid? command,
-        Func<SqlConnection, SqlTransaction, string, string, bool, Task<T>> operation, CancellationToken ct, Guid? destination = null)
+        Func<SqlConnection, SqlTransaction, string, string, bool, Task<T>> operation, CancellationToken ct, Guid? destination = null, bool warehouse = false)
     {
         var ops = user.HasClaim("synthetic_role", OpsRole);
-        if (!connections.UsesApp05CloseReadiness || (!ops && (write || !user.HasClaim("synthetic_role", AssigneeRole))))
+        if (!connections.UsesApp05CloseReadiness || (warehouse
+            ? !connections.UsesApp05Successor || !user.HasClaim("synthetic_role", "warehouse")
+            : !ops && (write || !user.HasClaim("synthetic_role", AssigneeRole))))
             throw new UnauthorizedAccessException("Trip readiness requires its current scoped role.");
 
         string tenant = App02a3Sql.Tenant(user);
         string actor = App02a3Sql.Actor(user);
         await using var db = await connections.OpenApp02c4Async(user, ct);
         await using var tx = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        // C.2/D.1 lock the warehouse grant before command and Trip locks.
+        if (warehouse)
+            await App02a3Sql.RequireRole(db, tx, tenant, actor, "warehouse", ct);
         if (command.HasValue)
             await App02a3Sql.Lock(db, tx, App02a3Sql.IdentityLock(tenant, "APP05:" + actor, command.Value.ToString("N")), ct);
         Guid[] trips = destination.HasValue ? [trip!.Value, destination.Value] : trip.HasValue ? [trip.Value] : [];
         foreach (Guid id in trips.Order())
             await App02a3Sql.Lock(db, tx, "APP01C:TRIP:" + tenant + ":" + id.ToString("N"), ct);
 
-        await App02a3Sql.RequireRole(db, tx, tenant, actor, ops ? OpsRole : AssigneeRole, ct);
-        if (trips.Length > 0 && await db.ExecuteScalarAsync<int>(App02a3Sql.Cmd("""
+        if (!warehouse)
+            await App02a3Sql.RequireRole(db, tx, tenant, actor, ops ? OpsRole : AssigneeRole, ct);
+        if (trips.Length > 0 && await db.ExecuteScalarAsync<int>(App02a3Sql.Cmd(warehouse ? """
+            SELECT COUNT(*) FROM dbo.C3TripWriter
+            WHERE TenantId=@Tenant AND TripId IN @Trips AND ActorId=@Actor;
+            """ : """
             SELECT COUNT(*) FROM dbo.App05TripOperator
             WHERE TenantId=@Tenant AND TripId IN @Trips AND ActorId=@Actor AND IsActive=1;
             """, new { Tenant = tenant, Trips = trips, Actor = actor }, tx, ct)) != trips.Length)

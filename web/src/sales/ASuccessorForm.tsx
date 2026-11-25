@@ -6,13 +6,13 @@ type Trip = { tripId: string; code: string; businessDate: string }
 type Successors = {
   confirmSourceId: string; followUpId: string; revision: string; remaining: number; unheld: number; unscheduled: number; canWrite: boolean
   trips: Trip[]
-  bindings: { bindingId: string | null; destinationTripId: string | null; code: string | null; quantity: number; transferred: number }[]
+  bindings: { bindingId: string | null; destinationTripId: string | null; code: string | null; quantity: number; transferred: number; reserved: number }[]
   rights: { rightId: string; held: number; neverLoaded: number; returned: number }[]
 }
-type Command = {
+export type SuccessorCommand = {
   commandId: string; destinationTripId: string; confirmSourceId: string; quantity: string
   followUpId: string; expectedRevision: string
-  bindingId?: string; originalRightId?: string
+  bindingId?: string; originalRightId?: string; warehouseId?: string
 }
 
 const format = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
@@ -22,7 +22,7 @@ function isId(value: unknown): value is string {
   return typeof value === 'string' && guid.test(value) && value !== '00000000-0000-0000-0000-000000000000'
 }
 
-function units(value: unknown) {
+export function successorUnits(value: unknown) {
   const match = typeof value === 'string' ? /^0*(\d{1,15})(?:\.(\d{1,3}))?$/.exec(value) : null
   if (match === null) return null
   const [, whole, fraction = ''] = match
@@ -31,29 +31,32 @@ function units(value: unknown) {
 
 type Source = { originTripId: string; orderLineId: string }
 
-async function outcome(response: Response, command: Command, source: Source) {
+export async function readSuccessorOutcome(response: Response, command: SuccessorCommand, source: Source) {
   if (response.status === 401 || response.status === 403) return 'access'
   const body = await response.json().catch(() => null)
   const request = body?.request
-  const expectedQuantity = units(command.quantity)
+  const expectedQuantity = successorUnits(command.quantity)
   if (!request || request.originTripId !== source.originTripId || request.orderLineId !== source.orderLineId
     || request.commandId !== command.commandId || request.destinationTripId !== command.destinationTripId
     || request.confirmSourceId !== command.confirmSourceId || request.followUpId !== command.followUpId
     || request.expectedRevision !== command.expectedRevision || expectedQuantity === null
-    || units(request.quantityBase) !== expectedQuantity
+    || successorUnits(request.quantityBase) !== expectedQuantity
     || request.bindingId !== (command.bindingId ?? null)
-    || request.originalRightId !== (command.originalRightId ?? null)) return 'unknown'
+    || request.originalRightId !== (command.originalRightId ?? null)
+    || (request.warehouseId ?? null) !== (command.warehouseId ?? null)) return 'unknown'
 
   if (response.status === 409 && body.outcome === 'REJECTED'
-    && typeof body.code === 'string' && body.code.length > 0) return 'rejected'
+    && typeof body.code === 'string' && body.code.length > 0) return { rejected: body.code as string }
 
-  const quantity = units(body.quantityBase)
+  const quantity = successorUnits(body.quantityBase)
   if (response.status !== 200 || body.outcome !== 'APPLIED' || !isId(body.bindingId)
     || quantity === null || quantity <= 0n || quantity !== expectedQuantity
     || body.quantity !== Number(body.quantityBase)) return 'unknown'
-  if (command.bindingId) {
-    const neverLoaded = units(body.neverLoadedBase)
-    const returned = units(body.returnedBase)
+  if (command.warehouseId) {
+    if (body.bindingId !== command.bindingId || !isId(body.sourceId) || !isId(body.rightId)) return 'unknown'
+  } else if (command.bindingId) {
+    const neverLoaded = successorUnits(body.neverLoadedBase)
+    const returned = successorUnits(body.returnedBase)
     if (body.bindingId !== command.bindingId || !isId(body.successorRightId)
       || neverLoaded === null || returned === null || neverLoaded + returned !== quantity
       || body.neverLoaded !== Number(body.neverLoadedBase) || body.returned !== Number(body.returnedBase)) return 'unknown'
@@ -64,7 +67,7 @@ async function outcome(response: Response, command: Command, source: Source) {
 export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, source }: {
   storageKey: string
   load: () => Promise<Successors>
-  apply: (command: Command) => Promise<Response>
+  apply: (command: SuccessorCommand) => Promise<Response>
   onApplied: () => void
   unit: string
   source: Source
@@ -79,8 +82,8 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
   const [rightId, setRight] = useState('')
   const [busy, setBusy] = useState(false)
   const writing = useRef(false)
-  const [pending, setPending] = useState<Command | null>(() => {
-    try { return JSON.parse(pendingJson(storageKey) ?? 'null') as Command | null }
+  const [pending, setPending] = useState<SuccessorCommand | null>(() => {
+    try { return JSON.parse(pendingJson(storageKey) ?? 'null') as SuccessorCommand | null }
     catch { return null }
   })
   useEffect(() => {
@@ -96,10 +99,10 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
   const binding = data?.bindings.find(row => row.bindingId === bindingId)
   const right = data?.rights.find(row => row.rightId === rightId)
   const eligible = data?.trips.some(trip => trip.tripId === binding?.destinationTripId)
-  const limit = binding && right && eligible ? Math.min(right.held, binding.quantity - binding.transferred) : 0
+  const limit = binding && right && eligible ? Math.min(right.held, binding.quantity - binding.transferred - binding.reserved) : 0
   const amount = (value: number) => format.format(value) + ' ' + unit
 
-  async function send(command: Command) {
+  async function send(command: SuccessorCommand) {
     if (writing.current || !navigator.onLine) return
     writing.current = true
     setBusy(true)
@@ -107,12 +110,12 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
     setPending(command)
     setNotice('')
     try {
-      const result = await outcome(await apply(command), command, source)
-      if (result === 'applied' || result === 'rejected') {
+      const result = await readSuccessorOutcome(await apply(command), command, source)
+      if (result === 'applied' || typeof result === 'object') {
         forgetPending(storageKey, command.commandId)
         setPending(null)
       }
-      switch (result) {
+      switch (typeof result === 'object' ? 'rejected' : result) {
         case 'applied':
           setNotice(command.bindingId ? 'Đã chuyển lượng HELD.' : 'Đã xếp chuyến kế nhiệm.')
           onApplied()
@@ -139,7 +142,7 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
     event.preventDefault()
     if (!data?.canWrite || pending || busy) return
     const quantity = String(new FormData(event.currentTarget).get('quantity') ?? '')
-    const baseQuantity = units(quantity)
+    const baseQuantity = successorUnits(quantity)
     const destinationTripId = transfer ? binding?.destinationTripId : target
     if (!destinationTripId || baseQuantity === null || baseQuantity <= 0n ||
         Number(quantity) > (transfer ? limit : data.unscheduled)) return
@@ -164,7 +167,7 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
       </dl>
       {data.bindings.length > 0 && <ul>
         {data.bindings.map((row, index) => <li key={row.bindingId ?? index}>
-          {row.code || 'Chuyến ngoài phân công'} · Xếp {amount(row.quantity)} · Đã chuyển HELD {amount(row.transferred)}
+          {row.code || 'Chuyến ngoài phân công'} · Xếp {amount(row.quantity)} · Đã chuyển HELD {amount(row.transferred)}{row.reserved > 0 && ' · Giữ bổ sung ' + amount(row.reserved)}
         </li>)}
       </ul>}
       {data.canWrite && (pending ? <Button disabled={busy} onClick={() => void send(pending)}>Gửi lại yêu cầu kế nhiệm</Button>
@@ -184,15 +187,15 @@ export function ASuccessorForm({ storageKey, load, apply, onApplied, unit, sourc
               <Button type="submit">Xếp chuyến</Button>
             </fieldset>
           </form>}
-          {data.bindings.some(row => row.transferred < row.quantity && data.trips.some(trip => trip.tripId === row.destinationTripId))
+          {data.bindings.some(row => row.transferred + row.reserved < row.quantity && data.trips.some(trip => trip.tripId === row.destinationTripId))
               && data.rights.some(row => row.held > 0) && <form aria-label="Chuyển HELD" onSubmit={event => submit(event, true)}>
             <fieldset className="sales-filter" disabled={busy}>
               <div className="field">
                 <label htmlFor={id + '-binding'}>Phần đã xếp</label>
                 <select id={id + '-binding'} value={bindingId} onChange={event => setBinding(event.target.value)} required>
                   <option value="">Chọn phần đã xếp</option>
-                  {data.bindings.filter(row => row.transferred < row.quantity && data.trips.some(trip => trip.tripId === row.destinationTripId))
-                    .map(row => <option key={row.bindingId} value={row.bindingId ?? ''}>{row.code} · {amount(row.quantity - row.transferred)}</option>)}
+                  {data.bindings.filter(row => row.transferred + row.reserved < row.quantity && data.trips.some(trip => trip.tripId === row.destinationTripId))
+                    .map(row => <option key={row.bindingId} value={row.bindingId ?? ''}>{row.code} · {amount(row.quantity - row.transferred - row.reserved)}</option>)}
                 </select>
               </div>
               <div className="field">

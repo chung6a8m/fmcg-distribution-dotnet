@@ -70,7 +70,7 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, OrderLine = orderLine }, tx, ct));
         if (step is null || quantity % step.Value != 0) return [];
         string releases = returns ? """
-            SELECT COALESCE(SUM(r.Quantity),0) AS Quantity FROM dbo.F05ReturnCase r
+            SELECT CONVERT(decimal(28,3),COALESCE(SUM(r.Quantity),0)) AS Quantity FROM dbo.F05ReturnCase r
             JOIN dbo.F05ReturnStage s ON s.TenantId=r.TenantId AND s.CaseId=r.Id AND s.Stage='RELEASE'
             WHERE r.TenantId=o.TenantId AND r.LotId=o.LotId AND s.DestinationId=o.LocationId
             """ : "SELECT 0 AS Quantity";
@@ -80,7 +80,7 @@ public sealed partial class App01a2CommandService
             JOIN dbo.F03Lot l ON l.TenantId=o.TenantId AND l.Id=o.LotId
             JOIN dbo.StockLocation loc ON loc.TenantId=o.TenantId AND loc.Id=o.LocationId
             CROSS APPLY (
-                SELECT COALESCE(SUM(h.Quantity),0) AS Quantity FROM dbo.F03LotHold h
+                SELECT CONVERT(decimal(28,3),COALESCE(SUM(h.Quantity),0)) AS Quantity FROM dbo.F03LotHold h
                 JOIN dbo.StockRight r ON r.TenantId=h.TenantId AND r.Id=h.StockRightId
                 WHERE h.TenantId=o.TenantId AND h.LotId=o.LotId AND r.StockLocationId=o.LocationId
             ) used

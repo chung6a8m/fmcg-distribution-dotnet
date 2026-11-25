@@ -18,7 +18,7 @@ internal static partial class App05CloseReadiness
         WHERE t.TenantId=@Tenant
         """;
 
-    private const string SourcesSql = """
+    private static string SourcesSql(bool successor) => $$"""
         SELECT o.Id FROM dbo.C2OrderDraft o
         WHERE o.TenantId=@Tenant AND o.TripId=@Trip AND NOT EXISTS(
             SELECT 1 FROM dbo.C2Confirmation c WHERE c.TenantId=o.TenantId AND c.OrderId=o.Id)
@@ -51,7 +51,10 @@ internal static partial class App05CloseReadiness
                 WHERE m.TenantId=v.TenantId AND m.StockRightId=v.Id
             ) x
             CROSS APPLY (
-                SELECT CASE WHEN v.TripId<>s.TripId OR v.SkuId<>s.SkuId OR x.Loaded>v.GrantedBaseQuantity
+                SELECT CASE WHEN (v.TripId<>s.TripId {{(successor ? """
+                    AND NOT EXISTS(SELECT 1 FROM dbo.App05ASuccessorReserve rr
+                        WHERE rr.TenantId=v.TenantId AND rr.RightId=v.Id AND rr.OrderLineId=s.AOrderLineId)
+                    """ : "")}}) OR v.SkuId<>s.SkuId OR x.Loaded>v.GrantedBaseQuantity
                     OR NOT EXISTS(SELECT 1 FROM dbo.StockLocation w
                         WHERE w.TenantId=v.TenantId AND w.Id=v.StockLocationId AND w.Kind='WAREHOUSE')
                     OR NOT EXISTS(

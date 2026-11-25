@@ -30,6 +30,8 @@ public sealed record C2OrderView(Guid Id, string Customer, string Trip, string S
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? TripId { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TripStatus { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public C2HandoffActions? Actions { get; init; }
 }
 
@@ -171,6 +173,7 @@ public sealed partial class App01a2CommandService
                     orderLines, h.ShipToSnapshotId, h.ShipToOrigin)
                 {
                     TripId = handoff ? h.TripId : null,
+                    TripStatus = handoff && connections.UsesApp05Successor ? h.TripStatus : null,
                     Actions = access?.Actions(h, orderLines, connections.UsesApp03BusinessDay, readyToLoad.Contains(h.Id))
                 };
             }).ToArray();

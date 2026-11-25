@@ -2,6 +2,7 @@ import { Fragment, useEffect, useEffectEvent, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Button, Field, Notice, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, read, rememberPending, requestSalesApi, type Detail, type Identity } from './customer-api'
+import { ASuccessorReserve } from './ASuccessorReserve'
 import './customers.css'
 
 const api = '/api/synthetic/app02c2'
@@ -21,7 +22,7 @@ type Line = { lineId: string | null; sku: string; baseUom: string; ordered: numb
   loaded: number; heldOnTrip: number; policySourceHash: string | null; pricing?: Pricing | null; handoff?: LineHandoff }
 type Order = { id: string; customer: string; trip: string; shipTo: string; businessDate: string | null;
   confirmSourceId: string | null; status: string; lines: Line[]; shipToSnapshotId: string | null; shipToOrigin: string
-  tripId?: string; actions?: { confirm: boolean; reserve: boolean; load: boolean } }
+  tripId?: string; tripStatus?: string; actions?: { confirm: boolean; reserve: boolean; load: boolean } }
 type Command = { path: '/drafts' | '/confirm' | '/reserve'; id: string; body: string }
 type DraftLine = { skuId: string; quantity: number; uomCode?: string }
 type CommandTarget =
@@ -328,8 +329,8 @@ function DraftForm({ session, catalog, disabled, save, context }: {
 }
 
 export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrder, selectedSource, selectedTrace,
-  recovering = false, onSelectOrder }: {
-  workspaceToken?: string; onOpenAr?: (orderId: string, tripId?: string) => void; context?: DraftContext
+  recovering = false, onSelectOrder, successorReserve = false }: {
+  successorReserve?: boolean; workspaceToken?: string; onOpenAr?: (orderId: string, tripId?: string) => void; context?: DraftContext
   selectedOrder?: string; selectedSource?: string; selectedTrace?: string; recovering?: boolean
   onSelectOrder?: (orderId: string, tripId?: string) => void
 }) {
@@ -538,7 +539,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrde
           </label>
         </div>
         {queued.length === 0 ? <p>Chưa có đơn ở bước này.</p> : <ul className="c1-rows">
-          {queued.map(order => <li key={order.id}>
+          {queued.map(order => <li key={order.id} data-order-id={order.id}>
             <a className="page-link" href={orderLocation('orders', order)}>{order.trip} · {order.customer} · {order.id.slice(0, 8)}</a>
             <span>{(Object.keys(steps) as (keyof typeof steps)[]).filter(key => order.actions?.[key])
               .map(key => steps[key]).join(' · ') || labels[order.status]}</span>
@@ -556,7 +557,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrde
           Nguồn {groupedSource} có {sourceLots.length} dòng lô.
         </p>}
         {!pinned && orders.length === 0 && <p>Chưa có đơn A.</p>}
-        {shown.map(order => <article className="panel panel-content" key={order.id}>
+        {shown.map(order => <article className="panel panel-content" key={order.id} data-order-id={order.id}>
           <h3>{order.customer} · {order.trip}</h3>
           <p>{order.shipTo}</p>
           <p><strong>{labels[order.status] ?? order.status}</strong>{order.businessDate && ' · ' + order.businessDate.slice(0, 10)}</p>
@@ -596,6 +597,11 @@ export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrde
             {workspaceToken && line.policySourceHash && <details>
               <summary>Nguồn chính sách</summary><p className="c3-source">{line.policySourceHash}</p>
             </details>}
+            {successorReserve && session.identity.warehouse && order.tripStatus === 'CLOSED_WITH_OPEN_CASES' &&
+              order.tripId && line.lineId && line.delivered < line.ordered &&
+              <ASuccessorReserve key={line.lineId} token={session.token} identity={session.identity}
+                tripId={order.tripId} lineId={line.lineId} unit={line.baseUom} warehouses={catalog.warehouses}
+                offline={offline} onApplied={() => void readOrders(session.token).then(setOrders).catch(() => {})} />}
             {(context ? order.actions?.reserve : session.identity.warehouse) && order.confirmSourceId && line.lineId
               && (line.handoff?.unreserved ?? line.ordered - line.reserved - line.delivered) > 0 &&
               <form className="c1-fields" aria-label={`Giữ hàng ${line.sku}`} onSubmit={event => {

@@ -17,7 +17,10 @@ internal static partial class App05CloseReadiness
     private sealed record SuccessorReceipt(byte[] PayloadHash, string Receipt, bool Applied);
     private sealed record SuccessorTrip(Guid TripId, string Code, DateTime BusinessDate, string Status);
     private sealed record SuccessorBinding(Guid BindingId, Guid DestinationTripId, string Code, DateTime BusinessDate,
-        decimal Quantity, decimal Transferred, bool DestinationVisible);
+        decimal Quantity, decimal Transferred, decimal Reserved, bool DestinationVisible)
+    {
+        internal decimal Unfilled => Quantity - Transferred - Reserved;
+    }
     private sealed record SuccessorState(SuccessorTrip[] Trips, SuccessorBinding[] Bindings, TransferRight[] Rights, string Revision);
     private sealed record TransferRight(Guid RightId, Guid Warehouse, decimal NeverLoaded, decimal Returned)
     {
@@ -39,18 +42,19 @@ internal static partial class App05CloseReadiness
                 return Results.Ok(new
                 {
                     source.FollowUpId, source.Line.ConfirmSourceId, source.Line.Remaining, state.Revision,
-                    Unheld = source.Line.Remaining - source.Line.Held,
+                    Unheld = Unheld(source, state),
                     Unscheduled = source.Line.Remaining - state.Bindings.Sum(b => b.Quantity),
                     CanWrite = ops, state.Trips, state.Rights,
                     Bindings = state.Bindings.Select(b => new
                     {
                         BindingId = b.DestinationVisible ? (Guid?)b.BindingId : null,
                         DestinationTripId = b.DestinationVisible ? (Guid?)b.DestinationTripId : null,
-                        Code = b.DestinationVisible ? b.Code : null, b.Quantity, b.Transferred
+                        Code = b.DestinationVisible ? b.Code : null, b.Quantity, b.Transferred, b.Reserved
                     })
                 });
             }, ct);
         });
+        MapSuccessorReserve(sources);
         MapCommand("/assign-successor", transfer: false);
         MapCommand("/transfer-held", transfer: true);
 
@@ -98,23 +102,24 @@ internal static partial class App05CloseReadiness
     }
 
     private static async Task<SuccessorState> ReadSuccessorState(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid trip, SuccessorSource source, CancellationToken ct)
+        string tenant, string actor, Guid trip, SuccessorSource source, CancellationToken ct, bool warehouse = false)
     {
-        var scope = new { Tenant = tenant, Actor = actor, source.BusinessDate };
+        var scope = new { Tenant = tenant, Actor = actor, source.BusinessDate, WarehouseScope = warehouse };
         var trips = (await db.QueryAsync<SuccessorTrip>(App02a3Sql.Cmd(
             EligibleSuccessorTrips + " ORDER BY t.Id;", scope, tx, ct))).ToArray();
-        var bindings = (await ReadSuccessorBindings(db, tx, tenant, actor, source.Line.OrderLineId, ct)).ToArray();
+        var bindings = (await ReadSuccessorBindings(db, tx, tenant, actor, source.Line.OrderLineId, ct, warehouse)).ToArray();
         var rights = (await ReadTransferRights(db, tx, tenant, trip, source.Line, ct)).ToArray();
         return new(trips, bindings, rights, Convert.ToHexString(Digest(new { Source = source, Trips = trips,
             Bindings = bindings, Rights = rights })));
     }
 
     private static async Task<IResult> ExecuteSuccessor(SqlConnection db, SqlTransaction tx, string tenant, string actor,
-        Guid trip, Guid line, SuccessorInput input, bool transfer, CancellationToken ct)
+        Guid trip, Guid line, SuccessorInput input, bool transfer, CancellationToken ct, Guid? warehouse = null)
     {
         // Hash the numeric value in canonical fixed-scale form for equivalent JSON decimals.
         string quantityBase = input.Quantity.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
-        byte[] hash = Digest(new { Trip = trip, Line = line, Transfer = transfer, input.DestinationTripId,
+        byte[] hash = warehouse.HasValue ? Digest(new { Kind = "Reserve", Trip = trip, Line = line, Input = input with { Quantity = 0 }, Quantity = quantityBase, Warehouse = warehouse.Value })
+            : Digest(new { Trip = trip, Line = line, Transfer = transfer, input.DestinationTripId,
             input.ConfirmSourceId, Quantity = quantityBase,
             input.BindingId, input.OriginalRightId, input.FollowUpId, input.ExpectedRevision });
         var scope = new { Tenant = tenant, Actor = actor, input.CommandId };
@@ -143,14 +148,17 @@ internal static partial class App05CloseReadiness
         if (input.Quantity % source.Step != 0)
             return await Record(new { Code = "A_SUCCESSOR_QUANTITY_STEP" }, false);
 
-        var state = await ReadSuccessorState(db, tx, tenant, actor, trip, source, ct);
+        // Serialize allocations of this pool before querying existing rights and holdings.
+        if (warehouse.HasValue)
+            await App01a2CommandService.LockStockAllocation(db, tx, tenant, warehouse.Value, source.Line.SkuId, ct);
+        var state = await ReadSuccessorState(db, tx, tenant, actor, trip, source, ct, warehouse: warehouse.HasValue);
         if (state.Revision != input.ExpectedRevision)
             return await Record(new { Code = "A_SUCCESSOR_REVISION_CHANGED" }, false);
         var destination = state.Trips.SingleOrDefault(t => t.TripId == input.DestinationTripId);
         if (destination is null)
             return await Record(new { Code = "A_SUCCESSOR_TRIP_NOT_ELIGIBLE" }, false);
 
-        if (!transfer)
+        if (!transfer && warehouse is null)
         {
             if (input.Quantity > source.Line.Remaining - state.Bindings.Sum(b => b.Quantity))
                 return await Record(new { Code = "A_SUCCESSOR_QUANTITY_EXCEEDED" }, false);
@@ -167,9 +175,19 @@ internal static partial class App05CloseReadiness
         var binding = state.Bindings.SingleOrDefault(b => b.BindingId == input.BindingId &&
             b.DestinationTripId == input.DestinationTripId);
         if (binding is null) return await Record(new { Code = "A_SUCCESSOR_BINDING_INVALID" }, false);
+        if (warehouse.HasValue)
+        {
+            if (input.Quantity > binding.Unfilled || input.Quantity > Unheld(source, state))
+                return await Record(new { Code = "A_UNHELD_QUANTITY_EXCEEDED" }, false);
+            var reserve = await App01a2CommandService.ReserveSuccessorStock(db, tx, tenant, actor, binding.BindingId,
+                destination.TripId, source.Line.OrderId, line, input.ConfirmSourceId, warehouse.Value, source.Line.SkuId,
+                input.Quantity, hash, ct);
+            return reserve.Code is not null ? await Record(new { reserve.Code }, false)
+                : await Record(new { binding.BindingId, input.Quantity, reserve.SourceId, reserve.RightId }, true);
+        }
         var right = state.Rights.SingleOrDefault(r => r.RightId == input.OriginalRightId);
         if (right is null) return await Record(new { Code = "A_HELD_RIGHT_INVALID" }, false);
-        if (input.Quantity > right.Held || input.Quantity > binding.Quantity - binding.Transferred)
+        if (input.Quantity > right.Held || input.Quantity > binding.Unfilled)
             return await Record(new { Code = "A_HELD_QUANTITY_EXCEEDED" }, false);
         if (!await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant,
             new(right.Warehouse, source.Line.SkuId), ct))
@@ -214,7 +232,7 @@ internal static partial class App05CloseReadiness
             response["request"] = JsonSerializer.SerializeToNode(new
             {
                 OriginTripId = trip, OrderLineId = line, input.CommandId, input.DestinationTripId,
-                input.ConfirmSourceId, input.FollowUpId, input.ExpectedRevision, input.BindingId, input.OriginalRightId, QuantityBase = quantityBase
+                input.ConfirmSourceId, input.FollowUpId, input.ExpectedRevision, input.BindingId, input.OriginalRightId, WarehouseId = warehouse, QuantityBase = quantityBase
             }, ClosureJson);
             if (applied)
             {
@@ -240,20 +258,27 @@ internal static partial class App05CloseReadiness
         JOIN dbo.StockLocation v ON v.TenantId=t.TenantId AND v.Id=t.VehicleLocationId AND v.Kind='VEHICLE' AND v.IsActive=1
         WHERE t.TenantId=@Tenant AND t.Status='PREPARED' AND t.BusinessDate>@BusinessDate
             AND t.BusinessDate=CAST(({App02c6Clock.SqlUtcNow} AT TIME ZONE 'UTC') AT TIME ZONE 'SE Asia Standard Time' AS date)
-            AND EXISTS(SELECT 1 FROM dbo.App05TripOperator o
-                WHERE o.TenantId=t.TenantId AND o.TripId=t.Id AND o.ActorId=@Actor AND o.IsActive=1)
+            AND ((@WarehouseScope=0 AND EXISTS(SELECT 1 FROM dbo.App05TripOperator o
+                WHERE o.TenantId=t.TenantId AND o.TripId=t.Id AND o.ActorId=@Actor AND o.IsActive=1))
+                OR (@WarehouseScope=1 AND EXISTS(SELECT 1 FROM dbo.C3TripWriter w
+                WHERE w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor)))
         """;
 
     private static Task<IEnumerable<SuccessorBinding>> ReadSuccessorBindings(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid line, CancellationToken ct) => db.QueryAsync<SuccessorBinding>(App02a3Sql.Cmd("""
-        SELECT b.BindingId,b.DestinationTripId,t.Code,t.BusinessDate,b.Quantity,x.Transferred,
-            CONVERT(bit,IIF(o.ActorId IS NULL,0,1)) AS DestinationVisible
+        string tenant, string actor, Guid line, CancellationToken ct, bool warehouse) => db.QueryAsync<SuccessorBinding>(App02a3Sql.Cmd("""
+        SELECT b.BindingId,b.DestinationTripId,t.Code,t.BusinessDate,b.Quantity,x.Transferred,y.Reserved,
+            CONVERT(bit,IIF((@WarehouseScope=0 AND o.ActorId IS NOT NULL)
+                OR (@WarehouseScope=1 AND w.ActorId IS NOT NULL),1,0)) AS DestinationVisible
         FROM dbo.App05ASuccessor b JOIN dbo.Trip t ON t.TenantId=b.TenantId AND t.Id=b.DestinationTripId
         LEFT JOIN dbo.App05TripOperator o ON o.TenantId=t.TenantId AND o.TripId=t.Id AND o.ActorId=@Actor AND o.IsActive=1
+        LEFT JOIN dbo.C3TripWriter w ON w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor
         CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(NeverLoaded+Returned),0)) AS Transferred
             FROM dbo.App05AHeldTransfer x WHERE x.TenantId=b.TenantId AND x.BindingId=b.BindingId) x
+        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(r.GrantedBaseQuantity-r.ReleasedBaseQuantity-r.ConsumedBaseQuantity),0)) AS Reserved
+            FROM dbo.App05ASuccessorReserve rr JOIN dbo.StockRight r ON r.TenantId=rr.TenantId AND r.Id=rr.RightId
+            WHERE rr.TenantId=b.TenantId AND rr.BindingId=b.BindingId) y
         WHERE b.TenantId=@Tenant AND b.OrderLineId=@Line ORDER BY t.BusinessDate,t.Code,b.BindingId;
-        """, new { Tenant = tenant, Actor = actor, Line = line }, tx, ct));
+        """, new { Tenant = tenant, Actor = actor, Line = line, WarehouseScope = warehouse }, tx, ct));
 
     private static Task<IEnumerable<TransferRight>> ReadTransferRights(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, ALine line, CancellationToken ct) => db.QueryAsync<TransferRight>(App02a3Sql.Cmd("""

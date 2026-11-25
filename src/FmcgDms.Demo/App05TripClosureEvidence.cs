@@ -228,7 +228,7 @@ internal static class App05TripClosureEvidence
 
             if (!await Wait("after-zero-close", exited)) return false;
             var zeroReceipt = await Read<ZeroCheckpoint>("after-zero-close");
-            await VerifyReceipt(zeroReceipt.ZeroReceipt, "CLOSED_WITH_OPEN_CASES", 2, zeroReceipt.ZeroReceipt.HandoffId);
+            await VerifyReceipt(zeroReceipt.ZeroReceipt, "CLOSED_WITH_OPEN_CASES", zero.Shared is null ? 2 : 3, zeroReceipt.ZeroReceipt.HandoffId);
             Check("one source-bound handoff and closure, with no manifest or stock/AR effect", Primary,
                 new TripImageRow("CLOSED_WITH_OPEN_CASES", 1), await TripImage(zero.Zero));
             Check("zero handoff leaves actual HELD and no right for the unreserved Confirm", Primary,
@@ -240,7 +240,7 @@ internal static class App05TripClosureEvidence
                 SELECT OrderLineId,ConfirmSourceId,HeldBaseQuantity
                 FROM dbo.App05ZeroStockHandoffLine WHERE TenantId=@Tenant AND TripId=@Zero AND HandoffId=@HandoffId;
                 """, new { Tenant = Primary, zero.Zero, zeroReceipt.ZeroReceipt.HandoffId }, cancellationToken: ct))).ToDictionary(row => row.OrderLineId);
-            Check("zero handoff references exactly two source Confirm lines", Primary, 2, proofs.Count);
+            Check("zero handoff references the exact source Confirm lines", Primary, zero.Shared is null ? 2 : 3, proofs.Count);
             Check("zero handoff proves MAIN HELD for the first original Confirm", Primary,
                 new ZeroProof(zero.Held.OrderLineId, zero.Held.ConfirmSourceId, zero.HeldQuantity), proofs.GetValueOrDefault(zero.Held.OrderLineId));
             Check("zero handoff proves no Reserve for the second original Confirm", Primary,
@@ -442,6 +442,97 @@ internal static class App05TripClosureEvidence
                     SELECT (SELECT COUNT(*) FROM dbo.App05ASuccessor)+(SELECT COUNT(*) FROM dbo.App05AHeldTransfer);
                     """, cancellationToken: ct)));
             await Acknowledge("successor-after");
+            if (!await Wait("reserve-before", exited)) return false;
+            var pool = await Read<ReserveBefore>("reserve-before");
+            string oldFinancial = await ReserveFinancialDigest();
+            Check("scheduling and transferring do not grow the MAIN allocation", Primary,
+                new ReservePool(33, 22), await ReadPool(pool.SkuId));
+            await Acknowledge("reserve-before");
+
+            if (!await Wait("reserve-arm", exited)) return false;
+            var reserveFault = await Read<SuccessorFault>("reserve-arm");
+            string reserveStatement = $"""
+                CREATE OR ALTER TRIGGER dbo.TR_App05EvidenceFailSuccessor ON dbo.App05ASuccessorCommand AFTER INSERT AS
+                BEGIN
+                    SET NOCOUNT ON;
+                    IF EXISTS(SELECT 1 FROM inserted WHERE TenantId=N'tenant-a' AND CommandId='{reserveFault.CommandId:D}')
+                        THROW 51927,'APP-05.4a synthetic reserve precommit fault.',1;
+                END;
+                """;
+            await db.ExecuteAsync(new CommandDefinition(verify + """
+                EXEC(@Statement);
+                ENABLE TRIGGER dbo.TR_App05EvidenceFailSuccessor ON dbo.App05ASuccessorCommand;
+                """, new { scope.Tenant, scope.Name, scope.Nonce, Statement = reserveStatement }, cancellationToken: ct));
+            await Acknowledge("reserve-arm");
+
+            if (!await Wait("reserve-rollback", exited)) return false;
+            Check("reserve rollback leaves only the already committed one-unit allocation", Primary,
+                new ReservePool(33, 23), await ReadPool(pool.SkuId));
+            Check("reserve rollback leaves no right or durable receipt for the failed command", Primary, 0,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT (SELECT COUNT(*) FROM dbo.App05ASuccessorReserve WHERE TenantId=@Tenant AND OrderLineId=@Line)
+                         + (SELECT COUNT(*) FROM dbo.App05ASuccessorCommand WHERE TenantId=@Tenant AND CommandId=@CommandId);
+                    """, new { scope.Tenant, Line = pool.UnreservedLine, reserveFault.CommandId }, cancellationToken: ct)));
+            await db.ExecuteAsync(new CommandDefinition(verify + " DISABLE TRIGGER dbo.TR_App05EvidenceFailSuccessor ON dbo.App05ASuccessorCommand;",
+                scope, cancellationToken: ct));
+            await Acknowledge("reserve-rollback");
+
+            if (!await Wait("reserve-cross-trip", exited)) return false;
+            Check("independent B warehouse actor receives the second race trip", Primary, 1,
+                await db.ExecuteAsync(new CommandDefinition(verify + """
+                    UPDATE w SET ActorId=@Actor FROM dbo.C3TripWriter w
+                    JOIN dbo.Trip t ON t.TenantId=w.TenantId AND t.Id=w.TripId AND t.Status='PREPARED'
+                    JOIN dbo.App02ActorRoleGrant g ON g.TenantId=t.TenantId AND g.ActorId=@Actor AND g.RoleCode='warehouse' AND g.IsActive=1
+                    WHERE w.TenantId=@Tenant AND w.TripId=@SecondTrip AND w.ActorId=@Receiver;
+                    """, new { scope.Tenant, scope.Name, scope.Nonce, pool.SecondTrip, App03DayBootstrap.Actor, DevF05Evidence.Receiver }, cancellationToken: ct)));
+            await Acknowledge("reserve-cross-trip");
+
+            if (!await Wait("reserve-after", exited)) return false;
+            var race = await Read<ReserveRace>("reserve-after");
+            Check("lot SKU Reserve allocates exactly six new units", Primary,
+                new ReservePool(33, 28), await ReadPool(pool.SkuId));
+            Check("shared A/B allocation ends at the capacity of MAIN", Primary,
+                new ReservePool(9, 9), await ReadPool(race.SharedSkuId));
+            var grants = (await db.QueryAsync<ReserveGrant>(new CommandDefinition("""
+                SELECT a.OrderLineId, COUNT(*) AS Rights, SUM(r.GrantedBaseQuantity) AS Quantity,
+                    SUM(COALESCE(h.Quantity,0)) AS LotQuantity, SUM(e.QuantityDelta) AS LedgerQuantity
+                FROM dbo.App05ASuccessorReserve a
+                JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.RightId AND r.TripId=a.DestinationTripId
+                JOIN dbo.LedgerEffect e ON e.TenantId=r.TenantId AND e.BusinessSourceLineId=r.BusinessSourceLineId
+                    AND e.LedgerKind='RIGHT_A' AND e.AmountDelta=0
+                OUTER APPLY (SELECT SUM(h.Quantity) AS Quantity FROM dbo.F03LotHold h
+                    WHERE h.TenantId=r.TenantId AND h.StockRightId=r.Id) h
+                WHERE a.TenantId=@Tenant GROUP BY a.OrderLineId;
+                """, scope, cancellationToken: ct))).ToDictionary(row => row.OrderLineId);
+            Check("mixed line creates one newly reserved right with one lot unit", Primary,
+                new ReserveGrant(pool.MixedLine, 1, 1, 1, 1), grants[pool.MixedLine]);
+            Check("the first Reserve on the unreserved Confirm creates exactly five lot units", Primary,
+                new ReserveGrant(pool.UnreservedLine, 1, 5, 5, 5), grants[pool.UnreservedLine]);
+            Check("only the winning A command can create the shared non-lot right", Primary, race.WinnerA ? 1m : 0m,
+                grants.GetValueOrDefault(race.SharedLine)?.Quantity ?? 0);
+            Check("Reserve does not move physical stock or change financial ledgers", Primary, oldFinancial, await ReserveFinancialDigest());
+            Check("no successor Reserve in the peer database", Peer, 0,
+                await peer.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM dbo.App05ASuccessorReserve;", cancellationToken: ct)));
+            await Acknowledge("reserve-after");
+
+            Task<ReservePool> ReadPool(Guid sku) => db.QuerySingleAsync<ReservePool>(new CommandDefinition("""
+                SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
+                FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@WarehouseId AND SkuId=@Sku;
+                """, new { scope.Tenant, pool.WarehouseId, Sku = sku }, cancellationToken: ct));
+
+            Task<string> ReserveFinancialDigest() => db.ExecuteScalarAsync<string>(new CommandDefinition("""
+                SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                    SELECT
+                        JSON_QUERY((SELECT * FROM dbo.LedgerEffect WHERE TenantId=@Tenant AND LedgerKind NOT IN ('RIGHT_A','RIGHT_B')
+                            ORDER BY Id FOR JSON PATH)) AS Ledger,
+                        JSON_QUERY((SELECT * FROM dbo.PhysicalStockMovement WHERE TenantId=@Tenant ORDER BY Id FOR JSON PATH)) AS Movements,
+                        JSON_QUERY((SELECT * FROM dbo.PhysicalStockBalance WHERE TenantId=@Tenant
+                            ORDER BY StockLocationId,SkuId FOR JSON PATH)) AS Stock,
+                        JSON_QUERY((SELECT * FROM dbo.AConfirmedLineSnapshot WHERE TenantId=@Tenant ORDER BY AOrderLineId FOR JSON PATH)) AS Confirms,
+                        JSON_QUERY((SELECT * FROM dbo.ReceivableOpenItem WHERE TenantId=@Tenant ORDER BY Id FOR JSON PATH)) AS Ar,
+                        JSON_QUERY((SELECT * FROM dbo.DeliveryStockIssue WHERE TenantId=@Tenant ORDER BY Id FOR JSON PATH)) AS Cogs
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)),2);
+                """, scope, cancellationToken: ct))!;
             return true;
         }
 
@@ -567,6 +658,10 @@ internal static class App05TripClosureEvidence
     private sealed record Persisted(Guid ClosureId, string ActorId, Guid CommandId, string Status,
         DateTimeOffset ClosedAt, int OpenWorkCount, Guid HandoffId, string Snapshot);
     private sealed record TripImageRow(string Status, int Decisions);
+    private sealed record ReserveBefore(Guid WarehouseId, Guid SkuId, Guid MixedLine, Guid UnreservedLine, Guid SecondTrip);
+    private sealed record ReserveRace(bool WinnerA, Guid SharedSkuId, Guid SharedLine);
+    private sealed record ReserveGrant(Guid OrderLineId, int Rights, decimal Quantity, decimal LotQuantity, decimal LedgerQuantity);
+    private sealed record ReservePool(decimal OnHand, decimal Allocated);
     private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);
     private sealed record SuccessorFault(Guid CommandId);
     private sealed record SuccessorRevocation(Guid TripId, Guid CommandId);
@@ -574,7 +669,7 @@ internal static class App05TripClosureEvidence
     private sealed record SuccessorRace(decimal Winner);
     private sealed record SuccessorOracle(Guid OrderLineId, decimal Scheduled, decimal Returned,
         decimal NeverLoaded, decimal LotQuantity, int Rights);
-    private sealed record ZeroFixture(Guid Zero, Order Held, Order Unreserved, decimal HeldQuantity);
+    private sealed record ZeroFixture(Guid Zero, Order Held, Order Unreserved, decimal HeldQuantity, Order? Shared);
     private sealed record ZeroProof(Guid OrderLineId, Guid ConfirmSourceId, decimal HeldBaseQuantity);
     private sealed record ZeroState(int Manifests, int Handoffs, int ReturnLines, decimal Held, int UnreservedRights);
     private sealed record OpenInventory(string Status, decimal MainStock, decimal MainCost, decimal Delivered, decimal Cogs,

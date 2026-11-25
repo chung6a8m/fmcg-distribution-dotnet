@@ -27,7 +27,7 @@ internal static partial class App05CloseReadiness
         FinanceProjection[] finances;
         Receivable[] ar;
         List<Source> sources;
-        using (var grid = await db.QueryMultipleAsync(App02a3Sql.Cmd(SourcesSql, scope, tx, ct)))
+        using (var grid = await db.QueryMultipleAsync(App02a3Sql.Cmd(SourcesSql(successor), scope, tx, ct)))
         {
             drafts = (await grid.ReadAsync<Guid>()).ToArray();
             pending = (await grid.ReadAsync<Guid>()).ToArray();

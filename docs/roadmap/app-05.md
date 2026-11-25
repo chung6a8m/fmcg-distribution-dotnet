@@ -76,7 +76,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `MERGED / FINAL_HEAD_CI_VERIFIED` |
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `MERGED / LOCAL_DEV_VERIFIED / PR_CI_INCOMPLETE` (#153) |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
-| **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `NOT_STARTED` |
+| **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `NOT_STARTED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
 | **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `NOT_STARTED` |
@@ -256,13 +256,11 @@ Lỗi ma trận D.3 trên final source của PR #153 vẫn là lịch sử hoste
 
 ### APP-05.4a — Reserve riêng cho phần chưa giữ
 
-**Files:** `src/FmcgDms.Api/Persistence/App01a2CommandService.cs`, `App02c2Commands.cs`, `App02c2Reads.cs`, `App02DevF03Lots.cs` và binding .3; `web/src/sales/OrderWorkspace.tsx`, `LoadWorkspace.tsx`; mở rộng `App05AFulfillmentTests.cs` và hồi quy `App02c2Tests.cs`.
+Migration tiến `202611250004` bổ sung liên kết bất biến từ quyền Reserve tới binding, dòng A, SKU, kho và chuyến đích. Dùng `-ASuccessor` trên phiên mới hoặc Resume phiên DEV đã có. Kho cần quyền hiện hành và phân công C.3 trên cả chuyến gốc lẫn chuyến đích. Từ **Đơn hàng**, mở dòng trên chuyến gốc đã đóng, chọn binding và kho rồi **Giữ bổ sung**. UI hiển thị lượng đã xếp, đã giữ và còn chờ giữ. Nạp/giao quyền kế nhiệm thuộc APP-05.4b.
 
-- [ ] Dùng ca Confirm5/Reserve4/Load3/Deliver1/Return2: remaining4, HELD3. Test đỏ việc chuyển4, tự cấp giữ khi chọn Trip, Reserve quá phần chưa giữ và hai yêu cầu tranh free pool.
-- [ ] Dùng ca Confirm5/Reserve0: đóng qua bàn giao không manifest, chọn Trip kế nhiệm bằng `AssignASuccessor`, Reserve5 lần đầu qua binding đó rồi nạp/giao trong .4b. Nếu thiếu tồn, không cấp giữ và vẫn có người/hạn; không phụ thuộc transfer một StockRight chưa tồn tại.
-- [ ] Bổ sung Reserve có source trên binding kế nhiệm, kiểm nghĩa vụ toàn dòng, quyền hiện hành, tồn đủ điều kiện/lô/FEFO và transaction. Transfer3 không tự tạo phần1; Reserve1 thành công mới cho nạp phần1.
-- [ ] Khi thiếu tồn, trả lý do và giữ phần1 trong follow-up; UI phân biệt scheduled/held/loadable. Replay hoặc rollback không nhân đôi right/allocated.
-- [ ] Kiểm cạnh tranh A/B trên pool dùng chung trong tổ hợp đã hỗ trợ, không đổi tổng physical/cost/AR do Reserve; commit đề xuất: `feat: reserve unheld A remainder on successor trips`.
+API `GET /reserve-options` và `POST /reserve-unheld` dùng chung tiền tố dòng A của .3. Lệnh Reserve nhận CommandId, FollowUpId, ConfirmSourceId, BindingId, DestinationTripId, WarehouseId, Quantity và ExpectedRevision. Transaction kiểm lượng trống của binding và phần chưa giữ toàn dòng. C.2 A, D.1 B và Reserve kế nhiệm dùng cùng khóa tenant/kho/SKU trong profile tích hợp. Cấp giữ ghi cùng giao dịch quyền, pool, lô FEFO, nguồn `STOCK_ALLOC`, hiệu ứng `RIGHT_A` và biên nhận. Replay kiểm lại quyền và cùng payload.
+
+**Biên nhận local.** `./scripts/Run-App03Dev.ps1 -Action VerifyASuccessor` lượt `a45c4009402a44eca5205d1eee447b5f` đạt 4/4 Chromium và 86/86 đối chiếu SQL, zero diff. Ca 5/4/3/1/2 còn 4 EA, chuyển đúng HELD3, rồi giữ thêm 1 EA qua UI. Confirm5 chưa Reserve nhận đủ 5 EA qua binding sau một lỗi precommit có chủ đích và replay cùng command. Hai actor và Trip tranh một pool không quản lý lô bằng Reserve A và quota D.1 B. Thiếu hàng giữ nguyên phần chờ. Tồn vật lý, cost, AR và tenant đối chứng được giữ nguyên. C.3 legacy chưa thấy quyền nạp mới. SHA256 `run.json` `7218866C05BAF9E65053AC920E1C8282FF52C9116F6F459E455232719E3D3738`.
 
 ### APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng
 
