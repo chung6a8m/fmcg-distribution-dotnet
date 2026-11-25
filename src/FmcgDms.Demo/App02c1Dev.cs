@@ -205,6 +205,8 @@ internal static class App02c1Dev
                     await App02c3DevFixture.Seed(db, tenant, Actor, c6 || (!c4 && mode == "Verify"));
                 if (c4 && (c6 || tenant == "tenant-a"))
                     await App02c4DevFixture.Seed(db, tenant, Actor, !returnLane && !pricing && !fefo && mode == "Verify");
+                if (increment == "App02C5" && mode == "Verify" && tenant == "tenant-a")
+                    await App02c5DevFixture.SeedSiblingSku(db, tenant);
                 if (acceptance is not null) await acceptance.Prepare(db, tenant);
             }
             if (persistent is { Resume: false }) await persistent.MarkReady();

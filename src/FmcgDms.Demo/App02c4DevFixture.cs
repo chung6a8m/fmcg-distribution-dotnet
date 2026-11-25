@@ -76,7 +76,8 @@ internal static class App02c4DevFixture
             """)).Order(StringComparer.Ordinal).ToArray();
         string[] expected = [
             "AR|375.0000|375.0000|7|FROZEN",
-            "CASE|13.000|RECEIVED|0", "CASE|25.000|APPLIED|1", "COUNTS|2|2|1|1|1|0|0",
+            "CASE|13.000|RECEIVED|0", "CASE|25.000|APPLIED|1",
+            c5 ? "COUNTS|3|3|2|2|2|0|0" : "COUNTS|2|2|1|1|1|0|0",
             "DELIVERY-EFFECT|AR-GROSS|0.000|375.0000",
             "DELIVERY-EFFECT|COGS|0.000|250.0000",
             "DELIVERY-EFFECT|PHYSICAL-OUT|-25.000|-250.0000",
@@ -87,6 +88,20 @@ internal static class App02c4DevFixture
             c5 ? "PHYSICAL|C2-TRUCK|15.001|150.0100" : "PHYSICAL|C2-TRUCK|15.000|150.0000",
             c5 ? "RIGHT|HELD|40.001|25.000|15.001" : "RIGHT|HELD|40.000|25.000|15.000"
         ];
+        if (c5)
+            expected = expected.Concat([
+                "AR|44.0000|44.0000|7|FROZEN",
+                "CASE|2.000|APPLIED|1",
+                "DELIVERY-EFFECT|AR-GROSS|0.000|44.0000",
+                "DELIVERY-EFFECT|COGS|0.000|12.0000",
+                "DELIVERY-EFFECT|PHYSICAL-OUT|-2.000|-12.0000",
+                "DELIVERY-EFFECT|RIGHT-A-USED|-2.000|0.0000",
+                "DELIVERY|PARTIALLY_DELIVERED|2.000|44.0000|12.0000|LOCAL|04 Duong DEV, Khu DEV, HCM, VN",
+                "LOAD|2.000|12.0000|MANIFEST_LOAD",
+                "PHYSICAL|C2-MAIN|8.000|48.0000",
+                "PHYSICAL|C2-TRUCK|0.000|0.0000",
+                "RIGHT|CONSUMED|2.000|2.000|0.000"
+            ]).Order(StringComparer.Ordinal).ToArray();
         int peer = await b.QuerySingleAsync<int>("""
             SELECT (SELECT COUNT(*) FROM dbo.C4DeliveryEvidence)+(SELECT COUNT(*) FROM dbo.C4DeliveryWriter)
                 +(SELECT COUNT(*) FROM dbo.BusinessCommand)+(SELECT COUNT(*) FROM dbo.TripManifest)
@@ -97,7 +112,8 @@ internal static class App02c4DevFixture
         var dates = await a.QuerySingleOrDefaultAsync<Dates>("""
             SELECT CONVERT(char(10),d.BusinessDate,23) AS BusinessDate,CONVERT(char(10),ar.DueBusinessDate,23) AS DueDate
             FROM dbo.SaleDelivery d JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId AND ar.SaleDeliveryId=d.Id
-            WHERE d.C4EvidenceId IS NOT NULL
+            JOIN dbo.Sku s ON s.TenantId=d.TenantId AND s.Id=d.SkuId
+            WHERE d.C4EvidenceId IS NOT NULL AND s.Code=N'C2-SKU'
             """);
         string increment = c5 ? "app02c5" : "app02c4";
         string dir = Path.Combine(root, "TestResults", increment);
@@ -107,7 +123,7 @@ internal static class App02c4DevFixture
         await File.WriteAllTextAsync(file, JsonSerializer.Serialize(new
         {
             source, apiVersion, apiSha256, runId = run.Id, environment = "Synthetic Windows LocalDB", instance = DemoRun.Instance,
-            fixtureVersion = 1, observedAtUtc = DateTime.UtcNow,
+            fixtureVersion = c5 ? 2 : 1, observedAtUtc = DateTime.UtcNow,
             browserFixtureSha256 = Hash(Path.Combine(root, "web", "e2e-" + increment, c5 ? "workspace.spec.ts" : "delivery.spec.ts")),
             browserReportSha256 = Hash(Path.Combine(root, "web", "test-results-" + increment, run.Id, "junit.xml")),
             dates, expected, actual, expectedTenantBEffects = 0, actualTenantBEffects = peer, matches

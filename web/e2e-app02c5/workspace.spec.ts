@@ -13,7 +13,11 @@ function open(page: Page, name: string) {
   return page.getByRole('navigation', { name: 'Sales A' }).getByRole('button', { name, exact: true }).click()
 }
 
-test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async ({ page, browser, context }, info) => {
+function commandResponse(page: Page, path: string) {
+  return page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith(path))
+}
+
+test('Reconcile AR, reject invalid scope and export each line of one confirmed order', async ({ page, browser, context }, info) => {
   const errors: string[] = []
   let deliveryPosts = 0
   let customerListReads = 0
@@ -45,17 +49,24 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   await page.getByRole('combobox', { name: 'Chuyến' }).selectOption({ label: 'C2-TRIP' })
   await page.getByRole('combobox', { name: 'SKU dòng 1' }).selectOption({ label: 'C2-SKU · Hàng tổng hợp' })
   await page.getByLabel('Số lượng dòng 1').fill('40.001')
+  await page.getByRole('button', { name: 'Thêm dòng' }).click()
+  await page.getByRole('combobox', { name: 'SKU dòng 2' }).selectOption({ label: 'C5-SIBLING · Hàng đối chiếu C.5' })
+  await page.getByLabel('Số lượng dòng 2').fill('2')
   await page.getByRole('button', { name: 'Lưu đơn nháp' }).click()
   await page.getByRole('button', { name: 'Confirm đơn' }).click()
   await expect(page.getByText('Đã Confirm · Chưa giữ hàng')).toBeVisible()
-  await page.getByRole('combobox', { name: 'Kho', exact: true }).selectOption({ label: 'C2-MAIN' })
-  await page.getByLabel('Số lượng giữ').fill('40.001')
-  await page.getByRole('button', { name: 'Reserve hàng' }).click()
-  await expect(page.getByText('Đã giữ đủ')).toBeVisible()
+  const originalReserve = page.getByRole('form', { name: 'Giữ hàng C2-SKU' })
+  await originalReserve.getByRole('combobox', { name: 'Kho', exact: true }).selectOption({ label: 'C2-MAIN' })
+  await originalReserve.getByLabel('Số lượng giữ').fill('40.001')
+  await originalReserve.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText('Đã giữ một phần')).toBeVisible()
 
   await open(page, 'Nạp hàng')
   await page.getByLabel('Số lượng nạp dòng 1').fill('40.001')
+  const firstLoad = commandResponse(page, '/app02c3/load')
   await page.getByRole('region', { name: 'Lập đợt nạp' }).getByRole('button', { name: 'Nạp hàng', exact: true }).click()
+  const firstLoadOutcome = await (await firstLoad).json() as { status: string; sourceId: string }
+  expect(firstLoadOutcome.status).toBe('APPLIED')
   await expect(page.getByText(/Đã nạp 40\.001 EA · Còn giữ tại kho 0 EA/)).toBeVisible()
 
   await open(page, 'Giao hàng')
@@ -77,9 +88,13 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
       return setItem.call(this, key, value)
     }
   })
+  let firstDeliverySource = ''
   await page.route('**/app02c4/deliver', async route => {
     const outcome = await route.fetch()
     expect(outcome.status()).toBe(200)
+    const body = await outcome.json() as { status: string; sourceId: string }
+    expect(body.status).toBe('APPLIED')
+    firstDeliverySource = body.sourceId
     await route.abort('failed')
   }, { times: 1 })
   await post.click()
@@ -110,13 +125,19 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   expect(posted).toMatchObject({ expected: 1, reconciled: 1, knownBalance: '375.0000', knownOverdue: '0' })
   const orders = await page.request.get('/api/synthetic/app02c2/orders', { headers: tenantA })
   expect(orders.ok()).toBeTruthy()
-  const [order] = await orders.json() as { id: string; lines: { lineId: string }[] }[]
-  const orderLineId = order.lines[0].lineId
+  const [order] = await orders.json() as {
+    id: string; trip: string; confirmSourceId: string; lines: { sku: string; lineId: string }[]
+  }[]
+  expect(order.lines).toHaveLength(2)
+  const orderLineId = order.lines.find(line => line.sku === 'C2-SKU')!.lineId
+  const siblingId = order.lines.find(line => line.sku === 'C5-SIBLING')!.lineId
   expect(orderLineId).toMatch(/^[0-9a-f-]{36}$/i)
   expect(orderLineId).not.toBe(order.id)
+  expect(siblingId).not.toBe(orderLineId)
+  const lineage = { orderId: order.id, originTrip: order.trip, trip: order.trip, confirmSourceId: order.confirmSourceId }
   expect(posted.sources[0]).toMatchObject({
     overdue: false, dueBusinessDate: dueDate + 'T00:00:00',
-    orderId: order.id, orderLineId, originTrip: 'C2-TRIP', trip: 'C2-TRIP',
+    ...lineage, orderLineId, loadSourceId: firstLoadOutcome.sourceId, sourceId: firstDeliverySource,
   })
   const peerLine = await page.request.get(reportUrl, {
     params: { orderLineId }, headers: headers('APP02C1_BROWSER_TOKEN_B'),
@@ -166,14 +187,21 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   } finally { await peer.close() }
   await open(page, 'Báo cáo AR')
   await expect(page.getByText(/Nguồn đã đối soát 1\/2/)).toBeVisible()
-  await page.getByLabel('Mã dòng đơn A').fill('sai-dinh-dang')
+  const lineFilter = page.getByLabel('Mã dòng đơn A')
+  await lineFilter.fill('sai-dinh-dang')
   await page.getByRole('button', { name: 'Tải báo cáo' }).click()
-  await expect(page.getByRole('alert')).toHaveText('Nhập mã dòng đơn A theo định dạng UUID.')
-  await page.getByLabel('Mã dòng đơn A').fill(orderLineId)
+  await expect(page.getByRole('region', { name: 'Kết quả báo cáo AR' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Xuất JSON' })).toHaveCount(0)
+  await expect(lineFilter).toBeFocused()
+  await expect(lineFilter).toHaveAttribute('aria-invalid', 'true')
+  await expect(lineFilter).toHaveAccessibleDescription('Nhập mã dòng đơn A theo định dạng UUID.')
+  await lineFilter.fill(orderLineId)
   const filteredReport = page.waitForResponse(response =>
     new URL(response.url()).searchParams.get('orderLineId') === orderLineId)
   await page.getByRole('button', { name: 'Tải báo cáo' }).click()
   expect((await filteredReport).ok()).toBeTruthy()
+  await expect(lineFilter).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(page.getByText('Mã dòng đơn A đang áp dụng ' + orderLineId, { exact: true })).toBeVisible()
   await expect(page.getByText(/Nguồn đã đối soát 1\/2/)).toBeVisible()
   await expect(page.getByText(/Tổng còn nợ đã đối soát 375/)).toBeVisible()
   const download = page.waitForEvent('download')
@@ -226,5 +254,63 @@ test('Load 40.001, deliver 25, keep 15.001 held and reconcile the report', async
   await page.getByLabel('Mốc UTC (ISO 8601)').press('Enter')
   await expect(page.getByText('Chưa có bằng chứng giao hàng trong phạm vi này.')).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+
+  await open(page, 'Đơn A và giữ hàng')
+  const siblingReserve = page.getByRole('form', { name: 'Giữ hàng C5-SIBLING' })
+  await siblingReserve.getByRole('combobox', { name: 'Kho', exact: true }).selectOption({ label: 'C2-MAIN' })
+  await siblingReserve.getByLabel('Số lượng giữ').fill('2')
+  await siblingReserve.getByRole('button', { name: 'Reserve hàng' }).click()
+  await expect(page.getByText('C5-SIBLING · Đặt 2 EA · Đã giữ 2 EA')).toBeVisible()
+  await open(page, 'Nạp hàng')
+  const siblingLoad = commandResponse(page, '/app02c3/load')
+  await page.getByRole('group', { name: /C5-SIBLING/ }).getByLabel(/Số lượng nạp dòng/).fill('2')
+  await page.getByRole('region', { name: 'Lập đợt nạp' }).getByRole('button', { name: 'Nạp hàng', exact: true }).click()
+  const siblingLoadOutcome = await (await siblingLoad).json() as { status: string; sourceId: string }
+  expect(siblingLoadOutcome.status).toBe('APPLIED')
+  // Keep the original browser's unresolved receipt while a fresh session delivers the sibling manifest line.
+  const siblingPage = await browser.newPage()
+  let siblingDeliverySource: string
+  try {
+    await signIn(siblingPage)
+    await open(siblingPage, 'Giao hàng')
+    const siblingDeliveryForm = siblingPage.locator('form').filter({
+      has: siblingPage.getByRole('heading', { name: /^C5-SIBLING ·/ }),
+    })
+    await siblingDeliveryForm.getByLabel(/Số lượng đã giao dòng/).fill('2')
+    const siblingDelivery = commandResponse(siblingPage, '/app02c4/deliver')
+    await siblingDeliveryForm.getByRole('button', { name: 'Xác nhận đã giao' }).click()
+    const siblingOutcome = await (await siblingDelivery).json() as { status: string; sourceId: string }
+    expect(siblingOutcome.status).toBe('APPLIED')
+    siblingDeliverySource = siblingOutcome.sourceId
+    expect(siblingDeliverySource).not.toBe(firstDeliverySource)
+  } finally { await siblingPage.close() }
+
+  const orderReport = await page.request.get(reportUrl, { headers: tenantA, params: { orderId } })
+  expect(orderReport.ok()).toBeTruthy()
+  expect(await orderReport.json()).toMatchObject({ expected: 3, reconciled: 2, knownBalance: '419.0000' })
+  for (const { lineId, loadSourceId, sourceId, knownBalance, expected } of [
+    { lineId: orderLineId, loadSourceId: firstLoadOutcome.sourceId, sourceId: firstDeliverySource, knownBalance: '375.0000', expected: 2 },
+    { lineId: siblingId, loadSourceId: siblingLoadOutcome.sourceId, sourceId: siblingDeliverySource, knownBalance: '44.0000', expected: 1 },
+  ]) {
+    const params = { orderId, orderLineId: lineId }
+    const response = await page.request.get(reportUrl, { headers: tenantA, params })
+    expect(response.ok()).toBeTruthy()
+    const result = await response.json()
+    expect(result).toMatchObject({ expected, reconciled: 1, knownBalance, filter: params })
+    const lineSource = { ...lineage, orderLineId: lineId, loadSourceId }
+    const expectedSources = [
+      { ...lineSource, sourceId, status: 'RECONCILED' },
+      ...(expected === 2 ? [{ ...lineSource, sourceId: null, status: 'PENDING' }] : []),
+    ]
+    expect(result.sources).toMatchObject(expectedSources)
+    const exportedLine = await page.request.get(reportUrl, {
+      headers: tenantA, params: { ...params, asOf: result.asOf, download: 'true' },
+    })
+    expect(exportedLine.ok()).toBeTruthy()
+    expect(exportedLine.headers()['content-disposition']).toContain('sales-a-ar.json')
+    expect(await exportedLine.json()).toMatchObject({
+      expected, reconciled: 1, knownBalance, filter: params, sources: expectedSources,
+    })
+  }
   expect(errors).toEqual([])
 })

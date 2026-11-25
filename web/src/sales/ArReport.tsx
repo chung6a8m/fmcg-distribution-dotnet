@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { Button, Field } from '../ui/controls'
 import { HttpError, read, readError, requestSalesApi, type Customer } from './customer-api'
 
@@ -115,6 +115,8 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
   const [report, setReport] = useState<Report | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [error, setError] = useState('')
+  const [lineError, setLineError] = useState('')
+  const lineFilterRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(true)
   const [exporting, setExporting] = useState(false)
   useEffect(() => {
@@ -163,13 +165,15 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
       event.preventDefault()
       const data = new FormData(event.currentTarget)
       const orderLineId = String(data.get('orderLineId') ?? '').trim()
-      if (orderLineId && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(orderLineId)) {
-        setError('Nhập mã dòng đơn A theo định dạng UUID.')
-        return
-      }
-      setBusy(true)
       setReport(null)
       setError('')
+      if (orderLineId && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(orderLineId)) {
+        setLineError('Nhập mã dòng đơn A theo định dạng UUID.')
+        lineFilterRef.current?.focus()
+        return
+      }
+      setLineError('')
+      setBusy(true)
       setFilter({ asOf: String(data.get('asOf') ?? '').trim(), customerId: String(data.get('customerId') ?? ''),
         orderId: String(data.get('orderId') ?? '').trim(), deliveryId: String(data.get('deliveryId') ?? '').trim(),
         orderLineId,
@@ -181,7 +185,8 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
         </select>
       </label>
       <Field name="orderId" label="Mã đơn A" defaultValue={orderId} />
-      <Field name="orderLineId" label="Mã dòng đơn A" />
+      <Field ref={lineFilterRef} name="orderLineId" label="Mã dòng đơn A" error={lineError}
+        onChange={() => { if (lineError) setLineError('') }} />
       <Field name="deliveryId" label="Mã lần giao" />
       <Field name="due" label="Ngày đến hạn" type="date" />
       <label className="field">Trạng thái hạn
@@ -196,6 +201,7 @@ export function ArReport({ token, orderId, returnUrl }: ReportProps) {
     {report && <section className="panel panel-content" aria-label="Kết quả báo cáo AR">
       <p>Mốc UTC <time dateTime={report.asOf}>{report.asOf}</time></p>
       <p>Phạm vi chuyến được phân công · {report.currency ?? 'SYNTHETIC_UNITLESS'}</p>
+      {filter.orderLineId && <p>Mã dòng đơn A đang áp dụng {filter.orderLineId}</p>}
       <Button disabled={exporting} onClick={() => void download(report.asOf)}>Xuất JSON</Button>
       {report.expected === null ? <p>Chưa có bằng chứng giao hàng trong phạm vi này.</p> : <>
         <p>Nguồn đã đối soát {report.reconciled}/{report.expected} lần giao đã ghi nhận</p>
