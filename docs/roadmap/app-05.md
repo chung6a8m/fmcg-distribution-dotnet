@@ -76,8 +76,8 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.1 — Readiness và việc tồn** | APP-03; CI .0 đã đạt | Đọc cuối chuyến; giao người/hạn/hành động cho nguồn A/D/F; fixture có phiên bản | `MERGED / FINAL_HEAD_CI_VERIFIED` |
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `MERGED / LOCAL_DEV_VERIFIED / PR_CI_INCOMPLETE` (#153) |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `MERGED / MAIN_CI_VERIFIED` (#154) |
-| **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `IMPLEMENTED / LOCAL_DEV_VERIFIED / FINAL_HEAD_CI_PENDING` |
-| **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `NOT_STARTED` |
+| **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `MERGED / MAIN_CI_VERIFIED` |
+| **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `IN_PROGRESS` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
 | **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `NOT_STARTED` |
 | **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
@@ -274,6 +274,15 @@ API `GET /reserve-options` và `POST /reserve-unheld` dùng chung tiền tố d�
 
 **Bổ sung theo review PR #155.** API Đơn hàng trả quyền Reserve kế nhiệm theo dòng và phân công Kho trên chuyến gốc. UI giữ nguyên yêu cầu đang chờ khi mất quyền. Ca Chromium bỏ ACK sau commit, kiểm sai actor/tenant, thu hồi quyền từng chuyến, rồi cấp lại để replay đúng yêu cầu và biên nhận. Oracle SQL đối chiếu đúng một quyền và hiệu ứng. Fixture synthetic mới tách lô FEFO 2 EA và 4 EA còn hạn, lô 5 EA hết hạn và lô gốc đã hết khả dụng. Oracle đối chiếu từng mã lô, hạn, kho, SKU và lượng. Khi MAIN còn 5 EA nhưng hết lô đủ điều kiện, lệnh trả từ chối và giữ nguyên quyền, lô, nguồn và sổ phân bổ. Lượt local `b11191a77b624655abaf39849d959096` đạt Chromium 4/4 và 109/109 đối chiếu SQL, zero diff. SHA256 `run.json` `68C2E480D2FB62C11828D02EBBD2541467AD35F2ADC3B7CF0FDB32A591D4E620`.
 
+#### Closeout APP-05.4a — 25/11/2026
+
+**Disposition** `MERGED / MAIN_CI_VERIFIED / SYNTHETIC_DEV_ONLY`.
+
+- PR #155 merge lúc 21:16 ICT. Final source `903ac58bc7da41c13291bdbbb407c34f2134f621`, merge `4cf8ee89754ae44b87f33b52df4cf9801f683dce`. Review độc lập đã kiểm lại phạm vi thao tác Kho, replay sau mất ACK và nguồn lô FEFO. [PR #155](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/155).
+- Final source đạt 10/10 workflow và 25/25 checks. APP-00A đạt attempt 2 sau khi lượt đầu thiếu bằng chứng hoàn tất hai ca C.6 DEV-07/A và DEV-08/A trong `sql-review.json`. Job APP-03 đã đạt ở attempt 1. Lượt `e0e32507f72f491aa84a4264e031d499` trên test merge `92c685d87cdb79c576ffe51a5be91bf212a43b2f` đạt Chromium 4/4 và SQL 109/109, zero diff. SHA256 `run.json` `5F4F42D33A2CF2268470C55E080DFBE383629EE0397FDC42876A9264D6C1EF98`. [CI final source](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45622795218).
+- Commit merge trên `main` đạt 10/10 workflow và 25/25 checks. APP-00A đạt attempt 1. Artifact `VerifyASuccessor` ghi đúng merge `4cf8ee8`, tree `6b4afffd11c7013d994e2e62a3813c145f38cd55`, lượt `e01bd57f420d4b5386efac6c95ed2bed`, Chromium 4/4 và SQL 109/109, zero diff. SHA256 `run.json` `C8DD5265F08B50DC342FC306A18561E08E02CDF1EBBDC67DC395838AD0C51064`. [CI main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45632314509).
+- Kết quả thuộc LocalDB synthetic DEV. Nạp, giao liên chuyến và báo cáo toàn dòng chuyển sang .4b. Nghiệm thu ca tích hợp của Owner thuộc .7, các gate physical/PREPROD/EV/P0/Pilot/Go-Live theo mốc riêng.
+
 ### APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng
 
 **Files:** `src/FmcgDms.Api/Persistence/App02c3Load.cs`, `App02c3Reads.cs`, `App02DevF03Lots.cs`, `App02c4Delivery.cs`, `App02c4Reads.cs`, `App02c4ShipTo.cs`, `App02c5Report.cs`, `App03HandoffReads.cs`, `App03OwnerReport.Sql.cs`; `web/src/sales/LoadWorkspace.tsx`, `DeliveryWorkspace.tsx`, `OrderWorkspace.tsx`. Test mới dự kiến `App05SuccessorDeliveryTests.cs`; mở rộng runner/evidence C.3/C.4/F03.
@@ -377,4 +386,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-**Increment hiện tại:** **APP-05.4a — Reserve phần chưa giữ trên chuyến kế nhiệm**. APP-05.3 đã merge qua PR #154 và có CI thành công trên commit merge. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7.
+Increment hiện tại là **APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng**. APP-05.4a đã merge qua PR #155. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7. [PR nháp báo cáo AR theo dòng Confirm](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/157).
