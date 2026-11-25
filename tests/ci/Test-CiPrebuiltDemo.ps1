@@ -36,11 +36,38 @@ function Assert-Rejected([scriptblock]$Action, [string]$Reason) {
 
 function New-FixtureAssembly([string]$Path, [string]$Version) {
     $type = 'PrebuiltFixture' + [Guid]::NewGuid().ToString('N')
-    Add-Type -OutputAssembly $Path -TypeDefinition @"
+    $definition = @"
 using System.Reflection;
 [assembly: AssemblyInformationalVersion("$Version")]
 public static class $type { }
 "@
+    # Add-Type's source compiler omits Win32 resources. Linux can read the
+    # managed attribute alone; Windows FileVersionInfo requires VERSIONINFO.
+    Add-Type -AssemblyName Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp
+    $syntax = [Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree]::ParseText($definition)
+    $reference = [Microsoft.CodeAnalysis.MetadataReference]::CreateFromFile([object].Assembly.Location)
+    $options = [Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions]::new([Microsoft.CodeAnalysis.OutputKind]::DynamicallyLinkedLibrary)
+    $compilation = [Microsoft.CodeAnalysis.CSharp.CSharpCompilation]::Create($type,
+        [Microsoft.CodeAnalysis.SyntaxTree[]]@($syntax), [Microsoft.CodeAnalysis.MetadataReference[]]@($reference), $options)
+    $native = $compilation.CreateDefaultWin32Resources($true, $true, $null, $null)
+    $output = [IO.File]::Create($Path)
+    try {
+        $result = $compilation.Emit($output, $null, $null, $native, $null, $null, [Threading.CancellationToken]::None)
+        if (!$result.Success) { throw ($result.Diagnostics -join "`n") }
+    } finally { $output.Dispose(); $native.Dispose() }
+
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $reader = [Reflection.PortableExecutable.PEReader]::new($stream)
+        try {
+            $directory = $reader.PEHeaders.PEHeader.ResourceTableDirectory
+            Assert-That ($directory.Size -gt 0) 'Fixture requires native VERSIONINFO resources for Windows ProductVersion.'
+            $bytes = [byte[]]$reader.GetSectionData($directory.RelativeVirtualAddress).GetContent(0, $directory.Size)
+            $resources = [Text.Encoding]::Unicode.GetString($bytes)
+            Assert-That ($resources.Contains('VS_VERSION_INFO') -and $resources.Contains('ProductVersion') -and
+                $resources.Contains($Version)) 'Fixture native version resource does not contain the requested ProductVersion.'
+        } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
 }
 
 function Get-OutputPath([string]$Project, [string]$Extension = 'dll') {
