@@ -19,7 +19,7 @@ type LineHandoff = { warehouseHeld: number; unreserved: number
   quantity: { uomCode: string; enteredQuantity: number; factor: number } | null; lots: LotStep[] }
 type Line = { lineId: string | null; sku: string; baseUom: string; ordered: number; reserved: number;
   delivered: number; unitPrice: number | null; policyVersion: number | null; termsDays: number | null
-  loaded: number; heldOnTrip: number; policySourceHash: string | null; pricing?: Pricing | null; handoff?: LineHandoff }
+  loaded: number; heldOnTrip: number; policySourceHash: string | null; canReserveSuccessor?: boolean; pricing?: Pricing | null; handoff?: LineHandoff }
 type Order = { id: string; customer: string; trip: string; shipTo: string; businessDate: string | null;
   confirmSourceId: string | null; status: string; lines: Line[]; shipToSnapshotId: string | null; shipToOrigin: string
   tripId?: string; tripStatus?: string; actions?: { confirm: boolean; reserve: boolean; load: boolean } }
@@ -601,6 +601,7 @@ export function OrderWorkspace({ workspaceToken, onOpenAr, context, selectedOrde
               order.tripId && line.lineId && line.delivered < line.ordered &&
               <ASuccessorReserve key={line.lineId} token={session.token} identity={session.identity}
                 tripId={order.tripId} lineId={line.lineId} unit={line.baseUom} warehouses={catalog.warehouses}
+                canReserve={line.canReserveSuccessor === true}
                 offline={offline} onApplied={() => void readOrders(session.token).then(setOrders).catch(() => {})} />}
             {(context ? order.actions?.reserve : session.identity.warehouse) && order.confirmSourceId && line.lineId
               && (line.handoff?.unreserved ?? line.ordered - line.reserved - line.delivered) > 0 &&

@@ -12,9 +12,9 @@ type Options = { followUpId: string; confirmSourceId: string; revision: string; 
 const api = '/api/synthetic/app05/trip-close'
 const number = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 3 })
 
-export function ASuccessorReserve({ token, identity, tripId, lineId, unit, warehouses, offline, onApplied }: {
+export function ASuccessorReserve({ token, identity, tripId, lineId, unit, warehouses, offline, canReserve, onApplied }: {
   token: string; identity: Identity; tripId: string; lineId: string; unit: string
-  warehouses: { id: string; label: string }[]; offline: boolean; onApplied: () => void
+  warehouses: { id: string; label: string }[]; offline: boolean; canReserve: boolean; onApplied: () => void
 }) {
   const id = useId()
   const path = '/trips/' + tripId + '/a-remainders/' + lineId
@@ -27,35 +27,39 @@ export function ASuccessorReserve({ token, identity, tripId, lineId, unit, wareh
   const [options, setOptions] = useState<Options>()
   const [bindingId, setBinding] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<'denied' | 'load' | null>(null)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const sending = useRef(false)
 
   useEffect(() => {
-    if (!open || offline) return
+    if (!open || offline || !canReserve) return
     let live = true
     void requestSalesApi(api, token, path + '/reserve-options').then(async response => {
+      if (response.status === 401 || response.status === 403) {
+        if (live) { setOptions(undefined); setError('denied') }
+        return
+      }
       if (!response.ok) throw new Error('Successor reserve options unavailable')
       const data = await response.json() as Options
-      if (live) { setOptions(data); setError(false) }
+      if (live) { setOptions(data); setError(null) }
     }).catch(() => {
-      if (live) { setOptions(undefined); setError(true) }
+      if (live) { setOptions(undefined); setError('load') }
     })
     return () => { live = false }
-  }, [open, offline, token, path, attempt])
+  }, [open, offline, canReserve, token, path, attempt])
 
   const binding = options?.bindings.find(row => row.bindingId === bindingId)
   const limit = binding && options ? Math.min(binding.unfilled, options.unheld) : 0
   const amount = (n: number) => number.format(n) + ' ' + unit
   function reload() {
     setOptions(undefined)
-    setError(false)
+    setError(null)
     setAttempt(value => value + 1)
   }
 
   async function send(command: SuccessorCommand) {
-    if (offline || !navigator.onLine || sending.current) return
+    if (offline || !navigator.onLine || !canReserve || sending.current) return
     sending.current = true
     setBusy(true)
     setNotice('')
@@ -103,11 +107,15 @@ export function ASuccessorReserve({ token, identity, tripId, lineId, unit, wareh
     })
   }
 
+  if (!canReserve) {
+    return pending ? <p role="status">Yêu cầu giữ bổ sung đang chờ xác nhận. Cần phân công trên chuyến gốc để gửi lại.</p> : null
+  }
   if (!open) return <Button disabled={offline} onClick={() => setOpen(true)}>Giữ hàng trên chuyến kế nhiệm</Button>
   return <section aria-label="Giữ hàng trên chuyến kế nhiệm">
     {notice && <p role="status">{notice}</p>}
     {pending && <Button disabled={offline || busy} onClick={() => void send(pending)}>Gửi lại yêu cầu giữ bổ sung</Button>}
-    {error ? <p role="alert">Không tải được chuyến kế nhiệm. <Button onClick={reload}>Tải lại</Button></p>
+    {error === 'denied' ? <p role="alert">Chưa đủ quyền đọc phần giữ của chuyến kế nhiệm.</p>
+      : error === 'load' ? <p role="alert">Không tải được chuyến kế nhiệm. <Button onClick={reload}>Tải lại</Button></p>
       : !options && <p role="status">Đang tải phần hàng chưa giữ…</p>}
     {options && <>
       <p>Còn chờ giữ {amount(options.unheld)}</p>

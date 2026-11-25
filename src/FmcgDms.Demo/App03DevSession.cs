@@ -30,6 +30,7 @@ internal sealed class App03DevSession
     internal bool Resume { get; }
     internal bool VerifyHandoff { get; private init; }
     internal bool VerifyField { get; private init; }
+    internal bool SplitSuccessorLots { get; private init; }
     internal bool UsesBusinessDay { get; private set; } = true;
     internal bool UsesField { get; private set; }
     internal bool UsesSettlement { get; private set; }
@@ -84,7 +85,7 @@ internal sealed class App03DevSession
     internal static async Task Run(string operation, string root, string source, string? id = null,
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
         bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false,
-        bool closeReadiness = false, bool tripClosure = false, bool successor = false)
+        bool closeReadiness = false, bool tripClosure = false, bool successor = false, bool splitSuccessorLots = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
@@ -123,7 +124,8 @@ internal sealed class App03DevSession
             startBeforeField, settlement, finance, closeReadiness, tripClosure, successor)
         {
             VerifyHandoff = verifyHandoff,
-            VerifyField = verifyField
+            VerifyField = verifyField,
+            SplitSuccessorLots = splitSuccessorLots
         };
 
         using var sessionLock = session.Acquire();

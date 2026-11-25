@@ -528,21 +528,68 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const oversized = await makeReserve(mixedPath, mixed, mixedBinding.bindingId, first, 2)
   expect(await (await reserve(mixedPath, oversized)).json()).toMatchObject({ code: 'A_UNHELD_QUANTITY_EXCEEDED' })
   expect((await reserve(mixedPath, oversized, 'OPS')).status()).toBe(403)
-  await checkpoint('reserve-before', { warehouseId, skuId, secondTrip: second, mixedLine: mixed.orderLineId, unreservedLine: unreserved.orderLineId, heldLine: held.orderLineId })
+  await checkpoint('reserve-before', { warehouseId, skuId, secondTrip: second, mixedTrip, firstTrip: first, mixedLine: mixed.orderLineId, unreservedLine: unreserved.orderLineId, heldLine: held.orderLineId })
 
-  const reservePage = await open(context, 'RECEIVER', 'orders?order=' + mixed.orderId + '&trip=' + mixedTrip)
+  const originOrderUrl = 'orders?order=' + mixed.orderId + '&trip=' + mixedTrip
+  const outOfScopeWarehouse = await open(context, 'SOURCE', originOrderUrl)
+  const outOfScopeOrder = outOfScopeWarehouse.locator('article[data-order-id="' + mixed.orderId + '"]')
+  await expect(outOfScopeOrder).toBeVisible()
+  await expect(outOfScopeOrder.getByRole('button', { name: 'Giữ hàng trên chuyến kế nhiệm' })).toHaveCount(0)
+  await outOfScopeWarehouse.close()
+  const reservePage = await open(context, 'RECEIVER', originOrderUrl)
   const orderCard = reservePage.locator('[data-order-id="' + mixed.orderId + '"]')
   await orderCard.getByRole('button', { name: 'Giữ hàng trên chuyến kế nhiệm' }).click()
   const reserveForm = orderCard.getByRole('form', { name: 'Giữ bổ sung' })
   await reserveForm.getByLabel('Chuyến kế nhiệm').selectOption(mixedBinding.bindingId)
   await reserveForm.getByLabel('Kho giữ').selectOption(warehouseId)
   await reserveForm.getByLabel('Lượng giữ bổ sung').fill('1')
-  const actual = reservePage.waitForResponse(response => response.url().endsWith(mixedPath + '/reserve-unheld'))
+  const reserveUrl = mixedPath + '/reserve-unheld'
+  const optionUrl = mixedPath + '/reserve-options'
+  let committed: unknown
+  await reservePage.route('**' + reserveUrl, async route => {
+    const response = await route.fetch()
+    expect(response.status(), await response.text()).toBe(200)
+    committed = await response.json()
+    await route.abort('failed')
+  }, { times: 1 })
+  const reserveIntent = reservePage.waitForRequest(req => req.url().endsWith(reserveUrl) && req.method() === 'POST')
   await reserveForm.getByRole('button', { name: 'Giữ bổ sung' }).click()
-  const actualResponse = await actual
-  expect(actualResponse.status(), await actualResponse.text()).toBe(200)
-  const receipt = await actualResponse.json()
-  expect(await (await reserve(mixedPath, actualResponse.request().postDataJSON())).json()).toEqual(receipt)
+  const originalReserve = (await reserveIntent).postDataJSON()
+  await expect(orderCard.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+
+  for (const role of ['SOURCE', 'PEER_WAREHOUSE']) {
+    expect((await request.get(optionUrl, { headers: auth(role) })).status()).toBe(403)
+    expect((await reserve(mixedPath, originalReserve, role)).status()).toBe(403)
+  }
+  await checkpoint('reserve-revoke-origin', { commandId: originalReserve.commandId })
+  expect((await request.get(optionUrl, { headers: auth('RECEIVER') })).status()).toBe(403)
+  expect((await reserve(mixedPath, { ...originalReserve, commandId: crypto.randomUUID() })).status()).toBe(403)
+  const repeat = orderCard.getByRole('button', { name: 'Gửi lại yêu cầu giữ bổ sung' })
+  async function replayReserve(status: number) {
+    const response = reservePage.waitForResponse(res => res.url().endsWith(reserveUrl) && res.request().method() === 'POST')
+    await repeat.click()
+    const result = await response
+    expect(result.status()).toBe(status)
+    expect(result.request().postDataJSON()).toEqual(originalReserve)
+    return result
+  }
+  await replayReserve(403)
+  await expect(orderCard.getByText('Chưa đủ quyền đọc phần giữ của chuyến kế nhiệm.')).toBeVisible()
+  await expect(orderCard.getByText('Không tải được chuyến kế nhiệm.')).toHaveCount(0)
+  await reservePage.reload()
+  await expect(orderCard.getByText('Yêu cầu giữ bổ sung đang chờ xác nhận. Cần phân công trên chuyến gốc để gửi lại.')).toBeVisible()
+  await expect(orderCard.getByRole('button', { name: 'Giữ hàng trên chuyến kế nhiệm' })).toHaveCount(0)
+
+  await checkpoint('reserve-revoke-destination')
+  expect((await reserveOptions(mixedPath)).bindings).toEqual([])
+  expect((await reserve(mixedPath, originalReserve)).status()).toBe(403)
+  expect((await reserve(mixedPath, { ...originalReserve, commandId: crypto.randomUUID() })).status()).toBe(403)
+  await checkpoint('reserve-restore')
+  await reservePage.reload()
+  expect(await (await replayReserve(200)).json()).toEqual(committed)
+  const changed = await reserve(mixedPath, { ...originalReserve, quantity: 2 })
+  expect(changed.status()).toBe(409)
+  expect(await changed.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
   await expect(orderCard.getByText('Đã giữ bổ sung cho chuyến kế nhiệm.')).toBeVisible()
   expect(await readSuccessors(mixedTrip, mixed)).toMatchObject({ unheld: 0, bindings: [{ transferred: 3, reserved: 1 }] })
 
@@ -562,6 +609,14 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
 
   expect(await get<{ id: string }[]>(request, c3 + '/trips/' + second + '/rights', 'RECEIVER'))
     .not.toContainEqual(expect.objectContaining({ id: firstReceipt.rightId }))
+  const heldUnfilled = (await reserveOptions(heldPath)).bindings.find(row => row.unfilled > 0)!
+  const lotShortage = await makeReserve(heldPath, held, heldUnfilled.bindingId, heldUnfilled.destinationTripId, 1)
+  await checkpoint('reserve-lot-before')
+  const noEligibleLots = await reserve(heldPath, lotShortage)
+  expect(noEligibleLots.status(), await noEligibleLots.text()).toBe(409)
+  expect(await noEligibleLots.json()).toMatchObject({ code: 'F03_LOT_STOCK_INSUFFICIENT' })
+  expect(await reserveOptions(heldPath)).toMatchObject({ unheld: 1 })
+  await checkpoint('reserve-lot-shortage', { commandId: lotShortage.commandId })
   await checkpoint('reserve-cross-trip')
 
   const sharedPath = base(zero, shared)

@@ -121,7 +121,7 @@ internal static class App02c1Dev
                     if (field) await App03FieldBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
                     if (settlement) await App03SettlementBootstrap.Prepare(run, tenant, lifetime.Token);
                     if (finance) await App03FinanceBootstrap.Prepare(run, tenant, App03DayBootstrap.FirstDay, lifetime.Token);
-                    if (closeReadiness) await App05CloseBootstrap.Prepare(run, tenant, lifetime.Token);
+                    if (closeReadiness) await App05CloseBootstrap.Prepare(run, tenant, lifetime.Token, persistent?.SplitSuccessorLots == true);
                     continue;
                 }
                 if (d1Run is not null)
