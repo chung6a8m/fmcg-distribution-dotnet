@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { setTimeout as delay } from 'node:timers/promises'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import Reporter, { monitorObserver } from '../ci/app03-read-reporter.mjs'
+import Reporter from '../ci/app03-read-reporter.mjs'
+import globalSetup, { startSqlObserver } from '../ci/app03-sql-setup.mjs'
 import { browserEvidenceConfig, evidenceDirectory, publishBrowserEvidence } from '../ci/app03-browser-evidence.mjs'
 
 const id = '1234567890abcdef'.repeat(2)
@@ -100,30 +102,126 @@ test('a publication I/O error or unredactable text cannot expose either original
   assert.equal(await readFile(path.join(browserCase, 'error-context.md'), 'utf8'), 'Bearer ' + env.APP03_SOURCE_TOKEN)
 })
 
-test('a completed scenario reaps its live observer through stdin EOF', async () => {
-  const child = spawn(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end', () => process.exit(0))"],
-    { stdio: ['pipe', 'ignore', 'ignore'] })
-  const reporter = new Reporter({ profile: 'app03-5' })
-  reporter.stopObserver = monitorObserver(child)
-  assert.equal(await reporter.onEnd({ status: 'failed' }), undefined)
+const receipt = async directory => JSON.parse(await readFile(path.join(directory, 'sql-observer-startup.json'), 'utf8'))
+
+function fakeObserver(directory, code) {
+  const bootstrap = `
+    const fs = require('node:fs');
+    const file = process.argv[1];
+    const write = data => fs.appendFileSync(file, JSON.stringify(data) + '\\n');
+    write({event:'start', profile:'app03-5', runId:process.argv[2], pid:process.pid});
+  `
+  return spawn(process.execPath, ['-e', bootstrap + code, path.join(directory, 'sql-reads.ndjson'), id],
+    { stdio: ['pipe', 'pipe', 'ignore'] })
+}
+
+test('opt-in global setup waits for this child to sample before yielding to the scenario, then reaps it', async t => {
+  const { root, directory, env } = await stagedFixture(t)
+  assert.equal(browserEvidenceConfig('app03-5', env, root).globalSetup, './ci/app03-sql-setup.mjs')
+  assert.equal(browserEvidenceConfig('app03-5', { ...env, FMCG_APP03_READ_DIAGNOSTICS: '0' }, root).globalSetup, undefined)
+  let child, resolved = false
+  const available = Promise.withResolvers()
+  const setup = startSqlObserver(directory, 'app03-5', id, () => {
+    child = fakeObserver(directory, `
+      write({event:'available'}); console.log('available');
+      process.stdin.on('data', () => write({event:'sample', rows:[]}));
+      process.stdin.on('end', () => process.exit(0));`)
+    t.after(() => child.kill('SIGKILL'))
+    once(child.stdout, 'data').then(available.resolve, available.reject)
+    return child
+  }).then(cleanup => { resolved = true; return cleanup })
+  await available.promise
+  await delay(150)
+  assert.equal(resolved, false)
+  assert.ok((await receipt(directory)).spawnUtc)
+  child.stdin.write('sample')
+  const cleanup = await setup
+  const ready = await receipt(directory)
+  assert.equal(ready.status, 'ready')
+  assert.equal(ready.firstObservation, 'sample')
+  assert.ok(ready.elapsedMs >= 100)
+  assert.ok(Date.parse(ready.spawnUtc) <= Date.parse(ready.decisionUtc))
+  assert.equal(await cleanup(), undefined)
+  assert.equal(child.exitCode, 0)
+  assert.ok((await receipt(directory)).exitUtc)
+})
+
+test('an unavailable first observation is distinguished from a successful observation', async t => {
+  const { directory } = await fixture(t)
+  const cleanup = await startSqlObserver(directory, 'app03-5', id, () =>
+    fakeObserver(directory, "write({event:'available'}); write({event:'sampleUnavailable'}); process.stdin.resume()"))
+  assert.equal((await receipt(directory)).firstObservation, 'sampleUnavailable')
+  await cleanup()
+})
+
+test('an unavailable observer is stopped before proceeding and cannot override a test result', async t => {
+  const { directory } = await fixture(t)
+  let child
+  const cleanup = await startSqlObserver(directory, 'app03-5', id, () => {
+    child = fakeObserver(directory, "write({event:'unavailable'}); process.stdin.resume()")
+    return child
+  })
+  assert.equal(cleanup, undefined)
+  assert.equal((await receipt(directory)).status, 'unavailable')
   assert.equal(child.exitCode, 0)
 })
 
-test('an observer that ignores EOF is forcibly reaped without overriding the result', async () => {
-  const child = spawn(process.execPath, ['-e', "process.stdin.resume(); setInterval(() => {}, 1000); console.log('ready')"],
-    { stdio: ['pipe', 'pipe', 'ignore'] })
-  const reporter = new Reporter({ profile: 'app03-5' })
-  reporter.stopObserver = monitorObserver(child)
-  await once(child.stdout, 'data')
-  assert.equal(await reporter.onEnd({ status: 'failed' }), undefined)
-  assert.ok(child.signalCode || child.exitCode !== null)
+for (const status of ['timeout', 'unavailable']) {
+  test(`startup cleanup shares the deadline after ${status}, even when the child ignores EOF`, async t => {
+    const { directory } = await fixture(t)
+    let child
+    const budgetMs = status === 'timeout' ? 350 : 1000
+    const start = performance.now()
+    const cleanup = await startSqlObserver(directory, 'app03-5', id, () => {
+      const event = status === 'unavailable' ? "write({event:'unavailable'});" : ''
+      child = fakeObserver(directory, event + "process.stdin.resume(); setInterval(() => {}, 1000)")
+      return child
+    }, budgetMs)
+    const observedMs = performance.now() - start
+    assert.equal(cleanup, undefined)
+    const result = await receipt(directory)
+    assert.equal(result.status, status)
+    assert.ok(child.signalCode || child.exitCode !== null)
+    assert.ok(Date.parse(result.setupEndedUtc) >= Date.parse(result.exitUtc))
+    assert.ok(result.setupElapsedMs >= result.elapsedMs)
+    assert.ok(result.setupElapsedMs >= budgetMs - 30)
+    // Permit Windows process-reaping / runner scheduling jitter, but no second 3.5s grace.
+    assert.ok(observedMs < budgetMs + 1500, `Setup took ${observedMs} ms for a ${budgetMs} ms budget`)
+    assert.ok(Math.abs(result.setupElapsedMs - observedMs) < 1000)
+  })
+}
+
+test('existing observations or another PID cannot manufacture readiness', async t => {
+  const { directory } = await fixture(t)
+  const file = path.join(directory, 'sql-reads.ndjson')
+  await writeFile(file, '{"event":"available"}\n{"event":"sample"}\n')
+  assert.equal(await startSqlObserver(directory, 'app03-5', id, () => assert.fail('Spawned against existing output')), undefined)
+  assert.equal((await receipt(directory)).status, 'existingOutput')
+  const another = await fixture(t)
+  const cleanup = await startSqlObserver(another.directory, 'app03-5', id, () => fakeObserver(another.directory, `
+    fs.writeFileSync(file, JSON.stringify({event:'start',profile:'app03-5',runId:process.argv[2],pid:0})+'\\n');
+    write({event:'available'}); write({event:'sample'}); process.stdin.resume();`))
+  assert.equal(cleanup, undefined)
+  assert.equal((await receipt(another.directory)).status, 'unexpectedOutput')
 })
 
-test('a missing observer executable cannot replace a failure or block reporter shutdown', async () => {
-  const child = spawn(path.join(tmpdir(), 'nonexistent-app03-observer-executable'), [], { stdio: ['pipe', 'ignore', 'ignore'] })
-  const reporter = new Reporter({ profile: 'app03-5' })
-  reporter.stopObserver = monitorObserver(child)
-  assert.equal(await reporter.onEnd({ status: 'failed' }), undefined)
+test('early child exit records its code and does not wait for the startup deadline', async t => {
+  const { directory } = await fixture(t)
+  const cleanup = await startSqlObserver(directory, 'app03-5', id,
+    () => fakeObserver(directory, 'process.exit(19)'))
+  const startup = await receipt(directory)
+  assert.equal(cleanup, undefined)
+  assert.equal(startup.status, 'exited')
+  assert.equal(startup.exitCode, 19)
+  assert.ok(startup.exitUtc)
+})
+
+test('spawn failure is recorded without blocking the scenario', async t => {
+  const { directory } = await fixture(t)
+  const cleanup = await startSqlObserver(directory, 'app03-5', id, () =>
+    spawn(path.join(tmpdir(), 'nonexistent-app03-observer-executable'), [], { stdio: ['pipe', 'ignore', 'ignore'] }))
+  assert.equal(cleanup, undefined)
+  assert.equal((await receipt(directory)).status, 'spawnError')
 })
 
 test('disabled diagnostics do not open a child or modify reports', async t => {
@@ -133,8 +231,7 @@ test('disabled diagnostics do not open a child or modify reports', async t => {
   await writeFile(junit, 'unmodified')
   const reporter = new Reporter({ profile: 'app03-5' })
   reporter.onBegin()
-  assert.equal(reporter.stopObserver, undefined)
-  await reporter.onEnd({ status: 'failed' })
+  assert.equal(await globalSetup({}), undefined)
   await reporter.onExit()
   assert.equal(await readFile(junit, 'utf8'), 'unmodified')
 })

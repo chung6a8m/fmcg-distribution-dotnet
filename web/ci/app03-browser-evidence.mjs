@@ -52,7 +52,8 @@ export function browserEvidenceConfig(profile, env = process.env, root = reposit
   const output = enabled ? stagingDirectory(root, profile, id, env.RUNNER_TEMP || tmpdir()) : `../TestResults/${profile}/${id}`
   const reporter = [['list'], ['junit', { outputFile: output + '/junit.xml' }]]
   if (enabled) reporter.push(['./ci/app03-read-reporter.mjs', { profile }])
-  return { outputDir: output + '/browser', reporter }
+  return { outputDir: output + '/browser', reporter,
+    ...(enabled ? { globalSetup: './ci/app03-sql-setup.mjs' } : {}) }
 }
 
 async function safeWrite(directory, relative, bytes) {

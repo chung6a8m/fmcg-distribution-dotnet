@@ -999,7 +999,7 @@ jobs:
         working-directory: web
         run: npx playwright install chromium
       - name: Verify APP-03 read diagnostics boundaries
-        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs web/tests/app03-read-vite.test.mjs
+        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs
       - name: Verify APP-03 SQL observer error classification
         shell: powershell
         run: ./tests/ci/Test-App03SqlReadErrors.ps1

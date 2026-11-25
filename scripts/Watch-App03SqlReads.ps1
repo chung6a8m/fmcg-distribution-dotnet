@@ -81,7 +81,7 @@ try {
     $pipeRead = $inputPipe.BeginRead((New-Object byte[] 1), 0, 1, $null, $null)
     $file = [IO.File]::Open((Join-Path $directory 'sql-reads.ndjson'), 'CreateNew', 'Write', 'Read')
     $writer = [IO.StreamWriter]::new($file, [Text.UTF8Encoding]::new($false))
-    Write-Record @{ event='start'; profile=$ProfileName; runId=$RunId }
+    Write-Record @{ event='start'; profile=$ProfileName; runId=$RunId; pid=$PID }
 
     $phase = 'connection'
     Add-Type -AssemblyName System.Data

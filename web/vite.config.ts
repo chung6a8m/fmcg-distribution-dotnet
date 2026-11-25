@@ -2,13 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { createApp03ReadHttpDiagnostics } from './ci/app03-read-http.mjs'
-
-const app03ReadDiagnostics = createApp03ReadHttpDiagnostics()
 
 export default defineConfig({
   plugins: [
-    app03ReadDiagnostics?.plugin,
     react(),
     tailwindcss(),
     VitePWA({
@@ -28,12 +24,5 @@ export default defineConfig({
       }
     })
   ],
-  server: {
-    proxy: {
-      '/health': 'http://localhost:5116',
-      '/api': app03ReadDiagnostics
-        ? { target: 'http://localhost:5116', changeOrigin: true, configure: app03ReadDiagnostics.configure }
-        : 'http://localhost:5116',
-    },
-  },
+  server: { proxy: { '/health': 'http://localhost:5116', '/api': 'http://localhost:5116' } }
 })
