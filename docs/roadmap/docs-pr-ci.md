@@ -135,3 +135,5 @@ runtime tương đương. Không tạo commit chỉ để ghi nhận chính lư�
 Thiết kế và kế hoạch: [design](../superpowers/specs/2026-11-25-docs-pr-ci-design.md),
 [implementation plan](../superpowers/plans/2026-11-25-docs-pr-ci.md).
 Quy tắc GitHub: [required checks và job/workflow bị skip](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks).
+
+Kiểm chứng phân loại CI: thay đổi này chỉ bổ sung một câu văn bản.
