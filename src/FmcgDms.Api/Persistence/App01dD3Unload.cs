@@ -174,25 +174,12 @@ public sealed partial class App01dCashierUnloadService
         var preview = await App05CloseReadiness.Read(db, tx, tenant, tripId, false, ct);
         if (preview.HandoffId is not null || preview.ALines.Length == 0 ||
             preview.ALines.Any(line => line.Remaining <= 0 || line.Loaded != 0 || line.Delivered != 0) ||
-            preview.Blockers.Any(blocker => blocker.Code is not ("ZERO_STOCK_HANDOFF_REQUIRED" or "FOLLOW_UP_REQUIRED")) ||
-            !await VerifyZeroHandoffBalances(db, tx, tenant, warehouses[0], preview.ALines, ct))
+            preview.Blockers.Any(blocker => blocker.Code is not ("ZERO_STOCK_HANDOFF_REQUIRED" or "FOLLOW_UP_REQUIRED")))
             return null;
+        foreach (var sku in preview.ALines.Where(line => line.Held > 0).Select(line => line.SkuId).Distinct().Order())
+            if (!await VerifyMainHeldPool(db, tx, tenant, new(warehouses[0], sku), ct))
+                return null;
         return new(warehouses[0], preview.ALines);
-    }
-
-    internal static async Task<bool> VerifyZeroHandoffBalances(SqlConnection db, SqlTransaction tx, string tenant,
-        Guid warehouse, IReadOnlyList<App05CloseReadiness.ALine> lines, CancellationToken ct)
-    {
-        foreach (var sku in lines.Where(line => line.Held > 0).GroupBy(line => line.SkuId).OrderBy(group => group.Key))
-        {
-            var physical = await ReadD3Physical(db, tx, tenant, warehouse, sku.Key, ct);
-            var pool = await ReadD3Pool(db, tx, tenant, warehouse, sku.Key, ct);
-            if (physical is null || physical.OnHandBaseQuantity != physical.SourceBaseQuantity ||
-                physical.OnHandCostAmount != physical.SourceCostAmount || pool is null ||
-                pool.OnHand != physical.OnHandBaseQuantity || pool.Allocated < sku.Sum(line => line.Held))
-                return false;
-        }
-        return true;
     }
 
     private static async Task UpdateD3Balances(SqlConnection db, SqlTransaction tx, string tenant,

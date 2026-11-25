@@ -12,7 +12,8 @@ type Choice = { id: string; label: string }
 type Catalog = { customers: Choice[]; trips: Choice[]; skus: Choice[]; warehouses: Choice[] }
 export type ALine = { orderId: string; orderLineId: string; confirmSourceId: string; loaded: number; held: number; remaining: number }
 export type Work = { sourceKind: string; sourceId: string; relatedId: string | null; followUp: { followUpId: string } | null }
-export type Preview = { revision: string; state: string; canClose: boolean; status: string; aLines: ALine[]; work: Work[] }
+export type Preview = { revision: string; state: string; canClose: boolean; status: string; aLines: ALine[]; work: Work[];
+  blockers: { code: string }[] }
 export type CloseInput = { commandId: string; expectedRevision: string }
 export type Closure = { closureId: string; tripId: string; commandId: string; status: string; handoffId: string;
   openWorkCount: number; snapshot: unknown; closedAt: string; closedBy: string }

@@ -154,8 +154,8 @@ public sealed partial class App01dCashierUnloadService
             """, new { Tenant = tenant, ManifestLine = manifestLine }, tx, ct));
 
     internal static async Task<D3Right[]> ReadD3Rights(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid trip, CancellationToken ct) =>
-        (await db.QueryAsync<D3Right>(Sql("""
+        string tenant, Guid? trip, CancellationToken ct, MainPoolScope? pool = null) =>
+        (await db.QueryAsync<D3Right>(Sql($"""
             SELECT r.Id,r.StockLocationId AS Warehouse,r.SkuId AS Sku,r.RightKind AS Kind,
                 r.GrantedBaseQuantity AS Granted,r.ConsumedBaseQuantity AS Consumed,
                 r.ReleasedBaseQuantity AS Released,r.Status,
@@ -174,13 +174,14 @@ public sealed partial class App01dCashierUnloadService
                                 SELECT 1 FROM dbo.BQuota b WITH (HOLDLOCK)
                                 WHERE b.TenantId=r.TenantId AND b.StockRightId=r.Id)))
                 ) THEN 1 ELSE 0 END) AS HasAllocationProof
-            FROM dbo.StockRight r WITH (UPDLOCK,HOLDLOCK)
-            WHERE r.TenantId=@Tenant AND r.TripId=@Trip;
-            """, new { Tenant = tenant, Trip = trip }, tx, ct))).ToArray();
+            FROM dbo.StockRight r WITH ({(pool is null ? "UPDLOCK,HOLDLOCK" : "HOLDLOCK")})
+            WHERE r.TenantId=@Tenant
+                AND {(pool is null ? "r.TripId=@Trip" : "r.StockLocationId=@Warehouse AND r.SkuId=@Sku")};
+            """, new { Tenant = tenant, Trip = trip, Warehouse = pool?.Warehouse, Sku = pool?.Sku }, tx, ct))).ToArray();
 
     internal static async Task<D3LoadedLine[]> ReadD3LoadedLines(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid trip, CancellationToken ct) =>
-        (await db.QueryAsync<D3LoadedLine>(Sql("""
+        string tenant, Guid? trip, CancellationToken ct, MainPoolScope? pool = null) =>
+        (await db.QueryAsync<D3LoadedLine>(Sql($"""
             SELECT l.Id,l.TripManifestId,l.LoadSourceLineId AS SourceLine,l.StockRightId AS RightId,
                 l.SkuId AS Sku,l.RightKind AS Kind,l.LoadedBaseQuantity AS Loaded,
                 COALESCE(issued.Quantity,0) AS Issued,
@@ -212,7 +213,7 @@ public sealed partial class App01dCashierUnloadService
                     SELECT COUNT(*) FROM dbo.DeliveryStockIssue i WITH (HOLDLOCK)
                     WHERE i.TenantId=l.TenantId AND i.TripManifestLineId=l.Id
                 ) THEN 1 ELSE 0 END) AS HasValidIssues
-            FROM dbo.TripManifestLine l WITH (UPDLOCK,HOLDLOCK)
+            FROM dbo.TripManifestLine l WITH ({(pool is null ? "UPDLOCK,HOLDLOCK" : "HOLDLOCK")})
             OUTER APPLY (
                 SELECT SUM(i.BaseQuantity) AS Quantity,COUNT(*) AS IssueCount
                 FROM dbo.DeliveryStockIssue i WITH (HOLDLOCK)
@@ -222,17 +223,18 @@ public sealed partial class App01dCashierUnloadService
                     AND d.TripId=l.TripId AND d.StockRightId=l.StockRightId AND d.RightKind=l.RightKind
                     AND i.SkuId=l.SkuId AND d.BaseQuantity=i.BaseQuantity AND d.CostAmount=i.CostAmount
             ) issued
-            WHERE l.TenantId=@Tenant AND l.TripId=@Trip AND l.IsC3=1
+            WHERE l.TenantId=@Tenant
+                AND {(pool is null ? "l.TripId=@Trip AND l.IsC3=1" : "l.WarehouseLocationId=@Warehouse AND l.SkuId=@Sku")}
             ORDER BY l.LoadSourceLineId,l.Id;
-            """, new { Tenant = tenant, Trip = trip }, tx, ct))).ToArray();
+            """, new { Tenant = tenant, Trip = trip, Warehouse = pool?.Warehouse, Sku = pool?.Sku }, tx, ct))).ToArray();
 
     private static Task<LocationBalance?> ReadD3Physical(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid location, Guid sku, CancellationToken ct) =>
-        db.QuerySingleOrDefaultAsync<LocationBalance>(Sql("""
+        string tenant, Guid location, Guid sku, CancellationToken ct, bool readOnly = false) =>
+        db.QuerySingleOrDefaultAsync<LocationBalance>(Sql($"""
             SELECT b.OnHandBaseQuantity,b.OnHandCostAmount,
                 o.BaseQuantity+COALESCE(d.Quantity,0) AS SourceBaseQuantity,
                 o.CostAmount+COALESCE(d.Amount,0) AS SourceCostAmount
-            FROM dbo.PhysicalStockBalance b WITH (UPDLOCK,HOLDLOCK)
+            FROM dbo.PhysicalStockBalance b WITH ({(readOnly ? "HOLDLOCK" : "UPDLOCK,HOLDLOCK")})
             JOIN dbo.PhysicalStockOpening o WITH (HOLDLOCK)
                 ON o.TenantId=b.TenantId AND o.StockLocationId=b.StockLocationId AND o.SkuId=b.SkuId
             OUTER APPLY (
@@ -245,10 +247,10 @@ public sealed partial class App01dCashierUnloadService
             """, new { Tenant = tenant, Location = location, Sku = sku }, tx, ct));
 
     private static Task<D3Pool?> ReadD3Pool(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid warehouse, Guid sku, CancellationToken ct) =>
-        db.QuerySingleOrDefaultAsync<D3Pool>(Sql("""
+        string tenant, Guid warehouse, Guid sku, CancellationToken ct, bool readOnly = false) =>
+        db.QuerySingleOrDefaultAsync<D3Pool>(Sql($"""
             SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
-            FROM dbo.StockPool WITH (UPDLOCK,HOLDLOCK)
+            FROM dbo.StockPool WITH ({(readOnly ? "HOLDLOCK" : "UPDLOCK,HOLDLOCK")})
             WHERE TenantId=@Tenant AND StockLocationId=@Warehouse AND SkuId=@Sku;
             """, new { Tenant = tenant, Warehouse = warehouse, Sku = sku }, tx, ct));
 }

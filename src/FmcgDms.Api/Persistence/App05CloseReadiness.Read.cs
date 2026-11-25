@@ -135,17 +135,27 @@ internal static partial class App05CloseReadiness
         if (closing && trip.Status == "RECONCILING" && trip.UnloadId is not null && manifests.Length == 0 &&
             rights.All(right => right.Kind == "A"))
         {
-            using var handoff = await db.QueryMultipleAsync(App02a3Sql.Cmd("""
-                SELECT WarehouseLocationId FROM dbo.D3TripUnload WHERE TenantId=@Tenant AND TripId=@Trip AND Id=@HandoffId;
+            var handoff = await db.QueryAsync<ZeroStockLine>(App02a3Sql.Cmd("""
                 SELECT OrderLineId,ConfirmSourceId,HeldBaseQuantity AS Held FROM dbo.App05ZeroStockHandoffLine
                 WHERE TenantId=@Tenant AND TripId=@Trip AND HandoffId=@HandoffId;
                 """, new { scope.Tenant, scope.Trip, HandoffId = trip.UnloadId }, tx, ct));
-            Guid warehouse = await handoff.ReadSingleAsync<Guid>();
-            var proof = (await handoff.ReadAsync<ZeroStockLine>()).ToHashSet();
-            if (aLines.Count == 0 || !proof.SetEquals(aLines.Select(line =>
-                    new ZeroStockLine(line.OrderLineId, line.ConfirmSourceId, line.Held))) ||
-                !await App01dCashierUnloadService.VerifyZeroHandoffBalances(db, tx, tenant, warehouse, aLines, ct))
+            if (aLines.Count == 0 || !handoff.ToHashSet().SetEquals(aLines.Select(line =>
+                    new ZeroStockLine(line.OrderLineId, line.ConfirmSourceId, line.Held))))
                 blockers.Add(new("ZERO_HANDOFF_SOURCE_DRIFT", D3, trip.UnloadId, "Đối chiếu biên nhận bàn giao bằng 0"));
+        }
+
+        var mainPools = closing && trip.Status == "RECONCILING"
+            ? rights.Where(right => right.Kind == "A" && right.Granted > right.Consumed + right.Released)
+                .Select(right => new App01dCashierUnloadService.MainPoolScope(right.Warehouse, right.Sku))
+                .Distinct().OrderBy(pool => pool.Warehouse).ThenBy(pool => pool.Sku).ToArray()
+            : [];
+        int provenPools = 0;
+        foreach (var pool in mainPools)
+        {
+            if (await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant, pool, ct))
+                provenPools++;
+            else
+                blockers.Add(new("MAIN_HELD_SOURCE_DRIFT", D3, pool.Sku, "Đối chiếu lượng giữ và nguồn tồn kho MAIN", pool.Warehouse));
         }
 
         var assignments = (await db.QueryAsync<Assignment>(App02a3Sql.Cmd(AssignmentsSql, scope, tx, ct)))
@@ -159,15 +169,16 @@ internal static partial class App05CloseReadiness
         string state = ReadinessState(trip.Used, blockers.Count, missing.Length, work.Length);
         blockers.AddRange(missing.Select(row => new Blocker("FOLLOW_UP_REQUIRED", row.SourceKind, row.SourceId,
             "Giao người phụ trách, hạn và hành động tiếp theo", row.RelatedId)));
-        int expected = aRows.Length + unprovenOrders.Length + finances.Length + ar.Length + pending.Length + tripStock.Length + rights.Length + loads.Length + 2;
+        int expected = aRows.Length + unprovenOrders.Length + finances.Length + ar.Length + pending.Length
+            + tripStock.Length + rights.Length + loads.Length + mainPools.Length + 2;
         int known = aLines.Count + finances.Count(row => row.OccurredAt <= asOf) + ar.Count(row => row.Proven)
             + tripStock.Count(row => row.Value.HasValue) + (custodyProven ? 1 : 0)
-            + rights.Length - unprovenRights.Length + loads.Length - unprovenLoads.Length + (loadScopeProven ? 1 : 0);
+            + rights.Length - unprovenRights.Length + loads.Length - unprovenLoads.Length + provenPools + (loadScopeProven ? 1 : 0);
         var coverage = trip.Used ? new Coverage(known, expected) : new Coverage(0, 0);
         var revision = Convert.ToHexString(Digest(new
         {
             tenant, trip, asOf, aRows, finances, ar, work, assignees, blockers, custody, stock = tripStock,
-            rights, loads, heldB, manifests
+            rights, loads, heldB, manifests, mainPools
         }));
         return new(tripId, trip.Code, DateOnly.FromDateTime(trip.BusinessDate), asOf, trip.Status,
             state, revision, coverage, ops && trip.Used && trip.Status is not ("CLOSED" or "CLOSED_WITH_OPEN_CASES"),

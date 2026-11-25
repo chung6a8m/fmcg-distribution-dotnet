@@ -4,6 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { auth, open } from '../e2e-app03-7/return-refund'
 import { accounting, app, c2, c4, d3, get, post, setup, type Closure, type ClosureHistory,
   type CloseInput, type Preview, type Work } from './fixture'
+import { resolvePendingDelivery, runAccountingSourceRace, verifyCustodyAndOffer } from './source-guards'
 
 const evidence = process.env.APP05_EVIDENCE_DIR!
 const assignee = 'app05-assignee'
@@ -61,7 +62,7 @@ test('day-one closes A15 and accounting work atomically after rollback and a los
   const order = await fixture.order(main, 40)
   await fixture.reserve(order, 40)
   await fixture.load(main, 40)
-  const delivery = await fixture.deliver(main, 25)
+  const delivery = await resolvePendingDelivery(request, main, 25, checkpoint)
   const vehicle = await read(request, main)
   expect(vehicle).toMatchObject({ state: 'BLOCKED', canClose: false })
   await rejectClose(request, main, closeInput(vehicle.revision), 'TRIP_CLOSE_NOT_READY')
@@ -91,7 +92,18 @@ test('day-one closes A15 and accounting work atomically after rollback and a los
   await rejectClose(request, main, closeInput(ready.revision), 'READINESS_CHANGED')
   await rejectClose(request, main, blockedClose, 'TRIP_CLOSE_NOT_READY')
 
+  const mainBeforeFault = await read(request, main)
+  await checkpoint('main-pool-fault', { trip: main, original: 15, fault: 0 })
+  const poolDrift = await read(request, main)
+  expect(poolDrift).toMatchObject({ state: 'BLOCKED', canClose: false, status: 'RECONCILING' })
+  expect(poolDrift.blockers).toContainEqual(expect.objectContaining({ code: 'MAIN_HELD_SOURCE_DRIFT' }))
+  await rejectClose(request, main, closeInput(mainBeforeFault.revision), 'READINESS_CHANGED')
+  await rejectClose(request, main, closeInput(poolDrift.revision), 'TRIP_CLOSE_NOT_READY')
+  expect(await history(request, main)).toMatchObject({ closure: null })
+  await checkpoint('main-pool-rejected')
+
   const before = await read(request, main)
+  expect(before.canClose).toBe(true)
   await rejectClose(request, main, { commandId: revised.commandId, expectedRevision: before.revision }, 'COMMAND_PAYLOAD_CONFLICT')
   const failure = closeInput(before.revision)
   const denied = await close(request, main, failure, 'PEER_OPS')
@@ -205,6 +217,16 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
     expect.objectContaining({ orderId: held.orderId, held: 5, remaining: 5, loaded: 0 }),
     expect.objectContaining({ orderId: unreserved.orderId, held: 0, remaining: 5, loaded: 0 }),
   ]))
+  await checkpoint('shared-pool-fault', { trip: zero, original: 20, fault: 5 })
+  const fixtureCheck = await request.post(d3 + '/unload', {
+    headers: auth('RECEIVER'),
+    data: { producerId: 'f05-receiver', commandId: crypto.randomUUID(),
+      sourceNumber: 'APP05-2-POOL-FAULT', tripId: zero },
+  })
+  expect(fixtureCheck.status(), await fixtureCheck.text()).toBe(200)
+  expect(await fixtureCheck.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'LOADED_MANIFEST_NOT_ELIGIBLE' })
+  expect(await history(request, zero)).toMatchObject({ closure: null })
+  await checkpoint('shared-pool-rejected')
   await checkpoint('before-zero-handoff', { zero, held, unreserved })
 
   const warehouse = await open(context, 'RECEIVER', 'settlement?trip=' + zero)
@@ -243,4 +265,36 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   })).status()).toBe(403)
   expect((await request.get(app + '/' + dayOne.main + '/closure', { headers: auth('OPS') })).status()).toBe(403)
   await checkpoint('after-revocation')
+})
+
+test('day-three blocks unsettled custody and a waiting Close rechecks a concurrent D.4 posting', async ({ context, request }, info) => {
+  const fixture = await setup(request)
+  const trip = fixture.trip('DEV-20261125-A')
+  const order = await fixture.order(trip, 3)
+  await fixture.reserve(order, 3)
+  await fixture.load(trip, 3)
+  await fixture.deliver(trip, 2)
+  await verifyCustodyAndOffer(request, trip, checkpoint)
+  await fixture.unload(trip)
+
+  const initial = await read(request, trip)
+  const finance = initial.work.filter(work => work.sourceKind === 'D4_RECONCILIATION')
+  expect(finance).toHaveLength(2)
+  expect(initial.work).toHaveLength(3)
+  const raced = finance[0]
+  for (const work of finance) {
+    const path = `${accounting}/${work.relatedId}`
+    await post(request, path + '/receive', { transportId: crypto.randomUUID() }, 'ACCOUNTANT')
+    if (work !== raced) await post(request, path + '/post', { transportId: crypto.randomUUID() }, 'ACCOUNTANT')
+  }
+  for (const work of initial.work) await assign(request, trip, work)
+  const preview = await read(request, trip)
+  expect(preview).toMatchObject({ canClose: true, state: 'READY_WITH_WORK' })
+  expect(preview.work.find(item => item.sourceId === raced.sourceId)).toMatchObject({ label: expect.stringContaining('Chờ hạch toán') })
+  const receipt = await runAccountingSourceRace(request, trip, raced, preview, checkpoint)
+  const ops = await open(context, 'OPS', 'trip-close?trip=' + trip)
+  const record = ops.locator(`[data-closure-id="${receipt.closureId}"]`)
+  await expect(record.getByTestId('closure-open-at-close')).toHaveText('3')
+  await ops.screenshot({ path: info.outputPath('fresh-close-after-accounting-post.png') })
+  await checkpoint('after-accounting-source-fresh-close', receipt)
 })

@@ -24,6 +24,8 @@ internal static class App05TripClosureEvidence
         var checks = new List<Comparison>();
         Task? session = null;
         ArmFailure? fixture = null;
+        var sources = new App05ClosureSourceEvidence(run, folder, ct, Wait, Acknowledge,
+            includeIntakeEvidence => EffectDigest(Primary, includeIntakeEvidence: includeIntakeEvidence));
         try
         {
             var first = await Open("Start");
@@ -35,7 +37,14 @@ internal static class App05TripClosureEvidence
                 tripClosure: true);
             var next = await Open("Resume");
             await Browser(next, "day-two", DayTwo);
-            Check("contrast tenant business rows preserved during both days", Peer, originalPeer, await EffectDigest(Peer));
+
+            await Stop();
+            await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(2),
+                tripClosure: true);
+            var third = await Open("Resume");
+            Guid thirdTrip = await App03SettlementEvidence.PrepareB(third, "DEV-20261125-A", load: true, ct);
+            await Browser(third, "day-three", exited => sources.VerifySourceRaceAndCash(exited, thirdTrip));
+            Check("contrast tenant business rows preserved across three synthetic days", Peer, originalPeer, await EffectDigest(Peer));
         }
         finally
         {
@@ -45,6 +54,7 @@ internal static class App05TripClosureEvidence
                 if (App03DevSession.HasManifest(run.Id))
                     await App03DevSession.Run("Remove", root, source, run.Id);
                 await File.WriteAllTextAsync(Path.Combine(folder, "expected-actual-diff.json"), JsonSerializer.Serialize(checks, Json));
+                await sources.WriteResults();
             }
         }
 
@@ -102,6 +112,7 @@ internal static class App05TripClosureEvidence
                 start.Environment["APP03_" + role + "_TOKEN"] = token;
             start.Environment["APP03_SOURCE_TOKEN"] = active.SourceToken;
             start.Environment["APP03_RECEIVER_TOKEN"] = active.ReceiverToken;
+            start.Environment["APP03_CASHIER_TOKEN"] = active.CashierToken;
             start.Environment["APP03_ACCOUNTANT_TOKEN"] = active.FinanceCredentials!["ACCOUNTANT"];
             start.Environment["APP03_RECONCILER_TOKEN"] = active.FinanceCredentials["RECONCILER"];
 
@@ -129,6 +140,8 @@ internal static class App05TripClosureEvidence
 
         async Task<bool> DayOne(Task exited)
         {
+            if (!await sources.VerifyPendingDelivery(exited)) return false;
+            if (!await VerifyPoolFault("main-pool", "RECONCILING", exited)) return false;
             if (!await Wait("arm-failure", exited)) return false;
             fixture = await Read<ArmFailure>("arm-failure");
             string before = await EffectDigest(Primary);
@@ -196,6 +209,7 @@ internal static class App05TripClosureEvidence
             Check("clean close adds no source stock or financial effects", Primary, beforeClean, await EffectDigest(Primary));
             await Acknowledge("after-clean-close");
 
+            if (!await VerifyPoolFault("shared-pool", "PREPARED", exited)) return false;
             if (!await Wait("before-zero-handoff", exited)) return false;
             var zero = await Read<ZeroFixture>("before-zero-handoff");
             string beforeZero = await EffectDigest(Primary, includeHandoffSources: false);
@@ -283,6 +297,46 @@ internal static class App05TripClosureEvidence
                 cancellationToken: ct));
         }
 
+        async Task<bool> VerifyPoolFault(string phase, string status, Task exited)
+        {
+            if (!await Wait(phase + "-fault", exited)) return false;
+            var fault = await Read<PoolFault>(phase + "-fault");
+            await SetPool(fault, fault.Original, fault.Fault);
+            try
+            {
+                string baseline = await EffectDigest(Primary);
+                await Acknowledge(phase + "-fault");
+                if (!await Wait(phase + "-rejected", exited)) return false;
+                Check(phase + " rejection preserves status and no closure", Primary, new TripImageRow(status, 0), await TripImage(fault.Trip));
+                Check(phase + " rejection creates no effects or new handoff", Primary, baseline, await EffectDigest(Primary));
+            }
+            finally
+            {
+                await SetPool(fault, fault.Fault, fault.Original);
+            }
+            await Acknowledge(phase + "-rejected");
+            return true;
+        }
+
+        async Task SetPool(PoolFault fault, decimal from, decimal to)
+        {
+            await using var db = await OpenDatabase(Primary);
+            await db.ExecuteAsync(new CommandDefinition("""
+                IF DB_NAME()<>@Name OR NOT EXISTS(SELECT 1 FROM dbo.LocalDemoOwner WHERE RunId=@Nonce)
+                    OR NOT EXISTS(SELECT 1 FROM dbo.App00ScratchMarker WHERE Nonce=@Nonce)
+                    OR NOT EXISTS(SELECT 1 FROM dbo.LocalApp03Session WHERE RunId=@Nonce AND TenantId=@Tenant)
+                    THROW 51923,'APP-05.2 pool evidence scope mismatch.',1;
+                UPDATE p SET AllocatedBaseQuantity=@To FROM dbo.StockPool p
+                JOIN dbo.Sku sku ON sku.TenantId=p.TenantId AND sku.Id=p.SkuId AND sku.Code=N'DAY-A-EA'
+                JOIN dbo.StockLocation w ON w.TenantId=p.TenantId AND w.Id=p.StockLocationId AND w.Code=N'C2-MAIN'
+                WHERE p.TenantId=@Tenant AND p.AllocatedBaseQuantity=@From
+                    AND EXISTS(SELECT 1 FROM dbo.StockRight r WHERE r.TenantId=p.TenantId AND r.TripId=@Trip
+                        AND r.SkuId=p.SkuId AND r.StockLocationId=p.StockLocationId AND r.RightKind='A');
+                IF @@ROWCOUNT<>1 THROW 51924,'APP-05.2 pool evidence expected one held pool.',1;
+                """, new { Tenant = Primary, Name = run.Name(Primary), Nonce = run.Id, fault.Trip, From = from, To = to },
+                cancellationToken: ct));
+        }
+
         async Task Fault(Guid trip, Guid command, bool arm)
         {
             await using var db = await OpenDatabase(Primary);
@@ -307,7 +361,7 @@ internal static class App05TripClosureEvidence
                 cancellationToken: ct));
         }
 
-        async Task<string> EffectDigest(string tenant, bool includeHandoffSources = true)
+        async Task<string> EffectDigest(string tenant, bool includeHandoffSources = true, bool includeIntakeEvidence = true)
         {
             await using var db = await OpenDatabase(tenant);
             string sourceSql = includeHandoffSources ? """
@@ -315,6 +369,7 @@ internal static class App05TripClosureEvidence
                 JSON_QUERY((SELECT * FROM dbo.BusinessSourceLine WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS SourceLines,
                 JSON_QUERY((SELECT * FROM dbo.D3TripUnload WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Handoffs,
                 """ : "";
+            string intakeSql = includeIntakeEvidence ? "JSON_QUERY((SELECT * FROM dbo.C4DeliveryEvidence WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Evidence," : "";
             return await db.ExecuteScalarAsync<string>(new CommandDefinition($"""
                 SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
                     SELECT
@@ -327,7 +382,7 @@ internal static class App05TripClosureEvidence
                             ORDER BY StockLocationId,SkuId FOR JSON PATH)) AS Pool,
                         JSON_QUERY((SELECT * FROM dbo.StockRight WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Rights,
                         JSON_QUERY((SELECT * FROM dbo.AConfirmedLineSnapshot WHERE TenantId=@tenant ORDER BY AOrderLineId FOR JSON PATH)) AS Confirms,
-                        JSON_QUERY((SELECT * FROM dbo.C4DeliveryEvidence WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Evidence,
+                        {intakeSql}
                         JSON_QUERY((SELECT * FROM dbo.SaleDelivery WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Deliveries,
                         JSON_QUERY((SELECT * FROM dbo.ReceivableOpenItem WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Ar,
                         JSON_QUERY((SELECT * FROM dbo.CashReceipt WHERE TenantId=@tenant ORDER BY Id FOR JSON PATH)) AS Receipts,
@@ -374,6 +429,7 @@ internal static class App05TripClosureEvidence
     private sealed record Command(Guid CommandId, string ExpectedRevision);
     private sealed record Order(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId);
     private sealed record AccountingWork(Guid SourceId, Guid RelatedId);
+    private sealed record PoolFault(Guid Trip, decimal Original, decimal Fault);
     private sealed record ArmFailure(Guid Main, Guid Clean, Command Failure, Order Order, Source Unload, Source CleanUnload,
         AccountingWork AccountingWork);
     private sealed record Receipt(Guid TripId, Guid ClosureId, Guid CommandId, DateTimeOffset ClosedAt, Guid HandoffId, JsonElement Snapshot);
