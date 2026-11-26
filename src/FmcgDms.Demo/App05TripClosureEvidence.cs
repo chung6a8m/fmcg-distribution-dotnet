@@ -55,6 +55,10 @@ internal static class App05TripClosureEvidence
                 await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(4));
                 var approval = await Open("Resume", upgrade: true);
                 await Browser(approval, "approval", VerifyApproval);
+                await Stop();
+                await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(5));
+                var competing = await Open("Resume", upgrade: true);
+                await Browser(competing, "approval-race", VerifyApprovalRace);
             }
             Check("contrast tenant business rows preserved across the synthetic journey", Peer, originalPeer, await EffectDigest(Peer));
         }
@@ -880,6 +884,40 @@ internal static class App05TripClosureEvidence
                 """, scope, cancellationToken: ct));
         }
 
+        async Task<bool> VerifyApprovalRace(Task exited)
+        {
+            if (!await Wait("approval-race-before", exited)) return false;
+            var fixture = await Read<ApprovalRaceFixture>("approval-race-before");
+            await using var db = await OpenDatabase(Primary);
+            var before = await ReadOutcome();
+            Check("competing actions start with one HELD and no approval or successor", Primary,
+                new ApprovalRaceState(0, 0, 0, 1, before.Allocated, before.Physical, "CONFIRMED"), before);
+            await Acknowledge("approval-race-before");
+            if (!await Wait("approval-race-after", exited)) return false;
+            var receipt = await Read<ApprovalRaceReceipt>("approval-race-after");
+            var expected = receipt.Approved
+                ? new ApprovalRaceState(2, 0, 1, 0, before.Allocated - 1, before.Physical, "REMAINDER_CLOSED")
+                : new ApprovalRaceState(0, 2, 0, 1, before.Allocated, before.Physical, "CONFIRMED");
+            Check("only one concurrent action commits and stock rights are conserved", Primary, expected, await ReadOutcome());
+            await Acknowledge("approval-race-after");
+            return true;
+
+            Task<ApprovalRaceState> ReadOutcome() => db.QuerySingleAsync<ApprovalRaceState>(new CommandDefinition("""
+                SELECT
+                    (SELECT COALESCE(SUM(a.Quantity),0) FROM dbo.App05ARemainderApproval a
+                        WHERE a.TenantId=s.TenantId AND a.OrderLineId=s.AOrderLineId) AS Approved,
+                    (SELECT COALESCE(SUM(b.Quantity),0) FROM dbo.App05ASuccessor b
+                        WHERE b.TenantId=s.TenantId AND b.OrderLineId=s.AOrderLineId AND b.DestinationTripId=@Destination) AS Scheduled,
+                    r.ReleasedBaseQuantity AS Released,r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held,
+                    p.AllocatedBaseQuantity AS Allocated,p.OnHandBaseQuantity AS Physical,o.Status
+                FROM dbo.AConfirmedLineSnapshot s JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId
+                JOIN dbo.AReservation a ON a.TenantId=s.TenantId AND a.AOrderLineId=s.AOrderLineId
+                JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                JOIN dbo.StockPool p ON p.TenantId=r.TenantId AND p.StockLocationId=r.StockLocationId AND p.SkuId=r.SkuId
+                WHERE s.TenantId=@Tenant AND s.TripId=@Origin AND s.AOrderLineId=@LineId;
+                """, new { Tenant = Primary, fixture.Origin, fixture.Destination, fixture.LineId }, cancellationToken: ct));
+        }
+
         async Task SetPool(PoolFault fault, decimal from, decimal to)
         {
             await using var db = await OpenDatabase(Primary);
@@ -987,6 +1025,10 @@ internal static class App05TripClosureEvidence
         }
     }
 
+    private sealed record ApprovalRaceFixture(Guid Origin, Guid Destination, Guid LineId);
+    private sealed record ApprovalRaceReceipt(bool Approved);
+    private sealed record ApprovalRaceState(decimal Approved, decimal Scheduled, decimal Released, decimal Held,
+        decimal Allocated, decimal Physical, string Status);
     private sealed record ApprovalBefore(Guid TripId, Guid LineId, Guid DeliverySourceId);
     private sealed record ApprovalAfter(Guid FirstSourceId, Guid FractionalSourceId, Guid FinalSourceId);
     private sealed record ApprovedRight(Guid SourceId, decimal Quantity, decimal Released, decimal NeverLoaded, decimal Returned,

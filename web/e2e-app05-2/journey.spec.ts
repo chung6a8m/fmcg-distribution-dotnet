@@ -921,4 +921,50 @@ test('approval closes an unheld portion and exact HELD generations without touch
   expect((await read(request, trip)).work).not.toContainEqual(expect.objectContaining({ sourceId: order.orderLineId }))
   expect((await history(request, trip)).closure).toEqual(original)
   await checkpoint('approval-after', { firstSourceId: partial.sourceId, fractionalSourceId: fractional.sourceId, finalSourceId: final!.sourceId })
+
+  const origin = fixture.trip('DEV-20261127-B')
+  const competingOrder = await fixture.order(origin, 2, 'approval')
+  await fixture.reserve(competingOrder, 1)
+  await fixture.unload(origin)
+  const before = await read(request, origin)
+  expect(before.work).toHaveLength(1)
+  await post(request, app + '/' + origin + '/follow-ups', {
+    ...assignmentInput(before.work[0], before.revision), dueAt: '2026-11-28T10:00:00+07:00',
+  }, 'OPS')
+  expect((await close(request, origin, closeInput((await read(request, origin)).revision))).status()).toBe(200)
+  await writeFile(join(evidence, 'approval-race-fixture.json'), JSON.stringify({ origin, order: competingOrder }))
+})
+
+test('approval-race preserves the held right when another operator assigns a successor', async ({ request }) => {
+  const { origin, order } = JSON.parse(await readFile(join(evidence, 'approval-race-fixture.json'), 'utf8')) as {
+    origin: string; order: SourceOrder
+  }
+  const destination = (await setup(request)).trip('DEV-20261128-A')
+  const base = app + '/' + origin + '/a-remainders/' + order.orderLineId
+  const proposalPath = base + '/closure-proposals'
+  const { scope } = await get<{ scope: { followUpId: string; revision: string } }>(request, proposalPath)
+  const proposal = await post<{ proposalId: string }>(request, proposalPath, {
+    commandId: crypto.randomUUID(), confirmSourceId: order.confirmSourceId, followUpId: scope.followUpId,
+    quantity: '2.000', reason: 'Yêu cầu đóng phần trước khi đưa ra chuyến khác', expectedRevision: scope.revision,
+  }, 'OPS')
+  const state = await get<SuccessorRead>(request, base + '/successors')
+  await checkpoint('approval-race-before', { origin, destination, lineId: order.orderLineId })
+  const [approval, assignment] = await Promise.all([
+    request.post(proposalPath + '/' + proposal.proposalId + '/approve', { headers: auth('CLOSURE_CHECKER'), data: {
+      commandId: crypto.randomUUID(), expectedRevision: scope.revision,
+    } }),
+    request.post(base + '/assign-successor', { headers: auth('OPS'), data: {
+      commandId: crypto.randomUUID(), destinationTripId: destination, confirmSourceId: order.confirmSourceId,
+      followUpId: state.followUpId, expectedRevision: state.revision, quantity: 2,
+    } }),
+  ])
+  expect([approval.status(), assignment.status()].sort()).toEqual([200, 409])
+  if (approval.ok()) {
+    expect(await approval.json()).toMatchObject({ status: 'APPROVED', quantity: '2.000', released: '1.000' })
+    expect(await assignment.json()).toMatchObject({ code: 'A_SUCCESSOR_REVISION_CHANGED' })
+  } else {
+    expect(await approval.json()).toMatchObject({ code: 'A_CLOSURE_SCOPE_CHANGED' })
+    expect(await assignment.json()).toMatchObject({ quantity: 2 })
+  }
+  await checkpoint('approval-race-after', { approved: approval.ok() })
 })
