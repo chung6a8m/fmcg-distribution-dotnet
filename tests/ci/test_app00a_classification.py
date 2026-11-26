@@ -185,9 +185,12 @@ class ClassificationTests(unittest.TestCase):
         from tools.classify_app00a_pr import path_preview
         paths = ["docs/roadmap/app-00a-parallel-ci.md","docs/roadmap/app-00a-build-cache.md","docs/roadmap/localdb-ci-bootstrap.md","docs/roadmap/pr-ci-concurrency.md","docs/roadmap/docs-pr-ci.md","docs/superpowers/plans/2026-11-16-issue-13-pwa-external-update.md","docs/superpowers/plans/2026-11-20-ui01-runtime-foundations.md","docs/superpowers/plans/2026-11-22-app-02d2.md","docs/superpowers/plans/2026-11-22-app-02d3.md","docs/superpowers/plans/2026-11-24-app00a-parallel-ci.md","docs/superpowers/plans/2026-11-25-app00a-build-cache.md","docs/superpowers/plans/2026-11-25-app03-read-diagnostics.md","docs/superpowers/plans/2026-11-25-docs-pr-ci.md","docs/superpowers/plans/2026-11-25-localdb-bootstrap.md","docs/superpowers/plans/2026-11-25-pr-ci-concurrency.md","README.md","AGENTS.md","docs/roadmap/app-05.md","tools/classify_app00a_pr.py","tools/verify_app00a_jobs.py",".github/workflows/app00a.yml"]
         for path in paths:
+            self.write(path, "existing v1/authority/control document\n")
+        self.base = self.commit("base with existing v1 and authority paths")
+        for path in paths:
             with self.subTest(path=path):
                 self.git("switch", "--detach", self.base)
-                self.write(path)
+                self.write(path, "modified v1/authority/control document\n")
                 self.write("docs/status/app-05-status.md")
                 source = self.commit("mixed policy update")
                 receipt = self.receipt(source, self.merge(source))
@@ -273,14 +276,26 @@ class ClassificationTests(unittest.TestCase):
                 self.assert_full(source, merge)
 
     def test_source_to_docs_and_docs_to_source_moves_require_full(self):
-        moves = (("src/runtime.cs", "docs/roadmap/docs-pr-ci.md"), ("docs/status/app-05-status.md", "src/moved.cs"))
-        for old, new in moves:
-            with self.subTest(old=old, new=new):
+        moves = (
+            ("src/runtime.cs", "docs/status/app-05-status.md", False),
+            ("src/runtime.cs", "docs/status/app-05-status.md", True),
+            ("docs/status/app-05-status.md", "src/moved.cs", False),
+        )
+        for old, new, overwrite in moves:
+            with self.subTest(old=old, new=new, overwrite=overwrite):
                 self.git("switch", "--detach", self.base)
-                self.git("mv", old, new)
+                base = self.base
+                if not overwrite and (self.repo / new).exists():
+                    # Exercise an actual rename into an eligible but absent name.
+                    self.git("rm", new)
+                    base = self.commit("base without rename destination")
+                (self.repo / new).parent.mkdir(parents=True, exist_ok=True)
+                if overwrite:
+                    self.git("mv", "-f", old, new)
+                else:
+                    self.git("mv", old, new)
                 source = self.commit("move")
-
-                self.assert_full(source, self.merge(source))
+                self.assert_full(source, self.merge(source, base=base), base=base)
 
     def test_empty_diff_requires_full(self):
         source = self.commit("empty")
