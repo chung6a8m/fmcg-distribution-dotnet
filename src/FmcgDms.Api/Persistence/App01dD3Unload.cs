@@ -162,8 +162,20 @@ public sealed partial class App01dCashierUnloadService
                     JOIN dbo.LedgerEffect e ON e.TenantId=l.TenantId AND e.BusinessSourceLineId=l.Id
                     WHERE s.TenantId=@Tenant AND s.TripId=@Trip AND e.LedgerKind='PHYSICAL_STOCK')
                 THEN 1 ELSE 0 END);
+            DECLARE @WarehouseCount int=(SELECT COUNT(*) FROM dbo.StockLocation
+                WHERE TenantId=@Tenant AND Kind='WAREHOUSE' AND IsActive=1);
+            DECLARE @HasRights bit=IIF(EXISTS(SELECT 1 FROM dbo.StockRight
+                WHERE TenantId=@Tenant AND TripId=@Trip),1,0);
+
+            -- With no rights, the zero handoff needs a warehouse anchor for its confirmed SKUs.
+            -- When more than one active warehouse exists, require one to hold every SKU's pool.
             SELECT w.Id FROM dbo.StockLocation w
             WHERE w.TenantId=@Tenant AND w.Kind='WAREHOUSE' AND w.IsActive=1
+                AND (@HasRights=1 OR @WarehouseCount=1 OR NOT EXISTS(
+                    SELECT 1 FROM dbo.AConfirmedLineSnapshot line
+                    WHERE line.TenantId=@Tenant AND line.TripId=@Trip
+                        AND NOT EXISTS(SELECT 1 FROM dbo.StockPool pool
+                            WHERE pool.TenantId=line.TenantId AND pool.StockLocationId=w.Id AND pool.SkuId=line.SkuId)))
                 AND NOT EXISTS(SELECT 1 FROM dbo.StockRight r WHERE r.TenantId=w.TenantId AND r.TripId=@Trip
                     AND (r.StockLocationId<>w.Id OR r.ConsumedBaseQuantity<>0 OR r.ReleasedBaseQuantity<>0));
             """, scope, tx, ct));

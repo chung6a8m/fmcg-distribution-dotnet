@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance', 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor')]
+    [ValidateSet('Start', 'Stop', 'Resume', 'Remove', 'NextDay', 'Verify', 'VerifyWorkspace', 'VerifyHandoff', 'VerifyField', 'VerifySettlement', 'VerifyFinance', 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor', 'VerifyDailyClose')]
     [string] $Action = 'Start',
     [ValidatePattern('^[a-f0-9]{32}$')]
     [string] $RunId,
@@ -85,7 +85,7 @@ try {
     $changes = git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { throw 'Cannot check source state.' }
     if ($changes) { $source += '+working-tree' }
-    if ($Action -in 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor') {
+    if ($Action -in 'VerifyAcceptance', 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor', 'VerifyDailyClose') {
         $evidenceTree = if (!$changes) {
             git rev-parse 'HEAD^{tree}'
             if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the evidence source tree.' }
@@ -115,7 +115,7 @@ try {
     if ($Action -eq 'VerifyFinance') { $sessionArgs[1] = 'VerifyFinance' }
     if ($Action -eq 'VerifyCloseReadiness') { $sessionArgs[1] = 'VerifyCloseReadiness' }
     if ($Action -eq 'VerifyCloseReadinessUpgrade') { $sessionArgs[1] = 'VerifyCloseReadinessUpgrade' }
-    if ($Action -in 'VerifyTripClosure', 'VerifyASuccessor') { $sessionArgs[1] = $Action }
+    if ($Action -in 'VerifyTripClosure', 'VerifyASuccessor', 'VerifyDailyClose') { $sessionArgs[1] = $Action }
     if ($ASuccessor) { $sessionArgs += 'ASuccessor' }
     elseif ($TripClosure) { $sessionArgs += 'TripClosure' }
     elseif ($CloseReadiness) { $sessionArgs += 'CloseReadiness' }
@@ -126,7 +126,7 @@ finally {
     if ($Action -eq 'VerifyAcceptance') {
         [Environment]::SetEnvironmentVariable('APP03_ACCEPTANCE_TREE', $previousAcceptanceTree, 'Process')
     }
-    if ($Action -in 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor') {
+    if ($Action -in 'VerifyCloseReadiness', 'VerifyCloseReadinessUpgrade', 'VerifyTripClosure', 'VerifyASuccessor', 'VerifyDailyClose') {
         [Environment]::SetEnvironmentVariable('APP05_EVIDENCE_TREE', $previousApp05EvidenceTree, 'Process')
     }
     Pop-Location
