@@ -7,6 +7,13 @@ internal static class App02c5Routes
 {
     public static void Map(WebApplication app, bool app03Workspace)
     {
+        app.MapGet("/api/synthetic/app02c5/ar/orders/{orderId:guid}/access", async (Guid orderId,
+            HttpContext context, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(new { allowed = await service.CanOpenOrderArC5(user, orderId, ct) });
+        }).RequireAuthorization("SyntheticSales");
+
         app.MapGet("/api/synthetic/app02c5/ar", async (string? asOf, Guid? customerId, Guid? orderId,
             Guid? deliveryId, DateOnly? due, bool? overdue, bool? download, Guid? orderLineId,
             HttpContext context, ClaimsPrincipal user, App01a2CommandService service, CancellationToken ct) =>

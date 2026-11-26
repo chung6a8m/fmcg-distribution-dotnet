@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const app03 = '/api/synthetic/app03'
 const c2 = '/api/synthetic/app02c2'
+const c5 = '/api/synthetic/app02c5'
 const tripA = '11111111-1111-1111-1111-111111111111'
 const tripB = '22222222-2222-2222-2222-222222222222'
 const tripPeer = '33333333-3333-3333-3333-333333333333'
@@ -11,7 +12,7 @@ const pendingId = '55555555-5555-5555-5555-555555555555'
 test.use({ serviceWorkers: 'block' })
 
 async function mockWorkspace(page: Page) {
-  const state = { revoked: false, noTrips: false, withoutTripA: false,
+  const state = { revoked: false, noTrips: false, withoutTripA: false, successorArAssignment: false,
     peerArFilters: [] as string[], orderFilters: [] as string[], loadLookups: [] as string[],
     loadRights: [] as object[] }
   await page.route('**/health/live', route => route.fulfill({ json: {
@@ -31,7 +32,10 @@ async function mockWorkspace(page: Page) {
     }
     if (path === c2 + '/session') return route.fulfill({ json: identity })
     if (path === c2 + '/orders') return route.fulfill({ json: peer ? [] : [{ id: orderA, trip: 'Chuyến A' }] })
-    if (path === '/api/synthetic/app02c5/ar') {
+    if (path === `${c5}/ar/orders/${orderA}/access`) {
+      return route.fulfill({ json: { allowed: !peer && !state.noTrips && (!state.withoutTripA || state.successorArAssignment) } })
+    }
+    if (path === c5 + '/ar') {
       const filter = url.searchParams.get('orderId') ?? ''
       if (peer) state.peerArFilters.push(filter)
       else state.orderFilters.push(filter)
@@ -168,6 +172,25 @@ test('APP-03 strips another identity’s AR history on Back and Forward', async 
   await expect(order).toHaveValue('')
   expect(state.orderFilters.length).toBeGreaterThan(0)
   expect(state.orderFilters.every(filter => filter === '')).toBe(true)
+})
+
+test('APP-03 keeps the AR order filter for a Sales writer assigned only to its successor', async ({ page }) => {
+  const state = await mockWorkspace(page)
+  state.withoutTripA = true
+  state.successorArAssignment = true
+  await page.goto('/work/ar?order=' + orderA)
+  await login(page, 'source')
+
+  await expect(page.getByLabel('Mã đơn A')).toHaveValue(orderA)
+  await expect(page).toHaveURL(new RegExp('order=' + orderA))
+  await expect(page.getByText('Chưa có bằng chứng giao hàng trong phạm vi này.')).toBeVisible()
+  expect(state.orderFilters).toEqual([orderA])
+
+  state.successorArAssignment = false
+  await page.reload()
+  await expect(page.getByLabel('Mã đơn A')).toHaveValue('')
+  await expect(page).not.toHaveURL(new RegExp(orderA))
+  await expect.poll(() => state.orderFilters).toEqual([orderA, ''])
 })
 
 test('APP-03 keeps a stale order link scoped until Warehouse opens other work', async ({ page }) => {

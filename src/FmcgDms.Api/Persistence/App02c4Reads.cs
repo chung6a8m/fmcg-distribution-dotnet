@@ -82,7 +82,8 @@ public sealed partial class App01a2CommandService
             var lines = (await db.QueryAsync<C4WorkspaceLine>(Sql($"""
             SELECT l.Id,o.Id AS OrderId,k.Code AS Sku,p.BaseUom,c.Name AS Customer,adr.Address AS ShipTo,
                 COALESCE(am.Version,1) AS ShipToVersion,l.LoadedBaseQuantity AS Loaded,d.Delivered,
-                CASE WHEN @Settlement=1 AND t.Status NOT IN ('PREPARED','IN_PROGRESS') THEN 0
+                CASE WHEN (@Settlement=1 AND t.Status NOT IN ('PREPARED','IN_PROGRESS'))
+                    {(successor ? $"OR (successorRight.BindingId IS NOT NULL AND t.BusinessDate<>{LotBusinessDate})" : "")} THEN 0
                     ELSE l.LoadedBaseQuantity-d.Delivered END AS Available,
                 r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held,
                 {(successor ? "origin.Code" : "CAST(NULL AS nvarchar(32))")} AS OriginTrip

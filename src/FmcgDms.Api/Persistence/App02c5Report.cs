@@ -35,6 +35,10 @@ public sealed record C5ArReport(DateTime AsOf, C5ArFilter Filter,
 
 public sealed partial class App01a2CommandService
 {
+    public Task<bool> CanOpenOrderArC5(ClaimsPrincipal principal, Guid orderId, CancellationToken ct) =>
+        WithC4Authority(principal, null, (db, tx, tenant, actor) => db.ExecuteScalarAsync<bool>(
+            Sql(C5OrderAccessSql(connections.UsesApp05Successor), new { Tenant = tenant, Actor = actor, OrderId = orderId }, tx, ct)), ct);
+
     public Task<C5ArReport?> ReceivablesC5(ClaimsPrincipal principal, DateTimeOffset? requestedCutoff,
         C5ArFilter filter, CancellationToken ct) =>
         WithC4Authority<C5ArReport?>(principal, null, async (db, tx, tenant, actor) =>
@@ -67,6 +71,24 @@ public sealed partial class App01a2CommandService
                 sum = sum.GetValueOrDefault() + (overdueOnly && row.Overdue != true ? 0 : balance);
         return sum;
     }
+
+    private static string C5OrderAccessSql(bool successor) => $$"""
+        SELECT CONVERT(bit,CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.C2OrderDraft o
+            JOIN dbo.C4DeliveryWriter w ON w.TenantId=o.TenantId AND w.TripId=o.TripId AND w.ActorId=@Actor
+            WHERE o.TenantId=@Tenant AND o.Id=@OrderId
+        ) {{(successor ? """
+        OR EXISTS (
+            SELECT 1 FROM dbo.AConfirmedLineSnapshot s
+            JOIN dbo.App05AExecutionRight successorRight ON successorRight.TenantId=s.TenantId
+                AND successorRight.OrderLineId=s.AOrderLineId AND successorRight.SkuId=s.SkuId
+                AND successorRight.OriginTripId=s.TripId AND successorRight.ConfirmSourceId=s.ConfirmBusinessSourceId
+            JOIN dbo.C4DeliveryWriter w ON w.TenantId=successorRight.TenantId
+                AND w.TripId=successorRight.DestinationTripId AND w.ActorId=@Actor
+            WHERE s.TenantId=@Tenant AND s.AOrderId=@OrderId
+        )
+        """ : "")}} THEN 1 ELSE 0 END);
+        """;
 
     private static string C5ReportSql(bool successor) => $"""
         SELECT e.ClientCommandId AS CommandId, o.Id AS OrderId, s.AOrderLineId AS OrderLineId, c.Id AS CustomerId,

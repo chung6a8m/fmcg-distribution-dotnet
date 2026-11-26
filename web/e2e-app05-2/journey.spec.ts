@@ -674,6 +674,13 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const deliveryInput = {
     commandId: crypto.randomUUID(), tripId: first, manifestLineId: line.id, shipToVersion: line.shipToVersion, quantity: 1,
   }
+  const staleInput = { ...deliveryInput, commandId: crypto.randomUUID() }
+  await checkpoint('successor-delivery-stale', { tripId: first, commandId: staleInput.commandId })
+  expect(await get<{ id: string; available: string }[]>(request, c4 + '/trips/' + first + '/lines', 'SOURCE'))
+    .toContainEqual(expect.objectContaining({ id: line.id, available: '0.000' }))
+  const stale = await request.post(c4 + '/deliver', { headers: auth('SOURCE'), data: staleInput })
+  expect(await stale.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'TRIP_NOT_ELIGIBLE' })
+  await checkpoint('successor-delivery-current')
   expect((await request.post(c4 + '/deliver', { headers: auth('RECEIVER'), data: deliveryInput })).status()).toBe(403)
   const delivery = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', deliveryInput, 'SOURCE')
   expect(delivery.status).toBe('APPLIED')
@@ -691,6 +698,17 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     originTripId: mixedTrip, destinationTripId: first, bindingId: mixedBinding.bindingId,
     rightId: mixedRight, manifestLineId: line.id, deliverySourceId: delivery.sourceId, loadSourceId: loaded.sourceId,
   })
+  await checkpoint('successor-ar-destination-only')
+  const scoped = await open(context, 'SOURCE', 'ar?order=' + mixed.orderId + '&trip=' + mixedTrip)
+  await expect(scoped.getByLabel('Mã đơn A')).toHaveValue(mixed.orderId)
+  await expect(scoped.getByRole('region', { name: 'Kết quả báo cáo AR' }).getByText(/Nguồn đã đối soát 1\/1/)).toBeVisible()
+  expect(await get<{ sources: { sourceId: string }[] }>(request,
+    '/api/synthetic/app02c5/ar?orderId=' + mixed.orderId, 'SOURCE')).toMatchObject({
+    expected: 1, reconciled: 1, sources: [{ sourceId: delivery.sourceId }],
+  })
+  await scoped.close()
+  await checkpoint('successor-ar-origins-restored')
+
   const transferredRights = await get<{ id: string; warehouseHeld: string; originTrip?: string }[]>(
     request, c3 + '/trips/' + first + '/rights', 'RECEIVER')
   expect(transferredRights).toContainEqual(expect.objectContaining({

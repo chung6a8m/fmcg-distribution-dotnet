@@ -78,33 +78,27 @@ type ReportProps = { token: string; orderId: string; returnUrl?: string }
 
 export function ScopedArReport({ onCheckOrder, ...props }: ReportProps & { onCheckOrder: (id: string) => void }) {
   const { orderId, token } = props
-  const [checked, setChecked] = useState('')
-  const [error, setError] = useState('')
+  const [check, setCheck] = useState<{ token: string; orderId: string; error?: string }>()
   const publish = useEffectEvent((id: string) => onCheckOrder(id))
 
   useEffect(() => {
     if (!orderId) return
     let active = true
-    async function load<T>(api: string, path: string): Promise<T[]> {
-      const response = await requestSalesApi(api, token, path)
-      if (!response.ok) throw new HttpError(response.status)
-      return response.json() as Promise<T[]>
-    }
-    void Promise.all([
-      load<{ id: string; trip: string }>('/api/synthetic/app02c2', '/orders'),
-      load<{ code: string }>('/api/synthetic/app02c4', '/trips'),
-    ]).then(([orders, trips]) => {
-      if (!active) return
-      const order = orders.find(row => row.id === orderId)
-      const allowed = order && trips.some(trip => trip.code === order.trip)
-      publish(allowed ? orderId : '')
-      if (allowed) setChecked(orderId)
-    }).catch(error => { if (active) setError(readError(error)) })
+    requestSalesApi(api, token, `/ar/orders/${encodeURIComponent(orderId)}/access`)
+      .then(async response => {
+        if (!response.ok) throw new HttpError(response.status)
+        const { allowed } = await response.json() as { allowed: boolean }
+        if (!active) return
+        if (allowed === true) setCheck({ token, orderId })
+        publish(allowed === true ? orderId : '')
+      })
+      .catch(error => { if (active) setCheck({ token, orderId, error: readError(error) }) })
     return () => { active = false }
   }, [token, orderId])
 
-  if (!orderId || checked === orderId) return <ArReport {...props} />
-  if (error) return <p role="alert">{error}</p>
+  const current = check?.token === token && check.orderId === orderId ? check : undefined
+  if (current?.error) return <p role="alert">{current.error}</p>
+  if (!orderId || current) return <ArReport key={orderId} {...props} />
   return <p role="status">Đang kiểm tra phạm vi của đơn…</p>
 }
 

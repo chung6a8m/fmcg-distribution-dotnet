@@ -629,6 +629,24 @@ internal static class App05TripClosureEvidence
                 await peer.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM dbo.App05ASuccessorReserve;", cancellationToken: ct)));
             await Acknowledge("reserve-after");
 
+            if (!await Wait("successor-delivery-stale", exited)) return false;
+            var stale = await Read<SuccessorStaleDelivery>("successor-delivery-stale");
+            await SetSuccessorDate(stale.TripId, 26, 25);
+            await Acknowledge("successor-delivery-stale");
+            if (!await Wait("successor-delivery-current", exited)) return false;
+            Check("a fresh stale-day successor attempt creates no C.4 evidence", Primary, 0,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.C4DeliveryEvidence WHERE TenantId=@Tenant AND ClientCommandId=@CommandId;
+                    """, new { scope.Tenant, stale.CommandId }, cancellationToken: ct)));
+            await SetSuccessorDate(stale.TripId, 25, 26);
+            await Acknowledge("successor-delivery-current");
+
+            Task SetSuccessorDate(Guid id, int before, int after) => db.ExecuteAsync(new CommandDefinition(verify + """
+                UPDATE dbo.Trip SET BusinessDate=DATEFROMPARTS(2026,11,@After)
+                WHERE TenantId=@Tenant AND Id=@Id AND BusinessDate=DATEFROMPARTS(2026,11,@Before) AND Status='PREPARED';
+                IF @@ROWCOUNT<>1 THROW 51929,'Expected exactly the owned successor test trip.',1;
+                """, new { scope.Tenant, scope.Nonce, scope.Name, Id = id, Before = before, After = after }, cancellationToken: ct));
+
             if (!await Wait("successor-reserve-delivered", exited)) return false;
             var delivered = await Read<SuccessorReserveDelivery>("successor-reserve-delivered");
             var identity = new
@@ -669,6 +687,19 @@ internal static class App05TripClosureEvidence
                 new ReservePool(32, 27), await ReadPool(pool.SkuId));
             Check("successor load and delivery leave the contrast tenant unchanged", Peer, peerBefore, await EffectDigest(Peer));
             await Acknowledge("successor-reserve-delivered");
+
+            if (!await Wait("successor-ar-destination-only", exited)) return false;
+            await ChangeOriginDeliveryWriter(App03DayBootstrap.Actor, "app05-oracle-other-sales");
+            await Acknowledge("successor-ar-destination-only");
+            if (!await Wait("successor-ar-origins-restored", exited)) return false;
+            await ChangeOriginDeliveryWriter("app05-oracle-other-sales", App03DayBootstrap.Actor);
+            await Acknowledge("successor-ar-origins-restored");
+
+            Task ChangeOriginDeliveryWriter(string from, string to) => db.ExecuteAsync(new CommandDefinition(verify + """
+                UPDATE dbo.C4DeliveryWriter SET ActorId=@To
+                WHERE TenantId=@Tenant AND TripId=@OriginTripId AND ActorId=@From;
+                IF @@ROWCOUNT<>1 THROW 51930,'Expected exactly the owned origin test writer.',1;
+                """, new { scope.Tenant, scope.Nonce, scope.Name, delivered.OriginTripId, From = from, To = to }, cancellationToken: ct));
 
             if (!await Wait("successor-held-delivered", exited)) return false;
             var heldDelivery = await Read<SuccessorHeldDelivery>("successor-held-delivered");
@@ -867,6 +898,7 @@ internal static class App05TripClosureEvidence
         Guid MainBindingId, Guid MixedBindingId, Guid MixedRightId);
     private sealed record SuccessorReserveDelivery(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid OriginTripId,
         Guid DestinationTripId, Guid BindingId, Guid RightId, Guid ManifestLineId, Guid DeliverySourceId, Guid LoadSourceId);
+    private sealed record SuccessorStaleDelivery(Guid TripId, Guid CommandId);
     private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);
     private sealed record SuccessorFault(Guid CommandId);
     private sealed record SuccessorRevocation(Guid TripId, Guid CommandId);
