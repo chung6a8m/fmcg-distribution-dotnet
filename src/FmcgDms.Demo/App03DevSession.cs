@@ -107,6 +107,12 @@ internal sealed class App03DevSession
             await App05UpgradeEvidence.Run(root, source);
             return;
         }
+        if (operation == "VerifyDailyClose")
+        {
+            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-05.7 requires Windows LocalDB.");
+            await App05DailyCloseEvidence.Run(root, source);
+            return;
+        }
         if (operation is "VerifyTripClosure" or "VerifyASuccessor")
         {
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("APP-05.2 requires Windows LocalDB.");

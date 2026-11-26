@@ -80,7 +80,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
-| **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
+| **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `IMPLEMENTED / SYNTHETIC_DEV_VERIFIED_LOCAL` |
 
 Thứ tự mặc định: **.0 → .1 → .2 → .3 → .4a → .4b → .5 → .6 → .7**. Phân tích .1 có thể song song .0; merge code cần kết quả CI áp dụng trên source cuối. Không chờ .6 mới cung cấp UI tối thiểu: mỗi increment có đường thao tác dùng được cho phần mình sở hữu. .6 gom công việc và tăng khả năng phục hồi, không xây lại màn đã có.
 
@@ -368,13 +368,9 @@ Bằng chứng APP-05.6 áp dụng cho synthetic DEV. APP-05.7 sở hữu nghi�
 
 ### APP-05.7 — Nghiệm thu ca tích hợp
 
-**Files:** `src/FmcgDms.Demo/App03AcceptanceEvidence.cs`, `App03AcceptanceOracle.cs`, `App03DevSessionEvidence.cs`, `App03SettlementVehicleEvidence.cs`, `web/e2e-app03-9/journey.spec.ts` để tái sử dụng; thêm `App05DailyCloseEvidence.cs`/oracle độc lập, mở rộng `web/e2e-app05/journey.spec.ts` và config APP-05; `scripts/Run-App03Dev.ps1` hoặc launcher riêng nếu việc mở rộng action làm hợp đồng khó dùng. Bổ sung hướng dẫn/biên nhận `docs/roadmap/app-05-7-acceptance.md` khi có execution thật.
+Runner `VerifyDailyClose` chạy một ca qua ngày 23–24/11 trên một cặp LocalDB theo nonce, gồm đóng chuyến có việc tồn, chuyến sạch, chuyến bị chặn, zero-manifest và chuyến chưa sử dụng. Ngày hai dùng browser context mới, khôi phục lệnh cũ và ghi giao tiếp từ nguồn Confirm. SQL đối chiếu nguồn, số dư, giá vốn, phải thu, cutoff D.4, lô, quyền giữ, biên bản và tenant đối chứng.
 
-- [ ] Công bố manifest fixture/expected và ma trận mục 7 trước run. Thêm action runner rõ tên, output và cleanup; tên dự kiến `VerifyDailyClose`, **chưa tồn tại tại baseline**, nên chưa đưa vào lệnh copy-run trước khi implement.
-- [ ] Chạy trực tiếp một ca trên laptop và một ca tự động UI→API→SQL trên cùng cặp DB qua hai ngày. Bao phủ clean, carry-forward, blocked, zero-manifest và unused Trip; phiên có lịch sử từ trước upgrade và browser mới.
-- [ ] Đối chiếu SQL độc lập expected/actual/diff theo source, lượng, tiền, lot/right generation, lịch sử closure và tenant đối chứng; không lấy response của chính command làm oracle.
-- [ ] Chạy F09 All và gate áp dụng trên source cuối, cộng kiểm mới của APP-05; ghi local/CI/merge/operator riêng. Nếu CI chỉ chạy tập con, nêu rõ; không đổi tên local thành hosted CI hoặc tái dùng PASS từ source cũ.
-- [ ] Bàn giao đường chạy, giới hạn, run/source/tree, artifacts/hashes và hành động Remove an toàn. Cập nhật bảng trạng thái cùng PR có evidence; commit đề xuất: `test: verify daily close and next-day fulfillment journey`.
+[Manifest fixture](app-05-7-fixture.json) và [hướng dẫn, biên nhận local](app-05-7-acceptance.md) ghi các checkpoint và hash. CI thêm runner tự động vào job `app03` cùng các bài hồi quy hiện hành. F09 All và hai thao tác trên Edge có biên nhận chạy local. Owner tự thao tác toàn ca giữ trạng thái `NOT_RUN`.
 
 ## 6. Fixture và các số phải đối chiếu
 
@@ -436,8 +432,8 @@ npm --prefix web run test:dependencies
 npm --prefix web run test:pwa-build
 ```
 
-Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số PASS. Chọn test/runners theo rủi ro và file thay đổi, giữ gate repo bắt buộc; .7 chạy acceptance mới và hồi quy cuối. Playwright business integration cần launcher/API/SQL thực tương ứng, không chỉ `npm test` hoặc browser fixture mock. Chưa có `VerifyDailyClose` ở baseline; PR sở hữu phải bổ sung và ghi cách dùng trước khi công bố lệnh mới.
+Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số PASS. Chọn test/runners theo rủi ro và file thay đổi, giữ gate repo bắt buộc; .7 chạy acceptance mới và hồi quy cuối. Playwright business integration cần launcher/API/SQL thực tương ứng, không chỉ `npm test` hoặc browser fixture mock. Lệnh `VerifyDailyClose` thuộc APP-05.7 và có hướng dẫn chạy trong biên nhận riêng.
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-Increment hiện tại là **APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng**. APP-05.4a đã merge qua PR #155. PR #157 đã đưa bộ lọc AR theo dòng Confirm lên `main` tại `5ed82e7`. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7. [PR báo cáo AR theo dòng Confirm](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/157).
+Increment **APP-05.7** ghi nghiệm thu tích hợp synthetic DEV hai ngày. Ca do Owner tự thao tác và các mốc tenant, Pilot, PREPROD hoặc vận hành thực tế theo đúng các gate ở roadmap. [Biên nhận APP-05.7](app-05-7-acceptance.md).

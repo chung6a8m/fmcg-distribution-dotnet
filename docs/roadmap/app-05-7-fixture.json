@@ -1,0 +1,61 @@
+{
+  "version": "APP-05.7-DEV-v1",
+  "businessDates": ["2026-11-23", "2026-11-24"],
+  "timezone": "Asia/Bangkok",
+  "tenant": "tenant-a",
+  "contrastTenant": "tenant-b",
+  "main": {
+    "originTrip": "DEV-20261123-A",
+    "successorTrip": "DEV-20261124-A",
+    "sku": "DAY-A-EA",
+    "lot": "DAY-A-ORIGIN",
+    "customer": "DAY-A-DEV",
+    "opening": { "mainEA": 60, "mainVND": 180000, "heldEA": 0, "vehicleEA": 0 },
+    "confirmedEA": 40,
+    "unitPriceVND": 10000,
+    "unitCostVND": 3000,
+    "termsDays": 7,
+    "dayOne": {
+      "reservedEA": 40, "loadedEA": 40, "deliveredEA": 25, "returnedEA": 15,
+      "mainEA": 35, "mainVND": 105000, "heldEA": 15, "vehicleEA": 0,
+      "deliveryArVND": 250000, "due": "2026-11-30", "totalCogsVND": 75000,
+      "closure": "CLOSED_WITH_OPEN_CASES", "workAtClose": 2
+    },
+    "dayTwo": {
+      "transferredEA": 15, "loadedEA": 15, "deliveredEA": 15,
+      "mainEA": 20, "mainVND": 60000, "heldEA": 0, "vehicleEA": 0,
+      "deliveryArVND": 150000, "totalArVND": 400000, "due": "2026-12-01", "totalCogsVND": 120000,
+      "workAtClose": 2, "currentOpenWork": 0
+    }
+  },
+  "clean": {
+    "trip": "DEV-20261123-B", "sku": "Z-REFUND-EA", "customer": "C2-FIXTURE",
+    "loadedEA": 1, "deliveredEA": 1, "dayTwoClosure": "CLOSED", "workAtClose": 0
+  },
+  "zeroManifest": {
+    "originTrip": "DEV-20261123-Z", "successorTrip": "DEV-20261124-B",
+    "sku": "Z-FIELD-EA", "customer": "C2-FIXTURE",
+    "confirmedEA": 5, "dayOneReservedEA": 0, "dayOneManifestLines": 0,
+    "dayTwoReservedEA": 5, "dayTwoDeliveredEA": 5
+  },
+  "unusedTrip": "DEV-20261123-U",
+  "cases": {
+    "integrated": ["DC-01", "DC-02", "DC-04", "DC-07", "DC-11", "DC-12", "DC-15", "DC-16"],
+    "existingVerifyASuccessor": ["DC-05", "DC-06", "DC-08", "DC-09", "DC-10"],
+    "shared": {
+      "DC-03": {
+        "dailyClose": "vehicle stock and missing assignment block close",
+        "verifyASuccessor": "pending custody, offer, intake and source drift block close"
+      },
+      "DC-13": {
+        "dailyClose": "completed work preserves the closing snapshot",
+        "verifyASuccessor": "reassignment writes an audit event and preserves the closing snapshot"
+      },
+      "DC-14": {
+        "dailyClose": "wrong tenant and actor cannot discover the receipt; tenant-b SQL image stays unchanged",
+        "verifyASuccessor": "cross-scope writes and replay are rejected"
+      }
+    }
+  },
+  "scope": "synthetic DEV"
+}
