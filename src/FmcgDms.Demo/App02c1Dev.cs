@@ -647,7 +647,8 @@ internal static class App02c1Dev
             if (acceptance is not null)
             {
                 await acceptance.ServeCheckpoints(browser, lifetime.Token);
-                await acceptance.Complete(browser.ExitCode, client, webUrl, tokenA, tokenB, Actor,
+                using var evidenceClient = App02c6Dev.CreateEvidenceClient();
+                await acceptance.Complete(browser.ExitCode, evidenceClient, webUrl, tokenA, tokenB, Actor,
                     Token(key, "tenant-a", ["sales", "case_checker"], App02c6Dev.Checker),
                     Token(key, "tenant-a", ["system_admin"]),
                     Token(key, "tenant-a", ["warehouse"]),
