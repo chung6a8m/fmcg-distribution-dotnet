@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 from tools.verify_app00a_jobs import evaluate_needs
 
@@ -387,6 +388,20 @@ class NeedsValidationTests(unittest.TestCase):
                 receipt = classification_receipt("docs-only")
                 receipt["changes"].append(receipt["changes"][0] | invalid_fields)
                 self.assert_receipt_rejected(receipt, "changes", "docs-only")
+
+    def test_light_receipt_rejects_control_paths_even_if_added_to_allowlist(self):
+        from tools import classify_app00a_pr as classifier
+
+        for path in ("tools/classify_app00a_pr.py", "tools/verify_app00a_jobs.py",
+                     ".github/workflows/app00a.yml", "AGENTS.md",
+                     "docs/roadmap/docs-pr-ci.md", "docs/status/agents.md",
+                     "docs/status/policy.json"):
+            with self.subTest(path=path):
+                receipt = classification_receipt("docs-only")
+                receipt["changes"][0]["path"] = path
+                with patch.object(classifier, "ALLOWED_DOC_PATHS",
+                                  classifier.ALLOWED_DOC_PATHS | {path}):
+                    self.assert_receipt_rejected(receipt, "changes", "docs-only")
 
     def test_full_receipt_rejects_malformed_fallback_fields(self):
         for field, value in (

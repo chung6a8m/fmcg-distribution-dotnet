@@ -40,8 +40,14 @@ def is_docs_only_change(change) -> bool:
         return False
     if any(not isinstance(value, str) for value in change.values()):
         return False
+    path = change["path"]
+    # Independent category fence: an accidental allowlist entry must not let
+    # a classifier, gate, workflow, authority or instruction exempt itself.
+    # This is NOT a wildcard allowlist; exact membership is still mandatory.
     return (
-        change["path"] in ALLOWED_DOC_PATHS
+        path in ALLOWED_DOC_PATHS
+        and re.fullmatch(r"docs/(?:status|receipts)/[a-z0-9][a-z0-9-]*\.md", path) is not None
+        and path.rsplit("/", 1)[-1] != "agents.md"
         and _PROSE_MODES.get(change["status"]) == (change["old_mode"], change["new_mode"])
     )
 
@@ -134,9 +140,18 @@ def _verify_blobs(repo, object_ids):
             raise _ComparisonUnavailable("prose_blob_unavailable")
 
         digest = sha1(b"blob " + size + b"\0", usedforsecurity=False)
-        digest.update(output[start:end])
+        content = output[start:end]
+        digest.update(content)
         if digest.hexdigest().encode("ascii") != oid:
             raise _ComparisonUnavailable("prose_blob_unavailable")
+        # Regular Git mode is not proof of a text document. Check both sides
+        # without parsing Markdown as instructions or logging its contents.
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise _ComparisonUnavailable("prose_blob_not_text") from error
+        if b"\0" in content:
+            raise _ComparisonUnavailable("prose_blob_not_text")
         offset = end + 1
     if offset != len(output):
         raise _ComparisonUnavailable("prose_blob_unavailable")

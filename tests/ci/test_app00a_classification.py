@@ -124,6 +124,63 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(receipt["mode"], "docs-only", receipt)
         self.assertCountEqual([change["path"] for change in receipt["changes"]], paths)
 
+    def test_receipt_only_modification_can_be_light(self):
+        self.write("docs/receipts/app-05-receipts.md")
+        source = self.commit("receipt only")
+        receipt = self.receipt(source, self.merge(source))
+        self.assertEqual(receipt["mode"], "docs-only", receipt)
+        self.assertEqual([change["path"] for change in receipt["changes"]],
+                         ["docs/receipts/app-05-receipts.md"])
+
+    def test_existing_control_files_cannot_self_admit_through_allowlist(self):
+        from tools import classify_app00a_pr as classifier
+
+        paths = ("tools/classify_app00a_pr.py", "tools/verify_app00a_jobs.py",
+                 ".github/workflows/app00a.yml", "AGENTS.md",
+                 "docs/roadmap/docs-pr-ci.md", "docs/status/agents.md",
+                 "docs/status/policy.json")
+        for path in paths:
+            self.write(path, "existing control\n")
+        self.base = self.commit("base with existing control files")
+        for path in paths:
+            with self.subTest(path=path):
+                self.git("switch", "--detach", self.base)
+                self.write(path, "changed existing control\n")
+                source = self.commit("control modification")
+                workflow = self.merge(source)
+                with patch.object(classifier, "ALLOWED_DOC_PATHS",
+                                  classifier.ALLOWED_DOC_PATHS | {path}):
+                    receipt = classifier.classify(
+                        self.repo, event_name="pull_request", base_sha=self.base,
+                        source_head_sha=source, workflow_sha=workflow)
+                self.assertEqual(receipt["mode"], "full", receipt)
+                self.assertEqual(receipt["reason"], "change_not_allowlisted_prose")
+                self.assertEqual(receipt["changes"], [])
+                self.assertEqual(receipt["diagnostics"]["offending_count"], 2)
+                self.assertEqual(
+                    {(item["phase"], item["status"], item["old_mode"], item["new_mode"])
+                     for item in receipt["diagnostics"]["offenders"]},
+                    {("whole-pr", "M", "100644", "100644"),
+                     ("integration", "M", "100644", "100644")})
+
+    def test_non_text_old_or_new_candidate_blob_requires_full(self):
+        name = "docs/status/app-05-status.md"
+        for data in (b"invalid UTF-8: \xff\n", b"embedded NUL: \0\n"):
+            for side in ("old", "new"):
+                with self.subTest(data=data, side=side):
+                    self.git("switch", "--detach", self.base)
+                    base = self.base
+                    (self.repo / name).write_bytes(data)
+                    if side == "old":
+                        base = self.commit("non-text historical blob")
+                        self.write(name, "valid prose\n")
+                    source = self.commit("candidate modification")
+                    receipt = self.receipt(source, self.merge(source, base=base), base=base)
+                    self.assertEqual(receipt["mode"], "full", receipt)
+                    self.assertEqual(receipt["reason"], "prose_blob_not_text")
+                    self.assertEqual(receipt["changes"], [])
+                    self.assertEqual(receipt["diagnostics"]["phase"], "blob-verification")
+
     def test_v1_authority_paths_and_policy_edits_require_full(self):
         from tools.classify_app00a_pr import path_preview
         paths = ["docs/roadmap/app-00a-parallel-ci.md","docs/roadmap/app-00a-build-cache.md","docs/roadmap/localdb-ci-bootstrap.md","docs/roadmap/pr-ci-concurrency.md","docs/roadmap/docs-pr-ci.md","docs/superpowers/plans/2026-11-16-issue-13-pwa-external-update.md","docs/superpowers/plans/2026-11-20-ui01-runtime-foundations.md","docs/superpowers/plans/2026-11-22-app-02d2.md","docs/superpowers/plans/2026-11-22-app-02d3.md","docs/superpowers/plans/2026-11-24-app00a-parallel-ci.md","docs/superpowers/plans/2026-11-25-app00a-build-cache.md","docs/superpowers/plans/2026-11-25-app03-read-diagnostics.md","docs/superpowers/plans/2026-11-25-docs-pr-ci.md","docs/superpowers/plans/2026-11-25-localdb-bootstrap.md","docs/superpowers/plans/2026-11-25-pr-ci-concurrency.md","README.md","AGENTS.md","docs/roadmap/app-05.md","tools/classify_app00a_pr.py","tools/verify_app00a_jobs.py",".github/workflows/app00a.yml"]
