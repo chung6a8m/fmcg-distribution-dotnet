@@ -77,7 +77,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.2 — Đóng chuyến** | .1 | CLOSED/CLOSED_WITH_OPEN_CASES nguyên tử, gồm chuyến có đơn nhưng chưa nạp; biên bản và replay | `MERGED / LOCAL_DEV_VERIFIED / PR_CI_INCOMPLETE` (#153) |
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `MERGED / MAIN_CI_VERIFIED` (#154) |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `MERGED / MAIN_CI_VERIFIED` |
-| **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_CI_PENDING` |
+| **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
 | **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `NOT_STARTED` |
 | **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
@@ -314,7 +314,8 @@ Review PR #159 bổ sung kiểm quyền mở báo cáo qua chuyến đích và �
 - PR #160 source `7335a9433c256a4a73ab2a57da8a3c25036e7274` đạt 10/10 workflow và 25/25 checks, APP-00A lần 4. Ba lượt trước dừng ở C.6 khi client HTTP chạm 3 giây trước khi đủ bằng chứng. Lượt cuối chạy lại cùng source và giữ đầy đủ gate. Merge `0f3f47150bb77f5ed6c2765c2385570b455a94fa`. [CI PR #160](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45731497374).
 - Artifact kiểm chứng từ test merge `03c02e1eeac1eede4e1958877e84e52c931d5579` có cùng tree `546d533ec9b117ebffafaad0380995c9ade70191` với merge #160. Lượt `c3016cf2a4774939830a36e39cc69356` đạt Chromium 4/4 và SQL 118/118, không có chênh lệch. Đã đối chiếu 40/25/15, 5/4/3/1/2, lần giao cạnh tranh trên cùng manifest, nguồn lot/cost, tiền lũy kế, thời hạn công nợ theo ngày giao, công việc A và tenant đối chứng. SHA256 `run.json` `58912A8F9ED468EA9278628F30A8432FE2F882042FCC093760F3B3B7711D5BEE`.
 - C.6 chạy lại local trên đúng source PR #160, lượt `993806f3592145eea7eba87dc88079c2` đạt 15/15 ca. SHA256 `sql-review.json` `4ED516127F9651C33BECD458DF55B6D63659077D1EA1E13570528A4FAE46B80D`. Kiểm chứng local và retest hosted ghi riêng.
-- CI trên merge #160 đang chạy. [CI main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45736671361).
+- Job APP-03 trên đúng merge #160 đã đạt. Artifact `5b37701a6d3c433b8062f0581543587a` ghi source `0f3f47150bb77f5ed6c2765c2385570b455a94fa`, Chromium 4/4 và SQL 118/118, không có chênh lệch. SHA256 `run.json` `F3D06A7F486457B3041F0BEC30EF1623F129366AD1E62AEAEF6CB354AA52D303`.
+- Gate tổng trên `main` chạy riêng. Lượt 1 và 2 thiếu bằng chứng C.6 sau timeout HTTP 3 giây. Link CI ghi các lượt chạy lại trên cùng commit. [CI main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45736671361).
 
 Phạm vi nghiệm thu là synthetic DEV cho chuyến kế nhiệm hợp lệ. Phần đã xếp lên chuyến kế nhiệm quá ngày cần đường phục hồi có nguồn riêng. Báo cáo D.4 và công việc kế toán giữ mốc xác nhận độc lập. Triển khai tenant, Pilot và nghiệm thu vận hành theo mốc riêng.
 
