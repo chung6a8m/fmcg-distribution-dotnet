@@ -60,7 +60,7 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Id = id }, tx, ct));
 
     private static async Task<IReadOnlyList<F03Pick>> PlanLotHold(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid orderLine, Guid sku, Guid location, decimal quantity, bool returns, CancellationToken ct)
+        string tenant, Guid orderLine, Guid sku, Guid location, decimal quantity, bool returns, CancellationToken ct, bool successor = false)
     {
         await App02a3Sql.Lock(db, tx, $"DEVF03:RESERVE:{sku:N}:{location:N}", ct);
         decimal? step = await db.QuerySingleOrDefaultAsync<decimal?>(Sql("""
@@ -83,6 +83,7 @@ public sealed partial class App01a2CommandService
                 SELECT CONVERT(decimal(28,3),COALESCE(SUM(h.Quantity),0)) AS Quantity FROM dbo.F03LotHold h
                 JOIN dbo.StockRight r ON r.TenantId=h.TenantId AND r.Id=h.StockRightId
                 WHERE h.TenantId=o.TenantId AND h.LotId=o.LotId AND r.StockLocationId=o.LocationId
+                    {(successor ? "AND NOT EXISTS(SELECT 1 FROM dbo.App05AHeldExecution e WHERE e.TenantId=h.TenantId AND e.RightId=h.StockRightId)" : "")}
             ) used
             CROSS APPLY ({releases}) released
             WHERE o.TenantId=@Tenant AND o.LocationId=@Location AND l.SkuId=@Sku

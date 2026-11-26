@@ -512,7 +512,7 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
                 if (connections.UsesDevF03 && await IsLotTracked(db, tx, tenant, line.Id, byRight: false, token))
                 {
                     lotPicks = await PlanLotHold(db, tx, tenant, line.Id, line.SkuId,
-                        request.StockLocationId, request.BaseQuantity, connections.UsesDevF05, token);
+                        request.StockLocationId, request.BaseQuantity, connections.UsesDevF05, token, connections.UsesApp05Successor);
                     if (lotPicks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
                 }
                 string? stockError = await AllocateStock(db, tx, tenant,
@@ -527,13 +527,13 @@ public sealed partial class App01a2CommandService(TenantConnections connections)
 
     private static async Task<(Guid SourceId, Guid RightId)> RecordAStockRight(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid commandId, string sourceNumber, Guid customer, Guid trip,
-        Guid orderLine, Guid sku, Guid warehouse, decimal quantity, IReadOnlyList<F03Pick>? lotPicks, CancellationToken token)
+        Guid orderLine, Guid sku, Guid warehouse, decimal quantity, IReadOnlyList<F03Pick>? lotPicks, CancellationToken token, Guid? executionRightId = null)
     {
         Guid source = await AddSource(db, tx, tenant, commandId, StockSourceKind,
             sourceNumber, actor, customer, trip, token);
         Guid sourceLine = await AddLine(db, tx, tenant, source, 1,
             sku, quantity, null, token);
-        Guid rightId = Guid.NewGuid();
+        Guid rightId = executionRightId ?? Guid.NewGuid();
         await db.ExecuteAsync(Sql("""
             INSERT dbo.StockRight(Id,TenantId,TripId,StockLocationId,SkuId,
                 BusinessSourceLineId,RightKind,GrantedBaseQuantity)

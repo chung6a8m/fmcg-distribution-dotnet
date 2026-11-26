@@ -37,10 +37,26 @@ public sealed partial class App01a2CommandService
     public Task<C3RightView[]> LoadRightsC3(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         ReadC3(principal, trip, async (db, tx, tenant, _) =>
         {
-            if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
-                || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
+            var tripScope = await FindTrip(db, tx, tenant, trip, ct);
+            if (!IsPreparedTrip(tripScope) || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
             var rights = (await EligibleC3Rights(db, tx, tenant, [trip], null, ct, connections.UsesApp05Successor)).ToArray();
-            return connections.UsesDevF03 ? await WithEligibleC3Lots(db, tx, tenant, rights, ct) : rights;
+            if (connections.UsesDevF03) rights = await WithEligibleC3Lots(db, tx, tenant, rights, ct);
+            if (!connections.UsesApp05Successor) return rights;
+            var pending = await PendingHeldExecution(db, tx, tenant, trip, null, ct);
+            var held = new List<C3RightView>();
+            foreach (var candidate in pending)
+            {
+                var view = candidate.ToView();
+                if (connections.UsesDevF03 && await IsLotTracked(db, tx, tenant, candidate.OriginalRightId, byRight: true, ct))
+                {
+                    var availability = await HeldExecutionLots(db, tx, tenant, candidate.Id, ct);
+                    var picks = availability.Where(lot => lot.ExpiresOn >= tripScope!.BusinessDate.Date)
+                        .Select(lot => lot.ToView()).ToArray();
+                    view = view with { Lots = picks, EligibleWarehouseHeld = picks.Sum(lot => lot.Quantity) };
+                }
+                held.Add(view);
+            }
+            return [..rights, ..held];
         }, ct);
 
     private static async Task<C3RightView[]> WithEligibleC3Lots(SqlConnection db, SqlTransaction tx, string tenant,

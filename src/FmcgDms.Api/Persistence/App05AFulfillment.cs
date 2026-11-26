@@ -41,7 +41,7 @@ internal static partial class App05CloseReadiness
                 var state = await ReadSuccessorState(db, tx, tenant, actor, tripId, source, ct);
                 return Results.Ok(new
                 {
-                    source.FollowUpId, source.Line.ConfirmSourceId, source.Line.Remaining, state.Revision,
+                    source.FollowUpId, source.Line.ConfirmSourceId, Remaining = source.CurrentRemaining, state.Revision,
                     Unheld = Unheld(source, state),
                     Unscheduled = source.Line.Remaining - state.Bindings.Sum(b => b.Quantity),
                     CanWrite = ops, state.Trips, state.Rights,
@@ -77,7 +77,7 @@ internal static partial class App05CloseReadiness
             });
     }
 
-    private sealed record SuccessorSource(ALine Line, Guid FollowUpId, DateTime BusinessDate, decimal Step);
+    private sealed record SuccessorSource(ALine Line, Guid FollowUpId, DateTime BusinessDate, decimal Step, decimal CurrentRemaining);
 
     private static async Task<SuccessorSource?> ReadSuccessorSource(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, Guid lineId, CancellationToken ct)
@@ -98,7 +98,12 @@ internal static partial class App05CloseReadiness
                 ON q.TenantId=a.TenantId AND q.DraftId=a.AOrderId AND q.LineNumber=a.LineNumber
             WHERE a.TenantId=@Tenant AND a.Id=@Line;
             """, new { Tenant = tenant, Line = lineId }, tx, ct));
-        return new(line, followUp.FollowUpId, snapshot.BusinessDate.ToDateTime(TimeOnly.MinValue), step ?? 0.001m);
+        decimal delivered = await db.ExecuteScalarAsync<decimal>(App02a3Sql.Cmd("""
+            SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery
+            WHERE TenantId=@Tenant AND AOrderLineId=@Line AND RightKind='A';
+            """, new { Tenant = tenant, Line = lineId }, tx, ct));
+        return new(line, followUp.FollowUpId, snapshot.BusinessDate.ToDateTime(TimeOnly.MinValue), step ?? 0.001m,
+            line.Confirmed - delivered);
     }
 
     private static async Task<SuccessorState> ReadSuccessorState(SqlConnection db, SqlTransaction tx,
@@ -148,7 +153,9 @@ internal static partial class App05CloseReadiness
         if (input.Quantity % source.Step != 0)
             return await Record(new { Code = "A_SUCCESSOR_QUANTITY_STEP" }, false);
 
-        // Serialize allocations of this pool before querying existing rights and holdings.
+        // Use the same backing-right lock as C.3 before reading the available generation.
+        if (transfer && input.OriginalRightId is Guid originRight)
+            await App01a2CommandService.LockHeldOriginRight(db, tx, tenant, originRight, ct);
         if (warehouse.HasValue)
             await App01a2CommandService.LockStockAllocation(db, tx, tenant, warehouse.Value, source.Line.SkuId, ct);
         var state = await ReadSuccessorState(db, tx, tenant, actor, trip, source, ct, warehouse: warehouse.HasValue);
@@ -190,7 +197,7 @@ internal static partial class App05CloseReadiness
         if (input.Quantity > right.Held || input.Quantity > binding.Unfilled)
             return await Record(new { Code = "A_HELD_QUANTITY_EXCEEDED" }, false);
         if (!await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant,
-            new(right.Warehouse, source.Line.SkuId), ct))
+            new(right.Warehouse, source.Line.SkuId), ct, successor: true))
             return await Record(new { Code = "MAIN_HELD_SOURCE_DRIFT" }, false);
 
         var allocation = await AllocateTransferLots(db, tx, tenant, source.Line, right, input.Quantity,
@@ -283,7 +290,7 @@ internal static partial class App05CloseReadiness
     private static Task<IEnumerable<TransferRight>> ReadTransferRights(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, ALine line, CancellationToken ct) => db.QueryAsync<TransferRight>(App02a3Sql.Cmd("""
         SELECT r.Id AS RightId,r.StockLocationId AS Warehouse,
-            r.GrantedBaseQuantity-r.ReleasedBaseQuantity-v.Loaded-x.NeverLoaded AS NeverLoaded,
+            r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized-v.Loaded-x.NeverLoaded AS NeverLoaded,
             v.Returned-x.Returned AS Returned
         FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
         JOIN dbo.StockLocation w ON w.TenantId=r.TenantId AND w.Id=r.StockLocationId AND w.Kind='WAREHOUSE' AND w.IsActive=1
@@ -292,11 +299,15 @@ internal static partial class App05CloseReadiness
             FROM dbo.TripManifestLine m LEFT JOIN dbo.D3TripUnloadLine u
                 ON u.TenantId=m.TenantId AND u.TripManifestLineId=m.Id
             WHERE m.TenantId=r.TenantId AND m.StockRightId=r.Id) v
-        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(NeverLoaded),0)) AS NeverLoaded,CONVERT(decimal(18,3),COALESCE(SUM(Returned),0)) AS Returned
-            FROM dbo.App05AHeldTransfer x WHERE x.TenantId=r.TenantId AND x.OriginalRightId=r.Id) x
+        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(NeverLoaded),0)) AS NeverLoaded,
+                CONVERT(decimal(18,3),COALESCE(SUM(Returned),0)) AS Returned,
+                CONVERT(decimal(18,3),COALESCE(SUM(CASE WHEN e.RightId IS NOT NULL THEN x.NeverLoaded+x.Returned END),0)) AS Materialized
+            FROM dbo.App05AHeldTransfer x LEFT JOIN dbo.App05AHeldExecution e
+                ON e.TenantId=x.TenantId AND e.RightId=x.SuccessorRightId
+            WHERE x.TenantId=r.TenantId AND x.OriginalRightId=r.Id) x
         WHERE a.TenantId=@Tenant AND a.AOrderLineId=@Line AND r.TripId=@Trip AND r.SkuId=@SkuId AND r.RightKind='A' AND r.Status='HELD'
             AND v.Loaded-v.Returned=r.ConsumedBaseQuantity
-            AND v.Loaded+x.NeverLoaded<=r.GrantedBaseQuantity-r.ReleasedBaseQuantity AND x.Returned<=v.Returned
+            AND v.Loaded+x.NeverLoaded<=r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized AND x.Returned<=v.Returned
         ORDER BY r.Id;
         """, new { Tenant = tenant, Trip = trip, Line = line.OrderLineId, line.SkuId }, tx, ct));
 }

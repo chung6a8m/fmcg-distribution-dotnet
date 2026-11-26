@@ -75,7 +75,9 @@ internal static partial class App05CloseReadiness
         if (successor)
         {
             var incoming = (await db.QueryAsync<Guid>(App02a3Sql.Cmd("""
-                SELECT BindingId FROM dbo.App05ASuccessor WHERE TenantId=@Tenant AND DestinationTripId=@Trip;
+                SELECT b.BindingId FROM dbo.App05ASuccessor b WHERE b.TenantId=@Tenant AND b.DestinationTripId=@Trip
+                    AND b.Quantity>(SELECT COALESCE(SUM(d.BaseQuantity),0) FROM dbo.SaleDelivery d
+                        WHERE d.TenantId=b.TenantId AND d.App05BindingId=b.BindingId AND d.TripId=b.DestinationTripId);
                 """, scope, tx, ct))).ToArray();
             if (incoming.Length > 0)
             {
@@ -169,7 +171,7 @@ internal static partial class App05CloseReadiness
         int provenPools = 0;
         foreach (var pool in mainPools)
         {
-            if (await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant, pool, ct))
+            if (await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant, pool, ct, successor))
                 provenPools++;
             else
                 blockers.Add(new("MAIN_HELD_SOURCE_DRIFT", D3, pool.Sku, "Đối chiếu lượng giữ và nguồn tồn kho MAIN", pool.Warehouse));

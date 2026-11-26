@@ -104,7 +104,8 @@ internal static partial class App03OwnerReport
             JOIN dbo.Sku k ON k.TenantId=r.TenantId AND k.Id=r.SkuId
             {{(successor ? """
                 CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(h.NeverLoaded+h.Returned),0)) AS Quantity
-                    FROM dbo.App05AHeldTransfer h WHERE h.TenantId=r.TenantId AND h.OriginalRightId=r.Id) transferred
+                    FROM dbo.App05AHeldTransfer h WHERE h.TenantId=r.TenantId AND h.OriginalRightId=r.Id
+                    AND NOT EXISTS(SELECT 1 FROM dbo.App05AHeldExecution e WHERE e.TenantId=h.TenantId AND e.RightId=h.SuccessorRightId)) transferred
                 """ : "")}}
             WHERE r.TenantId=@Tenant
             {{(successor ? """
@@ -115,6 +116,7 @@ internal static partial class App03OwnerReport
                 JOIN dbo.App05ASuccessor b ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
                 JOIN dbo.Trip t ON t.TenantId=b.TenantId AND t.Id=b.DestinationTripId
                 JOIN dbo.Sku k ON k.TenantId=b.TenantId AND k.Id=b.SkuId WHERE h.TenantId=@Tenant
+                    AND NOT EXISTS(SELECT 1 FROM dbo.App05AHeldExecution e WHERE e.TenantId=h.TenantId AND e.RightId=h.SuccessorRightId)
                 """ : "")}}
             UNION ALL
             SELECT 'ar-'+LOWER(d.RightKind),d.Unit,i.Id,d.Id,c.Name,
