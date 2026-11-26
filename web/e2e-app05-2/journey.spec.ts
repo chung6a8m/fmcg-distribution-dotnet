@@ -212,7 +212,7 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   const heldQuantity = process.env.APP05_SUCCESSOR_EVIDENCE ? 4 : 5
   await fixture.reserve(held, heldQuantity)
   const unreserved = await fixture.order(zero, 5)
-  const shared = process.env.APP05_SUCCESSOR_EVIDENCE ? await fixture.order(zero, 2, true) : undefined
+  const shared = process.env.APP05_SUCCESSOR_EVIDENCE ? await fixture.order(zero, 2, 'shared') : undefined
   const before = await read(request, zero)
   expect(before).toMatchObject({ state: 'BLOCKED', canClose: false })
   expect(before.aLines).toEqual(expect.arrayContaining([
@@ -829,4 +829,96 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     proposalId: created!.proposalId, lineId: held.orderLineId, confirmSourceId: held.confirmSourceId,
     commandId: submitted.commandId, followUpId: proposal.followUpId, reason: proposal.reason, revision: proposal.expectedRevision,
   })
+  const approvalPath = proposalPath + '/' + created!.proposalId + '/approve'
+  const approval = { commandId: crypto.randomUUID(), expectedRevision: proposal.expectedRevision }
+  const selfApproval = await request.post(approvalPath, { headers: auth('OPS'), data: approval })
+  expect(selfApproval.status()).toBe(409)
+  expect(await selfApproval.json()).toMatchObject({ code: 'A_CLOSURE_SELF_APPROVAL' })
+  expect((await request.post(approvalPath, { headers: auth('PEER_OPS'), data: approval })).status()).toBe(403)
+  const conflict = await request.post(approvalPath, { headers: auth('CLOSURE_CHECKER'), data: approval })
+  expect(conflict.status()).toBe(409)
+  expect(await conflict.json()).toMatchObject({ code: 'A_CLOSURE_SUCCESSOR_ACTIVE' })
+})
+
+test('approval closes an unheld portion and exact HELD generations without touching delivery accounts', async ({ context, request }) => {
+  const fixture = await setup(request)
+  const trip = fixture.trip('DEV-20261127-A')
+  const order = await fixture.order(trip, 4, 'approval')
+  await fixture.reserve(order, 3)
+  await fixture.load(trip, 2, 3)
+  const delivery = await fixture.deliver(trip, 1)
+  await fixture.unload(trip)
+  for (const work of (await read(request, trip)).work) {
+    const preview = await read(request, trip)
+    await post(request, app + '/' + trip + '/follow-ups', {
+      ...assignmentInput(work, preview.revision), dueAt: '2026-11-28T10:00:00+07:00',
+    }, 'OPS')
+  }
+  const closureResponse = await close(request, trip, closeInput((await read(request, trip)).revision))
+  expect(closureResponse.status(), await closureResponse.text()).toBe(200)
+  const original = (await history(request, trip)).closure
+
+  const path = app + '/' + trip + '/a-remainders/' + order.orderLineId + '/closure-proposals'
+  async function propose(quantity: string) {
+    const { scope } = await get<{ scope: { followUpId: string; revision: string } }>(request, path)
+    const proposal = await post<{ proposalId: string }>(request, path, {
+      commandId: crypto.randomUUID(), confirmSourceId: order.confirmSourceId, followUpId: scope.followUpId,
+      quantity, reason: 'Khách DEV chấp thuận dừng giao phần đã chỉ định', expectedRevision: scope.revision,
+    }, 'OPS')
+    return { id: proposal.proposalId, path: path + '/' + proposal.proposalId + '/approve',
+      data: { commandId: crypto.randomUUID(), expectedRevision: scope.revision } }
+  }
+  const first = await propose('2.000')
+  const stale = await propose('1.000')
+  await checkpoint('approval-before', { tripId: trip, lineId: order.orderLineId, deliverySourceId: delivery.sourceId })
+  const injection = await request.post(first.path, { headers: auth('CLOSURE_CHECKER'), data: { ...first.data, quantity: '3.000' } })
+  expect(injection.status()).toBe(400)
+  const approveFirst = () => post<{ sourceId: string; released: string }>(request, first.path, first.data, 'CLOSURE_CHECKER')
+  const [partial, repeated] = await Promise.all([approveFirst(), approveFirst()])
+  expect(repeated).toEqual(partial)
+  expect(partial).toMatchObject({ proposalId: first.id, status: 'APPROVED', quantity: '2.000', released: '1.000' })
+  const refusedStale = await request.post(stale.path, { headers: auth('CLOSURE_CHECKER'), data: stale.data })
+  expect(refusedStale.status()).toBe(409)
+  expect(await refusedStale.json()).toMatchObject({ code: 'A_CLOSURE_SCOPE_CHANGED' })
+  expect(await get(request, path)).toMatchObject({ scope: { remaining: '1.000', held: '1.000' } })
+  expect((await read(request, trip)).work).toContainEqual(expect.objectContaining({ sourceId: order.orderLineId }))
+  const almost = await propose('0.999')
+  const fractional = await post<{ sourceId: string; released: string }>(request, almost.path, almost.data, 'CLOSURE_CHECKER')
+  expect(fractional.released).toBe('0.999')
+  expect(await get(request, path)).toMatchObject({ scope: { remaining: '0.001', held: '0.001' } })
+  expect((await read(request, trip)).work).toContainEqual(expect.objectContaining({ sourceId: order.orderLineId }))
+  const last = await propose('0.001')
+  await checkpoint('approval-revoke', { tripId: trip })
+  expect((await request.post(last.path, { headers: auth('CLOSURE_CHECKER'), data: last.data })).status()).toBe(403)
+  await checkpoint('approval-restore', { tripId: trip })
+
+  const page = await open(context, 'CLOSURE_CHECKER', 'trip-close?trip=' + trip)
+  const work = page.locator('[data-source-id="' + order.orderLineId + '"]')
+  await work.getByRole('button', { name: 'Đề nghị đóng phần còn lại', exact: true }).click()
+  const row = work.locator('[data-proposal-id="' + last.id + '"]')
+  await row.getByRole('button', { name: 'Duyệt đề nghị', exact: true }).click()
+  let final: { sourceId: string; proposalId: string; commandId: string; released: string } | undefined
+  await page.route('**' + last.path, async route => {
+    const response = await route.fetch()
+    expect(response.status(), await response.text()).toBe(200)
+    final = await response.json()
+    await route.abort('failed')
+  }, { times: 1 })
+  const sent = page.waitForRequest(req => req.url().endsWith(last.path) && req.method() === 'POST')
+  await row.getByRole('button', { name: 'Xác nhận duyệt', exact: true }).click()
+  const submitted = (await sent).postDataJSON()
+  await work.getByRole('button', { name: 'Tra cứu kết quả duyệt', exact: true }).click()
+  const historical = page.locator('[data-proposal-id="' + last.id + '"]')
+  await expect(historical.getByText('Đã duyệt', { exact: true })).toBeVisible()
+  expect(final).toMatchObject({ proposalId: last.id, commandId: submitted.commandId, released: '0.001' })
+  expect(await post(request, last.path, submitted, 'CLOSURE_CHECKER')).toEqual(final)
+  const changed = await request.post(last.path, { headers: auth('CLOSURE_CHECKER'), data: {
+    ...submitted, expectedRevision: '0'.repeat(64),
+  } })
+  expect(changed.status()).toBe(409)
+  expect(await changed.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
+  expect(await get(request, path)).toMatchObject({ scope: { remaining: '0.000', held: '0.000' } })
+  expect((await read(request, trip)).work).not.toContainEqual(expect.objectContaining({ sourceId: order.orderLineId }))
+  expect((await history(request, trip)).closure).toEqual(original)
+  await checkpoint('approval-after', { firstSourceId: partial.sourceId, fractionalSourceId: fractional.sourceId, finalSourceId: final!.sourceId })
 })

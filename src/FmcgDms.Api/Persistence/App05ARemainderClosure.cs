@@ -17,14 +17,14 @@ internal static partial class App05CloseReadiness
 
     private sealed record ClosureProposal(Guid ProposalId, Guid CommandId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Quantity,
-        string Reason, string Maker, DateTimeOffset RecordedAt);
+        string Reason, string Maker, DateTimeOffset RecordedAt, byte[] SourceRevision);
 
     private sealed record ClosureProposalScope(Guid ConfirmSourceId, Guid FollowUpId, Guid SkuId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal QuantityStep,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Remaining,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Held,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal OnVehicle,
-        bool PendingDelivery, string Revision)
+        bool PendingDelivery, bool SuccessorActive, string Revision)
     {
         public bool CanPropose => Remaining > 0 && OnVehicle == 0 && !PendingDelivery;
     }
@@ -47,10 +47,22 @@ internal static partial class App05CloseReadiness
                 var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
                 if (scope is null) return Results.NotFound();
                 var proposals = await db.QueryAsync<ClosureProposal>(App02a3Sql.Cmd("""
-                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt FROM dbo.App05ARemainderClosureProposal
+                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,SourceRevision FROM dbo.App05ARemainderClosureProposal
                     WHERE TenantId=@Tenant AND TripId=@TripId AND OrderLineId=@LineId ORDER BY RecordedAt,ProposalId;
                     """, new { Tenant = tenant, TripId = tripId, LineId = lineId }, tx, ct));
-                return Results.Ok(new { Scope = scope, CanPropose = ops && scope.CanPropose, Proposals = proposals });
+                var approvals = (await db.QueryAsync<ClosureApproval>(App02a3Sql.Cmd("""
+                    SELECT a.ProposalId,a.SourceId,a.CommandId,a.Checker,a.Quantity,a.Released,a.ApprovedAt
+                    FROM dbo.App05ARemainderApproval a JOIN dbo.App05ARemainderClosureProposal p
+                        ON p.TenantId=a.TenantId AND p.ProposalId=a.ProposalId
+                    WHERE p.TenantId=@Tenant AND p.TripId=@TripId AND p.OrderLineId=@LineId;
+                    """, new { Tenant = tenant, TripId = tripId, LineId = lineId }, tx, ct)))
+                    .ToDictionary(a => a.ProposalId);
+                return Results.Ok(new { Scope = scope, CanPropose = ops && scope.CanPropose, Proposals = proposals.Select(p =>
+                    new { p.ProposalId, p.CommandId, Quantity = BaseQuantity(p.Quantity), p.Reason, p.Maker, p.RecordedAt,
+                        Approval = approvals.GetValueOrDefault(p.ProposalId),
+                        CanApprove = ops && !approvals.ContainsKey(p.ProposalId) && !SameClosureActor(actor, p.Maker)
+                            && scope.CanPropose && !scope.SuccessorActive && p.Quantity <= scope.Remaining
+                            && Convert.ToHexString(p.SourceRevision) == scope.Revision }) });
             }, ct);
         });
 
@@ -63,6 +75,7 @@ internal static partial class App05CloseReadiness
             return await Run(connections, context.User, tripId, true, input.CommandId, (db, tx, tenant, actor, _) =>
                 ProposeClosure(db, tx, tenant, actor, tripId, lineId, normalized, ct), ct);
         });
+        MapRemainderApproval(sources);
     }
 
     internal static Task LockAOrderLine(SqlConnection db, SqlTransaction tx, string tenant, Guid lineId, CancellationToken ct) =>
@@ -91,18 +104,25 @@ internal static partial class App05CloseReadiness
                 WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId
             ) manifest;
             """, new { Tenant = tenant, LineId = lineId }, tx, ct));
-        var delivered = source.Line.Confirmed - source.CurrentRemaining;
+        var delivered = source.Delivered;
         var onVehicle = stock.Loaded - delivered - stock.Returned;
         var held = stock.RightRemainder - onVehicle;
-        if (stock.Consumed != delivered || onVehicle < 0 || held < 0 || source.CurrentRemaining < 0)
+        if (stock.Consumed != delivered || onVehicle < 0 || held < 0 || source.CurrentRemaining < 0 || stock.RightRemainder > source.CurrentRemaining)
             return null;
         bool pending = await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
             SELECT CONVERT(bit,CASE WHEN EXISTS(
                 SELECT 1 FROM dbo.C4DeliveryEvidence e
-                JOIN dbo.BusinessCommand c ON c.TenantId=e.TenantId AND c.Id=e.Id AND c.Status='RECEIVED'
+                JOIN dbo.BusinessCommand c ON c.TenantId=e.TenantId AND c.Id=e.Id AND c.Status IN ('RECEIVED','PENDING')
                 JOIN dbo.TripManifestLine m ON m.TenantId=e.TenantId AND m.Id=e.ManifestLineId
                 JOIN dbo.AReservation a ON a.TenantId=m.TenantId AND a.StockRightId=m.StockRightId
                 WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId
+            ) THEN 1 ELSE 0 END);
+            """, new { Tenant = tenant, LineId = lineId }, tx, ct));
+        bool successorActive = await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
+            SELECT CONVERT(bit,CASE WHEN EXISTS(
+                SELECT 1 FROM dbo.App05ASuccessor b WHERE b.TenantId=@Tenant AND b.OrderLineId=@LineId
+                    AND b.Quantity>(SELECT COALESCE(SUM(d.BaseQuantity),0) FROM dbo.SaleDelivery d
+                        WHERE d.TenantId=b.TenantId AND d.App05BindingId=b.BindingId AND d.TripId=b.DestinationTripId)
             ) THEN 1 ELSE 0 END);
             """, new { Tenant = tenant, LineId = lineId }, tx, ct));
         string sourceFingerprint = await db.ExecuteScalarAsync<string>(App02a3Sql.Cmd("""
@@ -119,7 +139,7 @@ internal static partial class App05CloseReadiness
         string revision = Convert.ToHexString(Digest(new { sourceFingerprint, source.Line.ConfirmSourceId, source.FollowUpId,
             source.CurrentRemaining, Held = held, OnVehicle = onVehicle, Pending = pending }));
         return new(source.Line.ConfirmSourceId, source.FollowUpId, source.Line.SkuId, source.Step, source.CurrentRemaining,
-            held, onVehicle, pending, revision);
+            held, onVehicle, pending, successorActive, revision);
     }
 
     private static async Task<IResult> ProposeClosure(SqlConnection db, SqlTransaction tx, string tenant, string actor,

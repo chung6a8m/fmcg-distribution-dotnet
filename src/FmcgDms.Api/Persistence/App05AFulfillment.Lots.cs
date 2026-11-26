@@ -9,9 +9,9 @@ internal static partial class App05CloseReadiness
     private sealed record TransferAllocation(decimal NeverLoaded, decimal Returned, TransferLot[] Lots);
 
     private static async Task<TransferAllocation?> AllocateTransferLots(SqlConnection db, SqlTransaction tx,
-        string tenant, ALine line, TransferRight right, decimal quantity, DateTime businessDate, CancellationToken ct)
+        string tenant, ALine line, TransferRight right, decimal quantity, DateTime businessDate, CancellationToken ct, bool closing = false)
     {
-        var scope = new { Tenant = tenant, Line = line.OrderLineId, line.SkuId, right.RightId, BusinessDate = businessDate };
+        var scope = new { Tenant = tenant, Line = line.OrderLineId, line.SkuId, right.RightId, BusinessDate = businessDate, Closing = closing };
         var tracked = await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
             SELECT CONVERT(bit,CASE WHEN EXISTS(
                 SELECT 1 FROM dbo.F03Unit WHERE TenantId=@Tenant AND SkuId=@SkuId
@@ -28,7 +28,8 @@ internal static partial class App05CloseReadiness
         }
 
         var available = await db.QueryAsync<TransferLot>(App02a3Sql.Cmd("""
-            SELECT h.LotId,h.Quantity-m.Loaded-x.NeverLoaded AS NeverLoaded,u.Returned-x.Returned AS Returned
+            SELECT h.LotId,h.Quantity-m.Loaded-x.NeverLoaded-closed.NeverLoaded AS NeverLoaded,
+                u.Returned-x.Returned-closed.Returned AS Returned
             FROM dbo.F03LotHold h JOIN dbo.F03Lot l ON l.TenantId=h.TenantId AND l.Id=h.LotId
             CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(q.Quantity),0)) AS Loaded
                 FROM dbo.F03LotLoad q JOIN dbo.TripManifestLine m
@@ -41,7 +42,12 @@ internal static partial class App05CloseReadiness
             CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(x.NeverLoaded),0)) AS NeverLoaded,CONVERT(decimal(18,3),COALESCE(SUM(x.Returned),0)) AS Returned
                 FROM dbo.App05AHeldTransferLot x
                 WHERE x.TenantId=h.TenantId AND x.OriginalRightId=h.StockRightId AND x.LotId=h.LotId) x
-            WHERE h.TenantId=@Tenant AND h.StockRightId=@RightId AND l.SkuId=@SkuId AND l.ExpiresOn>=@BusinessDate
+            CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(c.NeverLoaded),0)) AS NeverLoaded,
+                CONVERT(decimal(18,3),COALESCE(SUM(c.Returned),0)) AS Returned
+                FROM dbo.App05ARemainderReleaseLot c
+                WHERE c.TenantId=h.TenantId AND c.StockRightId=h.StockRightId AND c.LotId=h.LotId) closed
+            WHERE h.TenantId=@Tenant AND h.StockRightId=@RightId AND l.SkuId=@SkuId
+                AND (@Closing=1 OR l.ExpiresOn>=@BusinessDate)
             ORDER BY l.ExpiresOn,l.Code COLLATE Latin1_General_100_BIN2,l.Id;
             """, scope, tx, ct));
         var picks = new List<TransferLot>();

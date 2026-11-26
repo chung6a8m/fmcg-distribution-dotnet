@@ -45,9 +45,11 @@ export async function setup(request: APIRequestContext) {
   const locationId = catalog.warehouses.find(choice => choice.label === 'C2-MAIN')!.id
   const trip = (label: string) => catalog.trips.find(choice => choice.label === label)!.id
 
-  async function order(tripId: string, quantity: number, sharedPool = false) {
-    const chosenCustomer = sharedPool ? catalog.customers.find(c => c.label.startsWith('C2-FIXTURE'))!.id : customerId
-    const chosenSku = sharedPool ? catalog.skus.find(s => s.label.startsWith('Z-FIELD-EA'))!.id : skuId
+  async function order(tripId: string, quantity: number, scenario?: 'shared' | 'approval') {
+    const chosenCustomer = scenario === 'shared' ? catalog.customers.find(c => c.label.startsWith('C2-FIXTURE'))!.id : customerId
+    const chosenSku = scenario
+      ? catalog.skus.find(s => s.label.startsWith(scenario === 'shared' ? 'Z-FIELD-EA' : 'DAY-CLOSURE-EA'))!.id
+      : skuId
     const detail = await get<{ registeredShipTos: { id: string; revision: number }[] }>(
       request, c1 + '/customers/' + chosenCustomer, 'SOURCE',
     )

@@ -32,6 +32,10 @@ internal static partial class App05CloseReadiness
             s.SkuId,k.Code AS SkuCode,k.BaseUom AS Unit,s.ConfirmedBaseQuantity AS Confirmed,
             COALESCE(r.Granted,0) AS Granted,COALESCE(r.Consumed,0) AS Consumed,COALESCE(r.Released,0) AS Released,
             COALESCE(r.Loaded,0) AS Loaded,COALESCE(d.Delivered,0) AS Delivered,COALESCE(r.Returned,0) AS Returned,
+            {{(successor ? """
+                (SELECT COALESCE(SUM(a.Quantity),0) FROM dbo.App05ARemainderApproval a
+                    WHERE a.TenantId=s.TenantId AND a.OrderLineId=s.AOrderLineId)
+                """ : "CONVERT(decimal(18,3),0)")}} AS ClosedRemainder,
             CONVERT(bit,CASE WHEN p.OrderLineId IS NOT NULL AND c.ConfirmSourceId=s.ConfirmBusinessSourceId
                 AND CONVERT(varbinary(48),k.BaseUom)=CONVERT(varbinary(48),p.BaseUom)
                 AND COALESCE(r.Drift,0)=0 THEN 1 ELSE 0 END) AS Proven

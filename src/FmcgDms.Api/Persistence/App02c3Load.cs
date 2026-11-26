@@ -86,7 +86,7 @@ public sealed partial class App01a2CommandService
             return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
 
         Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
-        if (successor && !d1Load) await LockHeldLoadOrigins(db, tx, tenant, tripId, rightIds, ct);
+        if (successor && !d1Load) await LockC3Fulfillment(db, tx, tenant, tripId, rightIds, ct);
         var rights = (d1Load
                 ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, settlement, ct)
                 : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct, successor))

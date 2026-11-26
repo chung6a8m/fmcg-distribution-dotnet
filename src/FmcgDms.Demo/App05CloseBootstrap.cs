@@ -12,6 +12,7 @@ internal static class App05CloseBootstrap
 {
     internal const string Ops = "app05-tenant-ops";
     internal const string Assignee = "app05-assignee";
+    internal const string ClosureChecker = "app05-closure-checker";
     internal const string Maker = "app05-credit-maker";
     internal const string Checker = "app05-credit-checker";
     internal const string SkuCode = "DAY-A-EA";
@@ -51,7 +52,18 @@ internal static class App05CloseBootstrap
             INSERT dbo.App05TripOperator(TenantId,TripId,ActorId)
             SELECT @tenant,t.TripId,a.ActorId FROM @trips t CROSS JOIN (VALUES(@Ops),(@Assignee)) a(ActorId);
             INSERT dbo.LocalApp05TripBootstrap(TripId) SELECT TripId FROM @trips;
-            """, new { tenant, Ops, Assignee }, tx, cancellationToken: ct));
+            IF OBJECT_ID(N'dbo.App05ARemainderApproval',N'U') IS NOT NULL
+            BEGIN
+                IF NOT EXISTS(SELECT 1 FROM dbo.App02ActorRoleGrant
+                    WHERE TenantId=@tenant AND ActorId=@ClosureChecker AND RoleCode='tenant_ops')
+                    INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                    VALUES(@tenant,@ClosureChecker,'tenant_ops',1,@BootstrapActor);
+                INSERT dbo.App05TripOperator(TenantId,TripId,ActorId)
+                SELECT @tenant,t.TripId,@ClosureChecker FROM dbo.LocalApp05TripBootstrap t
+                WHERE NOT EXISTS(SELECT 1 FROM dbo.App05TripOperator r
+                    WHERE r.TenantId=@tenant AND r.TripId=t.TripId AND r.ActorId=@ClosureChecker);
+            END;
+            """, new { tenant, Ops, Assignee, ClosureChecker, BootstrapActor }, tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
     }
 
@@ -117,6 +129,27 @@ internal static class App05CloseBootstrap
                 EffectiveFromUtc,EffectiveUntilUtc,Maker,Checker,ApprovedAtUtc,EvidenceRef)
             VALUES(@tenant,@plan,@customer,1,'EXCLUSIVE',0,@Starts,@Ends,@Maker,@Checker,@Starts,@Version);
             INSERT dbo.F04PlanQuote(TenantId,PlanId,PolicyId) VALUES(@tenant,@plan,@policy);
+            IF @SplitSuccessorLots=1
+            BEGIN
+                DECLARE @closureSku uniqueidentifier=NEWID(),@closureLot uniqueidentifier=NEWID(),@closurePolicy uniqueidentifier=NEWID();
+                INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom)
+                VALUES(@closureSku,@tenant,'DAY-CLOSURE-EA',N'Hàng kiểm đóng phần A DEV','EA');
+                INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity) VALUES(@tenant,@main,@closureSku,10);
+                INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,SnapshotCode,BaseQuantity,CostAmount,CapturedAtUtc)
+                SELECT @tenant,Id,@closureSku,@Version,IIF(Id=@main,10,0),IIF(Id=@main,30000,0),@Opening
+                FROM dbo.StockLocation WHERE TenantId=@tenant AND Code IN ('C2-MAIN','DEV-TRUCK-A','DEV-TRUCK-B','F05-QA');
+                INSERT dbo.PhysicalStockBalance(TenantId,StockLocationId,SkuId,OnHandBaseQuantity,OnHandCostAmount)
+                SELECT TenantId,StockLocationId,SkuId,BaseQuantity,CostAmount FROM dbo.PhysicalStockOpening
+                WHERE TenantId=@tenant AND SkuId=@closureSku AND SnapshotCode=@Version;
+                INSERT dbo.F03Unit(TenantId,SkuId,UomCode,Factor,[Step]) VALUES(@tenant,@closureSku,'EA',1,0.001);
+                INSERT dbo.F03Lot(TenantId,Id,SkuId,Code,ExpiresOn) VALUES(@tenant,@closureLot,@closureSku,'DAY-CLOSURE-LOT',@Expiry);
+                INSERT dbo.F03LotOpening(TenantId,LotId,LocationId,Quantity) VALUES(@tenant,@closureLot,@main,10);
+                INSERT dbo.C2CommercialPolicy(TenantId,Id,CustomerId,SkuId,Version,Decision,EffectiveFromUtc,EffectiveUntilUtc,
+                    Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
+                VALUES(@tenant,@closurePolicy,@customer,@closureSku,1,'APPROVED',@Starts,@Ends,@Maker,@Checker,
+                    @Starts,'APP-05.5-DEV',10000,0,0,7,500000,'Asia/Ho_Chi_Minh');
+                INSERT dbo.F04PlanQuote(TenantId,PlanId,PolicyId) VALUES(@tenant,@plan,@closurePolicy);
+            END;
             INSERT dbo.LocalApp05Bootstrap(Slot,Version) VALUES(1,@Version);
             """, new
         {

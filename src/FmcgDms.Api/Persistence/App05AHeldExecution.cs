@@ -16,18 +16,27 @@ public sealed partial class App01a2CommandService
     internal static Task LockHeldOriginRight(SqlConnection db, SqlTransaction tx, string tenant, Guid right, CancellationToken ct) =>
         App02a3Sql.Lock(db, tx, $"APP05:HELD-RIGHT:{tenant}:{right:N}", ct);
 
-    private static async Task LockHeldLoadOrigins(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId,
+    private static async Task LockC3Fulfillment(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId,
         Guid[] requested, CancellationToken ct)
     {
-        var transfers = (await db.QueryAsync<(Guid OrderLineId, Guid OriginalRightId)>(Sql("""
-            SELECT DISTINCT h.OrderLineId,h.OriginalRightId FROM dbo.App05AHeldTransfer h WITH (READCOMMITTEDLOCK)
+        var transfers = (await db.QueryAsync<(Guid OrderLineId, Guid OriginalRightId, Guid Warehouse, Guid Sku)>(Sql("""
+            SELECT DISTINCT h.OrderLineId,h.OriginalRightId,h.WarehouseId,h.SkuId
+            FROM dbo.App05AHeldTransfer h WITH (READCOMMITTEDLOCK)
             JOIN dbo.App05ASuccessor b WITH (READCOMMITTEDLOCK) ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
             WHERE h.TenantId=@Tenant AND b.DestinationTripId=@TripId AND h.SuccessorRightId IN @Requested;
             """, new { Tenant = tenant, TripId = tripId, Requested = requested }, tx, ct))).AsList();
-        foreach (Guid line in transfers.Select(t => t.OrderLineId).Distinct().Order())
+        var materialized = (await db.QueryAsync<(Guid OrderLineId, Guid Warehouse, Guid Sku)>(Sql("""
+            SELECT a.AOrderLineId,r.StockLocationId,r.SkuId FROM dbo.AReservation a WITH (READCOMMITTEDLOCK)
+            JOIN dbo.StockRight r WITH (READCOMMITTEDLOCK) ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+            WHERE a.TenantId=@Tenant AND a.StockRightId IN @Requested AND r.TripId=@TripId AND r.RightKind='A';
+            """, new { Tenant = tenant, TripId = tripId, Requested = requested }, tx, ct))).AsList();
+        foreach (Guid line in transfers.Select(t => t.OrderLineId).Union(materialized.Select(t => t.OrderLineId)).Order())
             await App05CloseReadiness.LockAOrderLine(db, tx, tenant, line, ct);
         foreach (Guid origin in transfers.Select(t => t.OriginalRightId).Distinct().Order())
             await LockHeldOriginRight(db, tx, tenant, origin, ct);
+        var pools = transfers.Select(t => (t.Warehouse, t.Sku)).Union(materialized.Select(t => (t.Warehouse, t.Sku)));
+        foreach (var (warehouse, sku) in pools.OrderBy(pool => pool.Warehouse).ThenBy(pool => pool.Sku))
+            await LockStockAllocation(db, tx, tenant, warehouse, sku, ct);
     }
 
     private static Task<IEnumerable<HeldExecutionCandidate>> PendingHeldExecution(SqlConnection db, SqlTransaction tx,

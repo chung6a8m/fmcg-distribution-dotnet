@@ -530,8 +530,9 @@ public sealed class App01c3APostingService(TenantConnections connections)
         foreach (var effect in effects)
             await AddEffectAsync(db, tx, tenant, sourceLine, effect, ct);
 
-        string newStatus = frozen.DeliveredQuantity + request.BaseQuantity
-            == frozen.ConfirmedQuantity ? "FULFILLED" : "PARTIALLY_DELIVERED";
+        string newStatus = frozen.DeliveredQuantity + frozen.ClosedQuantity + request.BaseQuantity == frozen.ConfirmedQuantity
+            ? frozen.ClosedQuantity > 0 ? "REMAINDER_CLOSED" : "FULFILLED"
+            : "PARTIALLY_DELIVERED";
         if (await db.ExecuteAsync(Sql("""
             UPDATE dbo.AOrder SET Status=@NewStatus
             WHERE TenantId=@Tenant AND Id=@Order
@@ -564,6 +565,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
 
     internal sealed class FrozenOrderTotals
     {
+        public decimal ClosedQuantity { get; set; }
         public int OrderLines { get; set; }
         public int FrozenLines { get; set; }
         public decimal ConfirmedQuantity { get; set; }

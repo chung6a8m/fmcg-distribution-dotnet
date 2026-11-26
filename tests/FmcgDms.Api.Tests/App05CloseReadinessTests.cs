@@ -14,7 +14,7 @@ public sealed class App05CloseReadinessTests
         int delivered, int returned, int remaining, int held, int onVehicle)
     {
         var line = new App05CloseReadiness.ARow(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
-            "SKU", "EA", confirmed, granted, delivered, 0, loaded, delivered, returned, true).ToView();
+            "SKU", "EA", confirmed, granted, delivered, 0, loaded, delivered, returned, 0, true).ToView();
         Assert.Equal((remaining, held, onVehicle), (line.Remaining, line.Held, line.OnVehicle));
     }
 

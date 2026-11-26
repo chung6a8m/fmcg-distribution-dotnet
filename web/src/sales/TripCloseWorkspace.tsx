@@ -191,6 +191,7 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
   const [closeNotice, setCloseNotice] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [result, setResult] = useState<{ data: Readiness; attempt: number } | null>(null)
+  const [lastApprovalLine, setLastApprovalLine] = useState('')
   const [error, setError] = useState(false)
   const [notice, setNotice] = useState('')
   const [editor, setEditor] = useState<{ key: string; revision: string } | null>(null)
@@ -249,11 +250,12 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
     setAttempt(value => value + 1)
   }
 
-  function remainderProposal(source: Work, line?: ALine) {
+  function remainderProposal(source: Work, line?: ALine, initiallyOpen = false) {
     if (!aSuccessor || !closed || source.sourceKind !== 'A_REMAINDER' || !source.followUp) return null
     return <AClosureProposalForm token={token} actorId={identity.actorId} tripId={tripId} lineId={source.sourceId}
       storageKey={storageKey + '.closure-proposal.' + source.sourceId} unit={line?.unit ?? ''}
-      enabled={fresh && historyFresh && !error} />
+      enabled={fresh && historyFresh && !error} initiallyOpen={initiallyOpen}
+      onApprovalRead={() => { setLastApprovalLine(source.sourceId); refresh() }} />
   }
 
   async function send(command: Assignment) {
@@ -354,8 +356,9 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
     </section>}
     {closure && <TripClosureHistory closure={closure}
       currentOpenWorkCount={historyFresh ? history?.data.currentOpenWorkCount : undefined} access={access}
+      openAfterApproval={!!lastApprovalLine && !!data && !data.work.some(work => work.sourceId === lastApprovalLine && work.sourceKind === 'A_REMAINDER')}
       renderResolvedProposal={source => data && !data.work.some(work => workKey(work) === workKey(source))
-        ? remainderProposal(source, closure.snapshot.aLines.find(line => line.orderLineId === source.sourceId)) : null} />}
+        ? remainderProposal(source, closure.snapshot.aLines.find(line => line.orderLineId === source.sourceId), source.sourceId === lastApprovalLine) : null} />}
     {closeNotice && <p role="status">{closeNotice}</p>}
     {pendingClose && !closed && <section className="panel panel-content">
       <h3>Khôi phục yêu cầu đóng chuyến</h3>
@@ -468,8 +471,9 @@ function TripCloseReceivables({ rows }: { rows: Readiness['receivables'] }) {
   </div></li>)}</ul>
 }
 
-function TripClosureHistory({ closure, currentOpenWorkCount, access, renderResolvedProposal }: {
+function TripClosureHistory({ closure, currentOpenWorkCount, access, openAfterApproval, renderResolvedProposal }: {
   closure: Closure; currentOpenWorkCount?: number | null; access: LinkAccess
+  openAfterApproval: boolean
   renderResolvedProposal: (source: Work) => ReactNode
 }) {
   const snapshot = closure.snapshot
@@ -485,7 +489,7 @@ function TripClosureHistory({ closure, currentOpenWorkCount, access, renderResol
       <dt>Việc mở lúc đóng</dt><dd data-testid="closure-open-at-close">{closure.openWorkCount}</dd>
       <dt>Việc đang mở</dt><dd data-testid="closure-open-current">{currentOpenWorkCount ?? 'Chưa xác định'}</dd>
     </dl>
-    <details>
+    <details open={openAfterApproval || undefined}>
       <summary>Ảnh chốt và nguồn</summary>
       <p>Ngày nghiệp vụ {dateLabel(snapshot.businessDate)} · Độ phủ nguồn {coverageLabel(snapshot.coverage)}</p>
       <p>Tính đến <time dateTime={snapshot.asOf}>{dateTimeLabel(snapshot.asOf)}</time></p>
