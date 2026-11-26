@@ -503,13 +503,39 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     trip: string; order: SourceOrder & { orderId: string }
   }
   const mixedPath = base(mixedTrip, mixed)
+  const approvalCommandIds: string[] = []
+  async function proposeForRace() {
+    const endpoint = mixedPath + '/closure-proposals'
+    const { scope } = await get<{ scope: { followUpId: string; revision: string } }>(request, endpoint)
+    const proposal = await post<{ proposalId: string }>(request, endpoint, {
+      commandId: crypto.randomUUID(), confirmSourceId: mixed.confirmSourceId, followUpId: scope.followUpId,
+      quantity: '1.000', reason: 'Đối chiếu lệnh duyệt với thao tác kế nhiệm', expectedRevision: scope.revision,
+    }, 'OPS')
+    return async (...codes: string[]) => {
+      const commandId = crypto.randomUUID()
+      approvalCommandIds.push(commandId)
+      const response = await context.request.post(endpoint + '/' + proposal.proposalId + '/approve', {
+        headers: auth('CLOSURE_CHECKER'), data: { commandId, expectedRevision: scope.revision },
+      })
+      expect(response.status(), await response.text()).toBe(409)
+      expect(codes).toContain((await response.json()).code)
+    }
+  }
   const mixedState = await readSuccessors(mixedTrip, mixed)
   expect(mixedState).toMatchObject({ remaining: 4, unheld: 1, rights: [{ held: 3, neverLoaded: 1, returned: 2 }] })
   const mixedBinding = await assignSuccessor(mixedPath + '/assign-successor', body(mixed, first, 4))
   const transfer = { ...body(mixed, first, 4), bindingId: mixedBinding.bindingId, originalRightId: mixedState.rights[0].rightId }
   expect(await (await send(mixedPath + '/transfer-held', transfer)).json()).toMatchObject({ code: 'A_HELD_QUANTITY_EXCEEDED' })
-  const mixedTransfer = await (await send(mixedPath + '/transfer-held', { ...transfer, commandId: crypto.randomUUID(), quantity: 3 })).json()
+  const approveAgainstTransfer = await proposeForRace()
+  await checkpoint('approval-transfer-before')
+  const [transferResponse] = await Promise.all([
+    send(mixedPath + '/transfer-held', { ...transfer, commandId: crypto.randomUUID(), quantity: 3 }),
+    approveAgainstTransfer('A_CLOSURE_SUCCESSOR_ACTIVE', 'A_CLOSURE_SCOPE_CHANGED'),
+  ])
+  expect(transferResponse.status(), await transferResponse.text()).toBe(200)
+  const mixedTransfer = await transferResponse.json()
   expect(mixedTransfer).toMatchObject({ quantity: 3, neverLoaded: 1, returned: 2 })
+  await checkpoint('approval-transfer-after', { lineId: mixed.orderLineId, rightId: mixedTransfer.successorRightId })
   expect(await readSuccessors(mixedTrip, mixed)).toMatchObject({ unheld: 1 })
 
   const catalog = await get<{ warehouses: { id: string; label: string }[]; skus: { id: string; label: string }[] }>(request, c2 + '/catalog', 'RECEIVER')
@@ -545,9 +571,13 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await reserveForm.getByLabel('Lượng giữ bổ sung').fill('1')
   const reserveUrl = mixedPath + '/reserve-unheld'
   const optionUrl = mixedPath + '/reserve-options'
+  const approveAgainstReserve = await proposeForRace()
   let committed: unknown
   await reservePage.route('**' + reserveUrl, async route => {
-    const response = await route.fetch()
+    const [response] = await Promise.all([
+      route.fetch(),
+      approveAgainstReserve('A_CLOSURE_SUCCESSOR_ACTIVE', 'A_CLOSURE_SCOPE_CHANGED'),
+    ])
     expect(response.status(), await response.text()).toBe(200)
     committed = await response.json()
     await route.abort('failed')
@@ -666,6 +696,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     lines: [{ rightId: firstReceipt.rightId, expectedWarehouseHeld: 5, quantity: 1 }],
   } })
   expect(await wrongRight.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'C3_RESERVATION_NOT_ELIGIBLE' })
+  const approveAgainstDelivery = await proposeForRace()
   const loaded = await post<{ status: string; sourceId: string }>(request, c3 + '/load', load, 'RECEIVER')
   expect(loaded.status).toBe('APPLIED')
   const lines = await get<{ id: string; orderId: string; shipToVersion: number; available: string }[]>(request, c4 + '/trips/' + first + '/lines', 'SOURCE')
@@ -682,7 +713,30 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect(await stale.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'TRIP_NOT_ELIGIBLE' })
   await checkpoint('successor-delivery-current')
   expect((await request.post(c4 + '/deliver', { headers: auth('RECEIVER'), data: deliveryInput })).status()).toBe(403)
-  const delivery = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', deliveryInput, 'SOURCE')
+  await approveAgainstDelivery('A_CLOSURE_ON_VEHICLE')
+  expect(await get(request, mixedPath + '/closure-proposals')).toMatchObject({
+    proposals: expect.arrayContaining([expect.objectContaining({
+      status: 'STALE', blockedReason: 'A_CLOSURE_ON_VEHICLE', canApprove: false,
+    })]),
+  })
+  await checkpoint('approval-delivery-arm', deliveryInput)
+  // This request is deliberately faulted after intake. SQL requires its exact RECEIVED row.
+  const interrupted = await request.post(c4 + '/deliver', { headers: auth('SOURCE'), data: deliveryInput })
+  expect(interrupted.status(), await interrupted.text()).toBe(500)
+  await checkpoint('approval-delivery-received')
+  expect(await get(request, mixedPath + '/closure-proposals')).toMatchObject({
+    proposals: expect.arrayContaining([expect.objectContaining({
+      status: 'STALE', blockedReason: 'A_CLOSURE_DELIVERY_PENDING', canApprove: false,
+    })]),
+  })
+  await approveAgainstDelivery('A_CLOSURE_DELIVERY_PENDING')
+  await checkpoint('approval-delivery-to-pending')
+  await approveAgainstDelivery('A_CLOSURE_DELIVERY_PENDING')
+  await checkpoint('approval-delivery-resume')
+  const [delivery] = await Promise.all([
+    post<{ status: string; sourceId: string }>(request, c4 + '/deliver', deliveryInput, 'SOURCE'),
+    approveAgainstDelivery('A_CLOSURE_DELIVERY_PENDING', 'A_CLOSURE_SCOPE_CHANGED'),
+  ])
   expect(delivery.status).toBe('APPLIED')
   expect(await post(request, c4 + '/deliver', deliveryInput, 'SOURCE'))
     .toMatchObject({ status: 'APPLIED', sourceId: delivery.sourceId, replayed: true })
@@ -722,9 +776,12 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const heldLines = await get<{ id: string; orderId: string; shipToVersion: number; available: string }[]>(
     request, c4 + '/trips/' + first + '/lines', 'SOURCE')
   const heldLine = heldLines.find(row => row.orderId === mixed.orderId && row.available === '3.000')!
-  const heldDelivery = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', {
-    commandId: crypto.randomUUID(), tripId: first, manifestLineId: heldLine.id, shipToVersion: heldLine.shipToVersion, quantity: 3,
-  }, 'SOURCE')
+  const [heldDelivery] = await Promise.all([
+    post<{ status: string; sourceId: string }>(request, c4 + '/deliver', {
+      commandId: crypto.randomUUID(), tripId: first, manifestLineId: heldLine.id, shipToVersion: heldLine.shipToVersion, quantity: 3,
+    }, 'SOURCE'),
+    approveAgainstDelivery('A_CLOSURE_ON_VEHICLE', 'A_CLOSURE_DELIVERY_PENDING', 'A_CLOSURE_SCOPE_CHANGED', 'A_CLOSURE_REMAINDER_NOT_ELIGIBLE'),
+  ])
   expect(heldDelivery.status).toBe('APPLIED')
   expect(await get<{ sources: { sourceId: string }[] }>(request,
     '/api/synthetic/app02c5/ar?orderLineId=' + mixed.orderLineId, 'SOURCE')).toMatchObject({
@@ -778,6 +835,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await checkpoint('successor-held-delivered', {
     mainLineId: order.orderLineId, mixedLineId: mixed.orderLineId, successorTripId: first,
     mainBindingId: binding.bindingId, mixedBindingId: mixedBinding.bindingId, mixedRightId: mixedTransfer.successorRightId,
+    approvalCommandIds,
   })
 
   const proposalPath = heldPath + '/closure-proposals'
@@ -813,6 +871,9 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await form.getByRole('button', { name: 'Gửi đề nghị', exact: true }).click()
   const submitted = (await sent).postDataJSON()
   await expect(proposalWork.getByText(/Chưa xác nhận được kết quả đề nghị/)).toBeVisible()
+  const pendingKey = await proposalPage.evaluate(lineId =>
+    Object.keys(sessionStorage).find(key => key.endsWith('.closure-proposal.' + lineId)), held.orderLineId)
+  expect(pendingKey).toBeTruthy()
   await proposalWork.getByRole('button', { name: 'Tra cứu đề nghị', exact: true }).click()
   await expect(proposalWork.getByText('Chờ duyệt', { exact: true })).toBeVisible()
   expect(created).toMatchObject({ status: 'PENDING', quantity: '1.000' })
@@ -822,8 +883,29 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect(await changedProposal.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
   expect(await get(request, proposalPath)).toMatchObject({
     scope: { remaining: '5.000', revision: proposalScope.scope.revision },
-    proposals: [expect.objectContaining({ proposalId: created!.proposalId, reason: proposal.reason })],
+    proposals: [expect.objectContaining({ proposalId: created!.proposalId, reason: proposal.reason,
+      confirmSourceId: submitted.confirmSourceId, followUpId: submitted.followUpId,
+      expectedRevision: submitted.expectedRevision })],
   })
+  const changedRevision = { ...submitted, expectedRevision: '0'.repeat(64) }
+  const revisionConflict = await request.post(proposalPath, { headers: auth('OPS'), data: changedRevision })
+  expect(revisionConflict.status()).toBe(409)
+  expect(await revisionConflict.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
+  await proposalPage.evaluate(({ key, command }) =>
+    sessionStorage.setItem(key, JSON.stringify(command)), { key: pendingKey!, command: changedRevision })
+  await proposalPage.reload()
+  await expect(proposalWork.getByRole('status').filter({ hasText: 'Mã yêu cầu đã gắn với nội dung khác' })).toBeVisible()
+  await expect(proposalWork.getByText('Đề nghị đang chờ xác nhận', { exact: false })).toBeVisible()
+  await expect(proposalWork.getByRole('button', { name: 'Gửi đề nghị', exact: true })).toHaveCount(0)
+  const retryConflict = proposalPage.waitForResponse(response =>
+    response.url().endsWith(proposalPath) && response.request().method() === 'POST')
+  await proposalWork.getByRole('button', { name: 'Gửi lại cùng yêu cầu', exact: true }).click()
+  const rejectedRevision = await retryConflict
+  expect(rejectedRevision.status()).toBe(409)
+  expect(rejectedRevision.request().postDataJSON()).toEqual(changedRevision)
+  await proposalWork.getByRole('button', { name: 'Tra cứu đề nghị', exact: true }).click()
+  await expect(proposalWork.getByRole('status').filter({ hasText: 'Mã yêu cầu đã gắn với nội dung khác' })).toBeVisible()
+  expect(await proposalPage.evaluate(key => JSON.parse(sessionStorage.getItem(key)!), pendingKey!)).toEqual(changedRevision)
   await proposalPage.close()
   await checkpoint('remainder-proposal-after', {
     proposalId: created!.proposalId, lineId: held.orderLineId, confirmSourceId: held.confirmSourceId,
@@ -888,6 +970,21 @@ test('approval closes an unheld portion and exact HELD generations without touch
   expect(await get(request, path)).toMatchObject({ scope: { remaining: '0.001', held: '0.001' } })
   expect((await read(request, trip)).work).toContainEqual(expect.objectContaining({ sourceId: order.orderLineId }))
   const last = await propose('0.001')
+  const assigneePage = await open(context, 'ASSIGNEE', 'trip-close?trip=' + trip)
+  const assigneeWork = assigneePage.locator('[data-source-id="' + order.orderLineId + '"]')
+  await assigneeWork.getByRole('button', { name: 'Đề nghị đóng phần còn lại', exact: true }).click()
+  const staleRow = assigneeWork.locator('[data-proposal-id="' + stale.id + '"]')
+  await expect(staleRow.getByText('Đã lỗi thời', { exact: true })).toBeVisible()
+  await expect(staleRow.getByText('Tạo đề nghị mới theo số liệu hiện tại.')).toBeVisible()
+  const pendingRow = assigneeWork.locator('[data-proposal-id="' + last.id + '"]')
+  await expect(pendingRow.getByText('Chờ duyệt', { exact: true })).toBeVisible()
+  await expect(pendingRow.getByRole('button', { name: 'Duyệt đề nghị', exact: true })).toHaveCount(0)
+  await assigneePage.close()
+  const view = await get(request, path, 'ASSIGNEE')
+  expect(view).toMatchObject({ proposals: expect.arrayContaining([
+    expect.objectContaining({ proposalId: stale.id, status: 'STALE', canApprove: false }),
+    expect.objectContaining({ proposalId: last.id, status: 'PENDING', canApprove: false }),
+  ]) })
   await checkpoint('approval-revoke', { tripId: trip })
   expect((await request.post(last.path, { headers: auth('CLOSURE_CHECKER'), data: last.data })).status()).toBe(403)
   await checkpoint('approval-restore', { tripId: trip })

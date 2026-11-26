@@ -62,7 +62,7 @@ internal static partial class App05CloseReadiness
         await LockAOrderLine(db, tx, tenant, lineId, ct);
         var identity = new { key.Tenant, TripId = tripId, LineId = lineId, ProposalId = proposalId };
         var proposal = await db.QuerySingleOrDefaultAsync<ClosureProposal>(App02a3Sql.Cmd("""
-            SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,SourceRevision
+            SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,ConfirmSourceId,FollowUpId,SourceRevision
             FROM dbo.App05ARemainderClosureProposal
             WHERE TenantId=@Tenant AND ProposalId=@ProposalId AND TripId=@TripId AND OrderLineId=@LineId;
             """, identity, tx, ct));
@@ -85,12 +85,14 @@ internal static partial class App05CloseReadiness
         if (order is null) return await Reject("A_CLOSURE_REMAINDER_NOT_ELIGIBLE");
 
         var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
-        if (scope is null || scope.Revision != input.ExpectedRevision || scope.Revision != Convert.ToHexString(proposal.SourceRevision))
+        if (scope?.DeliveryBlock is string deliveryBlock)
+            return await Reject(deliveryBlock);
+        if (scope is null || scope.Revision != input.ExpectedRevision || scope.Revision != proposal.ExpectedRevision)
             return await Reject("A_CLOSURE_SCOPE_CHANGED");
         if (!scope.CanPropose || proposal.Quantity > scope.Remaining || proposal.Quantity % scope.QuantityStep != 0)
             return await Reject("A_CLOSURE_REMAINDER_NOT_ELIGIBLE");
-        if (scope.SuccessorActive)
-            return await Reject("A_CLOSURE_SUCCESSOR_ACTIVE");
+        if (scope.ApprovalBlock is string blocker)
+            return await Reject(blocker);
 
         var source = await ReadSuccessorSource(db, tx, tenant, tripId, lineId, ct)
             ?? throw new InvalidOperationException("The locked closure source disappeared.");

@@ -55,6 +55,39 @@ internal sealed class App05ClosureSourceEvidence(DemoRun run, string folder, Can
         return true;
     }
 
+    internal async Task<bool> VerifyApprovalDeliveryGuard(Task exited)
+    {
+        if (!await wait("approval-delivery-arm", exited)) return false;
+        var input = await Read<DeliveryProbe>("approval-delivery-arm");
+        await using var db = await OwnedDatabase();
+        string before = await digest(false);
+        await SetFault(db, input, true);
+        await acknowledge("approval-delivery-arm");
+
+        if (!await wait("approval-delivery-received", exited)) return false;
+        Guid evidence = await db.QuerySingleAsync<Guid>(new CommandDefinition("""
+            SELECT Id FROM dbo.C4DeliveryEvidence WHERE TenantId=@Tenant AND TripId=@TripId
+                AND ManifestLineId=@ManifestLineId AND ClientCommandId=@CommandId;
+            """, new { Tenant, input.TripId, input.ManifestLineId, input.CommandId }, cancellationToken: ct));
+        Check("interruption leaves exactly the targeted RECEIVED delivery with no issue or AR",
+            new DeliveryState("RECEIVED", 0, 0, 0, 0), await DeliveryStateFor(db, input, evidence));
+        await acknowledge("approval-delivery-received");
+
+        if (!await wait("approval-delivery-to-pending", exited)) return false;
+        Check("approval against RECEIVED preserves the business image", before, await digest(false));
+        await SetIntakeState(db, input, evidence, "RECEIVED", "PENDING");
+        await acknowledge("approval-delivery-to-pending");
+
+        if (!await wait("approval-delivery-resume", exited)) return false;
+        Check("approval against PENDING leaves no issue or AR",
+            new DeliveryState("PENDING", 0, 0, 0, 0), await DeliveryStateFor(db, input, evidence));
+        Check("approval against PENDING preserves the business image", before, await digest(false));
+        await SetIntakeState(db, input, evidence, "PENDING", "RECEIVED");
+        await SetFault(db, input, false);
+        await acknowledge("approval-delivery-resume");
+        return true;
+    }
+
     internal async Task<bool> VerifySourceRaceAndCash(Task exited, Guid tripId)
     {
         await using var db = await OwnedDatabase();
@@ -197,7 +230,7 @@ internal sealed class App05ClosureSourceEvidence(DemoRun run, string folder, Can
     private async Task SetFault(SqlConnection db, DeliveryProbe input, bool arm)
     {
         string statement = arm ? $"""
-            CREATE TRIGGER dbo.TR_App05EvidenceFailDelivery ON dbo.SaleDelivery AFTER INSERT AS
+            CREATE OR ALTER TRIGGER dbo.TR_App05EvidenceFailDelivery ON dbo.SaleDelivery AFTER INSERT AS
             BEGIN
                 SET NOCOUNT ON;
                 IF EXISTS (SELECT 1 FROM inserted d JOIN dbo.C4DeliveryEvidence e ON e.TenantId=d.TenantId AND e.Id=d.C4EvidenceId
@@ -210,7 +243,8 @@ internal sealed class App05ClosureSourceEvidence(DemoRun run, string folder, Can
             IF NOT EXISTS(SELECT 1 FROM dbo.TripManifestLine WHERE TenantId=@Tenant AND TripId=@TripId AND Id=@ManifestLineId)
                 THROW 51915,'APP-05.2 evidence manifest scope mismatch.',1;
             EXEC(@Statement);
-            """, new { Tenant, Name = run.Name(Tenant), Nonce = run.Id, input.TripId, input.ManifestLineId, Statement = statement },
+            IF @Arm=1 ENABLE TRIGGER dbo.TR_App05EvidenceFailDelivery ON dbo.SaleDelivery;
+            """, new { Tenant, Name = run.Name(Tenant), Nonce = run.Id, input.TripId, input.ManifestLineId, Statement = statement, Arm = arm },
             cancellationToken: ct));
     }
 

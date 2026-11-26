@@ -17,7 +17,11 @@ internal static partial class App05CloseReadiness
 
     private sealed record ClosureProposal(Guid ProposalId, Guid CommandId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Quantity,
-        string Reason, string Maker, DateTimeOffset RecordedAt, byte[] SourceRevision);
+        string Reason, string Maker, DateTimeOffset RecordedAt, Guid ConfirmSourceId, Guid FollowUpId,
+        [property: JsonIgnore] byte[] SourceRevision)
+    {
+        public string ExpectedRevision => Convert.ToHexString(SourceRevision);
+    }
 
     private sealed record ClosureProposalScope(Guid ConfirmSourceId, Guid FollowUpId, Guid SkuId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal QuantityStep,
@@ -26,7 +30,14 @@ internal static partial class App05CloseReadiness
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal OnVehicle,
         bool PendingDelivery, bool SuccessorActive, string Revision)
     {
-        public bool CanPropose => Remaining > 0 && OnVehicle == 0 && !PendingDelivery;
+        public bool CanPropose => Remaining > 0 && DeliveryBlock is null;
+
+        [JsonIgnore]
+        public string? DeliveryBlock => PendingDelivery ? "A_CLOSURE_DELIVERY_PENDING"
+            : OnVehicle > 0 ? "A_CLOSURE_ON_VEHICLE" : null;
+
+        [JsonIgnore]
+        public string? ApprovalBlock => DeliveryBlock ?? (SuccessorActive ? "A_CLOSURE_SUCCESSOR_ACTIVE" : null);
     }
 
     internal static bool IsClosureProposalInputValid(ClosureProposalInput input) =>
@@ -47,7 +58,8 @@ internal static partial class App05CloseReadiness
                 var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
                 if (scope is null) return Results.NotFound();
                 var proposals = await db.QueryAsync<ClosureProposal>(App02a3Sql.Cmd("""
-                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,SourceRevision FROM dbo.App05ARemainderClosureProposal
+                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,ConfirmSourceId,FollowUpId,SourceRevision
+                    FROM dbo.App05ARemainderClosureProposal
                     WHERE TenantId=@Tenant AND TripId=@TripId AND OrderLineId=@LineId ORDER BY RecordedAt,ProposalId;
                     """, new { Tenant = tenant, TripId = tripId, LineId = lineId }, tx, ct));
                 var approvals = (await db.QueryAsync<ClosureApproval>(App02a3Sql.Cmd("""
@@ -57,12 +69,23 @@ internal static partial class App05CloseReadiness
                     WHERE p.TenantId=@Tenant AND p.TripId=@TripId AND p.OrderLineId=@LineId;
                     """, new { Tenant = tenant, TripId = tripId, LineId = lineId }, tx, ct)))
                     .ToDictionary(a => a.ProposalId);
-                return Results.Ok(new { Scope = scope, CanPropose = ops && scope.CanPropose, Proposals = proposals.Select(p =>
-                    new { p.ProposalId, p.CommandId, Quantity = BaseQuantity(p.Quantity), p.Reason, p.Maker, p.RecordedAt,
-                        Approval = approvals.GetValueOrDefault(p.ProposalId),
-                        CanApprove = ops && !approvals.ContainsKey(p.ProposalId) && !SameClosureActor(actor, p.Maker)
-                            && scope.CanPropose && !scope.SuccessorActive && p.Quantity <= scope.Remaining
-                            && Convert.ToHexString(p.SourceRevision) == scope.Revision }) });
+                var rows = proposals.Select(p =>
+                {
+                    var approval = approvals.GetValueOrDefault(p.ProposalId);
+                    bool stale = p.ExpectedRevision != scope.Revision;
+                    return new
+                    {
+                        p.ProposalId, p.CommandId, p.ConfirmSourceId, p.FollowUpId, p.ExpectedRevision,
+                        Quantity = BaseQuantity(p.Quantity), p.Reason, p.Maker, p.RecordedAt,
+                        Approval = approval,
+                        Status = approval is not null ? "APPROVED" : stale ? "STALE" : "PENDING",
+                        BlockedReason = approval is null ? scope.ApprovalBlock : null,
+                        CanApprove = approval is null && !stale && ops && !SameClosureActor(actor, p.Maker)
+                            && scope.ApprovalBlock is null && scope.CanPropose && p.Quantity <= scope.Remaining
+                            && p.Quantity % scope.QuantityStep == 0
+                    };
+                });
+                return Results.Ok(new { Scope = scope, CanPropose = ops && scope.CanPropose, Proposals = rows });
             }, ct);
         });
 
