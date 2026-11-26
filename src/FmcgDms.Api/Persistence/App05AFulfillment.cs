@@ -55,6 +55,7 @@ internal static partial class App05CloseReadiness
             }, ct);
         });
         MapSuccessorReserve(sources);
+        MapRemainderClosure(sources);
         MapCommand("/assign-successor", transfer: false);
         MapCommand("/transfer-held", transfer: true);
 
