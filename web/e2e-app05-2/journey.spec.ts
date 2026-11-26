@@ -508,8 +508,8 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   const mixedBinding = await assignSuccessor(mixedPath + '/assign-successor', body(mixed, first, 4))
   const transfer = { ...body(mixed, first, 4), bindingId: mixedBinding.bindingId, originalRightId: mixedState.rights[0].rightId }
   expect(await (await send(mixedPath + '/transfer-held', transfer)).json()).toMatchObject({ code: 'A_HELD_QUANTITY_EXCEEDED' })
-  expect(await (await send(mixedPath + '/transfer-held', { ...transfer, commandId: crypto.randomUUID(), quantity: 3 })).json())
-    .toMatchObject({ quantity: 3, neverLoaded: 1, returned: 2 })
+  const mixedTransfer = await (await send(mixedPath + '/transfer-held', { ...transfer, commandId: crypto.randomUUID(), quantity: 3 })).json()
+  expect(mixedTransfer).toMatchObject({ quantity: 3, neverLoaded: 1, returned: 2 })
   expect(await readSuccessors(mixedTrip, mixed)).toMatchObject({ unheld: 1 })
 
   const catalog = await get<{ warehouses: { id: string; label: string }[]; skus: { id: string; label: string }[] }>(request, c2 + '/catalog', 'RECEIVER')
@@ -690,5 +690,28 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     orderId: mixed.orderId, orderLineId: mixed.orderLineId, confirmSourceId: mixed.confirmSourceId,
     originTripId: mixedTrip, destinationTripId: first, bindingId: mixedBinding.bindingId,
     rightId: mixedRight, manifestLineId: line.id, deliverySourceId: delivery.sourceId, loadSourceId: loaded.sourceId,
+  })
+  const transferredRights = await get<{ id: string; warehouseHeld: string; originTrip?: string }[]>(
+    request, c3 + '/trips/' + first + '/rights', 'RECEIVER')
+  expect(transferredRights).toContainEqual(expect.objectContaining({
+    id: mixedTransfer.successorRightId, warehouseHeld: '3.000', originTrip: 'DEV-20261125-A',
+  }))
+  const heldLoad = await post<{ status: string; sourceId: string }>(request, c3 + '/load', {
+    commandId: crypto.randomUUID(), tripId: first,
+    lines: [{ rightId: mixedTransfer.successorRightId, expectedWarehouseHeld: 3, quantity: 3 }],
+  }, 'RECEIVER')
+  expect(heldLoad.status).toBe('APPLIED')
+  const heldLines = await get<{ id: string; orderId: string; shipToVersion: number; available: string }[]>(
+    request, c4 + '/trips/' + first + '/lines', 'SOURCE')
+  const heldLine = heldLines.find(row => row.orderId === mixed.orderId && row.available === '3.000')!
+  const heldDelivery = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', {
+    commandId: crypto.randomUUID(), tripId: first, manifestLineId: heldLine.id, shipToVersion: heldLine.shipToVersion, quantity: 3,
+  }, 'SOURCE')
+  expect(heldDelivery.status).toBe('APPLIED')
+  expect(await get<{ sources: { sourceId: string }[] }>(request,
+    '/api/synthetic/app02c5/ar?orderLineId=' + mixed.orderLineId, 'SOURCE')).toMatchObject({
+    expected: 3, reconciled: 3, sources: expect.arrayContaining([expect.objectContaining({
+      sourceId: heldDelivery.sourceId, originTrip: 'DEV-20261125-A', trip: 'DEV-20261126-A', quantity: '3.000',
+    })]),
   })
 })
