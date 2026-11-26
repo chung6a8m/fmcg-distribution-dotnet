@@ -8,6 +8,25 @@ namespace FmcgDms.Demo;
 
 internal static class App02c5DevFixture
 {
+    internal static Task SeedSiblingSku(SqlConnection db, string tenant) => db.ExecuteAsync("""
+        DECLARE @sku uniqueidentifier=NEWID(), @now datetime2(7)=SYSUTCDATETIME();
+        INSERT dbo.Sku(Id,TenantId,Code,Name,BaseUom)
+        VALUES(@sku,@tenant,N'C5-SIBLING',N'Hàng đối chiếu C.5',N'EA');
+        INSERT dbo.StockPool(TenantId,StockLocationId,SkuId,OnHandBaseQuantity)
+        SELECT @tenant,Id,@sku,10 FROM dbo.StockLocation WHERE TenantId=@tenant AND Code=N'C2-MAIN';
+        INSERT dbo.PhysicalStockOpening(TenantId,StockLocationId,SkuId,SnapshotCode,BaseQuantity,CostAmount)
+        SELECT @tenant,Id,@sku,N'C5-SIBLING-v1',IIF(Code=N'C2-MAIN',10,0),IIF(Code=N'C2-MAIN',60,0)
+        FROM dbo.StockLocation WHERE TenantId=@tenant AND Code IN (N'C2-MAIN',N'C2-TRUCK');
+        INSERT dbo.PhysicalStockBalance(TenantId,StockLocationId,SkuId,OnHandBaseQuantity,OnHandCostAmount)
+        SELECT TenantId,StockLocationId,SkuId,BaseQuantity,CostAmount FROM dbo.PhysicalStockOpening
+        WHERE TenantId=@tenant AND SkuId=@sku AND SnapshotCode=N'C5-SIBLING-v1';
+        INSERT dbo.C2CommercialPolicy(TenantId,Id,CustomerId,SkuId,Version,Decision,EffectiveFromUtc,EffectiveUntilUtc,
+            Maker,Checker,ApprovedAtUtc,EvidenceRef,UnitPrice,DiscountPerUnit,TaxRate,TermsDays,CreditCap,SellerTimeZone)
+        SELECT @tenant,NEWID(),Id,@sku,1,'APPROVED',DATEADD(day,-1,@now),DATEADD(day,1,@now),
+            N'c5-fixture-maker',N'c5-fixture-checker',DATEADD(day,-1,@now),N'c5-sibling-v1',22,0,0,7,1000,'Asia/Ho_Chi_Minh'
+        FROM dbo.Customer WHERE TenantId=@tenant AND Code=N'C2-FIXTURE';
+        """, new { tenant });
+
     internal static async Task VerifyCurrentAuthority(DemoRun run, HttpClient client, string webUrl,
         string token, string actor, CancellationToken ct)
     {

@@ -293,6 +293,12 @@ API `GET /reserve-options` và `POST /reserve-unheld` dùng chung tiền tố d�
 - [ ] UI và báo cáo hiện Trip gốc cùng các Trip thực hiện, drill-down delivery/source; MAIN không bị cộng lặp. Khi giao đủ theo nguồn, follow-up A hoàn tất; D.4 liên quan hoàn tất theo nguồn/báo cáo riêng.
 - [ ] Chạy hai fixture mục 6, hồi quy C.3/C.4/F03/F04, tenant đối chứng và race; commit đề xuất: `feat: load and deliver A remainder across business days`.
 
+**Bước đầu — báo cáo AR theo dòng đơn.** Bộ lọc `orderLineId` dùng mã dòng Confirm gốc. Chi tiết và bản xuất giữ mã đơn, mã dòng, chuyến gốc, chuyến thực giao và nguồn Confirm/nạp/giao. Quyền đọc vẫn theo phân công trên chuyến ghi nhận lần giao. Lượt DEV `e910b63ecc464c9cb4b56cf085bc5033` kiểm tra bộ lọc, bản xuất, dữ liệu đối chứng và ca không có dòng khớp. Chromium đạt 1/1, SQL 13/13 khớp, SHA256 đối chiếu `E53E8249BE0710806B2CD4D9FA18818A622EDE8F7BCD1B810DA430B5B0B2A7BD`.
+
+**Bổ sung theo review PR #157.** Gửi mã dòng sai định dạng ẩn kết quả và nút xuất cũ, đưa focus về trường lỗi. Sau khi sửa, báo cáo hiện mã dòng đang áp dụng. Fixture C.5 có hai dòng đã giao trên cùng một Confirm với công nợ 375 và 44. Ca kiểm đối chiếu riêng số lần, số dư và nguồn Confirm/nạp/giao trong API và bản xuất từng dòng. Thử tạm điều kiện lọc theo đơn làm ca kiểm nhận 419 ở dòng 375 và thất bại đúng kỳ vọng. Lượt C.5 `84b42742a2474cb48dd7d1b2916ca351` đạt Chromium 1/1, SQL 24/24 khớp. SHA256 đối chiếu `445B6A1D79238139055B120F1485A33237E196E8DC7E17E11380459A0E2ED3EC`. Hồi quy C.4 `864a9d126e964c149706d54a50daff54` đạt Chromium 1/1 và SQL 13/13.
+
+Để bật nạp và giao liên chuyến, migration cần ràng buộc manifest với binding, đúng quyền nền và chuyến thực hiện. Nguồn của Reserve mới và nguồn của HELD chuyển tiếp đi qua hai nhánh rõ ràng. C.3 cần đối chiếu phần đã dùng của từng thế hệ quyền theo lượng và lô. C.4 cần khóa theo dòng Confirm khi tính phần còn và làm tròn, đồng thời khóa chuyến thực hiện khi ghi evidence. C.5 và đường mở báo cáo từ hồ sơ đơn cần đọc theo binding của manifest và phân công trên từng chuyến thực giao. Đích kiểm chứng là báo cáo cùng mã dòng với hai chuyến khác nhau sau khi chạy các fixture mục 6.
+
 ### APP-05.5 — Đóng phần còn bằng nguồn được duyệt
 
 **Files:** command service/binding .3–.4, cơ chế approval/authority hiện có, follow-up và UI chi tiết; tạo `App05ARemainderClosure.cs`, `App05ARemainderClosureTests.cs` khi cần. Giữ correction/refund F ở nguồn nghiệp vụ tương ứng.
