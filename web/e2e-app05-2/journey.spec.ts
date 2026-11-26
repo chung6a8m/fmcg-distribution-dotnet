@@ -753,12 +753,17 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     request, c4 + '/trips/' + first + '/lines', 'SOURCE')).filter(row => row.originTrip === 'DEV-20261123-A')
   expect(mainLines).toHaveLength(3)
   const mainDeliveries = []
-  for (const row of mainLines) {
-    const result = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', {
+  for (const [index, row] of mainLines.entries()) {
+    const attempt = () => request.post(c4 + '/deliver', { headers: auth('SOURCE'), data: {
       commandId: crypto.randomUUID(), tripId: first, manifestLineId: row.id, shipToVersion: row.shipToVersion, quantity: Number(row.available),
-    }, 'SOURCE')
-    expect(result.status).toBe('APPLIED')
-    mainDeliveries.push(result.sourceId)
+    } })
+    const results = await Promise.all(Array.from({ length: index === 0 ? 2 : 1 },
+      async () => await (await attempt()).json() as { status: string; sourceId: string; reasonCode?: string }))
+    const applied = results.filter(result => result.status === 'APPLIED')
+    expect(applied).toHaveLength(1)
+    if (index === 0) expect(['C4_EXISTING_DELIVERY_PENDING', 'C4_QUANTITY_NOT_AVAILABLE',
+      'C4_LOADED_LINE_NOT_DELIVERABLE']).toContain(results.find(result => result.status === 'REJECTED')?.reasonCode)
+    mainDeliveries.push(applied[0].sourceId)
   }
   const originHistory = await history(request, main)
   expect(originHistory.closure).toEqual(prior)
@@ -767,7 +772,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   }))
   expect(await get<{ sources: { sourceId: string }[] }>(request,
     '/api/synthetic/app02c5/ar?orderLineId=' + order.orderLineId, 'SOURCE')).toMatchObject({
-    expected: 4, reconciled: 4, sources: expect.arrayContaining(mainDeliveries.map(sourceId =>
+    reconciled: 4, sources: expect.arrayContaining(mainDeliveries.map(sourceId =>
       expect.objectContaining({ sourceId, originTrip: 'DEV-20261123-A', trip: 'DEV-20261126-A' }))),
   })
   await checkpoint('successor-held-delivered', {

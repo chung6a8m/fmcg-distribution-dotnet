@@ -61,7 +61,10 @@ public sealed class App05AHeldExecutionSchema : Migration
             UNION ALL
             SELECT r.TenantId,r.RightId,r.BindingId,b.OriginTripId,r.DestinationTripId,r.OrderLineId,b.ConfirmSourceId,r.WarehouseId,r.SkuId,r.RightId
             FROM dbo.App05AHeldExecution r
-            JOIN dbo.App05ASuccessor b ON b.TenantId=r.TenantId AND b.BindingId=r.BindingId;
+            JOIN dbo.App05ASuccessor b ON b.TenantId=r.TenantId AND b.BindingId=r.BindingId
+            JOIN dbo.App05AHeldTransfer h ON h.TenantId=r.TenantId AND h.SuccessorRightId=r.RightId
+            JOIN dbo.StockRight child ON child.TenantId=r.TenantId AND child.Id=r.RightId
+                AND child.GrantedBaseQuantity=h.NeverLoaded+h.Returned;
             """);
         Execute.Sql("""
             CREATE TRIGGER dbo.TR_App05AHeldExecution_Immutable ON dbo.App05AHeldExecution INSTEAD OF UPDATE, DELETE AS

@@ -305,6 +305,8 @@ API `GET /reserve-options` và `POST /reserve-unheld` dùng chung tiền tố d�
 
 Review PR #159 bổ sung kiểm quyền mở báo cáo qua chuyến đích và ẩn lượng giao khả dụng khi chuyến kế nhiệm đã qua ngày DEV. Lệnh mới trên chuyến quá ngày trả từ chối trước bước ghi bằng chứng. Lượt `7472969b81514841953bc2f7ca0f95c3` đạt Chromium 4/4 và SQL 114/114, zero diff. SHA256 `run.json` `71AA8FD50E1C80943F091191F44ADE50ABC2EFDE98E790EBE7E5413A225366A5`.
 
+**Nạp và giao HELD có nguồn.** Migration `202611260002` tạo quyền thực hiện khi C.3 nạp lần đầu từ đúng thế hệ HELD. Quyền gốc giảm tương ứng, lô có nguồn chuyển giữ nguyên, tổng giữ tại MAIN chỉ giảm khi nạp vật lý. C.4 và C.5 dùng đúng dòng Confirm qua hai chuyến. Follow-up A biến mất khỏi việc hiện tại sau khi giao đủ, biên bản gốc vẫn giữ. Lượt `59b95837810640d39426d94ffe9cac5c` đạt Chromium 4/4 và SQL 118/118, zero diff, gồm 40/25/15, 5/4/3/1/2, cuộc đua giao cùng manifest, tiền lũy kế và tenant đối chứng. SHA256 `run.json` `4D16CFE8A65FC97CE376097DE9C0397F6D96A607C41B90535B414848EB84832D`. Chuyển lại phần còn sau khi chuyến kế nhiệm đã qua ngày cần đường phục hồi có nguồn riêng. Kết quả đang chờ CI và rà soát cuối.
+
 ### APP-05.5 — Đóng phần còn bằng nguồn được duyệt
 
 **Files:** command service/binding .3–.4, cơ chế approval/authority hiện có, follow-up và UI chi tiết; tạo `App05ARemainderClosure.cs`, `App05ARemainderClosureTests.cs` khi cần. Giữ correction/refund F ở nguồn nghiệp vụ tương ứng.

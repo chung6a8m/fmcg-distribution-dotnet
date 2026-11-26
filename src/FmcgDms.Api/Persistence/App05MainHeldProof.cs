@@ -68,11 +68,16 @@ public sealed partial class App01dCashierUnloadService
 
     private const string TransferProofSql = """
         SELECT e.OriginalRightId AS RightId,h.NeverLoaded+h.Returned AS Quantity,
-            CONVERT(bit,IIF(r.GrantedBaseQuantity=h.NeverLoaded+h.Returned AND paired.Id IS NOT NULL,1,0)) AS Proven
+            CONVERT(bit,IIF(r.GrantedBaseQuantity=h.NeverLoaded+h.Returned AND granted.Id IS NOT NULL
+                AND paired.Id IS NOT NULL,1,0)) AS Proven
         FROM dbo.App05AHeldExecution e
         JOIN dbo.App05AHeldTransfer h ON h.TenantId=e.TenantId AND h.SuccessorRightId=e.RightId
         JOIN dbo.StockRight r ON r.TenantId=e.TenantId AND r.Id=e.RightId
         JOIN dbo.BusinessSourceLine grantLine ON grantLine.TenantId=r.TenantId AND grantLine.Id=r.BusinessSourceLineId
+        LEFT JOIN dbo.LedgerEffect granted ON granted.TenantId=grantLine.TenantId AND granted.BusinessSourceLineId=grantLine.Id
+            AND granted.LedgerKind='RIGHT_A' AND granted.EffectKey='RIGHT-ALLOCATED'
+            AND granted.QuantityDelta=r.GrantedBaseQuantity AND granted.AmountDelta=0
+            AND granted.StockLocationId=e.WarehouseId AND granted.SkuId=e.SkuId
         OUTER APPLY (
             SELECT l.Id FROM dbo.BusinessSourceLine l JOIN dbo.LedgerEffect effect
                 ON effect.TenantId=l.TenantId AND effect.BusinessSourceLineId=l.Id

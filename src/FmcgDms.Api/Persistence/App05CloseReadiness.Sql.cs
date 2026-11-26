@@ -40,12 +40,12 @@ internal static partial class App05CloseReadiness
         LEFT JOIN dbo.C2Confirmation c ON c.TenantId=s.TenantId AND c.OrderId=s.AOrderId
         LEFT JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
         OUTER APPLY (
-            SELECT SUM(v.GrantedBaseQuantity){{(successor ? "-SUM(moved.Quantity)" : "")}} AS Granted,SUM(v.ConsumedBaseQuantity) AS Consumed,
-                SUM(v.ReleasedBaseQuantity){{(successor ? "-SUM(moved.Quantity)" : "")}} AS Released,SUM(x.Loaded) AS Loaded,SUM(x.Returned) AS Returned,
+            SELECT SUM(v.GrantedBaseQuantity{{(successor ? "-moved.Quantity" : "")}}) AS Granted,SUM(v.ConsumedBaseQuantity) AS Consumed,
+                SUM(v.ReleasedBaseQuantity{{(successor ? "-moved.Quantity" : "")}}) AS Released,SUM(x.Loaded) AS Loaded,SUM(x.Returned) AS Returned,
                 MAX(flags.Drift) AS Drift
             FROM dbo.AReservation a JOIN dbo.StockRight v ON v.TenantId=a.TenantId AND v.Id=a.StockRightId
             {{(successor ? """
-            CROSS APPLY(SELECT COALESCE(SUM(h.NeverLoaded+h.Returned),0) AS Quantity
+            CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(h.NeverLoaded+h.Returned),0)) AS Quantity
                 FROM dbo.App05AHeldExecution e JOIN dbo.App05AHeldTransfer h
                     ON h.TenantId=e.TenantId AND h.SuccessorRightId=e.RightId
                 WHERE e.TenantId=v.TenantId AND e.OriginalRightId=v.Id) moved

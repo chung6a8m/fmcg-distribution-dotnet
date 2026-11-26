@@ -62,7 +62,7 @@ public sealed partial class App01dCashierUnloadService
 
         var (plans, rejection) = await PlanD3Return(db, tx, tenant, input.TripId, trip.VehicleLocationId, ct);
         var zero = connections.UsesApp05TripClosure && rejection == "LOADED_MANIFEST_NOT_ELIGIBLE"
-            ? await PlanZeroStockHandoff(db, tx, tenant, input.TripId, ct) : null;
+            ? await PlanZeroStockHandoff(db, tx, tenant, input.TripId, connections.UsesApp05Successor, ct) : null;
         if (plans is null && zero is null) return BusinessCommandOutcome.Rejected(rejection!);
         Guid warehouse = zero?.Warehouse ?? plans![0].Warehouse;
         plans ??= [];
@@ -143,7 +143,7 @@ public sealed partial class App01dCashierUnloadService
     }
 
     private static async Task<D3ZeroHandoff?> PlanZeroStockHandoff(SqlConnection db, SqlTransaction tx, string tenant,
-        Guid tripId, CancellationToken ct)
+        Guid tripId, bool successor, CancellationToken ct)
     {
         var trip = await FindTrip(db, tx, tenant, tripId, ct);
         if (trip is null || trip.Status is not ("PREPARED" or "IN_PROGRESS") ||
@@ -171,13 +171,13 @@ public sealed partial class App01dCashierUnloadService
         var warehouses = (await grid.ReadAsync<Guid>()).ToArray();
         if (hasStockSource || warehouses.Length != 1) return null;
 
-        var preview = await App05CloseReadiness.Read(db, tx, tenant, tripId, false, ct);
+        var preview = await App05CloseReadiness.Read(db, tx, tenant, tripId, false, ct, successor: successor);
         if (preview.HandoffId is not null || preview.ALines.Length == 0 ||
             preview.ALines.Any(line => line.Remaining <= 0 || line.Loaded != 0 || line.Delivered != 0) ||
             preview.Blockers.Any(blocker => blocker.Code is not ("ZERO_STOCK_HANDOFF_REQUIRED" or "FOLLOW_UP_REQUIRED")))
             return null;
         foreach (var sku in preview.ALines.Where(line => line.Held > 0).Select(line => line.SkuId).Distinct().Order())
-            if (!await VerifyMainHeldPool(db, tx, tenant, new(warehouses[0], sku), ct))
+            if (!await VerifyMainHeldPool(db, tx, tenant, new(warehouses[0], sku), ct, successor))
                 return null;
         return new(warehouses[0], preview.ALines);
     }

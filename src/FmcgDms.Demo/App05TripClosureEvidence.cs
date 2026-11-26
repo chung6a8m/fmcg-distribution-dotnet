@@ -727,11 +727,12 @@ internal static class App05TripClosureEvidence
                     JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=p.TenantId AND s.AOrderLineId=p.OrderLineId
                     JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId AND o.Status='FULFILLED'
                     CROSS APPLY (
-                        SELECT SUM(IIF(d.TripId=s.TripId,d.BaseQuantity,0)) AS OriginalDelivered,
+                        SELECT SUM(IIF(d.App05BindingId IS NULL,d.BaseQuantity,0)) AS OriginalDelivered,
                                SUM(IIF(d.TripId=@SuccessorTripId AND d.App05BindingId=@MainBindingId,d.BaseQuantity,0)) AS SuccessorDelivered,
                                SUM(price.NetAmount) AS NetAmount,SUM(price.TaxAmount) AS TaxAmount,SUM(price.GrossAmount) AS GrossAmount
                         FROM dbo.SaleDelivery d JOIN dbo.F04DeliveryPricing price ON price.TenantId=d.TenantId AND price.DeliveryId=d.Id
                         WHERE d.TenantId=s.TenantId AND d.AOrderLineId=s.AOrderLineId
+                            AND (d.TripId=s.TripId OR d.TripId=@SuccessorTripId)
                     ) x
                     WHERE p.TenantId=@Tenant AND p.OrderLineId=@MainLineId AND s.ConfirmedBaseQuantity=40
                         AND x.OriginalDelivered=25 AND x.SuccessorDelivered=15
