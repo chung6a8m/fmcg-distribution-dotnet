@@ -79,7 +79,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `MERGED / MAIN_CI_VERIFIED` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
-| **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `IMPLEMENTED / CI_PENDING` |
+| **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
 
 Thứ tự mặc định: **.0 → .1 → .2 → .3 → .4a → .4b → .5 → .6 → .7**. Phân tích .1 có thể song song .0; merge code cần kết quả CI áp dụng trên source cuối. Không chờ .6 mới cung cấp UI tối thiểu: mỗi increment có đường thao tác dùng được cho phần mình sở hữu. .6 gom công việc và tăng khả năng phục hồi, không xây lại màn đã có.
@@ -354,6 +354,17 @@ APP-05.5 hoàn tất trong phạm vi triển khai synthetic DEV. Bàn công vi�
 - D.4 dùng cửa sổ `From < Cutoff <= AsOf <= now` và `From <= OccurredAt < Cutoff`. Báo cáo hoàn tất việc phải khớp Delivery, dòng nguồn, timestamp và hash của bằng chứng cam kết. NextDay chỉ chuyển clock/chuẩn bị ngày mới. Biên bản chốt giữ nguyên phân công, nguồn và tổng số việc tại lúc đóng.
 - Lịch sử lệnh phân trang theo actor, tenant và quyền hiện hành của từng Trip, tra được theo mã lệnh hoặc chuyến. Có kết quả đóng chuyến, phân công, chọn chuyến, chuyển HELD, giữ hàng bổ sung, nạp/giao kế nhiệm và đề nghị/duyệt đóng phần A. Các lần nạp đã áp dụng được nối từ manifest có quyền kế nhiệm. Receipt kế nhiệm bị từ chối từ trước .6 thiếu dữ liệu phạm vi gốc để đưa vào lịch sử, nhưng vẫn replay qua command gốc với đúng payload và quyền hiện hành. Yêu cầu chưa có receipt cần tra lại trước khi gửi cùng mã và dữ liệu gốc.
 - `VerifyASuccessor` bao phủ mất ACK, context browser mới sau Stop/NextDay/Resume, replay và thay payload, sai tenant hoặc bị thu hồi quyền, bộ lọc và đổi người/hạn từ bàn phím, đối chiếu snapshot và audit SQL. `VerifyCloseReadiness` thêm ca sai hash nguồn và biên cutoff. [Kế hoạch kiểm chứng](../superpowers/plans/2026-11-26-app-05-6-work-and-recovery.md).
+
+#### Closeout APP-05.6 — 26/11/2026
+
+- PR #165 đã merge vào `main`. Source `52672fae4f40279ba9b620a7b430778d9c0dc1e9`, merge `a7883ab6020c43e67d1771bca656e73a9a0eaa9b`. Tree `2f1026df21527771e54619635389514d56bbb014` trùng source, PR integration và merge. Review độc lập trên source cuối xác nhận xử lý phạm vi từng vai, truy vết C.3/C.4, bằng chứng nguồn hoàn tất và liên kết snapshot. Browser kiểm từng vai riêng. [PR #165](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/165).
+- CI final HEAD đạt 10/10 workflow và 25/25 check ở lượt đầu. Hosted integration `7da95d2bfcb7a6c3ca081784baebc488c43a5a02` có `VerifyASuccessor` run `adf6776fbe2c4b10a5f73a7d5afd84e5` đạt Chromium 6/6, SQL 140/140, zero diff. SHA256 `run.json` `C31555B3AD712F2B291B9FD4937DAEDB27E20DB77CBCE84D454BFEC67FC4FF49`. `VerifyCloseReadiness` run `ef07c5955275432881eede963a22355a` đạt Chromium 1/1 và SQL 67/67, zero diff. [CI PR #165](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45759741381).
+- Local trên source cuối đạt xUnit/MTP 398/398, web tests 15/15 và build. Hai runner Chromium/LocalDB `997758a59f274294a2316d1f5d9416ce` và `13fccd01ecbb4ba5a82db5f6b6822606` đạt cùng số ca và đối chiếu SQL. Cả hai đã Remove phiên scratch theo nonce.
+- Job APP-03 trên đúng merge `a7883ab` đạt ở lượt đầu. Hosted run `1a8e386eb2284e5f8f341dfa1c6efe9a` đạt Chromium 6/6 và SQL 140/140, zero diff. SHA256 `run.json` `DEEA186FE6887391DFA896CE5E570DD055E18278B86271DEA99F42E605AB6D19`. Readiness run `0a6f09e0becc449cad593cb6ecf49960` đạt Chromium 1/1 và SQL 67/67, zero diff.
+- Gate tổng trên merge đạt 10/10 workflow và 25/25 check ở lượt 4. Lượt đầu D1-09/A và bước nâng cao của C.6 hết timeout HTTP 3 giây. C.6 tiếp tục hết hạn ở lượt 2 và 3. [CI main](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45761753522).
+- PR #166 xử lý timeout lặp lại ở bộ thu thập bằng chứng C.6: HTTP probe sau Chromium có deadline 15 giây để nhận kết quả từ đường nghiệp vụ có thể chờ khóa SQL 10 giây. Startup/health giữ deadline riêng. Budget áp dụng cả client khôi phục và client cạnh tranh. Runner ghi method, path và thời gian khi nhận header sau 3 giây hoặc khi bị hủy. Probe loopback trả HTTP 409 sau 3,6 giây tái hiện timeout cũ và xác nhận client mới nhận đúng 409. Giữ ma trận, SQL oracle, quyền và yêu cầu về số lượng bằng chứng. [PR #166](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/166).
+
+Bằng chứng APP-05.6 áp dụng cho synthetic DEV. APP-05.7 sở hữu nghiệm thu ca tích hợp. Nghiệm thu tenant, Pilot và vận hành thực tế theo mốc riêng.
 
 ### APP-05.7 — Nghiệm thu ca tích hợp
 

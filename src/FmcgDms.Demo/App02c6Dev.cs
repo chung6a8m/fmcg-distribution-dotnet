@@ -36,6 +36,32 @@ internal sealed partial class App02c6Dev
         Directory.CreateDirectory(CheckpointPath);
     }
 
+    // The C.2/C.4 SQL transaction lock can wait for 10 seconds.
+    // Give the acceptance probe time to observe the resulting response.
+    internal static HttpClient CreateEvidenceClient() =>
+        new(new EvidenceTimingHandler()) { Timeout = TimeSpan.FromSeconds(15) };
+
+    private sealed class EvidenceTimingHandler() : DelegatingHandler(new SocketsHttpHandler { UseProxy = false })
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var timer = Stopwatch.StartNew();
+            string path = request.RequestUri!.AbsolutePath;
+            try
+            {
+                var response = await base.SendAsync(request, ct);
+                if (timer.Elapsed >= TimeSpan.FromSeconds(3))
+                    Console.Error.WriteLine($"C.6 HTTP {request.Method} {path}: {(int)response.StatusCode} after {timer.ElapsedMilliseconds} ms");
+                return response;
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine($"C.6 HTTP {request.Method} {path}: canceled after {timer.ElapsedMilliseconds} ms");
+                throw;
+            }
+        }
+    }
+
     internal DateTimeOffset InitialTime { get; } = new(2026, 10, 31, 16, 0, 0, TimeSpan.Zero);
     internal DateTimeOffset CanonicalTime { get; } = new(2026, 10, 31, 17, 5, 0, TimeSpan.Zero);
     internal string ClockPath => Path.Combine(directory, "clock.utc");

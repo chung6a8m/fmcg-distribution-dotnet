@@ -227,7 +227,7 @@ internal sealed partial class App02c6Dev
         var pending = receipts.First(r => r.Quantity == 13 && r.SourceId is null);
         var before = await Observe(run, "tenant-a");
         await restart();
-        using var recoveredSession = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        using var recoveredSession = CreateEvidenceClient();
         string freshToken = newSession();
         using var lookup = await Send(recoveredSession, baseUrl, $"app02c4/trips/{applied.TripId}/commands/{applied.CommandId}", freshToken, ct);
         using var lookupBody = JsonDocument.Parse(await lookup.Content.ReadAsStringAsync(ct));

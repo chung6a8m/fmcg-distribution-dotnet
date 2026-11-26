@@ -75,7 +75,7 @@ internal sealed partial class App02c6Advanced
         var right = new C2ReserveInput(Guid.NewGuid(), second.Id, second.Line, scene.Warehouse, 40, second.Confirm);
         await using var read = await App02c6Dev.ReadOnly(run, Tenant);
         string before = await Balance();
-        using var rival = new HttpClient(new SocketsHttpHandler { UseProxy = false });
+        using var rival = App02c6Dev.CreateEvidenceClient();
         var results = await Task.WhenAll(Attempt(client, left), Attempt(rival, right));
         Require(results.Count(result => result.Code == HttpStatusCode.OK) == 1, "Expected one successful competing allocation.");
         var winner = results[0].Code == HttpStatusCode.OK ? left : right;
