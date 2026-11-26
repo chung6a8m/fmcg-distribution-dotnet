@@ -39,7 +39,7 @@ class ConsumerAuditTests(unittest.TestCase):
             (root / 'src/reader.cs').write_text('uncommitted')
             report = audit.inventory(root, 'HEAD')
             self.assertEqual(report['tracked_count'], len(files))
-            self.assertEqual(report['v1_allowlist'], ['README.md'])
+            self.assertEqual(report['active_allowlist'], ['README.md'])
             self.assertEqual([r['path'] for r in report['opaque']], ['docs/binary.bin'])
             item = next(r for r in report['markdown_matrix'] if r['path'] == 'docs/status/app-05-status.md')
             self.assertEqual(item['disposition'], 'CANDIDATE_FULL_PENDING_REVIEW')

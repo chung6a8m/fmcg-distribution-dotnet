@@ -28,16 +28,17 @@ PUSH_CONTEXT = {
 def classification_receipt(mode="full", context=PR_CONTEXT):
     docs_only = mode == "docs-only"
     changes = (
-        [{"path": "README.md", "status": "M", "old_mode": "100644", "new_mode": "100644"}]
+        [{"path": "docs/status/app-05-status.md", "status": "M", "old_mode": "100644", "new_mode": "100644"}]
         if docs_only else []
     )
     return {
-        "version": 1,
+        "version": 2,
         "mode": mode,
         **context,
         "merge_base_sha": "d" * 40 if docs_only else "",
         "reason": "allowlisted_prose" if docs_only else "requires_full_ci",
         "changes": changes,
+        "diagnostics": {"phase": "complete" if docs_only else "context", "offending_count": 0, "offenders": []},
     }
 
 
@@ -304,15 +305,15 @@ class NeedsValidationTests(unittest.TestCase):
                 self.assert_receipt_rejected(receipt, "receipt")
 
     def test_receipt_requires_supported_integer_version(self):
-        for version in (0, 2, True, 1.0, "1"):
+        for version in (0, 1, 3, True, 2.0, "2"):
             with self.subTest(version=version):
                 self.assert_receipt_rejected(classification_receipt() | {"version": version}, "version")
 
     def test_receipt_json_rejects_duplicate_keys_and_non_json_literals(self):
         receipt = json.dumps(classification_receipt("docs-only"))
         for malformed in (
-            receipt.replace('"version": 1', '"version": 2, "version": 1'),
-            receipt.replace('"path": "README.md"', '"path": "other.md", "path": "README.md"'),
+            receipt.replace('"version": 2', '"version": 1, "version": 2'),
+            receipt.replace('"path": "docs/status/app-05-status.md"', '"path": "other.md", "path": "docs/status/app-05-status.md"'),
             receipt.replace('"reason": "allowlisted_prose"', '"reason": NaN'),
             "{",
         ):
@@ -375,7 +376,7 @@ class NeedsValidationTests(unittest.TestCase):
         for invalid_fields in (
             {"path": "docs/new.md"},
             {"path": "readme.md"},
-            {"path": "./README.md"},
+            {"path": "./docs/status/app-05-status.md"},
             {"status": "T"},
             {"old_mode": "120000"},
             {"new_mode": "100755"},
@@ -397,6 +398,20 @@ class NeedsValidationTests(unittest.TestCase):
         ):
             with self.subTest(field=field, value=value):
                 self.assert_receipt_rejected(classification_receipt() | {field: value}, field)
+
+    def test_diagnostics_schema_and_mode_fail_closed(self):
+        for detail in (None, {}, {"phase": "complete", "offending_count": True, "offenders": []},
+                       {"phase": "complete", "offending_count": 1, "offenders": []},
+                       {"phase": "context", "offending_count": 0, "offenders": []}):
+            with self.subTest(detail=detail):
+                self.assert_receipt_rejected(classification_receipt("docs-only") | {"diagnostics": detail}, "diagnostics", "docs-only")
+        full = classification_receipt() | {"reason": "change_not_allowlisted_prose", "diagnostics": {
+            "phase": "comparisons", "offending_count": 1, "offenders": [{"phase": "whole-pr", "path_preview": "AGENTS.md", "status": "M", "old_mode": "100644", "new_mode": "100644"}]}}
+        needs = successful_needs()
+        needs["classify"]["outputs"]["receipt"] = json.dumps(full)
+        self.assertTrue(self.evaluate(needs)[0])
+        full["diagnostics"]["offenders"][0]["path_preview"] = "<script>:\n"
+        self.assert_receipt_rejected(full, "diagnostics")
 
     def test_full_receipt_accepts_resolved_merge_base(self):
         needs = successful_needs()

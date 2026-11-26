@@ -27,7 +27,7 @@ quy tắc theo tiêu đề/commit hay đầu vào dispatch để tự chọn đ�
 build reuse, SQL/browser gate, test và artifact của bốn worker. Bước phân loại
 thêm một khoảng chờ ngắn trước worker; số đo thực tế phải ghi cả phần này.
 
-## 2. Danh sách đủ điều kiện phiên bản 1
+## 2. Danh sách đủ điều kiện phiên bản 1 (baseline lịch sử)
 
 Danh sách chính thức là `ALLOWED_DOC_PATHS` trong
 [`tools/classify_app00a_pr.py`](../../tools/classify_app00a_pr.py). Phiên bản
@@ -141,9 +141,7 @@ Quy tắc GitHub: [required checks và job/workflow bị skip](https://docs.gith
 Trạng thái tại lần bổ sung roadmap: **ROADMAP_APPROVED / IMPLEMENTATION_NOT_STARTED**.
 Phạm vi **SYNTHETIC_NONPRODUCTION / CI / DOCS_GOVERNANCE**. Owner yêu cầu thực
 hiện đề xuất bổ sung track v2 sau phân tích PR #163. Đây là roadmap triển khai
-theo các PR độc lập, không phải biên nhận v2 đã hoạt động. Các mục 1–4 là chính
-sách v1 đang áp dụng; chỉ thay chính sách thực thi trong increment tương ứng
-sau review và kiểm chứng. Không thay đổi phạm vi business, APP runtime,
+theo các PR độc lập, không phải biên nhận v2 đã hoạt động. Các mục 1–4 mô tả chính sách v1 lịch sử; chính sách candidate 02B ở mục 5.4 và handoff bên dưới. Chỉ áp dụng sau review, probe và kiểm chứng. Không thay đổi phạm vi business, APP runtime,
 production, physical/PREPROD, Pilot, Owner decisions hoặc các acceptance gate
 nghiệp vụ. Track này độc lập với tiến độ APP-05.7 và các increment business.
 
@@ -230,8 +228,8 @@ closeout mới.
 
 | Increment | Phụ thuộc | Phạm vi | Trạng thái |
 | --- | --- | --- | --- |
-| DOC-CI-02A — Consumer audit & document boundaries | v1 | Inventory và tách trạng thái khỏi instruction/hợp đồng; [audit và handoff](doc-ci-02a-consumer-audit.md) | SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING |
-| DOC-CI-02B — Status/receipt & classifier v2 | 02A | Chuẩn hóa status/receipt, mở rộng allowlist đã audit, diagnostics | NOT_STARTED |
+| DOC-CI-02A — Consumer audit & document boundaries | v1 | Inventory và tách trạng thái khỏi instruction/hợp đồng; [audit và handoff](doc-ci-02a-consumer-audit.md) | MERGED / MAIN_CI_VERIFIED / CLOSED ([receipt #169](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/169#issuecomment-7188635128)) |
+| DOC-CI-02B — Status/receipt & classifier v2 | 02A | Chuẩn hóa status/receipt, exact candidate allowlist và diagnostics | SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING |
 | DOC-CI-02C — Companion CI routing | 02B | Áp dụng cùng policy cho chín workflow đồng hành | NOT_STARTED |
 | DOC-CI-02D — Independent acceptance & closeout | 02C | Probe hosted, full controls, main receipt và đo hiệu quả | NOT_STARTED |
 
@@ -278,6 +276,8 @@ closeout mới.
   policy edits Full hoặc fail đúng hợp đồng; probe hosted trên candidate
   frozen thấy bốn APP-00A worker skipped, chín companion giữ nguyên.
   PR triển khai và main vẫn full. Bàn giao common policy contract cho 02C.
+
+**02B candidate policy (chưa merge):** [contract và audit disposition](doc-ci-02b-classifier-v2.md). Hai đường dẫn APP-05 được đề xuất; 16 path v1 trở về Full; chỉ sửa file đã tồn tại mode 100644 (A/D cũng Full). Receipt v2 có diagnostics bounded theo phase, không dùng v1 receipt để chọn v2 Light. Giữ nguyên triggers, worker và validate. Nếu consumer chưa được chứng minh, giữ Full; không merge candidate trước independent review, full CI và hosted Light proof.
 
 #### DOC-CI-02C — Companion CI routing
 

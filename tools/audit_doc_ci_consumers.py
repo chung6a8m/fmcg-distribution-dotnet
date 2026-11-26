@@ -102,13 +102,13 @@ def inventory(repo, ref):
     tracked = {r['path']: r for r in rows}
     matrix = [{'path': p, 'tracked': p in tracked,
                'mode': tracked.get(p, {}).get('mode'),
-               'v1_allowlisted': p in allowlist,
-               'disposition': 'V1_UNCHANGED_REAUDIT_REQUIRED' if p in allowlist else
+               'allowlisted': p in allowlist,
+               'disposition': 'ACTIVE_POLICY_REVIEW_REQUIRED' if p in allowlist else
                               ('CANDIDATE_FULL_PENDING_REVIEW' if p in CANDIDATES else 'FULL_DEFAULT'),
                'references': [{'source': s, 'line': n, 'role': role, 'kind': kind}
                               for s, n, role, kind in sorted(refs[p])]} for p in md]
-    return {'schema': 1, 'commit': commit, 'tree': tree, 'tracked_count': len(rows),
-            'text_count': len(contents), 'opaque': opaque, 'v1_allowlist': allowlist,
+    return {'schema': 2, 'commit': commit, 'tree': tree, 'tracked_count': len(rows),
+            'text_count': len(contents), 'opaque': opaque, 'active_allowlist': allowlist,
             'tracked_inventory': rows, 'markdown_matrix': matrix, 'generic_consumer_leads': leads,
             'limitations': ['Lexical leads are not proof of absence; inspect generic/dynamic consumers and opaque files.',
                             'Basename leads can be ambiguous; prose references include instructions and links.',
@@ -125,7 +125,7 @@ def main():
     args.output.write_text(json.dumps(report, ensure_ascii=True, indent=2) + '\n', encoding='utf-8')
     print(f"DOC-CI audit {report['commit']} tree {report['tree']}: {report['tracked_count']} tracked, "
           f"{report['text_count']} text, {len(report['opaque'])} opaque, "
-          f"{len(report['v1_allowlist'])} v1; no Light authorization")
+          f"{len(report['active_allowlist'])} active policy paths; no Light authorization")
 
 
 if __name__ == '__main__':
