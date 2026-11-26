@@ -6,7 +6,7 @@ import { forgetPending, pendingJson, rememberPending, requestSalesApi } from './
 type Command = {
   commandId: string; confirmSourceId: string; followUpId: string; quantity: string; reason: string; expectedRevision: string
 }
-type Proposal = { proposalId: string; commandId: string; quantity: string; reason: string; maker: string; recordedAt: string }
+type Proposal = Command & { proposalId: string; maker: string; recordedAt: string }
 type ProposalList = {
   scope: Pick<Command, 'confirmSourceId' | 'followUpId'> & { remaining: string; quantityStep: string; revision: string }
   canPropose: boolean; proposals: Proposal[]
@@ -17,6 +17,7 @@ const title = 'Đề nghị đóng phần còn lại'
 const finding = 'Đang tra cứu biên nhận đề nghị…'
 const unknown = 'Chưa xác nhận được kết quả đề nghị. Có thể tra cứu hoặc gửi lại cùng yêu cầu.'
 const saved = 'Đã ghi nhận đề nghị đóng. Đề nghị đang chờ duyệt.'
+const conflict = 'Mã yêu cầu đã gắn với nội dung khác. Giữ mã yêu cầu để đối chiếu biên nhận.'
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 const revision = /^[a-f0-9]{64}$/i
 const reasonValid = (reason: string) => reason.trim().length > 0 && reason.trim().length <= 240 && !/[\u0000-\u001f\u007f-\u009f]/.test(reason)
@@ -87,14 +88,17 @@ export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKe
       setData(result)
       setLoadError('')
       const original = restore(storageKey)
-      const receipt = original && result.scope.confirmSourceId === original.confirmSourceId
-        && result.scope.followUpId === original.followUpId && result.proposals.some(proposal =>
-          uuid.test(proposal.proposalId) && proposal.commandId === original.commandId && proposal.maker === actorId
-          && sameQuantity(original.quantity, proposal.quantity) && proposal.reason === original.reason)
-      if (receipt) {
+      const receipt = original && result.proposals.find(proposal =>
+        uuid.test(proposal.proposalId) && proposal.commandId === original.commandId && proposal.maker === actorId)
+      if (original && receipt && receipt.confirmSourceId === original.confirmSourceId
+        && receipt.followUpId === original.followUpId && sameQuantity(original.quantity, receipt.quantity)
+        && receipt.reason === original.reason.trim()
+        && receipt.expectedRevision === original.expectedRevision.toUpperCase()) {
         forgetPending(storageKey, original.commandId)
         setPending(null)
         setNotice(saved)
+      } else if (receipt) {
+        setNotice(conflict)
       } else if (original) {
         setNotice(message => message === finding ? unknown : message)
       }
@@ -121,7 +125,9 @@ export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKe
       const response = await requestSalesApi(api, token, path, JSON.stringify(command))
       const result = await response.json().catch(() => null) as { proposalId?: string; quantity?: string; status?: string; code?: string } | null
       const rejected = rejection(response.status, result?.code)
-      if (rejected) {
+      if (response.status === 409 && result?.code === 'COMMAND_PAYLOAD_CONFLICT') {
+        setNotice(conflict)
+      } else if (rejected) {
         forgetPending(storageKey, command.commandId)
         setPending(null)
         setNotice(rejected)

@@ -813,6 +813,9 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await form.getByRole('button', { name: 'Gửi đề nghị', exact: true }).click()
   const submitted = (await sent).postDataJSON()
   await expect(proposalWork.getByText(/Chưa xác nhận được kết quả đề nghị/)).toBeVisible()
+  const pendingKey = await proposalPage.evaluate(lineId =>
+    Object.keys(sessionStorage).find(key => key.endsWith('.closure-proposal.' + lineId)), held.orderLineId)
+  expect(pendingKey).toBeTruthy()
   await proposalWork.getByRole('button', { name: 'Tra cứu đề nghị', exact: true }).click()
   await expect(proposalWork.getByText('Chờ duyệt', { exact: true })).toBeVisible()
   expect(created).toMatchObject({ status: 'PENDING', quantity: '1.000' })
@@ -822,8 +825,29 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect(await changedProposal.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
   expect(await get(request, proposalPath)).toMatchObject({
     scope: { remaining: '5.000', revision: proposalScope.scope.revision },
-    proposals: [expect.objectContaining({ proposalId: created!.proposalId, reason: proposal.reason })],
+    proposals: [expect.objectContaining({ proposalId: created!.proposalId, reason: proposal.reason,
+      confirmSourceId: submitted.confirmSourceId, followUpId: submitted.followUpId,
+      expectedRevision: submitted.expectedRevision })],
   })
+  const changedRevision = { ...submitted, expectedRevision: '0'.repeat(64) }
+  const revisionConflict = await request.post(proposalPath, { headers: auth('OPS'), data: changedRevision })
+  expect(revisionConflict.status()).toBe(409)
+  expect(await revisionConflict.json()).toMatchObject({ code: 'COMMAND_PAYLOAD_CONFLICT' })
+  await proposalPage.evaluate(({ key, command }) =>
+    sessionStorage.setItem(key, JSON.stringify(command)), { key: pendingKey!, command: changedRevision })
+  await proposalPage.reload()
+  await expect(proposalWork.getByRole('status').filter({ hasText: 'Mã yêu cầu đã gắn với nội dung khác' })).toBeVisible()
+  await expect(proposalWork.getByText('Đề nghị đang chờ xác nhận', { exact: false })).toBeVisible()
+  await expect(proposalWork.getByRole('button', { name: 'Gửi đề nghị', exact: true })).toHaveCount(0)
+  const retryConflict = proposalPage.waitForResponse(response =>
+    response.url().endsWith(proposalPath) && response.request().method() === 'POST')
+  await proposalWork.getByRole('button', { name: 'Gửi lại cùng yêu cầu', exact: true }).click()
+  const rejectedRevision = await retryConflict
+  expect(rejectedRevision.status()).toBe(409)
+  expect(rejectedRevision.request().postDataJSON()).toEqual(changedRevision)
+  await proposalWork.getByRole('button', { name: 'Tra cứu đề nghị', exact: true }).click()
+  await expect(proposalWork.getByRole('status').filter({ hasText: 'Mã yêu cầu đã gắn với nội dung khác' })).toBeVisible()
+  expect(await proposalPage.evaluate(key => JSON.parse(sessionStorage.getItem(key)!), pendingKey!)).toEqual(changedRevision)
   await proposalPage.close()
   await checkpoint('remainder-proposal-after', {
     proposalId: created!.proposalId, lineId: held.orderLineId, confirmSourceId: held.confirmSourceId,

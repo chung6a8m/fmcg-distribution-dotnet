@@ -17,7 +17,11 @@ internal static partial class App05CloseReadiness
 
     private sealed record ClosureProposal(Guid ProposalId, Guid CommandId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Quantity,
-        string Reason, string Maker, DateTimeOffset RecordedAt);
+        string Reason, string Maker, DateTimeOffset RecordedAt, Guid ConfirmSourceId, Guid FollowUpId,
+        [property: JsonIgnore] byte[] SourceRevision)
+    {
+        public string ExpectedRevision => Convert.ToHexString(SourceRevision);
+    }
 
     private sealed record ClosureProposalScope(Guid ConfirmSourceId, Guid FollowUpId, Guid SkuId,
         [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal QuantityStep,
@@ -47,7 +51,8 @@ internal static partial class App05CloseReadiness
                 var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
                 if (scope is null) return Results.NotFound();
                 var proposals = await db.QueryAsync<ClosureProposal>(App02a3Sql.Cmd("""
-                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt FROM dbo.App05ARemainderClosureProposal
+                    SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt,ConfirmSourceId,FollowUpId,SourceRevision
+                    FROM dbo.App05ARemainderClosureProposal
                     WHERE TenantId=@Tenant AND TripId=@TripId AND OrderLineId=@LineId ORDER BY RecordedAt,ProposalId;
                     """, new { Tenant = tenant, TripId = tripId, LineId = lineId }, tx, ct));
                 return Results.Ok(new { Scope = scope, CanPropose = ops && scope.CanPropose, Proposals = proposals });
