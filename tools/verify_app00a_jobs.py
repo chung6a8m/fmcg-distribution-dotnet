@@ -5,16 +5,18 @@ import os
 import re
 
 if __package__:
-    from .classify_app00a_pr import is_docs_only_change
+    from .classify_app00a_pr import (is_docs_only_change, RECEIPT_VERSION,
+                                    MAX_DIAGNOSTIC_RECORDS, MAX_PATH_PREVIEW, DIAGNOSTIC_PHASES)
 else:
-    from classify_app00a_pr import is_docs_only_change
+    from classify_app00a_pr import (is_docs_only_change, RECEIPT_VERSION,
+                                    MAX_DIAGNOSTIC_RECORDS, MAX_PATH_PREVIEW, DIAGNOSTIC_PHASES)
 
 
 WORKER_JOBS = ("core_sql", "web_sales", "app03", "distribution")
 REQUIRED_JOBS = ("classify", *WORKER_JOBS)
 RECEIPT_FIELDS = {
     "version", "mode", "event_name", "base_sha", "source_head_sha", "workflow_sha",
-    "merge_base_sha", "reason", "changes",
+    "merge_base_sha", "reason", "changes", "diagnostics",
 }
 
 
@@ -79,6 +81,36 @@ def verify_receipt_identity(receipt, context):
         raise ValueError("source_head_sha must equal workflow_sha on push")
 
 
+def verify_diagnostics(detail, mode, reason):
+    if not isinstance(detail, dict) or detail.keys() != {"phase", "offending_count", "offenders"}:
+        raise ValueError("diagnostics schema is invalid")
+    phase, count, records = detail["phase"], detail["offending_count"], detail["offenders"]
+    if not isinstance(phase, str) or phase not in DIAGNOSTIC_PHASES:
+        raise ValueError("diagnostics phase is invalid")
+    if type(count) is not int or count < 0 or not isinstance(records, list) or len(records) != min(count, MAX_DIAGNOSTIC_RECORDS):
+        raise ValueError("diagnostics record count is invalid")
+    if mode == "docs-only":
+        if phase != "complete" or count:
+            raise ValueError("diagnostics must be empty and complete for docs-only")
+    elif phase == "complete" or (reason == "change_not_allowlisted_prose") != (count > 0) or (count and phase != "comparisons"):
+        raise ValueError("diagnostics do not match full fallback")
+    for item in records:
+        if not isinstance(item, dict) or item.keys() != {"phase", "path_preview", "status", "old_mode", "new_mode"}:
+            raise ValueError("diagnostics record schema is invalid")
+        if item["phase"] not in ("whole-pr", "integration"):
+            raise ValueError("diagnostics comparison phase is invalid")
+        preview = item["path_preview"]
+        if not isinstance(preview, str) or not 0 < len(preview) <= MAX_PATH_PREVIEW or any(
+            not 32 <= ord(c) <= 126 or c in ':<>&|[]*_~!' or ord(c) == 96 for c in preview
+        ):
+            raise ValueError("diagnostics path preview is invalid")
+        if not isinstance(item["status"], str) or not re.fullmatch(r"[A-Z]", item["status"]):
+            raise ValueError("diagnostics status is invalid")
+        if any(not isinstance(item[key], str) or not re.fullmatch(r"[0-7]{6}", item[key])
+               for key in ("old_mode", "new_mode")):
+            raise ValueError("diagnostics mode is invalid")
+
+
 def verified_mode(outputs, context):
     if not isinstance(outputs, dict):
         raise ValueError("outputs must be an object")
@@ -94,9 +126,9 @@ def verified_mode(outputs, context):
     except (ValueError, RecursionError) as error:
         raise ValueError(f"receipt contains invalid JSON ({error})") from error
     if not isinstance(receipt, dict) or receipt.keys() != RECEIPT_FIELDS:
-        raise ValueError("receipt must be an object with exactly the version 1 fields")
-    if type(receipt["version"]) is not int or receipt["version"] != 1:
-        raise ValueError("receipt version must be integer 1")
+        raise ValueError("receipt must be an object with exactly the version 2 fields")
+    if type(receipt["version"]) is not int or receipt["version"] != RECEIPT_VERSION:
+        raise ValueError("receipt version must be integer 2")
     if receipt["mode"] != mode:
         raise ValueError("receipt mode must match the classifier output mode")
     verify_receipt_identity(receipt, context)
@@ -120,6 +152,7 @@ def verified_mode(outputs, context):
             raise ValueError("full mode merge_base_sha must be empty or a full commit SHA")
         if changes != []:
             raise ValueError("full mode changes must be an empty list")
+    verify_diagnostics(receipt['diagnostics'], mode, reason)
     return mode
 
 

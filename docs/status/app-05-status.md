@@ -2,6 +2,10 @@
 
 **Snapshot nguồn:** `af8ecaabfd3417a258d866da7d52f01e492722fa`, 26/11/2026 (DOC-CI-02A). Đây là bản tách nguyên trạng mô tả từ [roadmap APP-05](../roadmap/app-05.md), `AGENTS.md` và README, không tái xác nhận evidence, không cấp authority hoặc mở gate. Đối chiếu PR/CI thật và roadmap trước khi quyết định increment tiếp theo. Không dùng Markdown này làm đầu vào runtime, test, build hoặc classifier.
 
+## Current descriptive index — snapshot tại baseline
+
+Mẫu cập nhật mỗi dòng: increment · trạng thái quan sát · phạm vi (LOCAL/PR CI/MAIN CI/physical/Owner) · link biên nhận/review · việc chưa xác minh. Không tự nâng trạng thái từ snapshot cũ; khi không có SHA/run thực tế ghi NOT_RECORDED hoặc PENDING, không suy diễn PASS. Lịch sử bên dưới không được chỉnh thành authority.
+
 ## Trạng thái từng increment tại baseline
 
 | Increment | Trạng thái đã ghi trong roadmap |

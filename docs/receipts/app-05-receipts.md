@@ -2,6 +2,10 @@
 
 Tách từ [roadmap APP-05](../roadmap/app-05.md) tại baseline `af8ecaabfd3417a258d866da7d52f01e492722fa` (26/11/2026), giữ nguyên nội dung các đoạn lịch sử/closeout bên dưới, chỉ sửa đường dẫn tương đối và thêm anchor điều hướng. Đây không phải biên nhận CI của DOC-CI-02A. Các hợp đồng, điều kiện, lịch sử lỗi và giới hạn vẫn có hiệu lực theo nguồn sở hữu, không đọc file này làm input test/build/runtime, không mở gate bằng chữ PASS. Các biên nhận local trộn với hướng dẫn kỹ thuật trong roadmap vẫn để tại chỗ. [Trạng thái](../status/app-05-status.md).
 
+## Quy cách append receipt (mô tả, không cấp quyền)
+
+Mỗi mục mới ghi increment và ngày; scope và disposition thực tế; source HEAD, tested integration/merge SHA (nếu có); workflow URL, run ID, attempt và kết quả job; artifact ID/digest nếu đã kiểm; link review; lỗi/rerun và giới hạn/điều kiện còn mở. Dùng NOT_RUN/PENDING/NOT_RECORDED khi chưa có evidence, không tự tạo số liệu. Không ghi đè historical receipt; append correction dẫn nguồn cũ. Không dùng file này thay hợp đồng, decision hoặc kết luận runtime/physical.
+
 <a id="app05-0-history"></a>
 
 #### Biên nhận lịch sử APP-05.0 — thay đổi nguồn, chờ CI và review (24/11/2026)

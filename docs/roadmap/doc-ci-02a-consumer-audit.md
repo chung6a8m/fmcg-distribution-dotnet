@@ -1,6 +1,6 @@
 # DOC-CI-02A — Consumer audit & document boundaries
 
-**Disposition: SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING.** Phạm vi SYNTHETIC_NONPRODUCTION / CI / DOCS_GOVERNANCE. Theo [roadmap DOC-CI v2](docs-pr-ci.md), không mở Light cho bất kỳ đường dẫn mới, không thay classifier/gate/routing, không mở 02B trước khi audit/review/full CI và receipt merge/main đủ.
+**Disposition: MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_CI_VERIFIED / CLOSED.** [Closeout #169](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/169#issuecomment-7188635128), merge `5607b70d5c0d5dac6414ad7575acf213a0c7a1f4`, 10/10 workflow, 25/25 job main attempt 1. PR full attempt 2; #75 còn OPEN. Các ghi chú pending dưới đây là lịch sử lúc tạo candidate, không phải disposition hiện hành. Phạm vi SYNTHETIC_NONPRODUCTION / CI / DOCS_GOVERNANCE. Theo [roadmap DOC-CI v2](docs-pr-ci.md), không mở Light cho bất kỳ đường dẫn mới, không thay classifier/gate/routing, không mở 02B trước khi audit/review/full CI và receipt merge/main đủ.
 
 ## 1. Baseline và inventory
 
@@ -95,11 +95,11 @@ Local native Git fixture 2/2 PASS: trực tiếp, đường dẫn ghép, glob, b
 - AGENTS chỉ bỏ phần lặp progress và chuyển sang link điều hướng; giữ mọi ràng buộc, Owner authorization, nghiệp vụ, độc lập review, full final-HEAD CI và các nợ. README giữ quyết định Owner và link đến nguồn; snapshot README cũ vẫn lưu. Roadmap giữ 9 increment, thứ tự, dependencies, output, hợp đồng, acceptance/fixture, scope, checklist, exit conditions và lịch sử ở link cũ. Không sửa hồ sơ APP-02/03/UI/LAB.
 - Kiểm tra cơ học 9/9 rows, 8/8 block được di chuyển với link relative rebased, 8 heading gốc giữ lại, chỉ di chuyển progress APP-05 trong AGENTS/README. Independent review đối chiếu nội dung và link/anchor trước/sau, không gán PASS tự động.
 
-## 5. Handoff cho 02B — chưa mở
+## 5. Handoff cho 02B — predecessor đã closeout
 
-- [ ] Đọc report base và checkout đúng source/tree/run/attempt; đối chiếu số tracked/Markdown/opaque, review **mọi** execution lead có thể đọc candidate/v1 (kể cả glob, hash, copy, build, imports, docs tools, link/authority). Phân loại false-positive/known consumer/unknown trong review; unknown giữ Full. Bằng chứng negative lexical không phải proof tuyệt đối.
-- [ ] Xác nhận exact 16 paths không thay đổi, full final-HEAD 10 workflow/25 check (không tính artifact mới là check), business/link/E-SIM, native regression, receipt và worker inventory. Không gọi local fixture PASS là full CI.
-- [ ] Independent review nội dung, link/anchor và authority, merge, kiểm full push main trên merge SHA. Chỉ sau đó closeout 02A; nếu cần chỉnh audit/candidate, sửa cùng PR trước merge.
+- [x] Đọc report base và checkout đúng source/tree/run/attempt; đối chiếu số tracked/Markdown/opaque, review **mọi** execution lead có thể đọc candidate/v1 (kể cả glob, hash, copy, build, imports, docs tools, link/authority). Phân loại false-positive/known consumer/unknown trong review; unknown giữ Full. Bằng chứng negative lexical không phải proof tuyệt đối. 02A đã ghi grouped/known/unknown disposition; relevant unknowns còn phải giải quyết ở 02B trước khi mở Light.
+- [x] Xác nhận exact 16 paths không thay đổi, full final-HEAD 10 workflow/25 check (không tính artifact mới là check), business/link/E-SIM, native regression, receipt và worker inventory. Không gọi local fixture PASS là full CI.
+- [x] Independent review nội dung, link/anchor và authority, merge, kiểm full push main trên merge SHA. Chỉ sau đó closeout 02A; nếu cần chỉnh audit/candidate, sửa cùng PR trước merge.
 - [ ] 02B chỉ cho phép exact paths được review đầy đủ; nếu vẫn còn consumer hoặc authority thì không đưa vào allowlist, không thay đổi bằng chữ PASS trong hồ sơ. Đề xuất bảo thủ: hai file APP-05 mới là ứng viên duy nhất từ 02A, xét lại toàn bộ 16 v1 (đặc biệt policy/instruction plans) trong PR full 02B; 02C/02D độc lập.
 
 Không có thay đổi business, schema, application runtime, classifier, gate verifier, permissions, tenant/physical/Owner acceptance hay CI worker steps. Không tự merge hoặc closeout theo báo cáo này.
