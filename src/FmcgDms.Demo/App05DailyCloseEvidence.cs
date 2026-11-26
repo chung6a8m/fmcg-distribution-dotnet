@@ -81,6 +81,8 @@ internal static class App05DailyCloseEvidence
                 var artifacts = new List<Artifact>();
                 foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
                 {
+                    // Playwright keeps a local retry cache that GitHub excludes from the artifact.
+                    if (Path.GetFileName(file) == ".last-run.json") continue;
                     await using var content = File.OpenRead(file);
                     artifacts.Add(new(Path.GetRelativePath(folder, file).Replace('\\', '/'),
                         Convert.ToHexString(await SHA256.HashDataAsync(content))));

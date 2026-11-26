@@ -25,7 +25,7 @@ Bật `APP05_DAILY_DIRECT=1` cho một lượt riêng để người thao tác �
 
 ## Artifacts và thu hồi
 
-Runner ghi `fixture.json`, snapshot và expected/actual/diff trong `sql-review.json`, JSON checkpoint gắn ID nguồn/lệnh, JUnit, ảnh Chromium và SHA-256 từng file trong `TestResults/app05-7/<run-id>/run.json`. Sau khi host dừng, runner gọi Remove theo manifest và xác nhận cả hai database thuộc nonce đã được thu hồi. Nếu lần chạy bị ngắt giữa chừng, dùng run ID được launcher in và đúng checkout.
+Runner ghi `fixture.json`, snapshot và expected/actual/diff trong `sql-review.json`, JSON checkpoint gắn ID nguồn/lệnh, JUnit, ảnh Chromium và SHA-256 từng file bằng chứng trong `TestResults/app05-7/<run-id>/run.json`. Cache chạy lại `.last-run.json` của Playwright nằm ngoài manifest. Sau khi host dừng, runner gọi Remove theo manifest và xác nhận cả hai database thuộc nonce đã được thu hồi. Nếu lần chạy bị ngắt giữa chừng, dùng run ID được launcher in và đúng checkout.
 
 ```powershell
 pwsh -NoProfile -File ./scripts/Run-App03Dev.ps1 -Action Stop -RunId <run-id>
