@@ -42,8 +42,8 @@ internal static partial class App05CloseReadiness
                 return Results.Ok(new
                 {
                     source.FollowUpId, source.Line.ConfirmSourceId, Remaining = source.CurrentRemaining, state.Revision,
-                    Unheld = Unheld(source, state),
-                    Unscheduled = source.Line.Remaining - state.Bindings.Sum(b => b.Quantity),
+                    Unheld = Unheld(source),
+                    Unscheduled = source.Line.Remaining - source.Approved - state.Bindings.Sum(b => b.Quantity),
                     CanWrite = ops, state.Trips, state.Rights,
                     Bindings = state.Bindings.Select(b => new
                     {
@@ -78,7 +78,11 @@ internal static partial class App05CloseReadiness
             });
     }
 
-    private sealed record SuccessorSource(ALine Line, Guid FollowUpId, DateTime BusinessDate, decimal Step, decimal CurrentRemaining);
+    private sealed record SuccessorSource(ALine Line, Guid FollowUpId, DateTime BusinessDate, decimal Step,
+        decimal Delivered, decimal Approved, decimal ActiveRights)
+    {
+        internal decimal CurrentRemaining => Line.Confirmed - Delivered - Approved;
+    }
 
     private static async Task<SuccessorSource?> ReadSuccessorSource(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, Guid lineId, CancellationToken ct)
@@ -103,8 +107,16 @@ internal static partial class App05CloseReadiness
             SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery
             WHERE TenantId=@Tenant AND AOrderLineId=@Line AND RightKind='A';
             """, new { Tenant = tenant, Line = lineId }, tx, ct));
+        decimal approved = await db.ExecuteScalarAsync<decimal>(App02a3Sql.Cmd("""
+            SELECT COALESCE(SUM(Quantity),0) FROM dbo.App05ARemainderApproval WHERE TenantId=@Tenant AND OrderLineId=@Line;
+            """, new { Tenant = tenant, Line = lineId }, tx, ct));
+        decimal activeRights = await db.ExecuteScalarAsync<decimal>(App02a3Sql.Cmd("""
+            SELECT COALESCE(SUM(r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity),0)
+            FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+            WHERE a.TenantId=@Tenant AND a.AOrderLineId=@Line;
+            """, new { Tenant = tenant, Line = lineId }, tx, ct));
         return new(line, followUp.FollowUpId, snapshot.BusinessDate.ToDateTime(TimeOnly.MinValue), step ?? 0.001m,
-            line.Confirmed - delivered);
+            delivered, approved, activeRights);
     }
 
     private static async Task<SuccessorState> ReadSuccessorState(SqlConnection db, SqlTransaction tx,
@@ -169,7 +181,7 @@ internal static partial class App05CloseReadiness
 
         if (!transfer && warehouse is null)
         {
-            if (input.Quantity > source.Line.Remaining - state.Bindings.Sum(b => b.Quantity))
+            if (input.Quantity > source.Line.Remaining - source.Approved - state.Bindings.Sum(b => b.Quantity))
                 return await Record(new { Code = "A_SUCCESSOR_QUANTITY_EXCEEDED" }, false);
             var bindingId = Guid.NewGuid();
             await db.ExecuteAsync(App02a3Sql.Cmd("""
@@ -186,7 +198,7 @@ internal static partial class App05CloseReadiness
         if (binding is null) return await Record(new { Code = "A_SUCCESSOR_BINDING_INVALID" }, false);
         if (warehouse.HasValue)
         {
-            if (input.Quantity > binding.Unfilled || input.Quantity > Unheld(source, state))
+            if (input.Quantity > binding.Unfilled || input.Quantity > Unheld(source))
                 return await Record(new { Code = "A_UNHELD_QUANTITY_EXCEEDED" }, false);
             var reserve = await App01a2CommandService.ReserveSuccessorStock(db, tx, tenant, actor, binding.BindingId,
                 destination.TripId, source.Line.OrderId, line, input.ConfirmSourceId, warehouse.Value, source.Line.SkuId,
@@ -196,7 +208,7 @@ internal static partial class App05CloseReadiness
         }
         var right = state.Rights.SingleOrDefault(r => r.RightId == input.OriginalRightId);
         if (right is null) return await Record(new { Code = "A_HELD_RIGHT_INVALID" }, false);
-        if (input.Quantity > right.Held || input.Quantity > binding.Unfilled)
+        if (input.Quantity > right.Held || input.Quantity > binding.Unfilled || input.Quantity > source.CurrentRemaining)
             return await Record(new { Code = "A_HELD_QUANTITY_EXCEEDED" }, false);
         if (!await App01dCashierUnloadService.VerifyMainHeldPool(db, tx, tenant,
             new(right.Warehouse, source.Line.SkuId), ct, successor: true))
@@ -292,8 +304,8 @@ internal static partial class App05CloseReadiness
     private static Task<IEnumerable<TransferRight>> ReadTransferRights(SqlConnection db, SqlTransaction tx, string tenant,
         Guid trip, ALine line, CancellationToken ct) => db.QueryAsync<TransferRight>(App02a3Sql.Cmd("""
         SELECT r.Id AS RightId,r.StockLocationId AS Warehouse,
-            r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized-v.Loaded-x.NeverLoaded AS NeverLoaded,
-            v.Returned-x.Returned AS Returned
+            r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized+closed.Returned-v.Loaded-x.NeverLoaded AS NeverLoaded,
+            v.Returned-x.Returned-closed.Returned AS Returned
         FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
         JOIN dbo.StockLocation w ON w.TenantId=r.TenantId AND w.Id=r.StockLocationId AND w.Kind='WAREHOUSE' AND w.IsActive=1
         CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(m.LoadedBaseQuantity),0)) AS Loaded,
@@ -307,9 +319,12 @@ internal static partial class App05CloseReadiness
             FROM dbo.App05AHeldTransfer x LEFT JOIN dbo.App05AHeldExecution e
                 ON e.TenantId=x.TenantId AND e.RightId=x.SuccessorRightId
             WHERE x.TenantId=r.TenantId AND x.OriginalRightId=r.Id) x
+        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(Returned),0)) AS Returned
+            FROM dbo.App05ARemainderRelease c WHERE c.TenantId=r.TenantId AND c.StockRightId=r.Id) closed
         WHERE a.TenantId=@Tenant AND a.AOrderLineId=@Line AND r.TripId=@Trip AND r.SkuId=@SkuId AND r.RightKind='A' AND r.Status='HELD'
             AND v.Loaded-v.Returned=r.ConsumedBaseQuantity
-            AND v.Loaded+x.NeverLoaded<=r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized AND x.Returned<=v.Returned
+            AND v.Loaded+x.NeverLoaded<=r.GrantedBaseQuantity-r.ReleasedBaseQuantity+x.Materialized+closed.Returned
+            AND x.Returned+closed.Returned<=v.Returned
         ORDER BY r.Id;
         """, new { Tenant = tenant, Trip = trip, Line = line.OrderLineId, line.SkuId }, tx, ct));
 }

@@ -51,8 +51,16 @@ internal static class App05TripClosureEvidence
                     tripClosure: true);
                 var upgraded = await Open("Resume", upgrade: true);
                 await Browser(upgraded, "successor", VerifySuccessor);
+                await Stop();
+                await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(4));
+                var approval = await Open("Resume", upgrade: true);
+                await Browser(approval, "approval", VerifyApproval);
+                await Stop();
+                await App03DevSession.Run("NextDay", root, source, run.Id, businessDate: App03DayBootstrap.FirstDay.AddDays(5));
+                var competing = await Open("Resume", upgrade: true);
+                await Browser(competing, "approval-race", VerifyApprovalRace);
             }
-            Check("contrast tenant business rows preserved across three synthetic days", Peer, originalPeer, await EffectDigest(Peer));
+            Check("contrast tenant business rows preserved across the synthetic journey", Peer, originalPeer, await EffectDigest(Peer));
         }
         finally
         {
@@ -443,6 +451,24 @@ internal static class App05TripClosureEvidence
                     SELECT (SELECT COUNT(*) FROM dbo.App05ASuccessor)+(SELECT COUNT(*) FROM dbo.App05AHeldTransfer);
                     """, cancellationToken: ct)));
             await Acknowledge("successor-after");
+            if (!await Wait("approval-transfer-before", exited)) return false;
+            string beforeTransferRace = await EffectDigest(Primary);
+            await Acknowledge("approval-transfer-before");
+            if (!await Wait("approval-transfer-after", exited)) return false;
+            var transferRace = await Read<ApprovalTransferRace>("approval-transfer-after");
+            Check("racing a rejected approval and transfer has no stock or financial effect", Primary,
+                beforeTransferRace, await EffectDigest(Primary));
+            Check("transfer race retains the exact HELD and lot generation", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.App05AHeldTransfer h
+                    JOIN dbo.App05AHeldTransferLot l ON l.TenantId=h.TenantId AND l.SuccessorRightId=h.SuccessorRightId
+                    WHERE h.TenantId=@Tenant AND h.OrderLineId=@LineId AND h.SuccessorRightId=@RightId
+                        AND h.NeverLoaded=1 AND h.Returned=2 AND l.NeverLoaded=1 AND l.Returned=2
+                        AND NOT EXISTS(SELECT 1 FROM dbo.App05ARemainderApproval a
+                            WHERE a.TenantId=h.TenantId AND a.OrderLineId=h.OrderLineId);
+                    """, new { scope.Tenant, transferRace.LineId, transferRace.RightId }, cancellationToken: ct)));
+            await Acknowledge("approval-transfer-after");
+
             if (!await Wait("reserve-before", exited)) return false;
             var pool = await Read<ReserveBefore>("reserve-before");
             string oldFinancial = await ReserveFinancialDigest();
@@ -647,6 +673,7 @@ internal static class App05TripClosureEvidence
                 IF @@ROWCOUNT<>1 THROW 51929,'Expected exactly the owned successor test trip.',1;
                 """, new { scope.Tenant, scope.Nonce, scope.Name, Id = id, Before = before, After = after }, cancellationToken: ct));
 
+            if (!await sources.VerifyApprovalDeliveryGuard(exited)) return false;
             if (!await Wait("successor-reserve-delivered", exited)) return false;
             var delivered = await Read<SuccessorReserveDelivery>("successor-reserve-delivered");
             var identity = new
@@ -741,6 +768,26 @@ internal static class App05TripClosureEvidence
             Check("HELD rerouting and two successor loads conserve MAIN allocation and physical quantity", Primary,
                 new ReservePool(14, 9), await ReadPool(pool.SkuId));
             Check("the HELD journey preserves the contrast tenant", Peer, peerBefore, await EffectDigest(Peer));
+            Check("all seven approval probes leave exactly one rejected receipt and no approval effect per command",
+                Primary, 7, await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.App05ASuccessorCommand c
+                    WHERE c.TenantId=@Tenant AND c.ActorId=@Checker AND c.CommandId IN @Commands AND c.Applied=0
+                        AND JSON_VALUE(c.Receipt,'$.code') IN ('A_CLOSURE_SUCCESSOR_ACTIVE','A_CLOSURE_SCOPE_CHANGED',
+                            'A_CLOSURE_ON_VEHICLE','A_CLOSURE_DELIVERY_PENDING','A_CLOSURE_REMAINDER_NOT_ELIGIBLE')
+                        AND NOT EXISTS(SELECT 1 FROM dbo.App05ARemainderApproval a
+                            WHERE a.TenantId=c.TenantId AND a.OrderLineId=@MixedLineId);
+                    """, new { scope.Tenant, Checker = App05CloseBootstrap.ClosureChecker,
+                        Commands = heldDelivery.ApprovalCommandIds, heldDelivery.MixedLineId }, cancellationToken: ct)));
+            Check("mixed line keeps the original Confirm and fulfills exactly five units with no remaining HELD", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.AConfirmedLineSnapshot s
+                    WHERE s.TenantId=@Tenant AND s.AOrderLineId=@MixedLineId AND s.ConfirmedBaseQuantity=5
+                        AND (SELECT SUM(d.BaseQuantity) FROM dbo.SaleDelivery d
+                            WHERE d.TenantId=s.TenantId AND d.AOrderLineId=s.AOrderLineId)=5
+                        AND (SELECT SUM(r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity)
+                            FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                            WHERE a.TenantId=s.TenantId AND a.AOrderLineId=s.AOrderLineId)=0;
+                    """, heldScope, cancellationToken: ct)));
             await Acknowledge("successor-held-delivered");
 
             if (!await Wait("remainder-proposal-before", exited)) return false;
@@ -784,6 +831,130 @@ internal static class App05TripClosureEvidence
                     FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)),2);
                 """, scope, cancellationToken: ct))!;
             return true;
+        }
+
+        async Task<bool> VerifyApproval(Task exited)
+        {
+            if (!await Wait("approval-before", exited)) return false;
+            var fixture = await Read<ApprovalBefore>("approval-before");
+            await using var db = await OpenDatabase(Primary);
+            var scope = new { Tenant = Primary, fixture.TripId, fixture.LineId, fixture.DeliverySourceId };
+            var baseline = await ReadUnchanged();
+            decimal allocation = await ReadAllocation();
+            await Acknowledge("approval-before");
+            if (!await SetCheckerScope("approval-revoke", false) || !await SetCheckerScope("approval-restore", true)) return false;
+            if (!await Wait("approval-after", exited)) return false;
+            var receipt = await Read<ApprovalAfter>("approval-after");
+            var results = await db.QueryAsync<ApprovedRight>(new CommandDefinition("""
+                SELECT a.SourceId,a.Quantity,a.Released,r.NeverLoaded,r.Returned,l.NeverLoaded AS LotNeverLoaded,l.Returned AS LotReturned
+                FROM dbo.App05ARemainderApproval a
+                JOIN dbo.App05ARemainderClosureProposal p ON p.TenantId=a.TenantId AND p.ProposalId=a.ProposalId
+                JOIN dbo.App05ARemainderRelease r ON r.TenantId=a.TenantId AND r.SourceId=a.SourceId AND r.OrderLineId=a.OrderLineId
+                JOIN dbo.App05ARemainderReleaseLot l ON l.TenantId=r.TenantId AND l.SourceId=r.SourceId AND l.StockRightId=r.StockRightId
+                JOIN dbo.BusinessSource s ON s.TenantId=a.TenantId AND s.Id=a.SourceId AND s.TripId=p.TripId AND s.SourceKind='A_REMAINDER_CLOSED'
+                JOIN dbo.BusinessSourceLine b ON b.TenantId=r.TenantId AND b.Id=r.SourceLineId AND b.BusinessSourceId=s.Id
+                JOIN dbo.LedgerEffect e ON e.TenantId=b.TenantId AND e.BusinessSourceLineId=b.Id
+                    AND e.LedgerKind='RIGHT_A_RELEASED' AND e.QuantityDelta=-a.Released AND e.AmountDelta=0
+                WHERE a.TenantId=@Tenant AND a.OrderLineId=@LineId AND p.TripId=@TripId AND p.Maker=@Ops AND a.Checker=@Checker;
+                """, new { scope.Tenant, scope.TripId, scope.LineId, App05CloseBootstrap.Ops, Checker = App05CloseBootstrap.ClosureChecker },
+                cancellationToken: ct));
+            var rows = results.ToDictionary(r => r.SourceId);
+            Check("approval releases one never-loaded unit after closing the one unheld unit", Primary,
+                new ApprovedRight(receipt.FirstSourceId, 2, 1, 1, 0, 1, 0), rows[receipt.FirstSourceId]);
+            Check("fractional approval releases part of the returned lot", Primary,
+                new ApprovedRight(receipt.FractionalSourceId, 0.999m, 0.999m, 0, 0.999m, 0, 0.999m), rows[receipt.FractionalSourceId]);
+            Check("final approval releases the last 0.001 of the returned lot", Primary,
+                new ApprovedRight(receipt.FinalSourceId, 0.001m, 0.001m, 0, 0.001m, 0, 0.001m), rows[receipt.FinalSourceId]);
+            Check("exactly three approvals preserve the original Confirm and close only after all obligations are satisfied",
+                Primary, 1, await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.AConfirmedLineSnapshot s
+                    JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId AND o.Status='REMAINDER_CLOSED'
+                    JOIN dbo.AReservation a ON a.TenantId=s.TenantId AND a.AOrderLineId=s.AOrderLineId
+                    JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                        AND r.Status='RELEASED' AND r.GrantedBaseQuantity=3 AND r.ConsumedBaseQuantity=1 AND r.ReleasedBaseQuantity=2
+                    WHERE s.TenantId=@Tenant AND s.TripId=@TripId AND s.AOrderLineId=@LineId AND s.ConfirmedBaseQuantity=4
+                        AND (SELECT COUNT(*) FROM dbo.App05ARemainderApproval x WHERE x.TenantId=s.TenantId AND x.OrderLineId=s.AOrderLineId)=3
+                        AND (SELECT SUM(x.Quantity) FROM dbo.App05ARemainderApproval x WHERE x.TenantId=s.TenantId AND x.OrderLineId=s.AOrderLineId)=3;
+                    """, scope, cancellationToken: ct)));
+            Check("release puts two held units back in the MAIN free quantity", Primary, allocation - 2, await ReadAllocation());
+            Check("approval leaves physical stock, Confirm, delivery, AR, COGS and original close intact", Primary, baseline, await ReadUnchanged());
+            await Acknowledge("approval-after");
+            return true;
+
+            async Task<bool> SetCheckerScope(string phase, bool active)
+            {
+                if (!await Wait(phase, exited)) return false;
+                await db.ExecuteAsync(new CommandDefinition("""
+                    IF DB_NAME()<>@Name OR NOT EXISTS(SELECT 1 FROM dbo.LocalDemoOwner WHERE RunId=@Nonce)
+                        OR NOT EXISTS(SELECT 1 FROM dbo.App00ScratchMarker WHERE Nonce=@Nonce)
+                        OR NOT EXISTS(SELECT 1 FROM dbo.LocalApp03Session WHERE RunId=@Nonce AND TenantId=@Tenant)
+                        THROW 51935,'APP-05.5 checker evidence scope mismatch.',1;
+                    UPDATE dbo.App05TripOperator SET IsActive=@Active
+                    WHERE TenantId=@Tenant AND TripId=@TripId AND ActorId=@Checker AND IsActive<>@Active;
+                    IF @@ROWCOUNT<>1 THROW 51936,'APP-05.5 checker test scope changed.',1;
+                    """, new { scope.Tenant, scope.TripId, Name = db.Database, Nonce = run.Id, Active = active,
+                        Checker = App05CloseBootstrap.ClosureChecker }, cancellationToken: ct));
+                await Acknowledge(phase);
+                return true;
+            }
+
+            Task<decimal> ReadAllocation() => db.QuerySingleAsync<decimal>(new CommandDefinition("""
+                SELECT p.AllocatedBaseQuantity FROM dbo.StockPool p
+                JOIN dbo.AReservation a ON a.TenantId=p.TenantId AND a.AOrderLineId=@LineId
+                JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                    AND r.StockLocationId=p.StockLocationId AND r.SkuId=p.SkuId
+                WHERE p.TenantId=@Tenant;
+                """, scope, cancellationToken: ct));
+
+            Task<string> ReadUnchanged() => db.QuerySingleAsync<string>(new CommandDefinition("""
+                SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                    SELECT
+                        JSON_QUERY((SELECT * FROM dbo.PhysicalStockBalance WHERE TenantId=@Tenant
+                            ORDER BY StockLocationId,SkuId FOR JSON PATH)) AS Physical,
+                        JSON_QUERY((SELECT * FROM dbo.PhysicalStockMovement WHERE TenantId=@Tenant ORDER BY Id FOR JSON PATH)) AS Movements,
+                        JSON_QUERY((SELECT * FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND BusinessSourceId=@DeliverySourceId FOR JSON PATH)) AS Delivery,
+                        JSON_QUERY((SELECT r.* FROM dbo.ReceivableOpenItem r JOIN dbo.SaleDelivery d ON d.TenantId=r.TenantId AND d.Id=r.SaleDeliveryId
+                            WHERE d.TenantId=@Tenant AND d.BusinessSourceId=@DeliverySourceId FOR JSON PATH)) AS AR,
+                        JSON_QUERY((SELECT i.* FROM dbo.DeliveryStockIssue i JOIN dbo.SaleDelivery d ON d.TenantId=i.TenantId AND d.Id=i.SaleDeliveryId
+                            WHERE d.TenantId=@Tenant AND d.BusinessSourceId=@DeliverySourceId FOR JSON PATH)) AS COGS,
+                        JSON_QUERY((SELECT * FROM dbo.AConfirmedLineSnapshot WHERE TenantId=@Tenant AND AOrderLineId=@LineId FOR JSON PATH)) AS Confirm,
+                        JSON_QUERY((SELECT * FROM dbo.App05TripClosure WHERE TenantId=@Tenant AND TripId=@TripId FOR JSON PATH)) AS Closure
+                    FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)),2);
+                """, scope, cancellationToken: ct));
+        }
+
+        async Task<bool> VerifyApprovalRace(Task exited)
+        {
+            if (!await Wait("approval-race-before", exited)) return false;
+            var fixture = await Read<ApprovalRaceFixture>("approval-race-before");
+            await using var db = await OpenDatabase(Primary);
+            var before = await ReadOutcome();
+            Check("competing actions start with one HELD and no approval or successor", Primary,
+                new ApprovalRaceState(0, 0, 0, 1, before.Allocated, before.Physical, "CONFIRMED"), before);
+            await Acknowledge("approval-race-before");
+            if (!await Wait("approval-race-after", exited)) return false;
+            var receipt = await Read<ApprovalRaceReceipt>("approval-race-after");
+            var expected = receipt.Approved
+                ? new ApprovalRaceState(2, 0, 1, 0, before.Allocated - 1, before.Physical, "REMAINDER_CLOSED")
+                : new ApprovalRaceState(0, 2, 0, 1, before.Allocated, before.Physical, "CONFIRMED");
+            Check("only one concurrent action commits and stock rights are conserved", Primary, expected, await ReadOutcome());
+            await Acknowledge("approval-race-after");
+            return true;
+
+            Task<ApprovalRaceState> ReadOutcome() => db.QuerySingleAsync<ApprovalRaceState>(new CommandDefinition("""
+                SELECT
+                    (SELECT COALESCE(SUM(a.Quantity),0) FROM dbo.App05ARemainderApproval a
+                        WHERE a.TenantId=s.TenantId AND a.OrderLineId=s.AOrderLineId) AS Approved,
+                    (SELECT COALESCE(SUM(b.Quantity),0) FROM dbo.App05ASuccessor b
+                        WHERE b.TenantId=s.TenantId AND b.OrderLineId=s.AOrderLineId AND b.DestinationTripId=@Destination) AS Scheduled,
+                    r.ReleasedBaseQuantity AS Released,r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held,
+                    p.AllocatedBaseQuantity AS Allocated,p.OnHandBaseQuantity AS Physical,o.Status
+                FROM dbo.AConfirmedLineSnapshot s JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId
+                JOIN dbo.AReservation a ON a.TenantId=s.TenantId AND a.AOrderLineId=s.AOrderLineId
+                JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                JOIN dbo.StockPool p ON p.TenantId=r.TenantId AND p.StockLocationId=r.StockLocationId AND p.SkuId=r.SkuId
+                WHERE s.TenantId=@Tenant AND s.TripId=@Origin AND s.AOrderLineId=@LineId;
+                """, new { Tenant = Primary, fixture.Origin, fixture.Destination, fixture.LineId }, cancellationToken: ct));
         }
 
         async Task SetPool(PoolFault fault, decimal from, decimal to)
@@ -893,6 +1064,14 @@ internal static class App05TripClosureEvidence
         }
     }
 
+    private sealed record ApprovalRaceFixture(Guid Origin, Guid Destination, Guid LineId);
+    private sealed record ApprovalRaceReceipt(bool Approved);
+    private sealed record ApprovalRaceState(decimal Approved, decimal Scheduled, decimal Released, decimal Held,
+        decimal Allocated, decimal Physical, string Status);
+    private sealed record ApprovalBefore(Guid TripId, Guid LineId, Guid DeliverySourceId);
+    private sealed record ApprovalAfter(Guid FirstSourceId, Guid FractionalSourceId, Guid FinalSourceId);
+    private sealed record ApprovedRight(Guid SourceId, decimal Quantity, decimal Released, decimal NeverLoaded, decimal Returned,
+        decimal LotNeverLoaded, decimal LotReturned);
     private sealed record Source(Guid SourceId);
     private sealed record Command(Guid CommandId, string ExpectedRevision);
     private sealed record Order(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId);
@@ -919,8 +1098,9 @@ internal static class App05TripClosureEvidence
     private sealed record ReservePool(decimal OnHand, decimal Allocated);
     private sealed record RemainderProposalProof(Guid ProposalId, Guid LineId, Guid ConfirmSourceId, Guid CommandId,
         Guid FollowUpId, string Reason, string Revision);
+    private sealed record ApprovalTransferRace(Guid LineId, Guid RightId);
     private sealed record SuccessorHeldDelivery(Guid MainLineId, Guid MixedLineId, Guid SuccessorTripId,
-        Guid MainBindingId, Guid MixedBindingId, Guid MixedRightId);
+        Guid MainBindingId, Guid MixedBindingId, Guid MixedRightId, Guid[] ApprovalCommandIds);
     private sealed record SuccessorReserveDelivery(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid OriginTripId,
         Guid DestinationTripId, Guid BindingId, Guid RightId, Guid ManifestLineId, Guid DeliverySourceId, Guid LoadSourceId);
     private sealed record SuccessorStaleDelivery(Guid TripId, Guid CommandId);

@@ -75,7 +75,7 @@ public sealed partial class App01a2CommandService
             WHERE r.TenantId=o.TenantId AND r.LotId=o.LotId AND s.DestinationId=o.LocationId
             """ : "SELECT 0 AS Quantity";
         var eligible = await db.QueryAsync<F03Pick>(Sql($"""
-            SELECT o.LotId,o.Quantity+released.Quantity-used.Quantity AS Quantity
+            SELECT o.LotId,o.Quantity+released.Quantity+closed.Quantity-used.Quantity AS Quantity
             FROM dbo.F03LotOpening o
             JOIN dbo.F03Lot l ON l.TenantId=o.TenantId AND l.Id=o.LotId
             JOIN dbo.StockLocation loc ON loc.TenantId=o.TenantId AND loc.Id=o.LocationId
@@ -86,9 +86,15 @@ public sealed partial class App01a2CommandService
                     {(successor ? "AND NOT EXISTS(SELECT 1 FROM dbo.App05AHeldExecution e WHERE e.TenantId=h.TenantId AND e.RightId=h.StockRightId)" : "")}
             ) used
             CROSS APPLY ({releases}) released
+            CROSS APPLY ({(successor ? """
+                SELECT CONVERT(decimal(28,3),COALESCE(SUM(l.NeverLoaded+l.Returned),0)) AS Quantity
+                FROM dbo.App05ARemainderReleaseLot l JOIN dbo.App05ARemainderRelease r
+                    ON r.TenantId=l.TenantId AND r.SourceId=l.SourceId AND r.StockRightId=l.StockRightId
+                WHERE l.TenantId=o.TenantId AND l.LotId=o.LotId AND r.WarehouseId=o.LocationId
+                """ : "SELECT 0 AS Quantity")}) closed
             WHERE o.TenantId=@Tenant AND o.LocationId=@Location AND l.SkuId=@Sku
                 AND loc.Kind='WAREHOUSE' AND loc.IsActive=1 AND l.ExpiresOn>={LotBusinessDate}
-                AND o.Quantity+released.Quantity>used.Quantity
+                AND o.Quantity+released.Quantity+closed.Quantity>used.Quantity
             ORDER BY l.ExpiresOn,l.Code COLLATE Latin1_General_100_BIN2,l.Id
             """, new { Tenant = tenant, Location = location, Sku = sku }, tx, ct));
         return PickLots(eligible, quantity);

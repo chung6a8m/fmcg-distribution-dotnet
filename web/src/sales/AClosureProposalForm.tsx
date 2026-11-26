@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from 'react'
 import { Button, Field } from '../ui/controls'
 import { successorUnits } from './ASuccessorForm'
 import { forgetPending, pendingJson, rememberPending, requestSalesApi } from './customer-api'
@@ -6,7 +6,14 @@ import { forgetPending, pendingJson, rememberPending, requestSalesApi } from './
 type Command = {
   commandId: string; confirmSourceId: string; followUpId: string; quantity: string; reason: string; expectedRevision: string
 }
-type Proposal = Command & { proposalId: string; maker: string; recordedAt: string }
+type ApprovalIntent = { proposalId: string; quantity: string; expectedRevision: string }
+type ApprovalCommand = ApprovalIntent & { commandId: string }
+type Approval = { commandId: string; sourceId: string; checker: string; quantity: string; released: string; approvedAt: string }
+type ApprovalReceipt = Pick<Approval, 'commandId' | 'sourceId' | 'quantity' | 'released'> & { proposalId: string; status: string }
+type Proposal = Command & {
+  proposalId: string; maker: string; recordedAt: string; status: 'PENDING' | 'STALE' | 'APPROVED'
+  canApprove: boolean; blockedReason?: string; approval?: Approval
+}
 type ProposalList = {
   scope: Pick<Command, 'confirmSourceId' | 'followUpId'> & { remaining: string; quantityStep: string; revision: string }
   canPropose: boolean; proposals: Proposal[]
@@ -16,8 +23,10 @@ const api = '/api/synthetic/app05/trip-close'
 const title = 'Đề nghị đóng phần còn lại'
 const finding = 'Đang tra cứu biên nhận đề nghị…'
 const unknown = 'Chưa xác nhận được kết quả đề nghị. Có thể tra cứu hoặc gửi lại cùng yêu cầu.'
-const saved = 'Đã ghi nhận đề nghị đóng. Đề nghị đang chờ duyệt.'
+const saved = 'Đã ghi nhận đề nghị đóng.'
 const conflict = 'Mã yêu cầu đã gắn với nội dung khác. Giữ mã yêu cầu để đối chiếu biên nhận.'
+const findingApproval = 'Đang tra cứu kết quả duyệt…'
+const unknownApproval = 'Chưa xác nhận được kết quả duyệt. Có thể tra cứu hoặc gửi lại cùng yêu cầu.'
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i
 const revision = /^[a-f0-9]{64}$/i
 const reasonValid = (reason: string) => reason.trim().length > 0 && reason.trim().length <= 240 && !/[\u0000-\u001f\u007f-\u009f]/.test(reason)
@@ -50,6 +59,21 @@ function restore(storageKey: string): Command | null {
   } catch { return null }
 }
 
+function restoreApproval(storageKey: string): ApprovalCommand | null {
+  try {
+    const command = JSON.parse(pendingJson(storageKey) ?? 'null') as ApprovalCommand | null
+    return command && uuid.test(command.commandId) && uuid.test(command.proposalId)
+      && revision.test(command.expectedRevision) && (successorUnits(command.quantity) ?? 0n) > 0n ? command : null
+  } catch { return null }
+}
+
+function validRelease(expected: string, receipt: Partial<Pick<Approval, 'quantity' | 'released' | 'sourceId'>>) {
+  const quantity = successorUnits(expected)
+  const released = successorUnits(receipt.released)
+  return uuid.test(receipt.sourceId ?? '') && quantity !== null && quantity === successorUnits(receipt.quantity)
+    && released !== null && released <= quantity
+}
+
 function rejection(status: number, code?: string) {
   if (status === 400 && code === 'A_CLOSURE_PROPOSAL_INVALID') return 'Kiểm tra lại lượng và lý do đề nghị.'
   if (status !== 409) return undefined
@@ -58,18 +82,38 @@ function rejection(status: number, code?: string) {
     return 'Đề nghị bị từ chối. Kiểm tra lại nguồn và lượng còn phải giao.'
 }
 
-export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKey, unit, enabled }: {
+function approvalRejection(status: number, code?: string) {
+  if (status === 404) return 'Không tìm thấy đề nghị trong phạm vi nguồn hiện hành.'
+  if (status !== 409) return undefined
+  switch (code) {
+    case 'A_CLOSURE_SELF_APPROVAL': return 'Người lập đề nghị cần người khác duyệt.'
+    case 'A_CLOSURE_SCOPE_CHANGED': return 'Dữ liệu nguồn đã thay đổi. Kiểm tra lại trước khi duyệt.'
+    case 'A_CLOSURE_REMAINDER_NOT_ELIGIBLE': return 'Phần còn lại hiện chưa đủ điều kiện duyệt đóng.'
+    case 'A_CLOSURE_SUCCESSOR_ACTIVE': return 'Chuyến kế nhiệm còn phần phải thực hiện.'
+    case 'A_CLOSURE_ON_VEHICLE': return 'Còn hàng trên xe. Cần xử lý giao hoặc trả hàng.'
+    case 'A_CLOSURE_DELIVERY_PENDING': return 'Còn bằng chứng giao hàng đang chờ xử lý.'
+    case 'A_CLOSURE_RELEASE_UNPROVEN': return 'Chưa xác minh được nguồn của lượng giữ cần giải phóng.'
+    default: return undefined
+  }
+}
+
+export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKey, unit, enabled, initiallyOpen = false, onApprovalRead }: {
   token: string; actorId: string; tripId: string; lineId: string; storageKey: string; unit: string; enabled: boolean
+  initiallyOpen?: boolean; onApprovalRead: () => void
 }) {
   const path = `/trips/${tripId}/a-remainders/${lineId}/closure-proposals`
+  const approvalKey = storageKey + '.approval'
   const [pending, setPending] = useState(() => restore(storageKey))
-  const [open, setOpen] = useState(pending !== null)
+  const [pendingApproval, setPendingApproval] = useState(() => restoreApproval(approvalKey))
+  const [confirmation, setConfirmation] = useState<ApprovalIntent>()
+  const [open, setOpen] = useState(initiallyOpen || pending !== null || pendingApproval !== null)
   const [data, setData] = useState<ProposalList>()
   const [attempt, setAttempt] = useState(0)
   const [loadError, setLoadError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const writing = useRef(false)
+  const publishApproval = useEffectEvent(onApprovalRead)
 
   useEffect(() => {
     if (!open || !navigator.onLine) return
@@ -102,11 +146,30 @@ export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKe
       } else if (original) {
         setNotice(message => message === finding ? unknown : message)
       }
+      const approvalRequest = restoreApproval(approvalKey)
+      if (approvalRequest) {
+        const proposal = result.proposals.find(row => row.proposalId === approvalRequest.proposalId)
+        const approval = proposal?.approval
+        if (approval && uuid.test(approval.commandId) && validRelease(approvalRequest.quantity, approval)) {
+          const sameCommand = approval.commandId === approvalRequest.commandId
+          if (!sameCommand || (approval.checker === actorId
+            && proposal.expectedRevision === approvalRequest.expectedRevision.toUpperCase())) {
+            forgetPending(approvalKey, approvalRequest.commandId)
+            setPendingApproval(null)
+            setNotice(sameCommand ? 'Đã duyệt đề nghị đóng phần còn lại.' : 'Đề nghị đã được duyệt bằng yêu cầu khác.')
+            publishApproval()
+            return
+          }
+          setNotice(conflict)
+        } else {
+          setNotice(message => message === findingApproval ? unknownApproval : message)
+        }
+      }
     }).catch(() => {
       if (current) { setData(undefined); setLoadError('Không tải được đề nghị đóng.') }
     })
     return () => { current = false }
-  }, [open, attempt, token, path, storageKey, actorId])
+  }, [open, attempt, token, path, storageKey, approvalKey, actorId])
 
   function reload() {
     setData(undefined)
@@ -147,9 +210,45 @@ export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKe
     }
   }
 
+  async function sendApproval(command: ApprovalCommand) {
+    if (!enabled || !navigator.onLine || writing.current) return
+    writing.current = true
+    setBusy(true)
+    setConfirmation(undefined)
+    setNotice('')
+    rememberPending(approvalKey, command)
+    setPendingApproval(command)
+    try {
+      const { commandId, expectedRevision, proposalId } = command
+      const response = await requestSalesApi(api, token, `${path}/${proposalId}/approve`, JSON.stringify({ commandId, expectedRevision }))
+      const result = await response.json().catch(() => null) as Partial<ApprovalReceipt> & { code?: string } | null
+      const rejected = approvalRejection(response.status, result?.code)
+      if (response.status === 409 && result?.code === 'COMMAND_PAYLOAD_CONFLICT') {
+        setNotice(conflict)
+      } else if (rejected) {
+        forgetPending(approvalKey, commandId)
+        setPendingApproval(null)
+        setNotice(rejected)
+        reload()
+      } else if ((response.status === 409 && result?.code === 'A_CLOSURE_ALREADY_APPROVED')
+        || (response.ok && result?.status === 'APPROVED' && result.proposalId === proposalId
+          && result.commandId === commandId && validRelease(command.quantity, result))) {
+        setNotice(findingApproval)
+        reload()
+      } else {
+        setNotice([401, 403].includes(response.status) ? 'Chưa đủ quyền xác nhận kết quả duyệt. Gửi lại cùng yêu cầu khi có quyền.' : unknownApproval)
+      }
+    } catch {
+      setNotice(unknownApproval)
+    } finally {
+      writing.current = false
+      setBusy(false)
+    }
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!data?.canPropose || pending || busy) return
+    if (!data?.canPropose || pending || pendingApproval || confirmation || busy) return
     const values = new FormData(event.currentTarget)
     const quantity = String(values.get('quantity') ?? '').trim()
     const reason = String(values.get('reason') ?? '').trim()
@@ -180,25 +279,53 @@ export function AClosureProposalForm({ token, actorId, tripId, lineId, storageKe
         <Button disabled={!enabled || busy || !data} onClick={() => void send(pending)}>Gửi lại cùng yêu cầu</Button>
       </div>
     </>}
+    {pendingApproval && <>
+      <p>Yêu cầu duyệt đang chờ xác nhận · Mã đề nghị {pendingApproval.proposalId} · Mã yêu cầu {pendingApproval.commandId}</p>
+      <div className="button-row">
+        <Button disabled={busy} onClick={reload}>Tra cứu kết quả duyệt</Button>
+        <Button disabled={!enabled || busy || !data} onClick={() => void sendApproval(pendingApproval)}>Gửi lại yêu cầu duyệt</Button>
+      </div>
+    </>}
     {loadError ? <div>
       <p role="alert">{loadError}</p>
-      {!pending && <Button onClick={reload}>Tải lại đề nghị</Button>}
+      {!pending && !pendingApproval && <Button onClick={reload}>Tải lại đề nghị</Button>}
     </div> : !data && <p role="status">Đang tải đề nghị đóng…</p>}
     {data && <>
       <p>Còn phải giao {amount(data.scope.remaining)}</p>
       {data.proposals.length > 0 && <ul className="c1-rows" aria-label="Đề nghị đã ghi nhận">
-        {data.proposals.map(proposal => <li key={proposal.proposalId}>
+        {data.proposals.map(proposal => <li key={proposal.proposalId} data-proposal-id={proposal.proposalId}>
           <div className="c3-source">
-            <p><strong>Chờ duyệt</strong> · {amount(proposal.quantity)} · {proposal.maker} ·{' '}
+            <p><strong>{proposal.status === 'APPROVED' ? 'Đã duyệt' : proposal.status === 'STALE'
+              ? 'Đã lỗi thời' : 'Chờ duyệt'}</strong> · {amount(proposal.quantity)} · {proposal.maker} ·{' '}
               <time dateTime={proposal.recordedAt}>{timestamp.format(new Date(proposal.recordedAt))} ICT</time>
             </p>
             <p>Lý do {proposal.reason}</p>
             <p>Mã đề nghị {proposal.proposalId}</p>
+            {proposal.status === 'STALE' && <p>Tạo đề nghị mới theo số liệu hiện tại.</p>}
+            {proposal.blockedReason && <p>{approvalRejection(409, proposal.blockedReason)}</p>}
+            {proposal.approval ? <dl className="sales-facts">
+              <dt>Người duyệt</dt><dd>{proposal.approval.checker}</dd>
+              <dt>Thời điểm duyệt</dt><dd><time dateTime={proposal.approval.approvedAt}>
+                {timestamp.format(new Date(proposal.approval.approvedAt))} ICT
+              </time></dd>
+              <dt>Đã giải phóng</dt><dd>{amount(proposal.approval.released)}</dd>
+              <dt>Mã nguồn đóng phần còn lại</dt><dd><code>{proposal.approval.sourceId}</code></dd>
+            </dl> : proposal.canApprove && (confirmation?.proposalId === proposal.proposalId ? <div>
+              <p>Duyệt đóng {amount(confirmation.quantity)}.</p>
+              <div className="button-row">
+                <Button onClick={() => setConfirmation(undefined)}>Hủy</Button>
+                <Button variant="primary" disabled={!enabled || busy || !!pending || !!pendingApproval || confirmation.expectedRevision !== data.scope.revision}
+                  onClick={() => void sendApproval({ ...confirmation, commandId: crypto.randomUUID() })}>Xác nhận duyệt</Button>
+              </div>
+            </div> : <Button disabled={!enabled || busy || !!confirmation || !!pending || !!pendingApproval}
+              onClick={() => setConfirmation({ proposalId: proposal.proposalId, quantity: proposal.quantity, expectedRevision: data.scope.revision })}>
+              Duyệt đề nghị
+            </Button>)}
           </div>
         </li>)}
       </ul>}
-      {!pending && (data.canPropose ? <form aria-label={title} onSubmit={submit}>
-        <fieldset className="sales-filter" disabled={!enabled || busy}>
+      {!pending && !pendingApproval && (data.canPropose ? <form aria-label={title} onSubmit={submit}>
+        <fieldset className="sales-filter" disabled={!enabled || busy || !!confirmation}>
           <Field name="quantity" label={unit ? `Lượng đề nghị đóng (${unit})` : 'Lượng đề nghị đóng'} type="number"
             step="any" required />
           <Field name="reason" label="Lý do đề nghị đóng" maxLength={240} required />

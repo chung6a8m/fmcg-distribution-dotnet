@@ -19,13 +19,13 @@ internal static partial class App05CloseReadiness
     internal sealed record Trip(Guid TripId, string Code, DateTime BusinessDate, string Status, Guid? UnloadId, bool Used);
     internal sealed record ARow(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid SkuId, string SkuCode, string Unit,
         decimal Confirmed, decimal Granted, decimal Consumed, decimal Released, decimal Loaded, decimal Delivered,
-        decimal Returned, bool Proven)
+        decimal Returned, decimal ClosedRemainder, bool Proven)
     {
         internal ALine ToView()
         {
             decimal onVehicle = Loaded - Delivered - Returned;
-            return new(OrderId, OrderLineId, ConfirmSourceId, SkuId, SkuCode, Unit, Confirmed, Confirmed - Delivered,
-                Granted - Consumed - Released - onVehicle, 0, Loaded, Delivered, 0, onVehicle);
+            return new(OrderId, OrderLineId, ConfirmSourceId, SkuId, SkuCode, Unit, Confirmed, Confirmed - Delivered - ClosedRemainder,
+                Granted - Consumed - Released - onVehicle, 0, Loaded, Delivered, ClosedRemainder, onVehicle);
         }
     }
 

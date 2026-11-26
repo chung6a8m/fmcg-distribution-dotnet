@@ -52,7 +52,7 @@ public sealed partial class App01a2CommandService
     }
 
     private sealed record C4Totals(decimal OnOrder, decimal ConfirmedOrder, decimal OnLine, decimal LinePayable,
-        decimal OnRight, decimal OnManifest);
+        decimal OnRight, decimal OnManifest, decimal ClosedOrder, decimal ClosedLine);
 
     public async Task<BusinessCommandOutcome> DeliverC4(ClaimsPrincipal principal, C4DeliveryInput input, CancellationToken ct)
     {
@@ -143,8 +143,8 @@ public sealed partial class App01a2CommandService
         Guid manifestLineId, CancellationToken ct)
     {
         var line = await db.ExecuteScalarAsync<Guid?>(Sql("""
-            SELECT a.AOrderLineId FROM dbo.TripManifestLine m
-            JOIN dbo.AReservation a ON a.TenantId=m.TenantId AND a.StockRightId=m.StockRightId
+            SELECT a.AOrderLineId FROM dbo.TripManifestLine m WITH (READCOMMITTEDLOCK)
+            JOIN dbo.AReservation a WITH (READCOMMITTEDLOCK) ON a.TenantId=m.TenantId AND a.StockRightId=m.StockRightId
             WHERE m.TenantId=@Tenant AND m.Id=@ManifestLineId AND m.TripId=@TripId AND m.IsC3=1 AND m.RightKind='A';
             """, new { Tenant = tenant, TripId = tripId, ManifestLineId = manifestLineId }, tx, ct));
         if (line is Guid id) await App05CloseReadiness.LockAOrderLine(db, tx, tenant, id, ct);
@@ -219,7 +219,7 @@ public sealed partial class App01a2CommandService
         if (pricing && price is null) return BusinessCommandOutcome.Rejected("F04_PRICE_INVALID");
         var policy = await ValidateC4Policy(db, tx, tenant, line, price, ct);
         if (policy is null) return BusinessCommandOutcome.Rejected("C4_FROZEN_POLICY_INVALID");
-        var totals = await db.QuerySingleAsync<C4Totals>(Sql("""
+        var totals = await db.QuerySingleAsync<C4Totals>(Sql($$"""
             SELECT
                 (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND AOrderId=@OrderId) AS OnOrder,
                 (SELECT COALESCE(SUM(ConfirmedBaseQuantity),0) FROM dbo.AConfirmedLineSnapshot
@@ -227,12 +227,20 @@ public sealed partial class App01a2CommandService
                 (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND AOrderLineId=@OrderLineId) AS OnLine,
                 (SELECT COALESCE(SUM(PayableAmount),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND AOrderLineId=@OrderLineId) AS LinePayable,
                 (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND StockRightId=@StockRightId) AS OnRight,
-                (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND TripManifestLineId=@ManifestLineId) AS OnManifest
+                (SELECT COALESCE(SUM(BaseQuantity),0) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND TripManifestLineId=@ManifestLineId) AS OnManifest,
+                {{(successor ? """
+                    (SELECT COALESCE(SUM(a.Quantity),0) FROM dbo.App05ARemainderApproval a
+                        JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=a.TenantId AND s.AOrderLineId=a.OrderLineId
+                        WHERE a.TenantId=@Tenant AND s.AOrderId=@OrderId) AS ClosedOrder,
+                    (SELECT COALESCE(SUM(Quantity),0) FROM dbo.App05ARemainderApproval
+                        WHERE TenantId=@Tenant AND OrderLineId=@OrderLineId) AS ClosedLine
+                    """ : "CONVERT(decimal(18,3),0) AS ClosedOrder,CONVERT(decimal(18,3),0) AS ClosedLine")}}
             """, new { Tenant = tenant, line.OrderId, line.OrderLineId, line.StockRightId, evidence.ManifestLineId }, tx, ct));
         decimal qty = evidence.Quantity;
         if (line.RightStatus != "HELD" || totals.OnRight != line.Consumed
             || qty > line.Granted - line.Consumed - line.Released || qty > line.Loaded - totals.OnManifest
-            || qty > line.Confirmed - totals.OnLine || qty > totals.ConfirmedOrder - totals.OnOrder)
+            || qty > line.Confirmed - totals.OnLine - totals.ClosedLine
+            || qty > totals.ConfirmedOrder - totals.OnOrder - totals.ClosedOrder)
             return BusinessCommandOutcome.Rejected("C4_QUANTITY_NOT_AVAILABLE");
 
         F04PriceAmount? deliveryPrice = null;
@@ -272,7 +280,8 @@ public sealed partial class App01a2CommandService
             new TripScope { VehicleLocationId = location, BusinessDate = evidence.BusinessDate },
             new FrozenRight { ManifestLineId = evidence.ManifestLineId, LoadSourceLineId = line.LoadSourceLineId,
                 StockRightId = line.StockRightId },
-            new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
+            new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder,
+                ClosedQuantity = totals.ClosedOrder },
             payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime,
             line.SuccessorBindingId, line.SuccessorOriginTripId, line.HeldExecutorId);
         if (lotPicks is not null && result.Status == "APPLIED")

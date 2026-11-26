@@ -24,12 +24,13 @@ public sealed partial class App01dCashierUnloadService
         Dictionary<Guid, MainReturn> returns;
         Dictionary<Guid, MainRelease> releases;
         MainTransfer[] transfers = [];
-        using (var evidence = await db.QueryMultipleAsync(Sql(ReturnAndReleaseProofSql + (successor ? "\n" + TransferProofSql : ""),
+        using (var evidence = await db.QueryMultipleAsync(Sql(ReturnAndReleaseProofSql + (successor ? "\n" + TransferProofSql + "\n" + ClosureReleaseProofSql : ""),
             new { Tenant = tenant, scope.Warehouse, scope.Sku }, tx, ct)))
         {
             returns = (await evidence.ReadAsync<MainReturn>()).ToDictionary(row => row.ManifestLineId);
             releases = (await evidence.ReadAsync<MainRelease>()).ToDictionary(row => row.RightId);
-            if (successor) transfers = (await evidence.ReadAsync<MainTransfer>()).ToArray();
+            if (successor)
+                transfers = (await evidence.ReadAsync<MainTransfer>()).Concat(await evidence.ReadAsync<MainTransfer>()).ToArray();
         }
         var loadIds = loads.Select(line => line.Id).ToHashSet();
         if (returns.Values.Any(row => !row.Proven || !loadIds.Contains(row.ManifestLineId)) ||
@@ -88,6 +89,29 @@ public sealed partial class App01dCashierUnloadService
                 AND l.LineNumber=2 AND l.BaseQuantity=r.GrantedBaseQuantity AND l.SkuId=e.SkuId
         ) paired
         WHERE e.TenantId=@Tenant AND e.WarehouseId=@Warehouse AND e.SkuId=@Sku;
+        """;
+
+    private const string ClosureReleaseProofSql = """
+        SELECT r.StockRightId AS RightId,r.NeverLoaded+r.Returned AS Quantity,
+            CONVERT(bit,IIF(e.Id IS NOT NULL AND c.Id IS NOT NULL AND ledger.Id IS NOT NULL
+                AND ((lot.NeverLoaded=r.NeverLoaded AND lot.Returned=r.Returned)
+                    OR (lot.Count=0 AND NOT EXISTS(SELECT 1 FROM dbo.F03LotHold h
+                        WHERE h.TenantId=r.TenantId AND h.StockRightId=r.StockRightId))),1,0)) AS Proven
+        FROM dbo.App05ARemainderRelease r
+        JOIN dbo.App05ARemainderApproval a ON a.TenantId=r.TenantId AND a.SourceId=r.SourceId AND a.OrderLineId=r.OrderLineId
+        LEFT JOIN dbo.BusinessSource e ON e.TenantId=a.TenantId AND e.Id=a.SourceId AND e.TripId=r.RightTripId
+            AND e.SourceKind='A_REMAINDER_CLOSED' AND e.ActorId COLLATE Latin1_General_100_BIN2=a.Checker
+        LEFT JOIN dbo.BusinessCommand c ON c.TenantId=e.TenantId AND c.Id=e.BusinessCommandId AND c.Status='APPLIED'
+            AND c.ActorId COLLATE Latin1_General_100_BIN2=a.Checker
+        LEFT JOIN dbo.BusinessSourceLine l ON l.TenantId=r.TenantId AND l.Id=r.SourceLineId AND l.BusinessSourceId=r.SourceId
+            AND l.SkuId=r.SkuId AND l.BaseQuantity=r.NeverLoaded+r.Returned
+        LEFT JOIN dbo.LedgerEffect ledger ON ledger.TenantId=l.TenantId AND ledger.BusinessSourceLineId=l.Id
+            AND ledger.LedgerKind='RIGHT_A_RELEASED' AND ledger.EffectKey='RIGHT-ALLOCATED' AND ledger.AmountDelta=0
+            AND ledger.QuantityDelta=-(r.NeverLoaded+r.Returned) AND ledger.StockLocationId=r.WarehouseId AND ledger.SkuId=r.SkuId
+        CROSS APPLY (SELECT COUNT(*) AS Count,SUM(p.NeverLoaded) AS NeverLoaded,SUM(p.Returned) AS Returned
+            FROM dbo.App05ARemainderReleaseLot p WHERE p.TenantId=r.TenantId AND p.StockRightId=r.StockRightId
+                AND p.SourceId=r.SourceId) lot
+        WHERE r.TenantId=@Tenant AND r.WarehouseId=@Warehouse AND r.SkuId=@Sku;
         """;
 
     private const string ReturnAndReleaseProofSql = """

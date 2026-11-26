@@ -26,7 +26,7 @@ internal static partial class App05CloseReadiness
                 return Results.Ok(new
                 {
                     source.FollowUpId, source.Line.ConfirmSourceId, state.Revision,
-                    Unheld = Unheld(source, state), source.Step,
+                    Unheld = Unheld(source), source.Step,
                     Bindings = state.Bindings.Where(b => b.DestinationVisible && state.Trips.Any(t => t.TripId == b.DestinationTripId))
                         .Select(b => new { b.BindingId, b.DestinationTripId, b.Code, b.Quantity, b.Transferred, b.Reserved, b.Unfilled })
                 });
@@ -51,8 +51,7 @@ internal static partial class App05CloseReadiness
         });
     }
 
-    private static decimal Unheld(SuccessorSource source, SuccessorState state) =>
-        source.Line.Remaining - source.Line.Held - state.Bindings.Sum(b => b.Reserved);
+    private static decimal Unheld(SuccessorSource source) => source.CurrentRemaining - source.ActiveRights;
 }
 
 public sealed partial class App01a2CommandService
