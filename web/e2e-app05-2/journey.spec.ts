@@ -607,8 +607,6 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect(await (await reserve(never, noRight)).json()).toEqual(firstReceipt)
   expect(await reserveOptions(never)).toMatchObject({ unheld: 0, bindings: [{ unfilled: 0, reserved: 5 }] })
 
-  expect(await get<{ id: string }[]>(request, c3 + '/trips/' + second + '/rights', 'RECEIVER'))
-    .not.toContainEqual(expect.objectContaining({ id: firstReceipt.rightId }))
   const heldUnfilled = (await reserveOptions(heldPath)).bindings.find(row => row.unfilled > 0)!
   const lotShortage = await makeReserve(heldPath, held, heldUnfilled.bindingId, heldUnfilled.destinationTripId, 1)
   await checkpoint('reserve-lot-before')
@@ -652,4 +650,62 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   expect(await unavailable.json()).toMatchObject({ code: 'STOCK_INSUFFICIENT' })
   expect(await reserveOptions(sharedPath)).toMatchObject({ unheld: holdA.ok() ? 1 : 2 })
   await checkpoint('reserve-after', { winnerA: holdA.ok(), sharedSkuId, sharedLine: shared.orderLineId })
+
+  const mixedRight = (committed as { rightId: string }).rightId
+  const rights = await get<{ id: string; orderId: string; warehouseHeld: string }[]>(
+    request, c3 + '/trips/' + first + '/rights', 'RECEIVER')
+  expect(rights).toContainEqual(expect.objectContaining({
+    id: mixedRight, orderId: mixed.orderId, warehouseHeld: '1.000', originTrip: 'DEV-20261125-A',
+  }))
+  expect(rights).not.toContainEqual(expect.objectContaining({ id: firstReceipt.rightId }))
+  const load = { commandId: crypto.randomUUID(), tripId: first,
+    lines: [{ rightId: mixedRight, expectedWarehouseHeld: 1, quantity: 1 }] }
+  expect((await request.post(c3 + '/load', { headers: auth('PEER_WAREHOUSE'), data: load })).status()).toBe(403)
+  const wrongRight = await request.post(c3 + '/load', { headers: auth('RECEIVER'), data: {
+    ...load, commandId: crypto.randomUUID(),
+    lines: [{ rightId: firstReceipt.rightId, expectedWarehouseHeld: 5, quantity: 1 }],
+  } })
+  expect(await wrongRight.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'C3_RESERVATION_NOT_ELIGIBLE' })
+  const loaded = await post<{ status: string; sourceId: string }>(request, c3 + '/load', load, 'RECEIVER')
+  expect(loaded.status).toBe('APPLIED')
+  const lines = await get<{ id: string; orderId: string; shipToVersion: number; available: string }[]>(request, c4 + '/trips/' + first + '/lines', 'SOURCE')
+  const line = lines.find(row => row.orderId === mixed.orderId)!
+  expect(line).toMatchObject({ available: '1.000', originTrip: 'DEV-20261125-A' })
+  const deliveryInput = {
+    commandId: crypto.randomUUID(), tripId: first, manifestLineId: line.id, shipToVersion: line.shipToVersion, quantity: 1,
+  }
+  const staleInput = { ...deliveryInput, commandId: crypto.randomUUID() }
+  await checkpoint('successor-delivery-stale', { tripId: first, commandId: staleInput.commandId })
+  expect(await get<{ id: string; available: string }[]>(request, c4 + '/trips/' + first + '/lines', 'SOURCE'))
+    .toContainEqual(expect.objectContaining({ id: line.id, available: '0.000' }))
+  const stale = await request.post(c4 + '/deliver', { headers: auth('SOURCE'), data: staleInput })
+  expect(await stale.json()).toMatchObject({ status: 'REJECTED', reasonCode: 'TRIP_NOT_ELIGIBLE' })
+  await checkpoint('successor-delivery-current')
+  expect((await request.post(c4 + '/deliver', { headers: auth('RECEIVER'), data: deliveryInput })).status()).toBe(403)
+  const delivery = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', deliveryInput, 'SOURCE')
+  expect(delivery.status).toBe('APPLIED')
+  expect(await post(request, c4 + '/deliver', deliveryInput, 'SOURCE'))
+    .toMatchObject({ status: 'APPLIED', sourceId: delivery.sourceId, replayed: true })
+  const report = await get<{ sources: { sourceId: string }[] }>(request,
+    '/api/synthetic/app02c5/ar?orderLineId=' + mixed.orderLineId, 'SOURCE')
+  expect(report.sources).toContainEqual(expect.objectContaining({
+    orderId: mixed.orderId, orderLineId: mixed.orderLineId, confirmSourceId: mixed.confirmSourceId,
+    originTrip: 'DEV-20261125-A', trip: 'DEV-20261126-A', sourceId: delivery.sourceId, loadSourceId: loaded.sourceId,
+    status: 'RECONCILED', quantity: '1.000',
+  }))
+  await checkpoint('successor-reserve-delivered', {
+    orderId: mixed.orderId, orderLineId: mixed.orderLineId, confirmSourceId: mixed.confirmSourceId,
+    originTripId: mixedTrip, destinationTripId: first, bindingId: mixedBinding.bindingId,
+    rightId: mixedRight, manifestLineId: line.id, deliverySourceId: delivery.sourceId, loadSourceId: loaded.sourceId,
+  })
+  await checkpoint('successor-ar-destination-only')
+  const scoped = await open(context, 'SOURCE', 'ar?order=' + mixed.orderId + '&trip=' + mixedTrip)
+  await expect(scoped.getByLabel('Mã đơn A')).toHaveValue(mixed.orderId)
+  await expect(scoped.getByRole('region', { name: 'Kết quả báo cáo AR' }).getByText(/Nguồn đã đối soát 1\/1/)).toBeVisible()
+  expect(await get<{ sources: { sourceId: string }[] }>(request,
+    '/api/synthetic/app02c5/ar?orderId=' + mixed.orderId, 'SOURCE')).toMatchObject({
+    expected: 1, reconciled: 1, sources: [{ sourceId: delivery.sourceId }],
+  })
+  await scoped.close()
+  await checkpoint('successor-ar-origins-restored')
 })

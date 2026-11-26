@@ -629,6 +629,78 @@ internal static class App05TripClosureEvidence
                 await peer.ExecuteScalarAsync<int>(new CommandDefinition("SELECT COUNT(*) FROM dbo.App05ASuccessorReserve;", cancellationToken: ct)));
             await Acknowledge("reserve-after");
 
+            if (!await Wait("successor-delivery-stale", exited)) return false;
+            var stale = await Read<SuccessorStaleDelivery>("successor-delivery-stale");
+            await SetSuccessorDate(stale.TripId, 26, 25);
+            await Acknowledge("successor-delivery-stale");
+            if (!await Wait("successor-delivery-current", exited)) return false;
+            Check("a fresh stale-day successor attempt creates no C.4 evidence", Primary, 0,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.C4DeliveryEvidence WHERE TenantId=@Tenant AND ClientCommandId=@CommandId;
+                    """, new { scope.Tenant, stale.CommandId }, cancellationToken: ct)));
+            await SetSuccessorDate(stale.TripId, 25, 26);
+            await Acknowledge("successor-delivery-current");
+
+            Task SetSuccessorDate(Guid id, int before, int after) => db.ExecuteAsync(new CommandDefinition(verify + """
+                UPDATE dbo.Trip SET BusinessDate=DATEFROMPARTS(2026,11,@After)
+                WHERE TenantId=@Tenant AND Id=@Id AND BusinessDate=DATEFROMPARTS(2026,11,@Before) AND Status='PREPARED';
+                IF @@ROWCOUNT<>1 THROW 51929,'Expected exactly the owned successor test trip.',1;
+                """, new { scope.Tenant, scope.Nonce, scope.Name, Id = id, Before = before, After = after }, cancellationToken: ct));
+
+            if (!await Wait("successor-reserve-delivered", exited)) return false;
+            var delivered = await Read<SuccessorReserveDelivery>("successor-reserve-delivered");
+            var identity = new
+            {
+                scope.Tenant, delivered.OrderId, delivered.OrderLineId, delivered.ConfirmSourceId, delivered.OriginTripId,
+                delivered.DestinationTripId, delivered.BindingId, delivered.RightId, delivered.ManifestLineId,
+                delivered.DeliverySourceId, delivered.LoadSourceId
+            };
+            Check("successor delivery preserves exact Confirm, order, location, lot and source lineage", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*)
+                    FROM dbo.SaleDelivery d
+                    JOIN dbo.AOrder o ON o.TenantId=d.TenantId AND o.Id=d.AOrderId AND o.TripId=@OriginTripId
+                    JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=d.TenantId AND s.AOrderId=d.AOrderId
+                        AND s.AOrderLineId=d.AOrderLineId AND s.TripId=o.TripId AND s.SkuId=d.SkuId
+                    JOIN dbo.TripManifestLine m ON m.TenantId=d.TenantId AND m.Id=d.TripManifestLineId
+                        AND m.TripId=d.TripId AND m.StockRightId=d.StockRightId AND m.LoadedBaseQuantity=1
+                    JOIN dbo.App05ASuccessorReserve r ON r.TenantId=d.TenantId AND r.RightId=d.StockRightId
+                        AND r.DestinationTripId=d.TripId AND r.BindingId=d.App05BindingId
+                        AND r.WarehouseId=m.WarehouseLocationId
+                    JOIN dbo.F03LotLoad l ON l.TenantId=m.TenantId AND l.ManifestLineId=m.Id AND l.Quantity=1
+                    JOIN dbo.F03LotIssue j ON j.TenantId=d.TenantId AND j.DeliveryId=d.Id AND j.LotId=l.LotId AND j.Quantity=1
+                    JOIN dbo.F03Lot k ON k.TenantId=l.TenantId AND k.Id=l.LotId AND k.Code=N'DAY-A-EARLY'
+                    JOIN dbo.ReceivableOpenItem ar ON ar.TenantId=d.TenantId AND ar.SaleDeliveryId=d.Id
+                        AND ar.DueBusinessDate=DATEADD(day,s.TermsDaysSnapshot,d.BusinessDate) AND ar.OriginalAmount=d.PayableAmount
+                    WHERE d.TenantId=@Tenant AND d.AOrderId=@OrderId AND d.AOrderLineId=@OrderLineId
+                        AND s.ConfirmBusinessSourceId=@ConfirmSourceId AND d.App05OriginTripId=@OriginTripId
+                        AND d.TripId=@DestinationTripId AND d.App05BindingId=@BindingId AND d.StockRightId=@RightId
+                        AND d.TripManifestLineId=@ManifestLineId AND d.BusinessSourceId=@DeliverySourceId
+                        AND m.LoadBusinessSourceId=@LoadSourceId AND d.BaseQuantity=1 AND d.C4PriorLineQuantity=1
+                        AND d.BusinessDate=DATEFROMPARTS(2026,11,26) AND d.ShipToSnapshotId=o.ShipToSnapshotId;
+                    """, identity, cancellationToken: ct)));
+            Check("successor replay leaves exactly two delivered EA across both trips", Primary, 2m,
+                await db.ExecuteScalarAsync<decimal>(new CommandDefinition("""
+                    SELECT SUM(BaseQuantity) FROM dbo.SaleDelivery WHERE TenantId=@Tenant AND AOrderLineId=@OrderLineId;
+                    """, identity, cancellationToken: ct)));
+            Check("loading the reserved EA decreases physical and allocated MAIN exactly once", Primary,
+                new ReservePool(32, 27), await ReadPool(pool.SkuId));
+            Check("successor load and delivery leave the contrast tenant unchanged", Peer, peerBefore, await EffectDigest(Peer));
+            await Acknowledge("successor-reserve-delivered");
+
+            if (!await Wait("successor-ar-destination-only", exited)) return false;
+            await ChangeOriginDeliveryWriter(App03DayBootstrap.Actor, "app05-oracle-other-sales");
+            await Acknowledge("successor-ar-destination-only");
+            if (!await Wait("successor-ar-origins-restored", exited)) return false;
+            await ChangeOriginDeliveryWriter("app05-oracle-other-sales", App03DayBootstrap.Actor);
+            await Acknowledge("successor-ar-origins-restored");
+
+            Task ChangeOriginDeliveryWriter(string from, string to) => db.ExecuteAsync(new CommandDefinition(verify + """
+                UPDATE dbo.C4DeliveryWriter SET ActorId=@To
+                WHERE TenantId=@Tenant AND TripId=@OriginTripId AND ActorId=@From;
+                IF @@ROWCOUNT<>1 THROW 51930,'Expected exactly the owned origin test writer.',1;
+                """, new { scope.Tenant, scope.Nonce, scope.Name, delivered.OriginTripId, From = from, To = to }, cancellationToken: ct));
+
             Task<ReservePool> ReadPool(Guid sku) => db.QuerySingleAsync<ReservePool>(new CommandDefinition("""
                 SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
                 FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@WarehouseId AND SkuId=@Sku;
@@ -781,6 +853,9 @@ internal static class App05TripClosureEvidence
     private sealed record ReserveRace(bool WinnerA, Guid SharedSkuId, Guid SharedLine);
     private sealed record ReserveGrant(Guid OrderLineId, int Rights, decimal Quantity, decimal LotQuantity, decimal LedgerQuantity);
     private sealed record ReservePool(decimal OnHand, decimal Allocated);
+    private sealed record SuccessorReserveDelivery(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid OriginTripId,
+        Guid DestinationTripId, Guid BindingId, Guid RightId, Guid ManifestLineId, Guid DeliverySourceId, Guid LoadSourceId);
+    private sealed record SuccessorStaleDelivery(Guid TripId, Guid CommandId);
     private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);
     private sealed record SuccessorFault(Guid CommandId);
     private sealed record SuccessorRevocation(Guid TripId, Guid CommandId);

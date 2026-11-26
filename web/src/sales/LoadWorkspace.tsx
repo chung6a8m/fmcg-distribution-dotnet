@@ -7,7 +7,7 @@ const api = '/api/synthetic/app02c3'
 const ordersApi = '/api/synthetic/app02c2'
 type Trip = { id: string; code: string }
 type Right = { id: string; orderId: string; warehouseId: string; warehouseCode: string; skuCode: string;
-  baseUom: string; granted: string; loaded: string; warehouseHeld: string
+  baseUom: string; granted: string; loaded: string; warehouseHeld: string; originTrip?: string
   lots?: { code: string; expiresOn: string; quantity: string }[]; eligibleWarehouseHeld?: string }
 type LoadLine = { rightId: string; expectedWarehouseHeld: string; quantity: string }
 type Command = { commandId: string; tripId: string; lines: LoadLine[] }
@@ -251,6 +251,7 @@ export function LoadWorkspace({ workspaceToken, startTrip, onTripChange, startOr
           {shown.map((r, i) => <fieldset key={r.id} className="c1-fields">
             <legend>Dòng {i + 1} · {r.skuCode}</legend>
             <p className="c3-source">Mã đơn {r.orderId}</p>
+            {r.originTrip && <p>Chuyến gốc {r.originTrip}</p>}
             {workspaceToken && !order && <a className="page-link" href={`/work/orders?trip=${trip}&order=${r.orderId}`}>
               Mở đơn và lịch sử lô
             </a>}

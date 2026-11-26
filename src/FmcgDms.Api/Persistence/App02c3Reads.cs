@@ -39,7 +39,7 @@ public sealed partial class App01a2CommandService
         {
             if (!IsPreparedTrip(await FindTrip(db, tx, tenant, trip, ct))
                 || await HasLegacyManifest(db, tx, tenant, trip, ct)) return [];
-            var rights = (await EligibleC3Rights(db, tx, tenant, [trip], null, ct)).ToArray();
+            var rights = (await EligibleC3Rights(db, tx, tenant, [trip], null, ct, connections.UsesApp05Successor)).ToArray();
             return connections.UsesDevF03 ? await WithEligibleC3Lots(db, tx, tenant, rights, ct) : rights;
         }, ct);
 

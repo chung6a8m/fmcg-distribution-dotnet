@@ -35,6 +35,10 @@ public sealed record C5ArReport(DateTime AsOf, C5ArFilter Filter,
 
 public sealed partial class App01a2CommandService
 {
+    public Task<bool> CanOpenOrderArC5(ClaimsPrincipal principal, Guid orderId, CancellationToken ct) =>
+        WithC4Authority(principal, null, (db, tx, tenant, actor) => db.ExecuteScalarAsync<bool>(
+            Sql(C5OrderAccessSql(connections.UsesApp05Successor), new { Tenant = tenant, Actor = actor, OrderId = orderId }, tx, ct)), ct);
+
     public Task<C5ArReport?> ReceivablesC5(ClaimsPrincipal principal, DateTimeOffset? requestedCutoff,
         C5ArFilter filter, CancellationToken ct) =>
         WithC4Authority<C5ArReport?>(principal, null, async (db, tx, tenant, actor) =>
@@ -50,7 +54,7 @@ public sealed partial class App01a2CommandService
             parameters.Add("Due", filter.Due?.ToDateTime(TimeOnly.MinValue), DbType.Date);
             parameters.Add("Overdue", filter.Overdue, DbType.Boolean);
             parameters.Add("AsOf", cutoff.UtcDateTime, DbType.DateTime2, scale: 7);
-            var rows = (await db.QueryAsync<C5ArSource>(Sql(C5ReportSql, parameters, tx, ct))).AsList();
+            var rows = (await db.QueryAsync<C5ArSource>(Sql(C5ReportSql(connections.UsesApp05Successor), parameters, tx, ct))).AsList();
             var customers = rows.GroupBy(row => (row.CustomerId, row.Customer)).Select(group =>
                 new C5ArCustomer(group.Key.CustomerId, group.Key.Customer, group.Count(r => r.Balance.HasValue),
                     group.Count(), KnownSum(group, false), KnownSum(group, true))).ToArray();
@@ -68,12 +72,30 @@ public sealed partial class App01a2CommandService
         return sum;
     }
 
-    private const string C5ReportSql = """
-        SELECT e.ClientCommandId AS CommandId, o.Id AS OrderId, frozen.AOrderLineId AS OrderLineId, c.Id AS CustomerId,
+    private static string C5OrderAccessSql(bool successor) => $$"""
+        SELECT CONVERT(bit,CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.C2OrderDraft o
+            JOIN dbo.C4DeliveryWriter w ON w.TenantId=o.TenantId AND w.TripId=o.TripId AND w.ActorId=@Actor
+            WHERE o.TenantId=@Tenant AND o.Id=@OrderId
+        ) {{(successor ? """
+        OR EXISTS (
+            SELECT 1 FROM dbo.AConfirmedLineSnapshot s
+            JOIN dbo.App05AExecutionRight successorRight ON successorRight.TenantId=s.TenantId
+                AND successorRight.OrderLineId=s.AOrderLineId AND successorRight.SkuId=s.SkuId
+                AND successorRight.OriginTripId=s.TripId AND successorRight.ConfirmSourceId=s.ConfirmBusinessSourceId
+            JOIN dbo.C4DeliveryWriter w ON w.TenantId=successorRight.TenantId
+                AND w.TripId=successorRight.DestinationTripId AND w.ActorId=@Actor
+            WHERE s.TenantId=@Tenant AND s.AOrderId=@OrderId
+        )
+        """ : "")}} THEN 1 ELSE 0 END);
+        """;
+
+    private static string C5ReportSql(bool successor) => $"""
+        SELECT e.ClientCommandId AS CommandId, o.Id AS OrderId, s.AOrderLineId AS OrderLineId, c.Id AS CustomerId,
             c.Code + N' · ' + c.Name AS Customer, origin.Code AS OriginTrip, t.Code AS Trip,
             e.ActorId AS Owner, TODATETIMEOFFSET(e.OccurredAtUtc,'+00:00') AS OccurredAtUtc, src.Id AS SourceId, d.Id AS DeliveryId,
             ml.LoadBusinessSourceId AS LoadSourceId, cf.ConfirmSourceId, d.ShipToSnapshotId,
-            e.ShipToVersion, adr.Address AS ShipTo, p.PolicyVersion, frozen.TermsDaysSnapshot AS TermsDays,
+            e.ShipToVersion, adr.Address AS ShipTo, p.PolicyVersion, s.TermsDaysSnapshot AS TermsDays,
             d.BusinessDate, ar.DueBusinessDate,
             CASE WHEN cmd.CompletedAtUtc IS NULL OR cmd.CompletedAtUtc>@AsOf THEN 'PENDING'
                 WHEN cmd.Status='REJECTED' THEN 'REJECTED'
@@ -89,13 +111,16 @@ public sealed partial class App01a2CommandService
         JOIN dbo.C4DeliveryWriter w ON w.TenantId=e.TenantId AND w.TripId=e.TripId AND w.ActorId=@Actor
         JOIN dbo.Trip t ON t.TenantId=e.TenantId AND t.Id=e.TripId
         JOIN dbo.TripManifestLine ml ON ml.TenantId=e.TenantId AND ml.Id=e.ManifestLineId
-        JOIN dbo.AReservation r ON r.TenantId=ml.TenantId AND r.StockRightId=ml.StockRightId
-        JOIN dbo.AConfirmedLineSnapshot frozen ON frozen.TenantId=r.TenantId AND frozen.AOrderLineId=r.AOrderLineId
-        JOIN dbo.AOrder o ON o.TenantId=frozen.TenantId AND o.Id=frozen.AOrderId AND o.TripId=e.TripId
-        JOIN dbo.Trip origin ON origin.TenantId=frozen.TenantId AND origin.Id=frozen.TripId
+        JOIN dbo.StockRight r ON r.TenantId=ml.TenantId AND r.Id=ml.StockRightId
+        JOIN dbo.AReservation rs ON rs.TenantId=r.TenantId AND rs.StockRightId=r.Id
+        JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=rs.TenantId AND s.AOrderLineId=rs.AOrderLineId
+        {(successor ? SuccessorExecutionRightJoin : "")}
+        JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId
+            AND (o.TripId=e.TripId{(successor ? " OR (successorRight.BindingId IS NOT NULL AND successorRight.DestinationTripId=e.TripId)" : "")})
+        JOIN dbo.Trip origin ON origin.TenantId=s.TenantId AND origin.Id=s.TripId
         JOIN dbo.Customer c ON c.TenantId=o.TenantId AND c.Id=o.CustomerId
         JOIN dbo.C2Confirmation cf ON cf.TenantId=o.TenantId AND cf.OrderId=o.Id
-        JOIN dbo.C2LinePolicy p ON p.TenantId=frozen.TenantId AND p.OrderLineId=frozen.AOrderLineId
+        JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
         JOIN dbo.BusinessCommand cmd ON cmd.TenantId=e.TenantId AND cmd.Id=e.Id
         LEFT JOIN dbo.BusinessSource src ON src.TenantId=e.TenantId AND src.BusinessCommandId=e.Id
             AND src.SourceKind='A_DELIVERY' AND src.RecordedAtUtc<=@AsOf
@@ -131,7 +156,7 @@ public sealed partial class App01a2CommandService
                 OR (le.EffectKey='RIGHT-A-USED' AND le.AmountDelta=0 AND le.QuantityDelta=-d.BaseQuantity))
         ) ledger
         CROSS APPLY (
-            SELECT IIF(ar.DueBusinessDate=DATEADD(day,frozen.TermsDaysSnapshot,d.BusinessDate)
+            SELECT IIF(ar.DueBusinessDate=DATEADD(day,s.TermsDaysSnapshot,d.BusinessDate)
                 AND alloc.LifetimeApplied=ar.AppliedAmount AND issue.BaseQuantity=d.BaseQuantity
                 AND issue.CostAmount=d.CostAmount AND adr.Id IS NOT NULL AND ledger.MatchingEffects=4,1,0) AS Ok
         ) reconciled
@@ -142,7 +167,7 @@ public sealed partial class App01a2CommandService
         ) aging
         WHERE e.TenantId=@Tenant AND e.OccurredAtUtc<=@AsOf
             AND (@CustomerId IS NULL OR c.Id=@CustomerId) AND (@OrderId IS NULL OR o.Id=@OrderId)
-            AND (@OrderLineId IS NULL OR frozen.AOrderLineId=@OrderLineId)
+            AND (@OrderLineId IS NULL OR s.AOrderLineId=@OrderLineId)
             AND (@DeliveryId IS NULL OR d.Id=@DeliveryId)
             AND (reconciled.Ok=0 OR ((@Due IS NULL OR ar.DueBusinessDate=@Due)
                 AND (@Overdue IS NULL OR aging.Overdue=@Overdue)))

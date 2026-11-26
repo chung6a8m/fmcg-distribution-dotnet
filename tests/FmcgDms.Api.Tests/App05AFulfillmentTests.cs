@@ -10,9 +10,10 @@ public sealed class App05AFulfillmentTests
     {
         var closure = App03A1Profile.MigrationSteps(true, true, true, true, true).ToArray();
         var successor = App03A1Profile.MigrationSteps(true, true, true, true, true, successor: true).ToArray();
-        Assert.Equal(closure, successor[..^2]);
-        Assert.Equal(("APP-05.3-v1", 202611250003L), successor[^2]);
-        Assert.Equal(("APP-05.3-v1", 202611250004L), successor[^1]);
+        Assert.Equal(closure, successor[..^3]);
+        Assert.Equal(("APP-05.3-v1", 202611250003L), successor[^3]);
+        Assert.Equal(("APP-05.3-v1", 202611250004L), successor[^2]);
+        Assert.Equal(("APP-05.3-v1", 202611260001L), successor[^1]);
         Assert.Throws<InvalidOperationException>(() =>
             App03A1Profile.MigrationSteps(true, true, true, true, false, successor: true).ToArray());
     }
