@@ -47,12 +47,18 @@ internal static partial class App05CloseReadiness
             CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(await Run(connections, context.User, tripId, false, null, async (db, tx, tenant, _, ops) =>
+            return Results.Ok(await Run(connections, context.User, tripId, false, null, async (db, tx, tenant, actor, ops) =>
             {
                 var row = await db.QuerySingleOrDefaultAsync<ClosureRow>(App02a3Sql.Cmd(
                     ClosureSql + " AND TripId=@Trip;", new { Tenant = tenant, Trip = tripId }, tx, ct));
                 var preview = await Read(db, tx, tenant, tripId, ops, ct, successor: connections.UsesApp05Successor);
-                return new { Closure = row?.Receipt(), CurrentOpenWorkCount = preview.Work.Length };
+                if (row is null)
+                    return new { Closure = row?.Receipt(), CurrentOpenWorkCount = preview.Work.Length };
+                if (row.OpenWorkCount == 0)
+                    return new { Closure = (object?)row.Receipt(), CurrentOpenWorkCount = 0 };
+                var completions = await ReadWorkCompletions(db, tx, tenant, actor, tripId, connections.UsesApp05Successor, ct);
+                return new { Closure = (object?)row.Receipt(),
+                    CurrentOpenWorkCount = ClosingWork(row).Count(work => !ProveWork(preview, work, completions).IsCompleted) };
             }, ct));
         });
     }

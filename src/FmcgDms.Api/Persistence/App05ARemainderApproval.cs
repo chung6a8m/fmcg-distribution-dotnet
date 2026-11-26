@@ -130,7 +130,7 @@ internal static partial class App05CloseReadiness
 
         async Task<IResult> Record<T>(T value, bool applied)
         {
-            string receipt = JsonSerializer.Serialize(value, ClosureJson);
+            string receipt = StoreCommandScope(value, "A_CLOSURE_APPROVAL", tripId, lineId).ToJsonString();
             await db.ExecuteAsync(App02a3Sql.Cmd($"""
                 INSERT dbo.App05ASuccessorCommand(TenantId,ActorId,CommandId,PayloadHash,Receipt,Applied,RecordedAt)
                 VALUES(@Tenant,@Actor,@CommandId,@PayloadHash,@Receipt,@Applied,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00'));
@@ -140,5 +140,5 @@ internal static partial class App05CloseReadiness
     }
 
     private static IResult Receipt(string json, bool applied) =>
-        Results.Content(json, "application/json", statusCode: applied ? 200 : 409);
+        Results.Json(ReadCommandBody(json), statusCode: applied ? 200 : 409);
 }

@@ -354,6 +354,8 @@ internal static class App02c1Dev
                     ["ASSIGNEE"] = Sign("tenant-a", "trip_assignee", App05CloseBootstrap.Assignee),
                     ["PEER_ASSIGNEE"] = Sign("tenant-b", "trip_assignee", App05CloseBootstrap.Assignee)
                 } : null;
+                if (closeCredentials is not null && persistent?.UsesTripClosure == true)
+                    closeCredentials["BACKUP_ASSIGNEE"] = Sign("tenant-a", "trip_assignee", App05CloseBootstrap.BackupAssignee);
                 if (closeCredentials is not null && persistent?.UsesSuccessor == true)
                     closeCredentials["CLOSURE_CHECKER"] = Sign("tenant-a", "tenant_ops", App05CloseBootstrap.ClosureChecker);
                 await observe(new App03DevHost(client, webUrl, tokenA, api.Id, viteProcess.Id, tokenB,
@@ -378,6 +380,7 @@ internal static class App02c1Dev
                     if (finance) Console.WriteLine("Finance roles: accountant, reconciler, maker, checker, refund-checker.");
                     if (finance) Console.WriteLine("Enter owner or peer-owner for the read-only distributor overview.");
                     if (closeReadiness) Console.WriteLine("Enter ops, peer-ops or assignee for the trip readiness workspace.");
+                    if (persistent.UsesTripClosure) Console.WriteLine("Enter backup-assignee for the second day-close work assignee.");
                     if (persistent.UsesSuccessor) Console.WriteLine("Enter closure-checker for independent A remainder approval.");
                     if (settlement) Console.WriteLine("Enter cashier for trip custody and employee advance returns.");
                     Console.WriteLine($"Use Ctrl+C or Stop -RunId {run.Id} to stop and retain both databases.");
@@ -401,6 +404,8 @@ internal static class App02c1Dev
                             "closure-checker" when persistent.UsesSuccessor =>
                                 Sign("tenant-a", "tenant_ops", App05CloseBootstrap.ClosureChecker),
                             "assignee" when closeReadiness => Sign("tenant-a", "trip_assignee", App05CloseBootstrap.Assignee),
+                            "backup-assignee" when persistent.UsesTripClosure =>
+                                Sign("tenant-a", "trip_assignee", App05CloseBootstrap.BackupAssignee),
                             "accountant" or "reconciler" or "maker" or "checker" when finance =>
                                 Sign("tenant-a", choice, App03FinanceBootstrap.AccountingActor(choice)),
                             _ => null

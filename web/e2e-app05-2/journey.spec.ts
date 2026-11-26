@@ -6,6 +6,9 @@ import { accounting, app, c2, c3, c4, d3, get, post, setup, type Closure, type C
   type CloseInput, type Preview, type Work } from './fixture'
 import { resolvePendingDelivery, runAccountingSourceRace, verifyCustodyAndOffer } from './source-guards'
 
+import { commandHistory, verifyFreshCommandRecovery } from './recovery'
+import { verifyBoardReassignment, verifyBoardReconciliation, verifyOverdueWork, verifySuccessorBoard } from './work-board'
+
 const evidence = process.env.APP05_EVIDENCE_DIR!
 const assignee = 'app05-assignee'
 const dueAt = '2026-11-25T10:00:00+07:00'
@@ -160,18 +163,20 @@ test('day-one closes A15 and accounting work atomically after rollback and a los
   await checkpoint('after-open-close', { receipt, command: closeCommand, delivery })
 })
 
-test('day-two recovers the first receipt, closes a reconciled trip and commits a zero-stock handoff', async ({ context, request }, info) => {
+test('day-two recovers the first receipt, closes a reconciled trip and commits a zero-stock handoff', async ({ browser, context, request }, info) => {
   const dayOne = JSON.parse(await readFile(join(evidence, 'arm-failure.json'), 'utf8')) as {
     main: string; clean: string; cleanUnload: { sourceId: string }; accountingWork: Work
     completeOrder: { confirmSourceId: string }
   }
-  const { receipt } = JSON.parse(await readFile(join(evidence, 'after-open-close.json'), 'utf8')) as { receipt: Closure }
+  const { receipt, command } = JSON.parse(await readFile(join(evidence, 'after-open-close.json'), 'utf8')) as { receipt: Closure; command: CloseInput }
+  await verifyFreshCommandRecovery(browser, request, dayOne.main, receipt, command)
   const ops = await open(context, 'OPS', 'trip-close?trip=' + dayOne.main)
   const record = ops.locator(`[data-closure-id="${receipt.closureId}"]`)
   await expect(record.getByRole('heading', { name: 'Biên bản đóng chuyến' })).toBeVisible()
   await expect(record.getByTestId('closure-open-at-close')).toHaveText('2')
   await expect(record.getByTestId('closure-open-current')).toHaveText('2')
 
+  await verifyBoardReassignment(context, request, receipt, dayOne.accountingWork)
   const reportId = crypto.randomUUID()
   await post(request, accounting + '/reconcile', {
     requestId: reportId, from: '2026-11-23T00:00:00+07:00', cutoff: '2026-11-24T00:00:00+07:00',
@@ -182,6 +187,19 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   await expect(record.getByTestId('closure-open-current')).toHaveText('1')
   await ops.screenshot({ path: info.outputPath('closure-recovered-next-day.png') })
   expect(await history(request, dayOne.main)).toEqual({ closure: receipt, currentOpenWorkCount: 1 })
+
+  await verifyBoardReconciliation(request, receipt, dayOne.accountingWork, reportId)
+  const board = await open(context, 'OPS', 'app05-work')
+  await expect(board.getByRole('heading', { name: 'Bàn công việc ngày sau' })).toBeVisible()
+  await board.getByLabel('Trạng thái việc').selectOption('COMPLETED')
+  await board.getByRole('button', { name: 'Lọc công việc' }).press('Enter')
+  const financeWork = receipt.snapshot.work.find(work => work.sourceId === dayOne.accountingWork.sourceId)!
+  await expect(board.getByTestId('app05-work-' + financeWork.followUp!.followUpId)).toContainText('Đã hoàn tất')
+  await expect(board.getByTestId('app05-work-' + financeWork.followUp!.followUpId)).toContainText(reportId)
+  await expect(board.getByRole('link', { name: 'Mở dòng nguồn kế toán' })).toHaveAttribute('href',
+    /[?&]source=/)
+  await board.screenshot({ path: info.outputPath('next-day-work-compact.png') })
+  await board.close()
 
   const clean = await read(request, dayOne.clean)
   expect(clean).toMatchObject({ canClose: true, state: 'READY', work: [] })
@@ -266,11 +284,14 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
     expectedRevision: JSON.parse(await readFile(join(evidence, 'after-open-close.json'), 'utf8')).command.expectedRevision,
   })).status()).toBe(403)
   expect((await request.get(app + '/' + dayOne.main + '/closure', { headers: auth('OPS') })).status()).toBe(403)
+  expect(await commandHistory(request, receipt.commandId, 'OPS')).toEqual([])
   await checkpoint('after-revocation')
 })
 
 test('day-three blocks unsettled custody and a waiting Close rechecks a concurrent D.4 posting', async ({ context, request }, info) => {
   const fixture = await setup(request)
+  const { main } = JSON.parse(await readFile(join(evidence, 'arm-failure.json'), 'utf8')) as { main: string }
+  await verifyOverdueWork(request, main)
   const trip = fixture.trip('DEV-20261125-A')
   const successorEvidence = Boolean(process.env.APP05_SUCCESSOR_EVIDENCE)
   const order = await fixture.order(trip, successorEvidence ? 5 : 3)
@@ -418,7 +439,11 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await transferForm.getByRole('button', { name: 'Chuyển HELD', exact: true }).click()
   const original = (await originalRequest).postDataJSON() as { commandId: string }
   await expect(source.getByText('Chưa xác nhận được kết quả. Có thể gửi lại cùng yêu cầu.')).toBeVisible()
+  expect(await commandHistory(request, original.commandId, 'OPS')).toEqual([
+    expect.objectContaining({ kind: 'A_TRANSFER_HELD', tripId: main, sourceId: order.orderLineId, status: 'APPLIED' }),
+  ])
   await checkpoint('successor-revoke', { tripId: first, commandId: original.commandId })
+  expect(await commandHistory(request, original.commandId, 'OPS')).toEqual([])
   expect((await readSuccessors(main, order)).bindings).toEqual([{
     bindingId: null, destinationTripId: null, code: null, quantity: 15, transferred: 9, reserved: 0,
   }])
@@ -591,7 +616,11 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     expect((await request.get(optionUrl, { headers: auth(role) })).status()).toBe(403)
     expect((await reserve(mixedPath, originalReserve, role)).status()).toBe(403)
   }
+  expect(await commandHistory(request, originalReserve.commandId, 'RECEIVER')).toEqual([
+    expect.objectContaining({ kind: 'A_RESERVE_UNHELD', status: 'APPLIED' }),
+  ])
   await checkpoint('reserve-revoke-origin', { commandId: originalReserve.commandId })
+  expect(await commandHistory(request, originalReserve.commandId, 'RECEIVER')).toEqual([])
   expect((await request.get(optionUrl, { headers: auth('RECEIVER') })).status()).toBe(403)
   expect((await reserve(mixedPath, { ...originalReserve, commandId: crypto.randomUUID() })).status()).toBe(403)
   const repeat = orderCard.getByRole('button', { name: 'Gửi lại yêu cầu giữ bổ sung' })
@@ -611,6 +640,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
   await expect(orderCard.getByRole('button', { name: 'Giữ hàng trên chuyến kế nhiệm' })).toHaveCount(0)
 
   await checkpoint('reserve-revoke-destination')
+  expect(await commandHistory(request, originalReserve.commandId, 'RECEIVER')).toEqual([])
   expect((await reserveOptions(mixedPath)).bindings).toEqual([])
   expect((await reserve(mixedPath, originalReserve)).status()).toBe(403)
   expect((await reserve(mixedPath, { ...originalReserve, commandId: crypto.randomUUID() })).status()).toBe(403)
@@ -738,6 +768,12 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     approveAgainstDelivery('A_CLOSURE_DELIVERY_PENDING', 'A_CLOSURE_SCOPE_CHANGED'),
   ])
   expect(delivery.status).toBe('APPLIED')
+  expect(await commandHistory(request, load.commandId, 'RECEIVER')).toEqual([
+    expect.objectContaining({ kind: 'A_SUCCESSOR_LOAD', resultId: loaded.sourceId, tripId: first, status: 'APPLIED' }),
+  ])
+  expect(await commandHistory(request, deliveryInput.commandId, 'SOURCE')).toEqual([
+    expect.objectContaining({ kind: 'A_SUCCESSOR_DELIVERY', resultId: delivery.sourceId, tripId: first, status: 'APPLIED' }),
+  ])
   expect(await post(request, c4 + '/deliver', deliveryInput, 'SOURCE'))
     .toMatchObject({ status: 'APPLIED', sourceId: delivery.sourceId, replayed: true })
   const report = await get<{ sources: { sourceId: string }[] }>(request,
@@ -832,6 +868,7 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
     reconciled: 4, sources: expect.arrayContaining(mainDeliveries.map(sourceId =>
       expect.objectContaining({ sourceId, originTrip: 'DEV-20261123-A', trip: 'DEV-20261126-A' }))),
   })
+  await verifySuccessorBoard(request, main, order.orderLineId, first, mainDeliveries)
   await checkpoint('successor-held-delivered', {
     mainLineId: order.orderLineId, mixedLineId: mixed.orderLineId, successorTripId: first,
     mainBindingId: binding.bindingId, mixedBindingId: mixedBinding.bindingId, mixedRightId: mixedTransfer.successorRightId,

@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dapper;
 using FmcgDms.Api.Tenancy;
 using Microsoft.Data.SqlClient;
@@ -55,7 +56,7 @@ internal static partial class App05CloseReadiness
     internal sealed record Preview(Guid TripId, string Code, DateOnly BusinessDate, DateTimeOffset AsOf, string Status,
         string State, string Revision, Coverage Coverage, bool CanAssign, string[] Assignees,
         Blocker[] Blockers, ALine[] ALines, Receivable[] Receivables, Work[] Work,
-        Guid? HandoffId, bool CanClose);
+        Guid? HandoffId, bool CanClose, [property: JsonIgnore] IReadOnlyDictionary<Guid, Guid> ReconciledReports);
 
     internal static void Map(WebApplication app)
     {
@@ -80,7 +81,12 @@ internal static partial class App05CloseReadiness
         });
         MapFollowUps(routes);
         var catalog = app.Services.GetRequiredService<TenantConnections>();
-        if (catalog.UsesApp05TripClosure) MapClosures(routes);
+        if (catalog.UsesApp05TripClosure)
+        {
+            MapClosures(routes);
+            MapWorkBoard(routes);
+            MapCommandHistory(routes);
+        }
         if (catalog.UsesApp05Successor) MapSuccessors(routes);
     }
 

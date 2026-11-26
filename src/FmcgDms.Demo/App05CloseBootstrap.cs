@@ -12,6 +12,7 @@ internal static class App05CloseBootstrap
 {
     internal const string Ops = "app05-tenant-ops";
     internal const string Assignee = "app05-assignee";
+    internal const string BackupAssignee = "app05-backup-assignee";
     internal const string ClosureChecker = "app05-closure-checker";
     internal const string Maker = "app05-credit-maker";
     internal const string Checker = "app05-credit-checker";
@@ -52,6 +53,17 @@ internal static class App05CloseBootstrap
             INSERT dbo.App05TripOperator(TenantId,TripId,ActorId)
             SELECT @tenant,t.TripId,a.ActorId FROM @trips t CROSS JOIN (VALUES(@Ops),(@Assignee)) a(ActorId);
             INSERT dbo.LocalApp05TripBootstrap(TripId) SELECT TripId FROM @trips;
+            IF OBJECT_ID(N'dbo.App05TripClosure',N'U') IS NOT NULL
+            BEGIN
+                IF NOT EXISTS(SELECT 1 FROM dbo.App02ActorRoleGrant
+                    WHERE TenantId=@tenant AND ActorId=@BackupAssignee AND RoleCode='trip_assignee')
+                    INSERT dbo.App02ActorRoleGrant(TenantId,ActorId,RoleCode,IsActive,ChangedBy)
+                    VALUES(@tenant,@BackupAssignee,'trip_assignee',1,@BootstrapActor);
+                INSERT dbo.App05TripOperator(TenantId,TripId,ActorId)
+                SELECT @tenant,t.TripId,@BackupAssignee FROM dbo.LocalApp05TripBootstrap t
+                WHERE NOT EXISTS(SELECT 1 FROM dbo.App05TripOperator r
+                    WHERE r.TenantId=@tenant AND r.TripId=t.TripId AND r.ActorId=@BackupAssignee);
+            END;
             IF OBJECT_ID(N'dbo.App05ARemainderApproval',N'U') IS NOT NULL
             BEGIN
                 IF NOT EXISTS(SELECT 1 FROM dbo.App02ActorRoleGrant
@@ -63,7 +75,7 @@ internal static class App05CloseBootstrap
                 WHERE NOT EXISTS(SELECT 1 FROM dbo.App05TripOperator r
                     WHERE r.TenantId=@tenant AND r.TripId=t.TripId AND r.ActorId=@ClosureChecker);
             END;
-            """, new { tenant, Ops, Assignee, ClosureChecker, BootstrapActor }, tx, cancellationToken: ct));
+            """, new { tenant, Ops, Assignee, BackupAssignee, ClosureChecker, BootstrapActor }, tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
     }
 

@@ -74,6 +74,7 @@ internal static class App03WorkspaceRoutes
                 TripClose = await closeReadinessAccess,
                 TripClosure = connections.UsesApp05TripClosure && await closeReadinessAccess,
                 ASuccessor = connections.UsesApp05Successor && await closeReadinessAccess,
+                App05DeliveryRecovery = connections.UsesApp05Successor && orders?.Sales == true,
                 ASuccessorReserve = connections.UsesApp05Successor && orders?.Warehouse == true,
                 BusinessDate = DateOnly.FromDateTime(App02c6Clock.Read(clock).AddHours(7)),
                 ExpiresAt = expiresAt

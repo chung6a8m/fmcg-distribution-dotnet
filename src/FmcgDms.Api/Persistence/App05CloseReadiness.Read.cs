@@ -5,14 +5,20 @@ namespace FmcgDms.Api.Persistence;
 
 internal static partial class App05CloseReadiness
 {
-    private sealed record FinanceProjection(Guid DeliveryId, Guid SourceId, DateTimeOffset? OccurredAt,
+    internal sealed record FinanceProjection(Guid DeliveryId, Guid SourceId, DateTimeOffset? OccurredAt,
         Guid? ReceiptId, Guid? PostingId, string? ReconciliationStatus, bool ReconciliationStale, Guid? CaseId,
-        Guid? ReportId, DateTimeOffset? ReportFromUtc, DateTimeOffset? ReportCutoff, DateTimeOffset? ReportAsOf)
+        Guid? ReportId, DateTimeOffset? ReportFromUtc, DateTimeOffset? ReportCutoff, DateTimeOffset? ReportAsOf,
+        bool ReportLineProven)
     {
-        internal FinanceRow ToRow(DateTimeOffset asOf) =>
-            new(DeliveryId, SourceId, OccurredAt!.Value, ReceiptId, PostingId, ReconciliationStatus,
-                ReconciliationStale || (ReportId is not null && !(ReportFromUtc <= OccurredAt &&
-                    OccurredAt < ReportCutoff && ReportCutoff <= ReportAsOf && ReportAsOf <= asOf)), CaseId);
+        internal FinanceRow ToRow(DateTimeOffset asOf)
+        {
+            var occurredAt = OccurredAt!.Value;
+            bool covered = ReportLineProven && ReportFromUtc is { } from && ReportCutoff is { } cutoff &&
+                ReportAsOf is { } reportAsOf &&
+                App02d4Accounting.CoversReconciliationSource(from, cutoff, reportAsOf, asOf, occurredAt);
+            return new(DeliveryId, SourceId, occurredAt, ReceiptId, PostingId, ReconciliationStatus,
+                ReconciliationStale || (ReportId is not null && !covered), CaseId);
+        }
     }
 
     internal static async Task<Preview> Read(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId, bool ops,
@@ -106,6 +112,7 @@ internal static partial class App05CloseReadiness
                     "Theo dõi phần chưa giao trên đơn gốc", null));
         }
 
+        var reconciledReports = new Dictionary<Guid, Guid>();
         foreach (var f in finances)
         {
             if (f.OccurredAt is null || f.OccurredAt > asOf)
@@ -117,6 +124,8 @@ internal static partial class App05CloseReadiness
             if (row.Pending(asOf) is { } pendingState)
                 sources.Add(new(D4, row.SourceId, row.DeliveryId, FinanceLabel(pendingState),
                     FinanceAction(pendingState), row.CaseId));
+            else if (f.ReportId is Guid reportId)
+                reconciledReports.Add(row.SourceId, reportId);
         }
         blockers.AddRange(ar.Where(row => !row.Proven).Select(row =>
             new Blocker("AR_SOURCE_DRIFT", D4, row.SourceId, "Đối chiếu phải thu với nguồn giao và phân bổ thu", row.DeliveryId)));
@@ -202,7 +211,8 @@ internal static partial class App05CloseReadiness
         return new(tripId, trip.Code, DateOnly.FromDateTime(trip.BusinessDate), asOf, trip.Status,
             state, revision, coverage, ops && trip.Used && trip.Status is not ("CLOSED" or "CLOSED_WITH_OPEN_CASES"),
             ops ? assignees : [], blockers.ToArray(), aLines.ToArray(), ar.Select(row => row.Proven ? row : row with { Amount = null }).ToArray(),
-            work, trip.UnloadId, closing && ops && CloseTarget(trip.Status, state, coverage, trip.UnloadId) is not null);
+            work, trip.UnloadId, closing && ops && CloseTarget(trip.Status, state, coverage, trip.UnloadId) is not null,
+            reconciledReports);
     }
 
     private static string FinanceLabel(string state) => state switch
