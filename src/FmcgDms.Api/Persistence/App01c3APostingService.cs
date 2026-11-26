@@ -387,7 +387,8 @@ public sealed class App01c3APostingService(TenantConnections connections)
         SqlConnection db, SqlTransaction tx, string tenant, string actor, Guid commandId,
         PostAPartialDeliveryCommand request, TripScope trip, FrozenRight right, FrozenOrderTotals frozen,
         decimal payable, DateTime due, CancellationToken ct, Guid? evidence = null, Guid? amendment = null,
-        DateTime? occurred = null, decimal? priorLineQuantity = null, bool d3Runtime = false)
+        DateTime? occurred = null, decimal? priorLineQuantity = null, bool d3Runtime = false,
+        Guid? successorBindingId = null, Guid? successorOriginTripId = null)
     {
         // Both B20 and A25 derive cost from exactly the same source-backed
         // vehicle on-hand, with four-decimal moving-average rounding.
@@ -490,15 +491,15 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 Sku = request.SkuId, Qty = request.BaseQuantity, Cost = cost }, tx, ct)) != 1)
             throw new InvalidOperationException("Vehicle custody changed under lock.");
 
-        await db.ExecuteAsync(Sql("""
+        await db.ExecuteAsync(Sql($"""
             INSERT dbo.SaleDelivery(Id,TenantId,TripId,CustomerId,ShipToSnapshotId,
                 TripManifestLineId,LoadSourceLineId,StockRightId,RightKind,SkuId,
                 AOrderId,AOrderLineId,BusinessSourceId,BusinessSourceKind,BusinessSourceLineId,
                 BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible,
-                C4EvidenceId,C4ShipToAmendmentId,C4PriorLineQuantity)
+                C4EvidenceId,C4ShipToAmendmentId,C4PriorLineQuantity{(successorBindingId.HasValue ? ",App05BindingId,App05OriginTripId" : "")})
             VALUES(@Delivery,@Tenant,@Trip,@Customer,@ShipTo,@ManifestLine,
                 @LoadLine,@Right,'A',@Sku,@Order,@OrderLine,@Source,N'A_DELIVERY',@SourceLine,
-                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0,@Evidence,@Amendment,@PriorLineQuantity);
+                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0,@Evidence,@Amendment,@PriorLineQuantity{(successorBindingId.HasValue ? ",@SuccessorBindingId,@SuccessorOriginTripId" : "")});
             INSERT dbo.DeliveryStockIssue(Id,TenantId,SaleDeliveryId,
                 BusinessSourceLineId,TripManifestLineId,SkuId,BaseQuantity,CostAmount)
             VALUES(@Issue,@Tenant,@Delivery,@SourceLine,@ManifestLine,@Sku,@Qty,@Cost);
@@ -512,7 +513,8 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 LoadLine = right.LoadSourceLineId, Right = right.StockRightId,
                 Sku = request.SkuId, Source = sourceId, SourceLine = sourceLine,
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
-                Date = trip.BusinessDate, Due = due, Evidence = evidence, Amendment = amendment, PriorLineQuantity = priorLineQuantity }, tx, ct));
+                Date = trip.BusinessDate, Due = due, Evidence = evidence, Amendment = amendment, PriorLineQuantity = priorLineQuantity,
+                SuccessorBindingId = successorBindingId, SuccessorOriginTripId = successorOriginTripId }, tx, ct));
 
         var effects = new[]
         {

@@ -38,7 +38,8 @@ public sealed partial class App01a2CommandService
         const string sql = """
             SELECT r.Id,CAST(NULL AS uniqueidentifier) AS OrderId,r.StockLocationId AS WarehouseId,
                 w.Code AS WarehouseCode,r.SkuId,k.Code AS SkuCode,k.BaseUom,
-                r.GrantedBaseQuantity AS Granted,totals.Loaded,r.GrantedBaseQuantity-totals.Loaded AS WarehouseHeld
+                r.GrantedBaseQuantity AS Granted,totals.Loaded,r.GrantedBaseQuantity-totals.Loaded AS WarehouseHeld,
+                CAST(NULL AS nvarchar(32)) AS OriginTrip
             FROM dbo.StockRight r
             JOIN dbo.BQuota q ON q.TenantId=r.TenantId AND q.StockRightId=r.Id
             JOIN dbo.Sku k ON k.TenantId=r.TenantId AND k.Id=r.SkuId AND k.IsActive=1

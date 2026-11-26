@@ -29,6 +29,8 @@ public sealed partial class App01a2CommandService
         public Guid SkuId { get; set; }
         public Guid LoadSourceLineId { get; set; }
         public Guid StockRightId { get; set; }
+        public Guid? SuccessorBindingId { get; set; }
+        public Guid? SuccessorOriginTripId { get; set; }
         public decimal Loaded { get; set; }
         public decimal Granted { get; set; }
         public decimal Consumed { get; set; }
@@ -118,13 +120,14 @@ public sealed partial class App01a2CommandService
             [("Evidence", evidence.Id.ToString("N"))],
             (db, tx, tenant, actor, command, token) =>
                 ApplyDeliveryC4(db, tx, tenant, actor, command, key, evidence, connections.UsesApp02d3,
-                    connections.UsesDevF03, connections.UsesDevF04, connections.UsesDevF06, token),
+                    connections.UsesDevF03, connections.UsesDevF04, connections.UsesDevF06,
+                    connections.UsesApp05Successor, token),
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, bool lots,
-        bool pricing, bool periodGuard, CancellationToken ct)
+        bool pricing, bool periodGuard, bool successor, CancellationToken ct)
     {
         if (periodGuard)
         {
@@ -140,13 +143,14 @@ public sealed partial class App01a2CommandService
             return BusinessCommandOutcome.Rejected("TRIP_NOT_ELIGIBLE");
         if (await SourceUsed(db, tx, tenant, "A_DELIVERY", key.SourceNumber, ct))
             return BusinessCommandOutcome.Rejected("SOURCE_ALREADY_USED");
-        var line = await db.QuerySingleOrDefaultAsync<C4PostingLine>(Sql("""
+        var line = await db.QuerySingleOrDefaultAsync<C4PostingLine>(Sql($"""
             SELECT o.Id AS OrderId,s.AOrderLineId AS OrderLineId,o.CustomerId,c.ShipToSnapshotId,
                 l.SkuId,l.LoadSourceLineId,l.StockRightId,l.LoadedBaseQuantity AS Loaded,
                 r.GrantedBaseQuantity AS Granted,r.ConsumedBaseQuantity AS Consumed,r.ReleasedBaseQuantity AS Released,
                 r.Status AS RightStatus,o.Status AS OrderStatus,s.ConfirmedBaseQuantity AS Confirmed,
                 s.UnitPriceSnapshot,s.TermsDaysSnapshot,s.ConfirmedAtUtc,cs.ActorId AS ConfirmActor,
                 p.PolicyId,p.PolicyVersion,p.PolicyPayload,p.SourceHash,p.BaseUom,p.GrossAmount
+                {(successor ? ",successorRight.BindingId AS SuccessorBindingId,successorRight.OriginTripId AS SuccessorOriginTripId" : "")}
             FROM dbo.TripManifestLine l
             JOIN dbo.TripManifest m ON m.TenantId=l.TenantId AND m.Id=l.TripManifestId AND m.Status='LOADED' AND m.IsC3=1
             JOIN dbo.PhysicalStockMovement mv ON mv.TenantId=l.TenantId AND mv.TripManifestLineId=l.Id
@@ -158,7 +162,8 @@ public sealed partial class App01a2CommandService
             JOIN dbo.StockRight r WITH (UPDLOCK,HOLDLOCK) ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
             JOIN dbo.AReservation rs ON rs.TenantId=r.TenantId AND rs.StockRightId=r.Id
             JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=rs.TenantId AND s.AOrderLineId=rs.AOrderLineId
-                AND s.TripId=l.TripId AND s.SkuId=l.SkuId
+                AND s.SkuId=l.SkuId
+            {(successor ? SuccessorExecutionRightJoin : "")}
             JOIN dbo.AOrder o WITH (UPDLOCK,HOLDLOCK) ON o.TenantId=s.TenantId AND o.Id=s.AOrderId
             JOIN dbo.Customer customer ON customer.TenantId=o.TenantId AND customer.Id=o.CustomerId AND customer.IsActive=1
             JOIN dbo.C2Confirmation c ON c.TenantId=o.TenantId AND c.OrderId=o.Id AND c.ConfirmSourceId=s.ConfirmBusinessSourceId
@@ -173,9 +178,12 @@ public sealed partial class App01a2CommandService
                 AND CONVERT(varbinary(48),sku.BaseUom)=CONVERT(varbinary(48),p.BaseUom)
             WHERE l.TenantId=@Tenant AND l.Id=@ManifestLineId AND l.TripId=@TripId
                 AND l.VehicleLocationId=@Location AND l.RightKind='A' AND l.LoadedBaseQuantity>0
+                AND (s.TripId=l.TripId{(successor ? " OR (successorRight.BindingId IS NOT NULL AND successorRight.DestinationTripId=l.TripId)" : "")})
             """, new { Tenant = tenant, evidence.ManifestLineId, evidence.TripId, Location = location }, tx, ct));
         if (line is null || line.OrderStatus is not ("CONFIRMED" or "PARTIALLY_DELIVERED"))
             return BusinessCommandOutcome.Rejected("C4_LOADED_LINE_NOT_DELIVERABLE");
+        if (line.SuccessorBindingId.HasValue && trip.BusinessDate.Date != evidence.BusinessDate.Date)
+            return BusinessCommandOutcome.Rejected("TRIP_NOT_ELIGIBLE");
         var address = await CurrentC4Address(db, tx, tenant, line.OrderId, line.ShipToSnapshotId, ct);
         if (address.Version != evidence.ShipToVersion)
             return BusinessCommandOutcome.Rejected("C4_STALE_SHIPTO");
@@ -238,7 +246,8 @@ public sealed partial class App01a2CommandService
             new FrozenRight { ManifestLineId = evidence.ManifestLineId, LoadSourceLineId = line.LoadSourceLineId,
                 StockRightId = line.StockRightId },
             new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
-            payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime);
+            payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime,
+            line.SuccessorBindingId, line.SuccessorOriginTripId);
         if (lotPicks is not null && result.Status == "APPLIED")
         {
             Guid delivery = await db.QuerySingleAsync<Guid>(Sql("""

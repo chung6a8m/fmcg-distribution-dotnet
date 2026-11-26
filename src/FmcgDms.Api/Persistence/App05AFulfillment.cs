@@ -274,7 +274,7 @@ internal static partial class App05CloseReadiness
         LEFT JOIN dbo.C3TripWriter w ON w.TenantId=t.TenantId AND w.TripId=t.Id AND w.ActorId=@Actor
         CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(NeverLoaded+Returned),0)) AS Transferred
             FROM dbo.App05AHeldTransfer x WHERE x.TenantId=b.TenantId AND x.BindingId=b.BindingId) x
-        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(r.GrantedBaseQuantity-r.ReleasedBaseQuantity-r.ConsumedBaseQuantity),0)) AS Reserved
+        CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(r.GrantedBaseQuantity-r.ReleasedBaseQuantity),0)) AS Reserved
             FROM dbo.App05ASuccessorReserve rr JOIN dbo.StockRight r ON r.TenantId=rr.TenantId AND r.Id=rr.RightId
             WHERE rr.TenantId=b.TenantId AND rr.BindingId=b.BindingId) y
         WHERE b.TenantId=@Tenant AND b.OrderLineId=@Line ORDER BY t.BusinessDate,t.Code,b.BindingId;

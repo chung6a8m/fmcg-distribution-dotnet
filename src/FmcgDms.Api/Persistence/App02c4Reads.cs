@@ -11,7 +11,8 @@ public sealed record C4WorkspaceLine(Guid Id, Guid OrderId, string Sku, string B
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Loaded,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Delivered,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Available,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Held)
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Held,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OriginTrip = null)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<F03LotView>? Lots { get; init; }
@@ -77,20 +78,25 @@ public sealed partial class App01a2CommandService
     public Task<IEnumerable<C4WorkspaceLine>> DeliveryLinesC4(ClaimsPrincipal principal, Guid trip, CancellationToken ct) =>
         WithC4Authority<IEnumerable<C4WorkspaceLine>>(principal, trip, async (db, tx, tenant, _) =>
         {
-            var lines = (await db.QueryAsync<C4WorkspaceLine>(Sql("""
+            bool successor = connections.UsesApp05Successor;
+            var lines = (await db.QueryAsync<C4WorkspaceLine>(Sql($"""
             SELECT l.Id,o.Id AS OrderId,k.Code AS Sku,p.BaseUom,c.Name AS Customer,adr.Address AS ShipTo,
                 COALESCE(am.Version,1) AS ShipToVersion,l.LoadedBaseQuantity AS Loaded,d.Delivered,
                 CASE WHEN @Settlement=1 AND t.Status NOT IN ('PREPARED','IN_PROGRESS') THEN 0
                     ELSE l.LoadedBaseQuantity-d.Delivered END AS Available,
-                r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held
+                r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity AS Held,
+                {(successor ? "origin.Code" : "CAST(NULL AS nvarchar(32))")} AS OriginTrip
             FROM dbo.TripManifestLine l
             JOIN dbo.Trip t ON t.TenantId=l.TenantId AND t.Id=l.TripId
             JOIN dbo.PhysicalStockMovement mv ON mv.TenantId=l.TenantId AND mv.TripManifestLineId=l.Id
             JOIN dbo.StockRight r ON r.TenantId=l.TenantId AND r.Id=l.StockRightId
             JOIN dbo.AReservation a ON a.TenantId=r.TenantId AND a.StockRightId=r.Id
             JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=a.TenantId AND s.AOrderLineId=a.AOrderLineId
+            {(successor ? SuccessorExecutionRightJoin : "")}
+            {(successor ? "LEFT JOIN dbo.Trip origin ON origin.TenantId=r.TenantId AND origin.Id=successorRight.OriginTripId" : "")}
             JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
-            JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId AND o.TripId=l.TripId
+            JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId
+                AND (o.TripId=l.TripId{(successor ? " OR (successorRight.BindingId IS NOT NULL AND successorRight.DestinationTripId=l.TripId)" : "")})
             JOIN dbo.C2Confirmation cf ON cf.TenantId=o.TenantId AND cf.OrderId=o.Id
             JOIN dbo.Customer c ON c.TenantId=o.TenantId AND c.Id=o.CustomerId
             JOIN dbo.Sku k ON k.TenantId=l.TenantId AND k.Id=l.SkuId

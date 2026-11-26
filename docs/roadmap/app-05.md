@@ -299,6 +299,8 @@ API `GET /reserve-options` và `POST /reserve-unheld` dùng chung tiền tố d�
 
 Để bật nạp và giao liên chuyến, migration cần ràng buộc manifest với binding, đúng quyền nền và chuyến thực hiện. Nguồn của Reserve mới và nguồn của HELD chuyển tiếp đi qua hai nhánh rõ ràng. C.3 cần đối chiếu phần đã dùng của từng thế hệ quyền theo lượng và lô. C.4 cần khóa theo dòng Confirm khi tính phần còn và làm tròn, đồng thời khóa chuyến thực hiện khi ghi evidence. C.5 và đường mở báo cáo từ hồ sơ đơn cần đọc theo binding của manifest và phân công trên từng chuyến thực giao. Đích kiểm chứng là báo cáo cùng mã dòng với hai chuyến khác nhau sau khi chạy các fixture mục 6.
 
+**Nạp và giao phần Reserve mới.** Migration tiến `202611260001` ràng buộc Delivery C.4 với binding, quyền giữ đích và dòng Confirm gốc. Màn nạp và giao hiển thị chuyến gốc trên dòng kế nhiệm. C.5 lấy scope từ chuyến thực giao và giữ mã nguồn gốc để đọc toàn dòng. Lượt `61597f09e5dc4b048646d17a8290b2d7` chạy Chromium 4/4 và SQL 113/113, zero diff. Ca 5/4/3/1/2 giao thêm 1 EA đã Reserve ở chuyến kế nhiệm và kiểm chứng đúng lô, hạn từ ngày giao, lượng MAIN, replay và tenant đối chứng. SHA256 `run.json` `4C10CC713DC279602933DA2926BC0305FA256E1699D057C40625108A358C2764`. APP-05.4b tiếp tục với nạp lại HELD có nguồn và hoàn tất công việc toàn dòng.
+
 ### APP-05.5 — Đóng phần còn bằng nguồn được duyệt
 
 **Files:** command service/binding .3–.4, cơ chế approval/authority hiện có, follow-up và UI chi tiết; tạo `App05ARemainderClosure.cs`, `App05ARemainderClosureTests.cs` khi cần. Giữ correction/refund F ở nguồn nghiệp vụ tương ứng.
@@ -392,4 +394,4 @@ Không chạy toàn bộ các lệnh trên trong mọi PR chỉ để tăng số
 
 Biên nhận mỗi increment ghi scope, command, môi trường, source/tree, run ID, expected/actual/diff, command/source IDs, artifact và SHA-256. Tách `IMPLEMENTED`, `DEV_VERIFIED_LOCAL`, `CI_VERIFIED`, `MERGED` và thao tác trực tiếp của Owner. Việc chưa chạy ghi `NOT_RUN`; không gắn PASS tiền nhiệm cho code vừa sửa. Review độc lập tập trung RF-01–05 và các nhánh thực sự bị thay đổi.
 
-Increment hiện tại là **APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng**. APP-05.4a đã merge qua PR #155. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7. [PR nháp báo cáo AR theo dòng Confirm](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/157).
+Increment hiện tại là **APP-05.4b — Nạp, giao tiếp và báo cáo toàn dòng**. APP-05.4a đã merge qua PR #155. PR #157 đã đưa bộ lọc AR theo dòng Confirm lên `main` tại `5ed82e7`. Đích nghiệm thu tổng thể là Owner tự chốt ca có A15 và người/hạn, mở lại trình duyệt hôm sau, xử lý tiếp bằng đơn gốc và xem lịch sử cả hai ngày. Chặng nghiệm thu tích hợp thuộc APP-05.7. [PR báo cáo AR theo dòng Confirm](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/157).

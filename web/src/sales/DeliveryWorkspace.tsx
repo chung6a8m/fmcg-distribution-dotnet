@@ -6,7 +6,7 @@ import './customers.css'
 const api = '/api/synthetic/app02c4'
 type Trip = { id: string; code: string }
 type Line = { id: string; sku: string; customer: string; shipTo: string; shipToVersion: number; baseUom: string;
-  loaded: string; delivered: string; available: string; held: string
+  loaded: string; delivered: string; available: string; held: string; originTrip?: string
   lots?: { code: string; expiresOn: string; quantity: string }[] }
 type Ar = { sourceId: string; customer: string; shipTo: string; businessDate: string; dueBusinessDate: string;
   quantity: string; amount: string; outstanding: string; cost: string; currency?: 'VND' }
@@ -215,6 +215,7 @@ export function DeliveryWorkspace({ workspaceToken, startTrip, onTripChange }: {
               shipToVersion: line.shipToVersion, quantity }, false)
           }}>
             <h3>{line.sku} · {line.customer}</h3>
+            {line.originTrip && <p>Chuyến gốc {line.originTrip}</p>}
             <p>ShipTo v{line.shipToVersion} · {line.shipTo}</p>
             <p>Đã nạp {displayQuantity(line.loaded)} {line.baseUom} · Đã giao {displayQuantity(line.delivered)} {line.baseUom} · Còn giữ {displayQuantity(line.held)} {line.baseUom}</p>
             {line.lots && line.lots.length > 0 && <div>

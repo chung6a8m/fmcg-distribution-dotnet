@@ -17,7 +17,8 @@ public sealed record C3RightView(Guid Id, Guid? OrderId, Guid WarehouseId, strin
     string SkuCode, string BaseUom,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Granted,
     [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal Loaded,
-    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal WarehouseHeld)
+    [property: JsonNumberHandling(JsonNumberHandling.WriteAsString | JsonNumberHandling.AllowReadingFromString)] decimal WarehouseHeld,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OriginTrip = null)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<F03LotView>? Lots { get; init; }
@@ -60,14 +61,15 @@ public sealed partial class App01a2CommandService
             (db, tx, tenant, actor, command, token) =>
                 validShape
                     ? ApplyPartialLoad(db, tx, tenant, actor, command, key.SourceNumber, input.TripId, lines, d1Load,
-                        connections.UsesDevF03, connections.UsesApp03Field, connections.UsesApp03Settlement, token)
+                        connections.UsesDevF03, connections.UsesApp03Field, connections.UsesApp03Settlement,
+                        connections.UsesApp05Successor, token)
                     : Task.FromResult(BusinessCommandOutcome.Rejected("INVALID_LOAD_LINES")),
             ct, "warehouse", input.TripId, d1Load: d1Load);
     }
 
     private static async Task<BusinessCommandOutcome> ApplyPartialLoad(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, string number, Guid tripId, C3LoadLine[] lines, bool d1Load, bool lots,
-        bool field, bool settlement, CancellationToken ct)
+        bool field, bool settlement, bool successor, CancellationToken ct)
     {
         if (lines.Select(l => l.RightId).Distinct().Count() != lines.Length
             || lines.Any(l => l.RightId == Guid.Empty || !ValidQuantity(l.Quantity)
@@ -86,7 +88,7 @@ public sealed partial class App01a2CommandService
         Guid[] rightIds = lines.Select(l => l.RightId).ToArray();
         var rights = (d1Load
                 ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, settlement, ct)
-                : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct))
+                : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct, successor))
             .ToDictionary(right => right.Id);
         if (rights.Count != lines.Length)
             return BusinessCommandOutcome.Rejected(d1Load ? "D1_QUOTA_NOT_ELIGIBLE" : "C3_RESERVATION_NOT_ELIGIBLE");
@@ -187,19 +189,22 @@ public sealed partial class App01a2CommandService
             """, new { Tenant = tenant, Trip = trip }, tx, ct));
 
     private static Task<IEnumerable<C3RightView>> EligibleC3Rights(SqlConnection db, SqlTransaction tx,
-        string tenant, Guid[] trips, Guid[]? rightIds, CancellationToken ct)
+        string tenant, Guid[] trips, Guid[]? rightIds, CancellationToken ct, bool successor = false)
     {
-        const string sql = """
+        string sql = $"""
             SELECT r.Id,o.Id AS OrderId,r.StockLocationId AS WarehouseId,w.Code AS WarehouseCode,
                 r.SkuId,sku.Code AS SkuCode,p.BaseUom,r.GrantedBaseQuantity AS Granted,
-                totals.Loaded,r.GrantedBaseQuantity-totals.Loaded AS WarehouseHeld
+                totals.Loaded,r.GrantedBaseQuantity-totals.Loaded AS WarehouseHeld,
+                {(successor ? "origin.Code" : "CAST(NULL AS nvarchar(32))")} AS OriginTrip
             FROM dbo.StockRight r
             JOIN dbo.AReservation a ON a.TenantId=r.TenantId AND a.StockRightId=r.Id
             JOIN dbo.AOrderLine ol ON ol.TenantId=a.TenantId AND ol.Id=a.AOrderLineId AND ol.SkuId=r.SkuId
-            JOIN dbo.AOrder o ON o.TenantId=ol.TenantId AND o.Id=ol.AOrderId AND o.TripId=r.TripId
+            JOIN dbo.AOrder o ON o.TenantId=ol.TenantId AND o.Id=ol.AOrderId
             JOIN dbo.C2Confirmation c ON c.TenantId=o.TenantId AND c.OrderId=o.Id
             JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=c.TenantId AND s.AOrderId=c.OrderId
                 AND s.AOrderLineId=ol.Id AND s.ConfirmBusinessSourceId=c.ConfirmSourceId AND s.SkuId=r.SkuId
+            {(successor ? SuccessorExecutionRightJoin : "")}
+            {(successor ? "LEFT JOIN dbo.Trip origin ON origin.TenantId=r.TenantId AND origin.Id=successorRight.OriginTripId" : "")}
             JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
             JOIN dbo.Sku sku ON sku.TenantId=r.TenantId AND sku.Id=r.SkuId AND sku.IsActive=1
                 AND CONVERT(varbinary(48),sku.BaseUom)=CONVERT(varbinary(48),p.BaseUom)
@@ -218,6 +223,11 @@ public sealed partial class App01a2CommandService
                 WHERE l.TenantId=r.TenantId AND l.StockRightId=r.Id AND l.IsC3=1
             ) totals
             WHERE r.TenantId=@Tenant AND r.TripId IN @Trips AND r.RightKind='A' AND r.Status='HELD'
+                AND (o.TripId=r.TripId {(successor ? $"""
+                    OR (successorRight.BindingId IS NOT NULL AND EXISTS(
+                        SELECT 1 FROM dbo.Trip t WHERE t.TenantId=r.TenantId AND t.Id=r.TripId
+                            AND t.Status='PREPARED' AND t.BusinessDate={LotBusinessDate}))
+                    """ : "")})
                 AND r.ReleasedBaseQuantity=0 AND o.Status IN ('CONFIRMED','PARTIALLY_DELIVERED')
                 AND r.ConsumedBaseQuantity<=totals.Loaded AND totals.Loaded<=r.GrantedBaseQuantity
             """;
