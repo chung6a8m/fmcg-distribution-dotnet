@@ -79,7 +79,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `MERGED / MAIN_CI_VERIFIED` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
 | **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
-| **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `NOT_STARTED` |
+| **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `IMPLEMENTED / CI_PENDING` |
 | **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
 
 Thứ tự mặc định: **.0 → .1 → .2 → .3 → .4a → .4b → .5 → .6 → .7**. Phân tích .1 có thể song song .0; merge code cần kết quả CI áp dụng trên source cuối. Không chờ .6 mới cung cấp UI tối thiểu: mỗi increment có đường thao tác dùng được cho phần mình sở hữu. .6 gom công việc và tăng khả năng phục hồi, không xây lại màn đã có.
@@ -350,13 +350,10 @@ APP-05.5 hoàn tất trong phạm vi triển khai synthetic DEV. Bàn công vi�
 
 ### APP-05.6 — Bàn công việc ngày sau và browser mới
 
-**Files:** `src/FmcgDms.Api/Persistence/App03WorkspaceRoutes.cs`, `App03HandoffReads.cs`, `App02d4Accounting.Reconcile.cs`, read/history của .1–.5; `web/src/workspace/Workspace.tsx`, `FinanceQueue.tsx`, `web/src/sales/customer-api.ts`, `MixedTripWorkspace.tsx`, `TripCloseWorkspace` và danh sách công việc mới nếu cần; `src/FmcgDms.Demo/App03DevSession.cs`. Test dự kiến `App05RecoveryTests.cs`, mở rộng `web/e2e-app05/journey.spec.ts`. `web/src/ui/command-recovery.ts` thuộc UI Lab, không phải durable business queue để thay server history.
-
-- [ ] Viết ca đỏ bỏ ACK sau COMMIT, Stop/Resume và đóng toàn bộ browser context. Phiên đăng nhập mới không có sessionStorage cũ phải tìm được command/source đúng quyền; thêm wrong tenant, revoked và changed-payload negatives.
-- [ ] Cấp server-readable history đủ tìm lại kết quả nguồn/lệnh theo phạm vi actor; không giữ bearer token lâu dài hoặc dùng cache client làm bằng chứng duy nhất. UI hướng dẫn tra/replay cùng identity khi UNKNOWN.
-- [ ] Bàn việc lọc theo người/hạn/trạng thái, mở đúng hồ sơ nguồn và Trip kế nhiệm. Reassign/đổi hạn cần reason/audit, không đổi snapshot lúc chốt. Quá hạn chỉ là nhãn theo clock DEV, không tự hoàn tất/xếp Trip hoặc phát sinh SLA/automation ngoài phạm vi.
-- [ ] Đối soát D.4 ngày một sau NextDay theo `From < Cutoff <= AsOf <= now` và `OccurredAt < Cutoff`; kiểm report line/source hash bao phủ đúng nguồn trước khi hoàn tất việc, không đóng việc ngày hai bằng báo cáo ngày một. NextDay tự nó không chốt Trip hoặc hoàn tất việc.
-- [ ] Kiểm keyboard, thông báo trạng thái, Compact, context và đóng/mở browser thực trong runner; commit đề xuất: `feat: resume daily follow-ups from a new browser session`.
+- Bàn việc DEV tại `/work/app05-work` đọc việc lúc chốt, phân công hiện tại và lịch sử từ máy chủ. Bộ lọc theo người, hạn và trạng thái. Đổi người/hạn yêu cầu lý do và phiên bản phân công hiện hành. Quá hạn lấy theo clock DEV. Mỗi việc dẫn về hồ sơ gốc và chuyến kế nhiệm mà actor có quyền đọc.
+- D.4 dùng cửa sổ `From < Cutoff <= AsOf <= now` và `From <= OccurredAt < Cutoff`. Báo cáo hoàn tất việc phải khớp Delivery, dòng nguồn, timestamp và hash của bằng chứng cam kết. NextDay chỉ chuyển clock/chuẩn bị ngày mới. Biên bản chốt giữ nguyên phân công, nguồn và tổng số việc tại lúc đóng.
+- Lịch sử lệnh phân trang theo actor, tenant và quyền hiện hành của từng Trip, tra được theo mã lệnh hoặc chuyến. Có kết quả đóng chuyến, phân công, chọn chuyến, chuyển HELD, giữ hàng bổ sung, nạp/giao kế nhiệm và đề nghị/duyệt đóng phần A. Các lần nạp đã áp dụng được nối từ manifest có quyền kế nhiệm. Receipt kế nhiệm bị từ chối từ trước .6 thiếu dữ liệu phạm vi gốc để đưa vào lịch sử, nhưng vẫn replay qua command gốc với đúng payload và quyền hiện hành. Yêu cầu chưa có receipt cần tra lại trước khi gửi cùng mã và dữ liệu gốc.
+- `VerifyASuccessor` bao phủ mất ACK, context browser mới sau Stop/NextDay/Resume, replay và thay payload, sai tenant hoặc bị thu hồi quyền, bộ lọc và đổi người/hạn từ bàn phím, đối chiếu snapshot và audit SQL. `VerifyCloseReadiness` thêm ca sai hash nguồn và biên cutoff. [Kế hoạch kiểm chứng](../superpowers/plans/2026-11-26-app-05-6-work-and-recovery.md).
 
 ### APP-05.7 — Nghiệm thu ca tích hợp
 

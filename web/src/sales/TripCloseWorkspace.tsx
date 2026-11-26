@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { linkedRecord } from '../workspace/linked-record'
 import { Button, Field } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, rememberPending, requestSalesApi, type Identity } from './customer-api'
 import { ASuccessorForm } from './ASuccessorForm'
@@ -12,7 +13,7 @@ const quantity = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 4 })
 const ict = new Intl.DateTimeFormat('vi-VN', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok',
 })
-const ictInput = new Intl.DateTimeFormat('sv-SE', {
+export const ictInput = new Intl.DateTimeFormat('sv-SE', {
   year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok',
 })
 const states: Record<string, string> = {
@@ -54,12 +55,12 @@ type ClosureHistory = { closure: Closure | null; currentOpenWorkCount: number | 
 type Assignment = Pick<FollowUp, 'assignee' | 'dueAt' | 'nextAction' | 'reason'> & {
   commandId: string; sourceKind: string; sourceId: string; expectedRevision: string
 }
-type LinkAccess = {
+export type LinkAccess = {
   orders: boolean; settlement: boolean; finance: boolean; returns: boolean; costs: boolean; refunds: boolean
 }
 
 const dateLabel = (date: string) => date.slice(0, 10).split('-').reverse().join('/')
-const dateTimeLabel = (date: string) => ict.format(new Date(date)) + ' ICT'
+export const dateTimeLabel = (date: string) => ict.format(new Date(date)) + ' ICT'
 const workKey = (source: Work) => source.sourceKind + ':' + source.sourceId
 
 function restoreAssignment(key: string): Assignment | null {
@@ -96,7 +97,7 @@ function coverageLabel({ expected, known }: Readiness['coverage']) {
   return expected == null || known == null ? 'chưa xác định' : known + '/' + expected
 }
 
-function SourceLink({ source, tripId, access }: { source: Source; tripId: string; access: LinkAccess }) {
+export function SourceLink({ source, tripId, access }: { source: Source; tripId: string; access: LinkAccess }) {
   const { sourceId, relatedId, caseId, sourceKind } = source
   function link(href: string, label: string, authorized: boolean) {
     return <a className="page-link" href={href} target={authorized ? undefined : '_blank'}
@@ -179,6 +180,7 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
   token: string; identity: Identity; trip: Trip; access: LinkAccess; tripClosure: boolean; aSuccessor: boolean
 }) {
   const { tripId } = trip
+  const linkedSource = new URLSearchParams(location.search).get('source') ?? undefined
   const path = '/trips/' + tripId
   const storageKey = 'app05.trip-close.v1.' + JSON.stringify([identity.sessionId, identity.tenantId, identity.actorId, tripId])
   const closeKey = storageKey + '.close'
@@ -356,6 +358,7 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
     </section>}
     {closure && <TripClosureHistory closure={closure}
       currentOpenWorkCount={historyFresh ? history?.data.currentOpenWorkCount : undefined} access={access}
+      linkedSnapshotSource={data && !data.work.some(item => item.sourceId === linkedSource) ? linkedSource : undefined}
       openAfterApproval={!!lastApprovalLine && !!data && !data.work.some(work => work.sourceId === lastApprovalLine && work.sourceKind === 'A_REMAINDER')}
       renderResolvedProposal={source => data && !data.work.some(work => workKey(work) === workKey(source))
         ? remainderProposal(source, closure.snapshot.aLines.find(line => line.orderLineId === source.sourceId), source.sourceId === lastApprovalLine) : null} />}
@@ -363,6 +366,7 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
     {pendingClose && !closed && <section className="panel panel-content">
       <h3>Khôi phục yêu cầu đóng chuyến</h3>
       <p className="c3-source">Mã yêu cầu {pendingClose.commandId}</p>
+      <a className="page-link" href={'/work/app05-work?command=' + pendingClose.commandId}>Tra lịch sử lệnh</a>
       <div className="button-row">
         <Button disabled={busy} onClick={refresh}>Tra cứu kết quả đóng chuyến</Button>
         <Button disabled={!canReplayClose} onClick={() => void closeTrip(pendingClose)}>Gửi lại cùng yêu cầu đóng chuyến</Button>
@@ -385,10 +389,11 @@ function TripDetails({ token, identity, trip, access, tripClosure, aSuccessor }:
         {notice && <p role="status">{notice}</p>}
         {pending && <div className="c3-source">
           <p>Yêu cầu chờ xác nhận {pending.commandId}</p>
+          {tripClosure && <a className="page-link" href={'/work/app05-work?command=' + pending.commandId}>Tra lịch sử lệnh</a>}
           <Button disabled={!data.canAssign || !fresh || busy} onClick={() => void send(pending)}>Gửi lại cùng yêu cầu</Button>
         </div>}
         {data.work.length ? <ul className="c1-rows">
-          {data.work.map(source => <li key={workKey(source)} data-source-kind={source.sourceKind} data-source-id={source.sourceId}>
+          {data.work.map(source => <li key={workKey(source)} id={"work-" + source.sourceId} {...linkedRecord(source.sourceId, linkedSource)} data-source-kind={source.sourceKind} data-source-id={source.sourceId}>
             <div className="c3-source">
               <h4>{source.label}</h4>
               <p>{source.action}</p>
@@ -471,9 +476,9 @@ function TripCloseReceivables({ rows }: { rows: Readiness['receivables'] }) {
   </div></li>)}</ul>
 }
 
-function TripClosureHistory({ closure, currentOpenWorkCount, access, openAfterApproval, renderResolvedProposal }: {
+function TripClosureHistory({ closure, currentOpenWorkCount, access, openAfterApproval, linkedSnapshotSource, renderResolvedProposal }: {
   closure: Closure; currentOpenWorkCount?: number | null; access: LinkAccess
-  openAfterApproval: boolean
+  openAfterApproval: boolean; linkedSnapshotSource?: string
   renderResolvedProposal: (source: Work) => ReactNode
 }) {
   const snapshot = closure.snapshot
@@ -489,7 +494,7 @@ function TripClosureHistory({ closure, currentOpenWorkCount, access, openAfterAp
       <dt>Việc mở lúc đóng</dt><dd data-testid="closure-open-at-close">{closure.openWorkCount}</dd>
       <dt>Việc đang mở</dt><dd data-testid="closure-open-current">{currentOpenWorkCount ?? 'Chưa xác định'}</dd>
     </dl>
-    <details open={openAfterApproval || undefined}>
+    <details open={openAfterApproval || !!linkedSnapshotSource || undefined}>
       <summary>Ảnh chốt và nguồn</summary>
       <p>Ngày nghiệp vụ {dateLabel(snapshot.businessDate)} · Độ phủ nguồn {coverageLabel(snapshot.coverage)}</p>
       <p>Tính đến <time dateTime={snapshot.asOf}>{dateTimeLabel(snapshot.asOf)}</time></p>
@@ -501,7 +506,9 @@ function TripClosureHistory({ closure, currentOpenWorkCount, access, openAfterAp
         <TripCloseReceivables rows={snapshot.receivables} />
       </>}
       {snapshot.work.length > 0 && <ul className="c1-rows">
-        {snapshot.work.map(item => <li key={workKey(item)}><div className="c3-source">
+        {snapshot.work.map(item => <li key={workKey(item)}
+          id={item.sourceId === linkedSnapshotSource ? 'work-' + item.sourceId : undefined}
+          {...linkedRecord(item.sourceId, linkedSnapshotSource)}><div className="c3-source">
           <h4>{item.label}</h4>
           <p>Mã nguồn {item.sourceId}</p>
           {item.followUp && <>

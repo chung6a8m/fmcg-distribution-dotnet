@@ -236,7 +236,8 @@ internal static partial class App05CloseReadiness
 
         async Task<IResult> Record(object body, bool applied)
         {
-            string receipt = JsonSerializer.Serialize(body, ClosureJson);
+            string kind = warehouse.HasValue ? "A_RESERVE_UNHELD" : transfer ? "A_TRANSFER_HELD" : "A_ASSIGN_SUCCESSOR";
+            string receipt = StoreCommandScope(body, kind, trip, line, input.DestinationTripId).ToJsonString();
             await db.ExecuteAsync(App02a3Sql.Cmd($"""
                 INSERT dbo.App05ASuccessorCommand(TenantId,ActorId,CommandId,PayloadHash,Receipt,Applied,RecordedAt)
                 VALUES(@Tenant,@Actor,@CommandId,@Hash,@Receipt,@Applied,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00'));
@@ -248,7 +249,7 @@ internal static partial class App05CloseReadiness
         {
             // Replay reaches here only after current authorization and an exact payload hash match.
             // Enrich the response without rewriting receipts recorded before this contract.
-            var response = JsonNode.Parse(receipt)!.AsObject();
+            var response = ReadCommandBody(receipt);
             response["outcome"] = applied ? "APPLIED" : "REJECTED";
             response["request"] = JsonSerializer.SerializeToNode(new
             {

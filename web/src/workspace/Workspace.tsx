@@ -15,6 +15,7 @@ const BSale = lazy(() => import('../sales/BSaleWorkspace').then(m => ({ default:
 const Ar = lazy(() => import('../sales/ArReport').then(m => ({ default: m.ScopedArReport })))
 const Returns = lazy(() => import('../sales/ReturnWorkspace').then(m => ({ default: m.ReturnWorkspace })))
 
+const App05Work = lazy(() => import('./App05WorkWorkspace').then(m => ({ default: m.App05WorkWorkspace })))
 const TripClose = lazy(() => import('../sales/TripCloseWorkspace').then(m => ({ default: m.TripCloseWorkspace })))
 const Settlement = lazy(() => import('../sales/MixedTripWorkspace').then(m => ({ default: m.MixedTripWorkspace })))
 const Advances = lazy(() => import('../sales/AdvanceWorkspace').then(m => ({ default: m.AdvancePanel })))
@@ -43,6 +44,7 @@ type Access = Identity & {
   tripClosure?: boolean
   aSuccessor?: boolean
   aSuccessorReserve?: boolean
+  app05DeliveryRecovery?: boolean
   sales: boolean; warehouse: boolean; fieldB?: boolean; returnRole: ReturnRole | null; businessDate: string; expiresAt: number
 }
 type Session = { token: string; access: Access }
@@ -57,6 +59,7 @@ const routes = [
   { id: 'delivery', label: 'Giao hàng A', group: 'Hiện trường', show: (a: Access) => a.sales },
   { id: 'b-sale', label: 'Bán và giao hàng B', group: 'Hiện trường', show: (a: Access) => !!a.fieldB && a.sales },
   { id: 'visits', label: 'Viếng thăm', group: 'Hiện trường', show: (a: Access) => a.sales },
+  { id: 'app05-work', label: 'Việc ngày sau và lịch sử lệnh', group: 'Vận hành', show: (a: Access) => a.tripClosure === true || a.aSuccessorReserve === true || a.app05DeliveryRecovery === true },
   { id: 'trip-close', label: 'Chuẩn bị đóng chuyến', group: 'Vận hành', show: (a: Access) => a.tripClose === true },
   { id: 'settlement', label: 'Đối soát chuyến và nộp tiền', group: '', show: (a: Access) => !!a.handoffRoles?.length },
   { id: 'advances', label: 'Tạm ứng và hoàn ứng', group: '', show: (a: Access) => !!a.advanceRole },
@@ -294,7 +297,7 @@ function Workspace() {
       authorized.access.warehouse, authorized.access.returnRole, authorized.access.fieldB,
       authorized.access.handoffRoles, authorized.access.advanceRole, authorized.access.giftRole,
       authorized.access.accountingRoles, authorized.access.adjustmentRole, authorized.access.refundRole, authorized.access.owner,
-      authorized.access.tripClose, authorized.access.tripClosure, authorized.access.aSuccessor])} {...authorized} offline={offline} />}
+      authorized.access.tripClose, authorized.access.tripClosure, authorized.access.aSuccessor, authorized.access.aSuccessorReserve, authorized.access.app05DeliveryRecovery])} {...authorized} offline={offline} />}
     <footer><a className="page-link" href="/dev">Công cụ DEV và UI Lab</a></footer>
   </main>
 }
@@ -404,6 +407,12 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         : 'Màn hình này cần quyền phù hợp và profile DEV có hỗ trợ.'}</p>}
       <Suspense fallback={<p role="status">Đang tải màn hình…</p>}>
         {current?.id === 'owner' && (offline ? <p role="status">Kết nối lại để đọc số liệu Chủ NPP.</p> : <Owner key={token} token={token} />)}
+        {current?.id === 'app05-work' && <App05Work token={token} identity={access} offline={offline}
+          canReadWork={access.tripClosure === true} access={{
+            orders: access.sales || access.warehouse, settlement: !!access.handoffRoles?.length,
+            finance: !!access.accountingRoles?.length, returns: access.returnRole !== null,
+            costs: !!access.adjustmentRole, refunds: !!access.refundRole,
+          }} />}
         {current?.id === 'trip-close' && <TripClose token={token} identity={access} offline={offline}
           tripId={trip} onTripChange={saveTrip} tripClosure={access.tripClosure === true} aSuccessor={access.aSuccessor === true} access={{
             orders: access.sales || access.warehouse, settlement: !!access.handoffRoles?.length,
@@ -428,7 +437,7 @@ function WorkArea({ access, token, offline }: Session & { offline: boolean }) {
         {current?.id === 'load' && <Load workspaceToken={token} onTripChange={saveLoadTrip}
           startTrip={loadOrder ? (guid.test(requestedTrip) ? requestedTrip : '') : trip} startOrder={loadOrder}
           onOrderChange={id => remember('order', id)} />}
-        {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
+        {current?.id === 'delivery' && <Delivery workspaceToken={token} startTrip={trip} startSource={linkedId} onTripChange={saveTrip} />}
         {current?.id === 'field' && <FieldTrips token={token} settlement={!!access.handoffRoles?.length} />}
         {current?.id === 'b-stock' && <BStock workspaceToken={token} startTrip={trip} onTripChange={saveTrip} />}
         {current?.id === 'b-sale' && <BSale workspaceToken={token} startTrip={trip} requestedTrip={query.get('trip')}

@@ -177,7 +177,7 @@ internal static partial class App05CloseReadiness
             """, identity, tx, ct));
         if (previous is not null)
             return CryptographicOperations.FixedTimeEquals(previous.PayloadHash, hash)
-                ? Results.Content(previous.Receipt, "application/json", statusCode: previous.Applied ? 200 : 409) : Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
+                ? Receipt(previous.Receipt, previous.Applied) : Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
         if (await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
             SELECT CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM dbo.App05FollowUpAssignment
                     WHERE TenantId=@Tenant AND ActorId=@Actor AND CommandId=@CommandId)
@@ -210,12 +210,12 @@ internal static partial class App05CloseReadiness
 
         async Task<IResult> Record<T>(T value, bool applied)
         {
-            string receipt = JsonSerializer.Serialize(value, ClosureJson);
+            string receipt = StoreCommandScope(value, "A_CLOSURE_PROPOSAL", tripId, lineId).ToJsonString();
             await db.ExecuteAsync(App02a3Sql.Cmd($"""
                 INSERT dbo.App05ASuccessorCommand(TenantId,ActorId,CommandId,PayloadHash,Receipt,Applied,RecordedAt)
                 VALUES(@Tenant,@Actor,@CommandId,@PayloadHash,@Receipt,@Applied,TODATETIMEOFFSET({App02c6Clock.SqlUtcNow},'+00:00'));
                 """, new { identity.Tenant, identity.Actor, input.CommandId, PayloadHash = hash, Receipt = receipt, Applied = applied }, tx, ct));
-            return Results.Content(receipt, "application/json", statusCode: applied ? 200 : 409);
+            return Receipt(receipt, applied);
         }
     }
 }

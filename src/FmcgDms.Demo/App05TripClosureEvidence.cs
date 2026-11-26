@@ -216,6 +216,16 @@ internal static class App05TripClosureEvidence
                     AND l.Status='RECONCILED_OK' AND l.OccurredAt<h.Cutoff AND h.Cutoff<=h.AsOf;
                 """, new { report.ReportId, fixture.AccountingWork.RelatedId, fixture.AccountingWork.SourceId }, cancellationToken: ct));
             Check("covering D.4 report links the original first-day source", Primary, 1, covered);
+            var reassignment = await db.QuerySingleAsync<BoardReassignment>(new CommandDefinition("""
+                SELECT TOP(1) a.Assignee,a.ActorId,a.DueAt,a.NextAction,a.Reason,COUNT(*) OVER () AS EventCount
+                FROM dbo.App05FollowUpAssignment a
+                WHERE a.TenantId=@Tenant AND a.TripId=@Trip AND a.SourceKind='A_REMAINDER' AND a.SourceId=@OrderLineId
+                ORDER BY a.EventId DESC;
+                """, new { Tenant = Primary, Trip = fixture.Main, fixture.Order.OrderLineId }, cancellationToken: ct));
+            Check("next-day A reassignment appends one event and keeps the original next action", Primary,
+                new BoardReassignment(App05CloseBootstrap.BackupAssignee, App05CloseBootstrap.Ops,
+                    new DateTimeOffset(2026, 11, 24, 9, 15, 0, TimeSpan.FromHours(7)),
+                    "Điều phối 15 EA cho ngày sau", "Đổi hạn để điều phối chuyến giao tiếp", 3), reassignment);
             var cleanOriginal = await TripImage(fixture.Clean);
             Check("clean trip is open before contenders", Primary, new TripImageRow("RECONCILING", 0), cleanOriginal);
             string beforeClean = await EffectDigest(Primary);
@@ -1084,6 +1094,8 @@ internal static class App05TripClosureEvidence
     private sealed record CleanCheckpoint(Receipt CleanReceipt);
     private sealed record ZeroCheckpoint(Receipt ZeroReceipt);
     private sealed record ReportCheckpoint(Guid ReportId);
+    private sealed record BoardReassignment(string Assignee, string ActorId, DateTimeOffset DueAt,
+        string NextAction, string Reason, int EventCount);
     private sealed record Persisted(Guid ClosureId, string ActorId, Guid CommandId, string Status,
         DateTimeOffset ClosedAt, int OpenWorkCount, Guid HandoffId, string Snapshot);
     private sealed record TripImageRow(string Status, int Decisions);

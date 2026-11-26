@@ -32,7 +32,7 @@ internal static partial class App02d4Accounting
     {
         await using var db = await runtime.Open(http.User, "reconciler", ct);
         DateTimeOffset now = runtime.UtcNow;
-        if (request.From >= request.Cutoff || request.AsOf < request.Cutoff || request.AsOf > now)
+        if (!ValidReconciliationWindow(request.From, request.Cutoff, request.AsOf, now))
             return Results.BadRequest(new Error("INVALID_RECONCILIATION_WINDOW"));
         if (request.RequestId == Guid.Empty || (!runtime.UsesFinance && request.RequestId is not null))
             return Results.BadRequest(new Error("INVALID_REPORT_REQUEST_ID"));
@@ -64,7 +64,7 @@ internal static partial class App02d4Accounting
         if (snapshot is null) return Results.StatusCode(StatusCodes.Status502BadGateway);
 
         var sources = await runtime.ReadSources(db, ct, asOf: request.AsOf);
-        var scope = sources.Where(source => source.OccurredAt >= request.From && source.OccurredAt < request.Cutoff)
+        var scope = sources.Where(source => ContainsSource(request.From, request.Cutoff, source.OccurredAt))
             .ToArray();
         var ids = scope.Select(source => source.SourceLineId).ToHashSet();
         var receipts = snapshot.Receipts.ToDictionary(row => row.SourceLineId);
@@ -147,6 +147,16 @@ internal static partial class App02d4Accounting
         await tx.CommitAsync(ct);
         return await ReadReport(db, report.Id, runtime.UsesFinance, ct);
     }
+
+    private static bool ValidReconciliationWindow(DateTimeOffset from, DateTimeOffset cutoff, DateTimeOffset asOf,
+        DateTimeOffset now) => from < cutoff && cutoff <= asOf && asOf <= now;
+
+    private static bool ContainsSource(DateTimeOffset from, DateTimeOffset cutoff, DateTimeOffset occurredAt) =>
+        from <= occurredAt && occurredAt < cutoff;
+
+    internal static bool CoversReconciliationSource(DateTimeOffset from, DateTimeOffset cutoff, DateTimeOffset asOf,
+        DateTimeOffset now, DateTimeOffset occurredAt) =>
+        ValidReconciliationWindow(from, cutoff, asOf, now) && ContainsSource(from, cutoff, occurredAt);
 
     private static Task<StoredReport?> FindStoredReport(SqlConnection db, Guid id, System.Data.Common.DbTransaction? tx,
         CancellationToken ct) => db.QuerySingleOrDefaultAsync<StoredReport>(new CommandDefinition($"""

@@ -96,9 +96,15 @@ internal static partial class App05CloseReadiness
 
         SELECT d.Id AS DeliveryId,d.BusinessSourceLineId AS SourceId,q.OccurredAt,q.ReceiptId,q.PostingId,
             q.ReconciliationStatus,ISNULL(q.ReconciliationStale,CONVERT(bit,0)) AS ReconciliationStale,g.Id AS CaseId,
-            q.ReportId,q.ReportFromUtc,q.ReportCutoff,q.ReportAsOf
+            q.ReportId,q.ReportFromUtc,q.ReportCutoff,q.ReportAsOf,
+            CONVERT(bit,CASE WHEN h.ExpectedCount IS NOT NULL AND l.DeliveryId=d.Id
+                AND l.OccurredAt=s.OccurredAt AND s.RecordedAt<=h.AsOf
+                AND l.SourceHash COLLATE Latin1_General_100_BIN2=s.Hash THEN 1 ELSE 0 END) AS ReportLineProven
         FROM dbo.SaleDelivery d
         LEFT JOIN d4app.FinanceQueueProvenance q ON q.DeliveryId=d.Id AND q.SourceLineId=d.BusinessSourceLineId
+        LEFT JOIN d4app.CommittedSource s ON s.DeliveryId=d.Id AND s.SourceLineId=d.BusinessSourceLineId
+        LEFT JOIN d4app.AccountingReport h ON h.Id=q.ReportId
+        LEFT JOIN d4app.AccountingReportLine l ON l.ReportId=h.Id AND l.SourceLineId=d.BusinessSourceLineId
         OUTER APPLY (
             SELECT TOP(1) c.Id FROM d4app.FinanceCases c
             WHERE c.DeliveryId=d.Id AND c.SourceLineId=d.BusinessSourceLineId AND c.ClosedReportId IS NULL

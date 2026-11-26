@@ -1,3 +1,4 @@
+import { linkedRecord } from '../workspace/linked-record'
 import { useEffect, useEffectEvent, useRef, useState, type FormEvent } from 'react'
 import { Button, Field, ThemeSelect } from '../ui/controls'
 import { forgetPending, HttpError, pendingJson, readError, rememberPending, requestSalesApi, type Identity } from './customer-api'
@@ -59,8 +60,8 @@ async function get<T>(token: string, path: string, service = api): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function DeliveryWorkspace({ workspaceToken, startTrip, onTripChange }: {
-  workspaceToken?: string; startTrip?: string; onTripChange?: (trip: string) => void
+export function DeliveryWorkspace({ workspaceToken, startTrip, startSource, onTripChange }: {
+  workspaceToken?: string; startTrip?: string; startSource?: string; onTripChange?: (trip: string) => void
 }) {
   const [session, setSession] = useState<{ token: string; identity: Identity } | null>(null)
   const [trips, setTrips] = useState<Trip[]>([])
@@ -123,7 +124,8 @@ export function DeliveryWorkspace({ workspaceToken, startTrip, onTripChange }: {
       setSession({ token, identity })
       setTrips(available)
       setPending(saved)
-      const selected = available.find(t => t.id === saved?.tripId) ?? available.find(t => t.id === startTrip)
+      const linkedTrip = available.find(t => t.id === startTrip)
+      const selected = (startSource ? linkedTrip : undefined) ?? available.find(t => t.id === saved?.tripId) ?? linkedTrip
       const effectiveTrip = selected?.id ?? available[0]?.id ?? ''
       onTripChange?.(effectiveTrip)
       await refresh(token, effectiveTrip)
@@ -242,7 +244,7 @@ export function DeliveryWorkspace({ workspaceToken, startTrip, onTripChange }: {
         <section className="panel panel-content" aria-label="Công nợ theo lần giao">
           <h2>Công nợ theo lần giao</h2>
           {data.ar.length === 0 && <p>Chưa phát sinh công nợ.</p>}
-          {data.ar.map(item => <article className="panel panel-content" key={item.sourceId}>
+          {data.ar.map(item => <article className="panel panel-content" key={item.sourceId} {...linkedRecord(item.sourceId, startSource)}>
             <h3>{item.customer} · {displayAmount(item.amount, item.currency)}</h3>
             <p>{item.shipTo}</p>
             <p>Ngày giao {item.businessDate.slice(0, 10)} · Hạn AR {item.dueBusinessDate.slice(0, 10)}</p>

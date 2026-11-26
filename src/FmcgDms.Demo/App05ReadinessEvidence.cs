@@ -137,19 +137,56 @@ internal static class App05ReadinessEvidence
             var current = await Request(next, readiness + nextTrip, next.CloseCredentials!["OPS"], ct);
             Compare("prior trip excludes vehicle stock from the new trip", "tenant-a", false, HasVehicleBlocker(old));
             Compare("new trip includes its own vehicle stock", "tenant-a", true, HasVehicleBlocker(current));
+            Compare("NextDay alone leaves prior D.4 work open", "tenant-a", true, HasFinanceWork(old, fixture.D4.SourceId));
+
+            const string reconcile = "/api/synthetic/app02d4/accounting/reconcile";
+            var reconciler = next.FinanceCredentials!["RECONCILER"];
+            var from = new DateTimeOffset(2026, 11, 23, 0, 0, 0, TimeSpan.FromHours(7));
+            var cutoff = from.AddDays(1);
+            var asOf = cutoff.AddHours(9);
+            var exclusiveBoundary = await Request(next, reconcile, reconciler, ct, new
+            {
+                requestId = Guid.NewGuid(), from, cutoff = from.AddHours(9), asOf
+            });
+            Compare("report excludes the source exactly at cutoff", "tenant-a", false,
+                exclusiveBoundary.GetProperty("lines").EnumerateArray().Any(row =>
+                    row.GetProperty("sourceLineId").GetGuid() == fixture.D4.SourceId));
+
+            await using var db = await Own("tenant-a");
+            Guid wrongHashReport = Guid.NewGuid();
+            int seededLines = await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                IF NOT EXISTS(SELECT 1 FROM dbo.LocalApp03Session WHERE TenantId=N'tenant-a' AND RunId=@Nonce)
+                    OR DB_NAME()<>@Name
+                    THROW 51000, 'Expected the owned APP-05 evidence database.', 1;
+                INSERT d4app.AccountingReport(Id,FromUtc,Cutoff,AsOf,ExpectedCount,ReceivedCount,PostedCount,OkCount,
+                    DiffCount,PendingCount,OutsideCount,Status,CreatedAt)
+                VALUES(@wrongHashReport,@from,@cutoff,@asOf,1,1,1,1,0,0,0,'RECONCILED_OK',@asOf);
+                INSERT d4app.AccountingReportLine(ReportId,DeliveryId,SourceLineId,SourceHash,OccurredAt,Period,
+                    ReceiptId,PostingId,Status,ExpectedQuantity,ExpectedGross,ExpectedAr,ExpectedCost,
+                    ActualQuantity,ActualGross,ActualAr,ActualCost,DiffQuantity,DiffGross,DiffAr,DiffCost)
+                SELECT @wrongHashReport,s.DeliveryId,s.SourceLineId,REPLICATE('0',64),s.OccurredAt,r.Period,r.Id,p.Id,
+                    'RECONCILED_OK',s.Quantity,s.Gross,s.Ar,s.Cost,p.Quantity,p.Gross,p.Ar,p.Cost,0,0,0,0
+                FROM d4app.CommittedSource s
+                JOIN d4accounting.Receipt r ON r.Id=@AccountingReceipt AND r.DeliveryId=s.DeliveryId
+                    AND r.SourceLineId=s.SourceLineId
+                JOIN d4accounting.Posting p ON p.Id=@AccountingPosting AND p.ReceiptId=r.Id AND p.Kind='BASE'
+                WHERE s.DeliveryId=@RelatedId AND s.SourceLineId=@SourceId AND s.Hash<>REPLICATE('0',64);
+                SELECT @@ROWCOUNT;
+                """, new { wrongHashReport, from, cutoff, asOf, Nonce = run.Id, Name = run.Name("tenant-a"),
+                    fixture.AccountingReceipt, fixture.AccountingPosting, fixture.D4.RelatedId, fixture.D4.SourceId },
+                cancellationToken: ct));
+            Compare("wrong-hash report test fixture", "tenant-a", 1, seededLines);
+            var wrongHash = await Request(next, readiness + fixture.Trip, next.CloseCredentials!["ASSIGNEE"], ct);
+            Compare("report line with a wrong source hash leaves prior D.4 work open", "tenant-a", true,
+                HasFinanceWork(wrongHash, fixture.D4.SourceId));
 
             Guid requestId = Guid.NewGuid();
-            await Request(next, "/api/synthetic/app02d4/accounting/reconcile", next.FinanceCredentials!["RECONCILER"], ct, new
-            {
-                requestId, from = "2026-11-23T00:00:00+07:00", cutoff = "2026-11-24T00:00:00+07:00",
-                asOf = "2026-11-24T09:00:00+07:00", unknownScope = false
-            });
+            await Request(next, reconcile, reconciler, ct, new { requestId, from, cutoff, asOf });
             var after = await Request(next, readiness + fixture.Trip, next.CloseCredentials!["ASSIGNEE"], ct);
             var work = after.GetProperty("work").EnumerateArray().ToArray();
             Compare("covering report removes only the original posted D.4 work", "tenant-a", 1, work.Length);
             Compare("covering report leaves the A obligation", "tenant-a", fixture.Line.OrderLineId,
                 work[0].GetProperty("sourceId").GetGuid());
-            await using var db = await Own("tenant-a");
             var actual = await db.QuerySingleAsync<DayTwo>(new CommandDefinition("""
                 SELECT CONVERT(bit,CASE WHEN older.VehicleLocationId=newer.VehicleLocationId THEN 1 ELSE 0 END) AS SameVehicle,
                     p.OnHandBaseQuantity AS VehicleQuantity,l.Status AS ReportStatus
@@ -158,14 +195,16 @@ internal static class App05ReadinessEvidence
                 JOIN dbo.Sku k ON k.TenantId=p.TenantId AND k.Id=p.SkuId AND k.Code='Z-FIELD-EA'
                 JOIN d4app.AccountingReportLine l ON l.ReportId=@requestId AND l.SourceLineId=@SourceId AND l.DeliveryId=@RelatedId
                 JOIN d4app.AccountingReport h ON h.Id=l.ReportId
+                JOIN d4app.CommittedSource s ON s.DeliveryId=l.DeliveryId AND s.SourceLineId=l.SourceLineId AND s.Hash=l.SourceHash
                 WHERE older.TenantId=N'tenant-a' AND older.Id=@Trip AND l.OccurredAt<h.Cutoff
-                    AND h.Cutoff<=h.AsOf AND l.ActualGross=l.ExpectedGross AND l.ActualCost=l.ExpectedCost;
-                """, new { nextTrip, requestId, fixture.Trip, fixture.D4.SourceId, fixture.D4.RelatedId },
+                    AND h.FromUtc<=l.OccurredAt AND h.Cutoff<=h.AsOf AND h.AsOf<=@asOf
+                    AND l.ActualGross=l.ExpectedGross AND l.ActualCost=l.ExpectedCost;
+                """, new { nextTrip, requestId, asOf, fixture.Trip, fixture.D4.SourceId, fixture.D4.RelatedId },
                 cancellationToken: ct));
             Compare("same vehicle carries only the next trip and report covers original delivery", "tenant-a",
                 new DayTwo(true, 1m, "RECONCILED_OK"), actual);
             await File.WriteAllTextAsync(Path.Combine(folder, "next-day-sources.json"),
-                JsonSerializer.Serialize(new { fixture.Trip, nextTrip, requestId, fixture.D4.SourceId, actual }, Json), ct);
+                JsonSerializer.Serialize(new { fixture.Trip, nextTrip, requestId, wrongHashReport, fixture.D4.SourceId, actual }, Json), ct);
 
 
             const string b = "/api/synthetic/app02d2";
@@ -196,6 +235,15 @@ internal static class App05ReadinessEvidence
             var pending = await Request(next, readiness + nextTrip, next.CloseCredentials!["OPS"], ct);
             Compare("custody keeps the new trip blocked", "tenant-a", true, HasBlocker(pending, "CUSTODY_OUTSTANDING"));
             Compare("pending offer independently blocks the new trip", "tenant-a", true, HasBlocker(pending, "CASH_OFFER_PENDING"));
+            var dayTwoSource = await db.QuerySingleAsync<Guid>(new CommandDefinition("""
+                SELECT BusinessSourceLineId FROM dbo.SaleDelivery
+                WHERE TenantId=N'tenant-a' AND TripId=@nextTrip AND BusinessSourceId=@sourceId;
+                """, new { nextTrip, sourceId = sale.GetProperty("sourceId").GetGuid() }, cancellationToken: ct));
+            Compare("day-one report leaves day-two delivery work open", "tenant-a", true, HasFinanceWork(pending, dayTwoSource));
+            int dayTwoLine = await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                SELECT COUNT(*) FROM d4app.AccountingReportLine WHERE ReportId=@requestId AND SourceLineId=@dayTwoSource;
+                """, new { requestId, dayTwoSource }, cancellationToken: ct));
+            Compare("day-one report has no day-two source line", "tenant-a", 0, dayTwoLine);
             var oldAfterSale = await Request(next, readiness + fixture.Trip, next.CloseCredentials!["ASSIGNEE"], ct);
             Compare("new trip sale and offer do not affect prior trip readiness", "tenant-a", after.GetProperty("revision").GetString(),
                 oldAfterSale.GetProperty("revision").GetString());
@@ -205,6 +253,8 @@ internal static class App05ReadinessEvidence
 
             static bool HasBlocker(JsonElement preview, string code) =>
                 preview.GetProperty("blockers").EnumerateArray().Any(item => item.GetProperty("code").GetString() == code);
+            static bool HasFinanceWork(JsonElement preview, Guid sourceId) => preview.GetProperty("work").EnumerateArray().Any(row =>
+                row.GetProperty("sourceKind").GetString() == "D4_RECONCILIATION" && row.GetProperty("sourceId").GetGuid() == sourceId);
             static bool HasVehicleBlocker(JsonElement preview) =>
                 preview.GetProperty("blockers").EnumerateArray().Any(item =>
                     item.GetProperty("code").GetString() is "VEHICLE_STOCK_OUTSTANDING" or "VEHICLE_SOURCE_DRIFT");
