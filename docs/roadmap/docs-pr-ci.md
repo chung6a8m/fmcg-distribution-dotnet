@@ -230,7 +230,7 @@ closeout mới.
 
 | Increment | Phụ thuộc | Phạm vi | Trạng thái |
 | --- | --- | --- | --- |
-| DOC-CI-02A — Consumer audit & document boundaries | v1 | Inventory và tách trạng thái khỏi instruction/hợp đồng | NOT_STARTED |
+| DOC-CI-02A — Consumer audit & document boundaries | v1 | Inventory và tách trạng thái khỏi instruction/hợp đồng; [audit và handoff](doc-ci-02a-consumer-audit.md) | SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING |
 | DOC-CI-02B — Status/receipt & classifier v2 | 02A | Chuẩn hóa status/receipt, mở rộng allowlist đã audit, diagnostics | NOT_STARTED |
 | DOC-CI-02C — Companion CI routing | 02B | Áp dụng cùng policy cho chín workflow đồng hành | NOT_STARTED |
 | DOC-CI-02D — Independent acceptance & closeout | 02C | Probe hosted, full controls, main receipt và đo hiệu quả | NOT_STARTED |

@@ -36,6 +36,23 @@ jobs:
         run: python tools/validate_business.py
       - name: Validate E-SIM-01
         run: python tools/validate_e_sim_01.py
+      - name: Audit tracked documentation consumers (full route only)
+        id: doc_consumer_audit
+        if: steps.classification.outputs.mode == 'full'
+        env:
+          DOC_CI_AUDIT_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          if [ -n "$DOC_CI_AUDIT_BASE_SHA" ]; then
+            python3 -B tools/audit_doc_ci_consumers.py --ref "$DOC_CI_AUDIT_BASE_SHA" --output TestResults/doc-ci-consumer-audit/base.json
+          fi
+          python3 -B tools/audit_doc_ci_consumers.py --ref HEAD --output TestResults/doc-ci-consumer-audit/checkout.json
+      - name: Upload documentation consumer inventory (audit only)
+        if: ${{ !cancelled() && steps.doc_consumer_audit.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: app00a-doc-consumer-audit-${{ github.run_attempt }}
+          path: TestResults/doc-ci-consumer-audit/
+          if-no-files-found: error
       - name: Upload APP-00A classification receipt
         if: ${{ !cancelled() && steps.classification.outcome == 'success' }}
         uses: actions/upload-artifact@v7
