@@ -78,7 +78,7 @@ Mỗi hàng là một PR có thay đổi thực chất, kiểm chứng và cập
 | **APP-05.3 — Chọn chuyến và chuyển HELD** | .2 | Liên kết thực hiện kế nhiệm và chuyển đúng quyền đã giữ, không đổi đơn gốc | `MERGED / MAIN_CI_VERIFIED` (#154) |
 | **APP-05.4a — Reserve phần chưa giữ** | .3 | Giữ bổ sung có nguồn trên chuyến kế nhiệm; thiếu tồn vẫn là việc chờ | `MERGED / MAIN_CI_VERIFIED` |
 | **APP-05.4b — Nạp và giao tiếp** | .4a | Load/Delivery trên chuyến mới; bảo toàn lot/cost/snapshot và due; báo cáo toàn dòng | `MERGED / FINAL_HEAD_CI_VERIFIED / MAIN_FEATURE_CI_VERIFIED` |
-| **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `NOT_STARTED` |
+| **APP-05.5 — Đóng phần A còn lại** | .4b | Đề nghị/duyệt độc lập, giải phóng đúng phần giữ, hoàn tất việc theo nguồn | `IN_PROGRESS` |
 | **APP-05.6 — Công việc ngày sau và phục hồi** | .2, .4b, .5 | Bàn công việc theo người/hạn; tái giao có audit; browser mới tìm lại nguồn/lệnh | `NOT_STARTED` |
 | **APP-05.7 — Nghiệm thu trọn ca** | .0–.6 | Hai ngày cùng DB, đủ nhánh sạch/có tồn/bị chặn/chưa nạp, direct operator và oracle độc lập | `NOT_STARTED` |
 
@@ -327,6 +327,8 @@ Phạm vi nghiệm thu là synthetic DEV cho chuyến kế nhiệm hợp lệ. P
 - [ ] Tạo đề nghị có source/quantity/reason; actor độc lập đủ quyền duyệt đúng version. Chỉ kết thúc nghĩa vụ chưa giao và release phần HELD hợp lệ; không đảo phần đã giao hoặc giảm AR đã ghi vì thao tác này.
 - [ ] Recheck toàn dòng và right generation dưới transaction/khóa chung; giải quyết partial closure, replay, payload conflict. Việc chỉ xong khi phần nghĩa vụ còn lại bằng 0 theo delivery/nguồn duyệt.
 - [ ] UI thể hiện người đề nghị/người duyệt, nguồn release và phần còn; xác minh conservation/financial no-effect cùng tenant guards; commit đề xuất: `feat: approve closure of undelivered A remainder`.
+
+**Bước đầu — đề nghị đóng có nguồn.** Migration tiến `202611260003` ghi đề nghị bất biến với dòng Confirm, hồ sơ bàn giao, người đề nghị, lượng, lý do và revision hiện hành. Người có quyền gửi đề nghị từ biên bản chuyến đã đóng và có thể tra lại khi mất ACK. Lượt synthetic DEV `691eb905896346f3a11f5de3fd7ddf17` đạt Chromium 4/4 và SQL 121/121, zero diff. Ca kiểm dùng biên nhận UI bị mất ACK, replay cùng lệnh, đổi payload, trùng ID với lệnh chuyển HELD, revision cũ và quyền sai. SHA256 `run.json` `4D4D80E0C7C39988B75C7B11CA8151C6006D6E97062E9923EA0D051C590D8292`. Đề nghị ở trạng thái chờ duyệt và giữ nguyên tồn, sổ công nợ và nghĩa vụ giao. Duyệt độc lập và giải phóng HELD thuộc bước tiếp theo.
 
 ### APP-05.6 — Bàn công việc ngày sau và browser mới
 

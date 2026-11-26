@@ -55,6 +55,7 @@ internal static partial class App05CloseReadiness
             }, ct);
         });
         MapSuccessorReserve(sources);
+        MapRemainderClosure(sources);
         MapCommand("/assign-successor", transfer: false);
         MapCommand("/transfer-held", transfer: true);
 
@@ -147,6 +148,7 @@ internal static partial class App05CloseReadiness
             """, scope, tx, ct)))
             return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
+        await LockAOrderLine(db, tx, tenant, line, ct);
         var source = await ReadSuccessorSource(db, tx, tenant, trip, line, ct);
         if (source?.Line.ConfirmSourceId != input.ConfirmSourceId || source.FollowUpId != input.FollowUpId)
             return await Record(new { Code = "A_SUCCESSOR_SOURCE_INVALID" }, false);

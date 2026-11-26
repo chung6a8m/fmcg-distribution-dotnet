@@ -743,6 +743,28 @@ internal static class App05TripClosureEvidence
             Check("the HELD journey preserves the contrast tenant", Peer, peerBefore, await EffectDigest(Peer));
             await Acknowledge("successor-held-delivered");
 
+            if (!await Wait("remainder-proposal-before", exited)) return false;
+            string beforeProposal = await EffectDigest(Primary);
+            await Acknowledge("remainder-proposal-before");
+            if (!await Wait("remainder-proposal-after", exited)) return false;
+            var proposal = await Read<RemainderProposalProof>("remainder-proposal-after");
+            Check("remainder proposal replay leaves exactly one request for the line", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.App05ARemainderClosureProposal WHERE TenantId=@Tenant AND OrderLineId=@LineId;
+                    """, new { scope.Tenant, proposal.LineId }, cancellationToken: ct)));
+            Check("the persisted proposal binds the exact maker, command, Confirm, follow-up and revision", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.App05ARemainderClosureProposal
+                    WHERE TenantId=@Tenant AND ProposalId=@ProposalId AND OrderLineId=@LineId
+                        AND ConfirmSourceId=@ConfirmSourceId AND Quantity=1 AND Maker=@Ops
+                        AND CommandId=@CommandId AND FollowUpId=@FollowUpId AND Reason=@Reason
+                        AND CONVERT(varchar(64),SourceRevision,2)=@Revision;
+                    """, new { scope.Tenant, proposal.ProposalId, proposal.LineId, proposal.ConfirmSourceId,
+                        proposal.CommandId, proposal.FollowUpId, proposal.Reason, proposal.Revision, App05CloseBootstrap.Ops }, cancellationToken: ct)));
+            Check("a remainder proposal preserves stock, settlement, financial evidence and Confirm", Primary,
+                beforeProposal, await EffectDigest(Primary));
+            await Acknowledge("remainder-proposal-after");
+
             Task<ReservePool> ReadPool(Guid sku) => db.QuerySingleAsync<ReservePool>(new CommandDefinition("""
                 SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
                 FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@WarehouseId AND SkuId=@Sku;
@@ -895,6 +917,8 @@ internal static class App05TripClosureEvidence
     private sealed record ReserveRace(bool WinnerA, Guid SharedSkuId, Guid SharedLine);
     private sealed record ReserveGrant(Guid OrderLineId, int Rights, decimal Quantity, decimal LotQuantity, decimal LedgerQuantity);
     private sealed record ReservePool(decimal OnHand, decimal Allocated);
+    private sealed record RemainderProposalProof(Guid ProposalId, Guid LineId, Guid ConfirmSourceId, Guid CommandId,
+        Guid FollowUpId, string Reason, string Revision);
     private sealed record SuccessorHeldDelivery(Guid MainLineId, Guid MixedLineId, Guid SuccessorTripId,
         Guid MainBindingId, Guid MixedBindingId, Guid MixedRightId);
     private sealed record SuccessorReserveDelivery(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid OriginTripId,

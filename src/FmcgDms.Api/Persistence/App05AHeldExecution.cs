@@ -19,12 +19,14 @@ public sealed partial class App01a2CommandService
     private static async Task LockHeldLoadOrigins(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId,
         Guid[] requested, CancellationToken ct)
     {
-        var origins = await db.QueryAsync<Guid>(Sql("""
-            SELECT DISTINCT h.OriginalRightId FROM dbo.App05AHeldTransfer h
-            JOIN dbo.App05ASuccessor b ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
+        var transfers = (await db.QueryAsync<(Guid OrderLineId, Guid OriginalRightId)>(Sql("""
+            SELECT DISTINCT h.OrderLineId,h.OriginalRightId FROM dbo.App05AHeldTransfer h WITH (READCOMMITTEDLOCK)
+            JOIN dbo.App05ASuccessor b WITH (READCOMMITTEDLOCK) ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
             WHERE h.TenantId=@Tenant AND b.DestinationTripId=@TripId AND h.SuccessorRightId IN @Requested;
-            """, new { Tenant = tenant, TripId = tripId, Requested = requested }, tx, ct));
-        foreach (Guid origin in origins.Order())
+            """, new { Tenant = tenant, TripId = tripId, Requested = requested }, tx, ct))).AsList();
+        foreach (Guid line in transfers.Select(t => t.OrderLineId).Distinct().Order())
+            await App05CloseReadiness.LockAOrderLine(db, tx, tenant, line, ct);
+        foreach (Guid origin in transfers.Select(t => t.OriginalRightId).Distinct().Order())
             await LockHeldOriginRight(db, tx, tenant, origin, ct);
     }
 
