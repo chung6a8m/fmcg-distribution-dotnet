@@ -670,6 +670,47 @@ internal static class App05TripClosureEvidence
             Check("successor load and delivery leave the contrast tenant unchanged", Peer, peerBefore, await EffectDigest(Peer));
             await Acknowledge("successor-reserve-delivered");
 
+            if (!await Wait("successor-held-delivered", exited)) return false;
+            var heldDelivery = await Read<SuccessorHeldDelivery>("successor-held-delivered");
+            var heldScope = new { scope.Tenant, heldDelivery.MainLineId, heldDelivery.MixedLineId, heldDelivery.SuccessorTripId,
+                heldDelivery.MainBindingId, heldDelivery.MixedBindingId, heldDelivery.MixedRightId };
+            Check("mixed HELD conserves never-loaded and D.3 returned quantities and issues the original lot", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.App05AHeldExecution e
+                    JOIN dbo.App05AHeldTransfer h ON h.TenantId=e.TenantId AND h.SuccessorRightId=e.RightId
+                    JOIN dbo.StockRight origin ON origin.TenantId=e.TenantId AND origin.Id=e.OriginalRightId
+                    JOIN dbo.StockRight child ON child.TenantId=e.TenantId AND child.Id=e.RightId
+                    JOIN dbo.SaleDelivery d ON d.TenantId=e.TenantId AND d.StockRightId=e.RightId AND d.App05BindingId=e.BindingId
+                        AND d.App05HeldExecutorId=e.RightId AND d.TripId=e.DestinationTripId AND d.AOrderLineId=e.OrderLineId
+                    JOIN dbo.App05AHeldTransferLot lot ON lot.TenantId=e.TenantId AND lot.SuccessorRightId=e.RightId
+                    JOIN dbo.F03LotIssue issue ON issue.TenantId=d.TenantId AND issue.DeliveryId=d.Id AND issue.LotId=lot.LotId
+                    WHERE e.TenantId=@Tenant AND e.RightId=@MixedRightId AND e.OrderLineId=@MixedLineId
+                        AND e.BindingId=@MixedBindingId AND e.DestinationTripId=@SuccessorTripId
+                        AND h.NeverLoaded=1 AND h.Returned=2 AND origin.ReleasedBaseQuantity=3
+                        AND child.GrantedBaseQuantity=3 AND child.ConsumedBaseQuantity=3
+                        AND lot.NeverLoaded=1 AND lot.Returned=2 AND issue.Quantity=3 AND d.BaseQuantity=3;
+                    """, heldScope, cancellationToken: ct)));
+            Check("A40 has exactly 25 on the origin and 15 on the successor with full frozen value", Primary, 1,
+                await db.ExecuteScalarAsync<int>(new CommandDefinition("""
+                    SELECT COUNT(*) FROM dbo.F04PriceLine p
+                    JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=p.TenantId AND s.AOrderLineId=p.OrderLineId
+                    JOIN dbo.AOrder o ON o.TenantId=s.TenantId AND o.Id=s.AOrderId AND o.Status='FULFILLED'
+                    CROSS APPLY (
+                        SELECT SUM(IIF(d.TripId=s.TripId,d.BaseQuantity,0)) AS OriginalDelivered,
+                               SUM(IIF(d.TripId=@SuccessorTripId AND d.App05BindingId=@MainBindingId,d.BaseQuantity,0)) AS SuccessorDelivered,
+                               SUM(price.NetAmount) AS NetAmount,SUM(price.TaxAmount) AS TaxAmount,SUM(price.GrossAmount) AS GrossAmount
+                        FROM dbo.SaleDelivery d JOIN dbo.F04DeliveryPricing price ON price.TenantId=d.TenantId AND price.DeliveryId=d.Id
+                        WHERE d.TenantId=s.TenantId AND d.AOrderLineId=s.AOrderLineId
+                    ) x
+                    WHERE p.TenantId=@Tenant AND p.OrderLineId=@MainLineId AND s.ConfirmedBaseQuantity=40
+                        AND x.OriginalDelivered=25 AND x.SuccessorDelivered=15
+                        AND x.NetAmount=p.NetAmount AND x.TaxAmount=p.TaxAmount AND x.GrossAmount=p.GrossAmount;
+                    """, heldScope, cancellationToken: ct)));
+            Check("HELD rerouting and two successor loads conserve MAIN allocation and physical quantity", Primary,
+                new ReservePool(14, 9), await ReadPool(pool.SkuId));
+            Check("the HELD journey preserves the contrast tenant", Peer, peerBefore, await EffectDigest(Peer));
+            await Acknowledge("successor-held-delivered");
+
             Task<ReservePool> ReadPool(Guid sku) => db.QuerySingleAsync<ReservePool>(new CommandDefinition("""
                 SELECT OnHandBaseQuantity AS OnHand,AllocatedBaseQuantity AS Allocated
                 FROM dbo.StockPool WHERE TenantId=@Tenant AND StockLocationId=@WarehouseId AND SkuId=@Sku;
@@ -822,6 +863,8 @@ internal static class App05TripClosureEvidence
     private sealed record ReserveRace(bool WinnerA, Guid SharedSkuId, Guid SharedLine);
     private sealed record ReserveGrant(Guid OrderLineId, int Rights, decimal Quantity, decimal LotQuantity, decimal LedgerQuantity);
     private sealed record ReservePool(decimal OnHand, decimal Allocated);
+    private sealed record SuccessorHeldDelivery(Guid MainLineId, Guid MixedLineId, Guid SuccessorTripId,
+        Guid MainBindingId, Guid MixedBindingId, Guid MixedRightId);
     private sealed record SuccessorReserveDelivery(Guid OrderId, Guid OrderLineId, Guid ConfirmSourceId, Guid OriginTripId,
         Guid DestinationTripId, Guid BindingId, Guid RightId, Guid ManifestLineId, Guid DeliverySourceId, Guid LoadSourceId);
     private sealed record SuccessorFixture(Order Order, Order Held, Order Unreserved);

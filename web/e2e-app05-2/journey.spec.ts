@@ -714,4 +714,46 @@ test('successor schedules frozen A lines and transfers backed HELD with rollback
       sourceId: heldDelivery.sourceId, originTrip: 'DEV-20261125-A', trip: 'DEV-20261126-A', quantity: '3.000',
     })]),
   })
+  expect((await read(request, mixedTrip)).work).not.toContainEqual(expect.objectContaining({
+    sourceKind: 'A_REMAINDER', sourceId: mixed.orderLineId,
+  }))
+
+  const mainRemainder = await readSuccessors(main, order)
+  const finalTransfer = await (await send(transferPath, {
+    ...body(order, first, 6), bindingId: binding.bindingId, originalRightId: right.rightId,
+    followUpId: mainRemainder.followUpId, expectedRevision: mainRemainder.revision,
+  })).json()
+  expect(finalTransfer).toMatchObject({ quantity: 6, returned: 6, neverLoaded: 0 })
+  const recoveredFour = await (await request.post(transferPath, { headers: auth('OPS'), data: original })).json()
+  expect(recoveredFour).toMatchObject({ quantity: 4, returned: 4 })
+  const mainHeld = [transferred, recoveredFour, finalTransfer] as { successorRightId: string; quantity: number }[]
+  expect((await post<{ status: string }>(request, c3 + '/load', {
+    commandId: crypto.randomUUID(), tripId: first,
+    lines: mainHeld.map(row => ({ rightId: row.successorRightId, expectedWarehouseHeld: row.quantity, quantity: row.quantity })),
+  }, 'RECEIVER')).status).toBe('APPLIED')
+  const mainLines = (await get<{ id: string; originTrip?: string; shipToVersion: number; available: string }[]>(
+    request, c4 + '/trips/' + first + '/lines', 'SOURCE')).filter(row => row.originTrip === 'DEV-20261123-A')
+  expect(mainLines).toHaveLength(3)
+  const mainDeliveries = []
+  for (const row of mainLines) {
+    const result = await post<{ status: string; sourceId: string }>(request, c4 + '/deliver', {
+      commandId: crypto.randomUUID(), tripId: first, manifestLineId: row.id, shipToVersion: row.shipToVersion, quantity: Number(row.available),
+    }, 'SOURCE')
+    expect(result.status).toBe('APPLIED')
+    mainDeliveries.push(result.sourceId)
+  }
+  const originHistory = await history(request, main)
+  expect(originHistory.closure).toEqual(prior)
+  expect((await read(request, main)).work).not.toContainEqual(expect.objectContaining({
+    sourceKind: 'A_REMAINDER', sourceId: order.orderLineId,
+  }))
+  expect(await get<{ sources: { sourceId: string }[] }>(request,
+    '/api/synthetic/app02c5/ar?orderLineId=' + order.orderLineId, 'SOURCE')).toMatchObject({
+    expected: 4, reconciled: 4, sources: expect.arrayContaining(mainDeliveries.map(sourceId =>
+      expect.objectContaining({ sourceId, originTrip: 'DEV-20261123-A', trip: 'DEV-20261126-A' }))),
+  })
+  await checkpoint('successor-held-delivered', {
+    mainLineId: order.orderLineId, mixedLineId: mixed.orderLineId, successorTripId: first,
+    mainBindingId: binding.bindingId, mixedBindingId: mixedBinding.bindingId, mixedRightId: mixedTransfer.successorRightId,
+  })
 })

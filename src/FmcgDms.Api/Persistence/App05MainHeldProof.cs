@@ -8,9 +8,10 @@ public sealed partial class App01dCashierUnloadService
     internal sealed record MainPoolScope(Guid Warehouse, Guid Sku);
     private sealed record MainReturn(Guid ManifestLineId, decimal Quantity, bool Proven);
     private sealed record MainRelease(Guid RightId, decimal Quantity, decimal NeverLoaded, bool Proven);
+    private sealed record MainTransfer(Guid RightId, decimal Quantity, bool Proven);
 
     internal static async Task<bool> VerifyMainHeldPool(SqlConnection db, SqlTransaction tx, string tenant,
-        MainPoolScope scope, CancellationToken ct)
+        MainPoolScope scope, CancellationToken ct, bool successor = false)
     {
         var rights = await ReadD3Rights(db, tx, tenant, null, ct, scope);
         var loads = await ReadD3LoadedLines(db, tx, tenant, null, ct, scope);
@@ -22,17 +23,21 @@ public sealed partial class App01dCashierUnloadService
 
         Dictionary<Guid, MainReturn> returns;
         Dictionary<Guid, MainRelease> releases;
-        using (var evidence = await db.QueryMultipleAsync(Sql(ReturnAndReleaseProofSql,
+        MainTransfer[] transfers = [];
+        using (var evidence = await db.QueryMultipleAsync(Sql(ReturnAndReleaseProofSql + (successor ? "\n" + TransferProofSql : ""),
             new { Tenant = tenant, scope.Warehouse, scope.Sku }, tx, ct)))
         {
             returns = (await evidence.ReadAsync<MainReturn>()).ToDictionary(row => row.ManifestLineId);
             releases = (await evidence.ReadAsync<MainRelease>()).ToDictionary(row => row.RightId);
+            if (successor) transfers = (await evidence.ReadAsync<MainTransfer>()).ToArray();
         }
         var loadIds = loads.Select(line => line.Id).ToHashSet();
         if (returns.Values.Any(row => !row.Proven || !loadIds.Contains(row.ManifestLineId)) ||
-            releases.Values.Any(row => !row.Proven || rightKinds.GetValueOrDefault(row.RightId) != "B"))
+            releases.Values.Any(row => !row.Proven || rightKinds.GetValueOrDefault(row.RightId) != "B") ||
+            transfers.Any(row => !row.Proven || rightKinds.GetValueOrDefault(row.RightId) != "A"))
             return false;
 
+        var movedByRight = transfers.ToLookup(row => row.RightId);
         decimal allocated = 0;
         foreach (var right in rights)
         {
@@ -41,7 +46,7 @@ public sealed partial class App01dCashierUnloadService
             decimal loaded = lines.Sum(line => line.Loaded);
             decimal remainder = right.Granted - right.Consumed - right.Released;
             decimal vehicle = lines.Sum(line => line.Remaining - (returns.GetValueOrDefault(line.Id)?.Quantity ?? 0));
-            if (!right.HasAllocationProof || right.Released != (release?.Quantity ?? 0) ||
+            if (!right.HasAllocationProof || right.Released != (release?.Quantity ?? 0) + movedByRight[right.Id].Sum(row => row.Quantity) ||
                 (release is not null && (release.Quantity != right.Granted - right.Consumed ||
                     release.NeverLoaded != right.Granted - loaded)) ||
                 lines.Sum(line => line.Issued) != right.Consumed || loaded > right.Granted ||
@@ -60,6 +65,25 @@ public sealed partial class App01dCashierUnloadService
             physical.OnHandCostAmount == physical.SourceCostAmount && pool is not null &&
             pool.OnHand == physical.OnHandBaseQuantity && pool.Allocated == allocated;
     }
+
+    private const string TransferProofSql = """
+        SELECT e.OriginalRightId AS RightId,h.NeverLoaded+h.Returned AS Quantity,
+            CONVERT(bit,IIF(r.GrantedBaseQuantity=h.NeverLoaded+h.Returned AND paired.Id IS NOT NULL,1,0)) AS Proven
+        FROM dbo.App05AHeldExecution e
+        JOIN dbo.App05AHeldTransfer h ON h.TenantId=e.TenantId AND h.SuccessorRightId=e.RightId
+        JOIN dbo.StockRight r ON r.TenantId=e.TenantId AND r.Id=e.RightId
+        JOIN dbo.BusinessSourceLine grantLine ON grantLine.TenantId=r.TenantId AND grantLine.Id=r.BusinessSourceLineId
+        OUTER APPLY (
+            SELECT l.Id FROM dbo.BusinessSourceLine l JOIN dbo.LedgerEffect effect
+                ON effect.TenantId=l.TenantId AND effect.BusinessSourceLineId=l.Id
+                AND effect.LedgerKind='RIGHT_A_TRANSFER_OUT' AND effect.EffectKey='RIGHT-ALLOCATED'
+                AND effect.QuantityDelta=-r.GrantedBaseQuantity AND effect.AmountDelta=0
+                AND effect.StockLocationId=e.WarehouseId AND effect.SkuId=e.SkuId
+            WHERE l.TenantId=grantLine.TenantId AND l.BusinessSourceId=grantLine.BusinessSourceId
+                AND l.LineNumber=2 AND l.BaseQuantity=r.GrantedBaseQuantity AND l.SkuId=e.SkuId
+        ) paired
+        WHERE e.TenantId=@Tenant AND e.WarehouseId=@Warehouse AND e.SkuId=@Sku;
+        """;
 
     private const string ReturnAndReleaseProofSql = """
         SELECT r.TripManifestLineId AS ManifestLineId,r.BaseQuantity AS Quantity,

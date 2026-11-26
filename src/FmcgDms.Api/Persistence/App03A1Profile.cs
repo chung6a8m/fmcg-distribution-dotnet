@@ -126,6 +126,7 @@ public static class App03A1Profile
                     AND OBJECT_ID(N'dbo.App05ASuccessorCommand',N'U') IS NOT NULL
                     AND OBJECT_ID(N'dbo.App05ASuccessorReserve',N'U') IS NOT NULL
                     AND OBJECT_ID(N'dbo.App05AExecutionRight',N'V') IS NOT NULL
+                    AND OBJECT_ID(N'dbo.App05AHeldExecution',N'U') IS NOT NULL
                     AND COL_LENGTH(N'dbo.SaleDelivery',N'App05BindingId') IS NOT NULL THEN 1 ELSE 0 END);
                 """, cancellationToken: ct)))
                 throw new InvalidOperationException($"{SuccessorName} requires the complete successor schema in both tenant databases.");
@@ -179,6 +180,7 @@ public static class App03A1Profile
             yield return (SuccessorName, App05AFulfillmentSchema.Version);
             yield return (SuccessorName, App05ASuccessorReserveSchema.Version);
             yield return (SuccessorName, App05ASuccessorDeliverySchema.Version);
+            yield return (SuccessorName, App05AHeldExecutionSchema.Version);
         }
     }
 

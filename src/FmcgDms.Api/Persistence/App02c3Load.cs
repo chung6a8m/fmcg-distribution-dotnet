@@ -90,6 +90,10 @@ public sealed partial class App01a2CommandService
                 ? await EligibleD1Rights(db, tx, tenant, tripId, rightIds, field, settlement, ct)
                 : await EligibleC3Rights(db, tx, tenant, [tripId], rightIds, ct, successor))
             .ToDictionary(right => right.Id);
+        var pendingHeld = successor && !d1Load
+            ? (await PendingHeldExecution(db, tx, tenant, tripId, rightIds, ct)).ToDictionary(right => right.Id)
+            : new Dictionary<Guid, HeldExecutionCandidate>();
+        foreach (var right in pendingHeld.Values) rights.Add(right.Id, right.ToView());
         if (rights.Count != lines.Length)
             return BusinessCommandOutcome.Rejected(d1Load ? "D1_QUOTA_NOT_ELIGIBLE" : "C3_RESERVATION_NOT_ELIGIBLE");
         if (d1Load && field && lines.Any(l => l.Quantity != decimal.Truncate(l.Quantity)))
@@ -133,16 +137,34 @@ public sealed partial class App01a2CommandService
         }
 
         var lotPicks = new Dictionary<Guid, IReadOnlyList<F03Pick>>();
+        var transferredLots = new Dictionary<Guid, IReadOnlyList<F03Pick>>();
         if (lots)
         {
             foreach (var line in manifestLines)
             {
-                if (!await IsLotTracked(db, tx, tenant, line.StockRightId, byRight: true, ct)) continue;
-                var picks = await PlanLotLoad(db, tx, tenant, line.StockRightId, line.PlannedBaseQuantity, ct);
+                var pendingRight = pendingHeld.GetValueOrDefault(line.StockRightId);
+                Guid lotBasis = pendingRight?.OriginalRightId ?? line.StockRightId;
+                if (!await IsLotTracked(db, tx, tenant, lotBasis, byRight: true, ct)) continue;
+                IReadOnlyList<F03Pick> picks;
+                if (pendingRight is null)
+                    picks = await PlanLotLoad(db, tx, tenant, line.StockRightId, line.PlannedBaseQuantity, ct);
+                else
+                {
+                    if (!await MeetsLotStep(db, tx, tenant, lotBasis, line.PlannedBaseQuantity, ct))
+                        return BusinessCommandOutcome.Rejected(LotUnavailable);
+                    var transferLots = (await HeldExecutionLots(db, tx, tenant, line.StockRightId, ct)).AsList();
+                    if (transferLots.Sum(lot => lot.Quantity) != pendingRight.Quantity)
+                        return BusinessCommandOutcome.Rejected(LotUnavailable);
+                    transferredLots.Add(line.StockRightId, transferLots.Select(lot => lot.ToPick()).ToArray());
+                    picks = PickLots(transferLots.Where(lot => lot.ExpiresOn >= trip.BusinessDate.Date)
+                        .Select(lot => lot.ToPick()), line.PlannedBaseQuantity);
+                }
                 if (picks.Count == 0) return BusinessCommandOutcome.Rejected(LotUnavailable);
                 lotPicks.Add(line.Id, picks);
             }
         }
+        foreach (var right in pendingHeld.Values.OrderBy(right => right.OriginalRightId).ThenBy(right => right.Id))
+            await MaterializeHeldExecution(db, tx, tenant, actor, right, transferredLots.GetValueOrDefault(right.Id), ct);
         Guid source = await AddSource(db, tx, tenant, command, ManifestLoadSource, number, actor, null, tripId, ct);
         await db.ExecuteAsync(Sql("""
             INSERT dbo.TripManifest(Id,TenantId,ManifestNumber,TripId,WarehouseLocationId,VehicleLocationId,IsC3)

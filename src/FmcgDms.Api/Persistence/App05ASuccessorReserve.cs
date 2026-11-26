@@ -78,7 +78,7 @@ public sealed partial class App01a2CommandService
         IReadOnlyList<F03Pick>? lots = null;
         if (await IsLotTracked(db, tx, tenant, lineId, byRight: false, ct))
         {
-            lots = await PlanLotHold(db, tx, tenant, lineId, sku, warehouse, quantity, returns: true, ct);
+            lots = await PlanLotHold(db, tx, tenant, lineId, sku, warehouse, quantity, returns: true, ct, successor: true);
             if (lots.Count == 0) return new(LotUnavailable);
         }
 

@@ -40,10 +40,16 @@ internal static partial class App05CloseReadiness
         LEFT JOIN dbo.C2Confirmation c ON c.TenantId=s.TenantId AND c.OrderId=s.AOrderId
         LEFT JOIN dbo.C2LinePolicy p ON p.TenantId=s.TenantId AND p.OrderLineId=s.AOrderLineId
         OUTER APPLY (
-            SELECT SUM(v.GrantedBaseQuantity) AS Granted,SUM(v.ConsumedBaseQuantity) AS Consumed,
-                SUM(v.ReleasedBaseQuantity) AS Released,SUM(x.Loaded) AS Loaded,SUM(x.Returned) AS Returned,
+            SELECT SUM(v.GrantedBaseQuantity){{(successor ? "-SUM(moved.Quantity)" : "")}} AS Granted,SUM(v.ConsumedBaseQuantity) AS Consumed,
+                SUM(v.ReleasedBaseQuantity){{(successor ? "-SUM(moved.Quantity)" : "")}} AS Released,SUM(x.Loaded) AS Loaded,SUM(x.Returned) AS Returned,
                 MAX(flags.Drift) AS Drift
             FROM dbo.AReservation a JOIN dbo.StockRight v ON v.TenantId=a.TenantId AND v.Id=a.StockRightId
+            {{(successor ? """
+            CROSS APPLY(SELECT COALESCE(SUM(h.NeverLoaded+h.Returned),0) AS Quantity
+                FROM dbo.App05AHeldExecution e JOIN dbo.App05AHeldTransfer h
+                    ON h.TenantId=e.TenantId AND h.SuccessorRightId=e.RightId
+                WHERE e.TenantId=v.TenantId AND e.OriginalRightId=v.Id) moved
+            """ : "")}}
             CROSS APPLY (
                 SELECT COALESCE(SUM(m.LoadedBaseQuantity),0) AS Loaded,COALESCE(SUM(u.BaseQuantity),0) AS Returned
                 FROM dbo.TripManifestLine m LEFT JOIN dbo.D3TripUnloadLine u
@@ -52,7 +58,7 @@ internal static partial class App05CloseReadiness
             ) x
             CROSS APPLY (
                 SELECT CASE WHEN (v.TripId<>s.TripId {{(successor ? """
-                    AND NOT EXISTS(SELECT 1 FROM dbo.App05ASuccessorReserve rr
+                    AND NOT EXISTS(SELECT 1 FROM dbo.App05AExecutionRight rr
                         WHERE rr.TenantId=v.TenantId AND rr.RightId=v.Id AND rr.OrderLineId=s.AOrderLineId)
                     """ : "")}}) OR v.SkuId<>s.SkuId OR x.Loaded>v.GrantedBaseQuantity
                     OR NOT EXISTS(SELECT 1 FROM dbo.StockLocation w

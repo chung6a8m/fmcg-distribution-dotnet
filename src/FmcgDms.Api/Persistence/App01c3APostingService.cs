@@ -388,7 +388,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
         PostAPartialDeliveryCommand request, TripScope trip, FrozenRight right, FrozenOrderTotals frozen,
         decimal payable, DateTime due, CancellationToken ct, Guid? evidence = null, Guid? amendment = null,
         DateTime? occurred = null, decimal? priorLineQuantity = null, bool d3Runtime = false,
-        Guid? successorBindingId = null, Guid? successorOriginTripId = null)
+        Guid? successorBindingId = null, Guid? successorOriginTripId = null, Guid? heldExecutorId = null)
     {
         // Both B20 and A25 derive cost from exactly the same source-backed
         // vehicle on-hand, with four-decimal moving-average rounding.
@@ -496,10 +496,10 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 TripManifestLineId,LoadSourceLineId,StockRightId,RightKind,SkuId,
                 AOrderId,AOrderLineId,BusinessSourceId,BusinessSourceKind,BusinessSourceLineId,
                 BaseQuantity,PayableAmount,CostAmount,CostBasisVersion,BusinessDate,InvoiceEligible,
-                C4EvidenceId,C4ShipToAmendmentId,C4PriorLineQuantity{(successorBindingId.HasValue ? ",App05BindingId,App05OriginTripId" : "")})
+                C4EvidenceId,C4ShipToAmendmentId,C4PriorLineQuantity{(successorBindingId.HasValue ? ",App05BindingId,App05OriginTripId,App05HeldExecutorId" : "")})
             VALUES(@Delivery,@Tenant,@Trip,@Customer,@ShipTo,@ManifestLine,
                 @LoadLine,@Right,'A',@Sku,@Order,@OrderLine,@Source,N'A_DELIVERY',@SourceLine,
-                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0,@Evidence,@Amendment,@PriorLineQuantity{(successorBindingId.HasValue ? ",@SuccessorBindingId,@SuccessorOriginTripId" : "")});
+                @Qty,@Payable,@Cost,N'SYNTHETIC_MA_V1',@Date,0,@Evidence,@Amendment,@PriorLineQuantity{(successorBindingId.HasValue ? ",@SuccessorBindingId,@SuccessorOriginTripId,@HeldExecutorId" : "")});
             INSERT dbo.DeliveryStockIssue(Id,TenantId,SaleDeliveryId,
                 BusinessSourceLineId,TripManifestLineId,SkuId,BaseQuantity,CostAmount)
             VALUES(@Issue,@Tenant,@Delivery,@SourceLine,@ManifestLine,@Sku,@Qty,@Cost);
@@ -514,7 +514,7 @@ public sealed class App01c3APostingService(TenantConnections connections)
                 Sku = request.SkuId, Source = sourceId, SourceLine = sourceLine,
                 Qty = request.BaseQuantity, Payable = payable, Cost = cost,
                 Date = trip.BusinessDate, Due = due, Evidence = evidence, Amendment = amendment, PriorLineQuantity = priorLineQuantity,
-                SuccessorBindingId = successorBindingId, SuccessorOriginTripId = successorOriginTripId }, tx, ct));
+                SuccessorBindingId = successorBindingId, SuccessorOriginTripId = successorOriginTripId, HeldExecutorId = heldExecutorId }, tx, ct));
 
         var effects = new[]
         {

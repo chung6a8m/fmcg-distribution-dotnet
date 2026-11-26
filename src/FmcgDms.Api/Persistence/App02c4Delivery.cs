@@ -31,6 +31,7 @@ public sealed partial class App01a2CommandService
         public Guid StockRightId { get; set; }
         public Guid? SuccessorBindingId { get; set; }
         public Guid? SuccessorOriginTripId { get; set; }
+        public Guid? HeldExecutorId { get; set; }
         public decimal Loaded { get; set; }
         public decimal Granted { get; set; }
         public decimal Consumed { get; set; }
@@ -150,7 +151,7 @@ public sealed partial class App01a2CommandService
                 r.Status AS RightStatus,o.Status AS OrderStatus,s.ConfirmedBaseQuantity AS Confirmed,
                 s.UnitPriceSnapshot,s.TermsDaysSnapshot,s.ConfirmedAtUtc,cs.ActorId AS ConfirmActor,
                 p.PolicyId,p.PolicyVersion,p.PolicyPayload,p.SourceHash,p.BaseUom,p.GrossAmount
-                {(successor ? ",successorRight.BindingId AS SuccessorBindingId,successorRight.OriginTripId AS SuccessorOriginTripId" : "")}
+                {(successor ? ",successorRight.BindingId AS SuccessorBindingId,successorRight.OriginTripId AS SuccessorOriginTripId,successorRight.HeldExecutorId" : "")}
             FROM dbo.TripManifestLine l
             JOIN dbo.TripManifest m ON m.TenantId=l.TenantId AND m.Id=l.TripManifestId AND m.Status='LOADED' AND m.IsC3=1
             JOIN dbo.PhysicalStockMovement mv ON mv.TenantId=l.TenantId AND mv.TripManifestLineId=l.Id
@@ -247,7 +248,7 @@ public sealed partial class App01a2CommandService
                 StockRightId = line.StockRightId },
             new FrozenOrderTotals { ConfirmedQuantity = totals.ConfirmedOrder, DeliveredQuantity = totals.OnOrder },
             payable, due, ct, evidence.Id, address.AmendmentId, evidence.OccurredAtUtc, totals.OnLine, d3Runtime,
-            line.SuccessorBindingId, line.SuccessorOriginTripId);
+            line.SuccessorBindingId, line.SuccessorOriginTripId, line.HeldExecutorId);
         if (lotPicks is not null && result.Status == "APPLIED")
         {
             Guid delivery = await db.QuerySingleAsync<Guid>(Sql("""
