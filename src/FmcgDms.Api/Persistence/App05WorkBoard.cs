@@ -112,9 +112,18 @@ internal static partial class App05CloseReadiness
                     .ToArray();
             }
             var current = preview.Work.SingleOrDefault(row => row.SourceKind == source.SourceKind && row.SourceId == source.SourceId);
+            var label = proof.IsCompleted ? source.SourceKind switch
+            {
+                A => "Xử lý phần A · " + proof.ALine!.SkuCode,
+                D4 => "Đối soát D.4",
+                "F05_RETURN" => "Trả hàng",
+                "F06_COST" => "Điều chỉnh giá vốn",
+                "F08_REFUND" => "Hoàn tiền",
+                _ => source.Label
+            } : current?.Label ?? source.Label;
             var assignment = events[^1];
             rows.Add(new(closure.TripId, preview.Code, preview.BusinessDate, closure.ClosureId, source.SourceKind,
-                source.SourceId, source.RelatedId, current?.CaseId, current?.Label ?? source.Label, workStatus,
+                source.SourceId, source.RelatedId, current?.CaseId ?? source.CaseId, label, workStatus,
                 !proof.IsCompleted && assignment.DueAt < preview.AsOf, source.FollowUp!, assignment, Convert.ToHexString(Digest(assignment)), events, trips,
                 proof.ALine, proof.ReportId, proof.SourceIds, proof.Reason, ops && !proof.IsCompleted, preview.Assignees));
         }

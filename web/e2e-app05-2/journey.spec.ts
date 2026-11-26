@@ -194,11 +194,15 @@ test('day-two recovers the first receipt, closes a reconciled trip and commits a
   await board.getByLabel('Trạng thái việc').selectOption('COMPLETED')
   await board.getByRole('button', { name: 'Lọc công việc' }).press('Enter')
   const financeWork = receipt.snapshot.work.find(work => work.sourceId === dayOne.accountingWork.sourceId)!
-  await expect(board.getByTestId('app05-work-' + financeWork.followUp!.followUpId)).toContainText('Đã hoàn tất')
-  await expect(board.getByTestId('app05-work-' + financeWork.followUp!.followUpId)).toContainText(reportId)
+  const financeRow = board.getByTestId('app05-work-' + financeWork.followUp!.followUpId)
+  await expect(financeRow).toContainText('Đã hoàn tất')
+  await expect(financeRow.getByRole('heading')).toHaveText('Đối soát D.4')
+  await expect(financeRow).toContainText(reportId)
   await expect(board.getByRole('link', { name: 'Mở dòng nguồn kế toán' })).toHaveAttribute('href',
     /[?&]source=/)
   await board.screenshot({ path: info.outputPath('next-day-work-compact.png') })
+  await financeRow.getByRole('link', { name: 'Mở chuyến gốc' }).click()
+  await expect(board.locator('[id="work-' + financeWork.sourceId + '"]')).toBeFocused()
   await board.close()
 
   const clean = await read(request, dayOne.clean)
