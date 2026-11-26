@@ -143,3 +143,5 @@ APP-05.5 hoàn tất trong phạm vi triển khai synthetic DEV. Bàn công vi�
 - PR #166 xử lý timeout lặp lại ở bộ thu thập bằng chứng C.6: HTTP probe sau Chromium có deadline 15 giây để nhận kết quả từ đường nghiệp vụ có thể chờ khóa SQL 10 giây. Startup/health giữ deadline riêng. Budget áp dụng cả client khôi phục và client cạnh tranh. Runner ghi method, path và thời gian khi nhận header sau 3 giây hoặc khi bị hủy. Probe loopback trả HTTP 409 sau 3,6 giây tái hiện timeout cũ và xác nhận client mới nhận đúng 409. Giữ ma trận, SQL oracle, quyền và yêu cầu về số lượng bằng chứng. [PR #166](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/166).
 
 Bằng chứng APP-05.6 áp dụng cho synthetic DEV. APP-05.7 sở hữu nghiệm thu ca tích hợp. Nghiệm thu tenant, Pilot và vận hành thực tế theo mốc riêng.
+
+Ghi chú mô phỏng DOC-CI-02B: đây là văn bản thử route Light, không phải biên nhận thực thi hay kết luận PASS.
