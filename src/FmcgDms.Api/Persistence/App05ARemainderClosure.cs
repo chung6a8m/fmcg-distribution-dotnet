@@ -15,11 +15,16 @@ internal static partial class App05CloseReadiness
         [property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)] decimal Quantity,
         string? Reason, string? ExpectedRevision);
 
-    private sealed record ClosureProposal(Guid ProposalId, Guid CommandId, decimal Quantity,
+    private sealed record ClosureProposal(Guid ProposalId, Guid CommandId,
+        [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Quantity,
         string Reason, string Maker, DateTimeOffset RecordedAt);
 
     private sealed record ClosureProposalScope(Guid ConfirmSourceId, Guid FollowUpId, Guid SkuId,
-        decimal QuantityStep, decimal Remaining, decimal Held, decimal OnVehicle, bool PendingDelivery, string Revision)
+        [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal QuantityStep,
+        [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Remaining,
+        [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal Held,
+        [property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] decimal OnVehicle,
+        bool PendingDelivery, string Revision)
     {
         public bool CanPropose => Remaining > 0 && OnVehicle == 0 && !PendingDelivery;
     }
@@ -39,7 +44,7 @@ internal static partial class App05CloseReadiness
             context.Response.Headers.CacheControl = "no-store";
             return await Run<IResult>(connections, context.User, tripId, false, null, async (db, tx, tenant, actor, ops) =>
             {
-                var scope = await ReadClosureProposalScope(db, tx, tenant, actor, tripId, lineId, ct);
+                var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
                 if (scope is null) return Results.NotFound();
                 var proposals = await db.QueryAsync<ClosureProposal>(App02a3Sql.Cmd("""
                     SELECT ProposalId,CommandId,Quantity,Reason,Maker,RecordedAt FROM dbo.App05ARemainderClosureProposal
@@ -60,15 +65,37 @@ internal static partial class App05CloseReadiness
         });
     }
 
+    internal static Task LockAOrderLine(SqlConnection db, SqlTransaction tx, string tenant, Guid lineId, CancellationToken ct) =>
+        App02a3Sql.Lock(db, tx, $"APP05:A-ORDER-LINE:{tenant}:{lineId:N}", ct);
+
+    private sealed record ClosureProposalStock(decimal RightRemainder, decimal Consumed, decimal Loaded, decimal Returned);
+
     private static async Task<ClosureProposalScope?> ReadClosureProposalScope(SqlConnection db, SqlTransaction tx,
-        string tenant, string actor, Guid tripId, Guid lineId, CancellationToken ct)
+        string tenant, Guid tripId, Guid lineId, CancellationToken ct)
     {
+        await LockAOrderLine(db, tx, tenant, lineId, ct);
         var source = await ReadSuccessorSource(db, tx, tenant, tripId, lineId, ct);
         if (source is null) return null;
-        var state = await ReadSuccessorState(db, tx, tenant, actor, tripId, source, ct);
-        var preview = await Read(db, tx, tenant, tripId, true, ct, successor: true);
-        var line = preview.ALines.SingleOrDefault(line => line.OrderLineId == lineId);
-        if (line is null) return null;
+        var stock = await db.QuerySingleAsync<ClosureProposalStock>(App02a3Sql.Cmd("""
+            SELECT rights.RightRemainder,rights.Consumed,manifest.Loaded,manifest.Returned
+            FROM (
+                SELECT COALESCE(SUM(r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity),0) AS RightRemainder,
+                    COALESCE(SUM(r.ConsumedBaseQuantity),0) AS Consumed
+                FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId
+            ) rights
+            CROSS JOIN (
+                SELECT COALESCE(SUM(m.LoadedBaseQuantity),0) AS Loaded,COALESCE(SUM(u.BaseQuantity),0) AS Returned
+                FROM dbo.AReservation a JOIN dbo.TripManifestLine m ON m.TenantId=a.TenantId AND m.StockRightId=a.StockRightId
+                LEFT JOIN dbo.D3TripUnloadLine u ON u.TenantId=m.TenantId AND u.TripManifestLineId=m.Id
+                WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId
+            ) manifest;
+            """, new { Tenant = tenant, LineId = lineId }, tx, ct));
+        var delivered = source.Line.Confirmed - source.CurrentRemaining;
+        var onVehicle = stock.Loaded - delivered - stock.Returned;
+        var held = stock.RightRemainder - onVehicle;
+        if (stock.Consumed != delivered || onVehicle < 0 || held < 0 || source.CurrentRemaining < 0)
+            return null;
         bool pending = await db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""
             SELECT CONVERT(bit,CASE WHEN EXISTS(
                 SELECT 1 FROM dbo.C4DeliveryEvidence e
@@ -78,9 +105,21 @@ internal static partial class App05CloseReadiness
                 WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId
             ) THEN 1 ELSE 0 END);
             """, new { Tenant = tenant, LineId = lineId }, tx, ct));
-        string revision = Convert.ToHexString(Digest(new { state.Revision, Line = line, Pending = pending }));
-        return new(line.ConfirmSourceId, source.FollowUpId, line.SkuId, source.Step, line.Remaining, line.Held,
-            line.OnVehicle, pending, revision);
+        string sourceFingerprint = await db.ExecuteScalarAsync<string>(App02a3Sql.Cmd("""
+            SELECT CONVERT(varchar(64),HASHBYTES('SHA2_256',(
+                SELECT JSON_QUERY((SELECT r.Id,r.RowVersion
+                    FROM dbo.AReservation a JOIN dbo.StockRight r ON r.TenantId=a.TenantId AND r.Id=a.StockRightId
+                    WHERE a.TenantId=@Tenant AND a.AOrderLineId=@LineId ORDER BY r.Id FOR JSON PATH)) AS Rights,
+                    JSON_QUERY((SELECT BindingId,Quantity FROM dbo.App05ASuccessor
+                    WHERE TenantId=@Tenant AND OrderLineId=@LineId ORDER BY BindingId FOR JSON PATH)) AS Bindings,
+                    JSON_QUERY((SELECT SuccessorRightId,NeverLoaded,Returned FROM dbo.App05AHeldTransfer
+                    WHERE TenantId=@Tenant AND OrderLineId=@LineId ORDER BY SuccessorRightId FOR JSON PATH)) AS Transfers
+                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)),2);
+            """, new { Tenant = tenant, LineId = lineId }, tx, ct)) ?? throw new InvalidOperationException("The closure source fingerprint is missing.");
+        string revision = Convert.ToHexString(Digest(new { sourceFingerprint, source.Line.ConfirmSourceId, source.FollowUpId,
+            source.CurrentRemaining, Held = held, OnVehicle = onVehicle, Pending = pending }));
+        return new(source.Line.ConfirmSourceId, source.FollowUpId, source.Line.SkuId, source.Step, source.CurrentRemaining,
+            held, onVehicle, pending, revision);
     }
 
     private static async Task<IResult> ProposeClosure(SqlConnection db, SqlTransaction tx, string tenant, string actor,
@@ -106,7 +145,7 @@ internal static partial class App05CloseReadiness
             """, identity, tx, ct)))
             return Results.Conflict(new { Code = "COMMAND_PAYLOAD_CONFLICT" });
 
-        var scope = await ReadClosureProposalScope(db, tx, tenant, actor, tripId, lineId, ct);
+        var scope = await ReadClosureProposalScope(db, tx, tenant, tripId, lineId, ct);
         if (scope?.ConfirmSourceId != input.ConfirmSourceId || scope?.FollowUpId != input.FollowUpId)
             return await Record(new { Code = "A_CLOSURE_SOURCE_INVALID" }, false);
         if (scope.Revision != input.ExpectedRevision)
@@ -123,7 +162,8 @@ internal static partial class App05CloseReadiness
             """, new { identity.Tenant, ProposalId = proposalId, TripId = tripId, LineId = lineId, input.ConfirmSourceId,
                 scope.SkuId, input.FollowUpId, input.CommandId, identity.Actor, input.Quantity, input.Reason,
                 Revision = Convert.FromHexString(scope.Revision) }, tx, ct));
-        return await Record(new { ProposalId = proposalId, input.Quantity, Status = "PENDING" }, true);
+        return await Record(new { ProposalId = proposalId, Quantity = input.Quantity.ToString("F3", CultureInfo.InvariantCulture),
+            Status = "PENDING" }, true);
 
         async Task<IResult> Record<T>(T value, bool applied)
         {

@@ -80,6 +80,8 @@ public sealed partial class App01a2CommandService
                 WHERE TenantId=@Tenant AND ProducerId=@ProducerId AND CommandId=@CommandId
                 """, new { Tenant = tenant, key.ProducerId, key.CommandId }, tx, ct)) != 0)
                 return new C4Receipt(null, Conflict: true);
+            if (connections.UsesApp05Successor)
+                await LockC4OrderLine(db, tx, tenant, input.TripId, input.ManifestLineId, ct);
             if (connections.UsesApp02d3 && trip is not { Status: "PREPARED" or "IN_PROGRESS" })
                 return new C4Receipt(null, "TRIP_NOT_ELIGIBLE");
             if (connections.UsesApp05Successor && await db.ExecuteScalarAsync<bool>(Sql($"""
@@ -137,10 +139,23 @@ public sealed partial class App01a2CommandService
             ct, "sales", deliveryTrip: input.TripId, pendingCommand: evidence.Id);
     }
 
+    private static async Task LockC4OrderLine(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId,
+        Guid manifestLineId, CancellationToken ct)
+    {
+        var line = await db.ExecuteScalarAsync<Guid?>(Sql("""
+            SELECT a.AOrderLineId FROM dbo.TripManifestLine m
+            JOIN dbo.AReservation a ON a.TenantId=m.TenantId AND a.StockRightId=m.StockRightId
+            WHERE m.TenantId=@Tenant AND m.Id=@ManifestLineId AND m.TripId=@TripId AND m.IsC3=1 AND m.RightKind='A';
+            """, new { Tenant = tenant, TripId = tripId, ManifestLineId = manifestLineId }, tx, ct));
+        if (line is Guid id) await App05CloseReadiness.LockAOrderLine(db, tx, tenant, id, ct);
+    }
+
     private static async Task<BusinessCommandOutcome> ApplyDeliveryC4(SqlConnection db, SqlTransaction tx,
         string tenant, string actor, Guid command, C2CommandKey key, C4Evidence evidence, bool d3Runtime, bool lots,
         bool pricing, bool periodGuard, bool successor, CancellationToken ct)
     {
+        if (successor)
+            await LockC4OrderLine(db, tx, tenant, evidence.TripId, evidence.ManifestLineId, ct);
         if (periodGuard)
         {
             DateTime today = await db.ExecuteScalarAsync<DateTime>(Sql($"SELECT {LotBusinessDate}", null, tx, ct));
