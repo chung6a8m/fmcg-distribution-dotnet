@@ -229,7 +229,7 @@ public sealed partial class App01dCashierUnloadService
                 if (report.TripStatus is "CLOSED" or "CLOSED_WITH_OPEN_CASES")
                     report = report with { CanOffer = false, CanAccept = false, CanUnload = false };
                 else if (report.CanUnload && report.SoldQty == 0 && report.Custody == 0 && report.PendingOfferId is null)
-                    report = report with { CanZeroHandoff = await PlanZeroStockHandoff(db, tx, tenant, tripId, ct) is not null };
+                    report = report with { CanZeroHandoff = await PlanZeroStockHandoff(db, tx, tenant, tripId, connections.UsesApp05Successor, ct) is not null };
             }
             return report with
             {

@@ -153,7 +153,9 @@ internal static partial class App05CloseReadiness
         if (input.Quantity % source.Step != 0)
             return await Record(new { Code = "A_SUCCESSOR_QUANTITY_STEP" }, false);
 
-        // Serialize allocations of this pool before querying existing rights and holdings.
+        // Use the same backing-right lock as C.3 before reading the available generation.
+        if (transfer && input.OriginalRightId is Guid originRight)
+            await App01a2CommandService.LockHeldOriginRight(db, tx, tenant, originRight, ct);
         if (warehouse.HasValue)
             await App01a2CommandService.LockStockAllocation(db, tx, tenant, warehouse.Value, source.Line.SkuId, ct);
         var state = await ReadSuccessorState(db, tx, tenant, actor, trip, source, ct, warehouse: warehouse.HasValue);
@@ -299,7 +301,7 @@ internal static partial class App05CloseReadiness
             WHERE m.TenantId=r.TenantId AND m.StockRightId=r.Id) v
         CROSS APPLY(SELECT CONVERT(decimal(18,3),COALESCE(SUM(NeverLoaded),0)) AS NeverLoaded,
                 CONVERT(decimal(18,3),COALESCE(SUM(Returned),0)) AS Returned,
-                COALESCE(SUM(CASE WHEN e.RightId IS NOT NULL THEN x.NeverLoaded+x.Returned END),0) AS Materialized
+                CONVERT(decimal(18,3),COALESCE(SUM(CASE WHEN e.RightId IS NOT NULL THEN x.NeverLoaded+x.Returned END),0)) AS Materialized
             FROM dbo.App05AHeldTransfer x LEFT JOIN dbo.App05AHeldExecution e
                 ON e.TenantId=x.TenantId AND e.RightId=x.SuccessorRightId
             WHERE x.TenantId=r.TenantId AND x.OriginalRightId=r.Id) x

@@ -13,6 +13,21 @@ public sealed partial class App01a2CommandService
             new(Id, OrderId, WarehouseId, WarehouseCode, SkuId, SkuCode, BaseUom, Quantity, 0, Quantity, OriginTrip);
     }
 
+    internal static Task LockHeldOriginRight(SqlConnection db, SqlTransaction tx, string tenant, Guid right, CancellationToken ct) =>
+        App02a3Sql.Lock(db, tx, $"APP05:HELD-RIGHT:{tenant}:{right:N}", ct);
+
+    private static async Task LockHeldLoadOrigins(SqlConnection db, SqlTransaction tx, string tenant, Guid tripId,
+        Guid[] requested, CancellationToken ct)
+    {
+        var origins = await db.QueryAsync<Guid>(Sql("""
+            SELECT DISTINCT h.OriginalRightId FROM dbo.App05AHeldTransfer h
+            JOIN dbo.App05ASuccessor b ON b.TenantId=h.TenantId AND b.BindingId=h.BindingId
+            WHERE h.TenantId=@Tenant AND b.DestinationTripId=@TripId AND h.SuccessorRightId IN @Requested;
+            """, new { Tenant = tenant, TripId = tripId, Requested = requested }, tx, ct));
+        foreach (Guid origin in origins.Order())
+            await LockHeldOriginRight(db, tx, tenant, origin, ct);
+    }
+
     private static Task<IEnumerable<HeldExecutionCandidate>> PendingHeldExecution(SqlConnection db, SqlTransaction tx,
         string tenant, Guid tripId, Guid[]? requested, CancellationToken ct) =>
         db.QueryAsync<HeldExecutionCandidate>(Sql($"""
@@ -24,7 +39,8 @@ public sealed partial class App01a2CommandService
             JOIN dbo.Trip origin ON origin.TenantId=h.TenantId AND origin.Id=h.OriginTripId AND origin.Status='CLOSED_WITH_OPEN_CASES'
             JOIN dbo.Trip t ON t.TenantId=b.TenantId AND t.Id=b.DestinationTripId AND t.Status='PREPARED'
                 AND t.BusinessDate={LotBusinessDate}
-            JOIN dbo.StockRight r ON r.TenantId=h.TenantId AND r.Id=h.OriginalRightId AND r.Status='HELD'
+            JOIN dbo.StockRight r {(requested is null ? "" : "WITH (UPDLOCK,HOLDLOCK)")}
+                ON r.TenantId=h.TenantId AND r.Id=h.OriginalRightId AND r.Status='HELD'
                 AND r.GrantedBaseQuantity-r.ConsumedBaseQuantity-r.ReleasedBaseQuantity>=h.NeverLoaded+h.Returned
             JOIN dbo.AConfirmedLineSnapshot s ON s.TenantId=b.TenantId AND s.AOrderLineId=b.OrderLineId
                 AND s.ConfirmBusinessSourceId=b.ConfirmSourceId AND s.TripId=b.OriginTripId AND s.SkuId=b.SkuId
