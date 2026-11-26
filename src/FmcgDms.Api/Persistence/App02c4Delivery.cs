@@ -81,6 +81,17 @@ public sealed partial class App01a2CommandService
                 return new C4Receipt(null, Conflict: true);
             if (connections.UsesApp02d3 && trip is not { Status: "PREPARED" or "IN_PROGRESS" })
                 return new C4Receipt(null, "TRIP_NOT_ELIGIBLE");
+            if (connections.UsesApp05Successor && await db.ExecuteScalarAsync<bool>(Sql($"""
+                SELECT CONVERT(bit,CASE WHEN EXISTS (
+                    SELECT 1 FROM dbo.TripManifestLine l
+                    JOIN dbo.Trip t ON t.TenantId=l.TenantId AND t.Id=l.TripId
+                    JOIN dbo.App05AExecutionRight a ON a.TenantId=l.TenantId AND a.RightId=l.StockRightId
+                        AND a.DestinationTripId=l.TripId AND a.WarehouseId=l.WarehouseLocationId AND a.SkuId=l.SkuId
+                    WHERE l.TenantId=@Tenant AND l.Id=@ManifestLineId AND l.TripId=@TripId AND l.RightKind='A'
+                        AND t.BusinessDate<>{LotBusinessDate}
+                ) THEN 1 ELSE 0 END);
+                """, args, tx, ct)))
+                return new C4Receipt(null, "TRIP_NOT_ELIGIBLE");
             if (await db.ExecuteScalarAsync<int>(Sql("""
                 SELECT COUNT(*) FROM dbo.TripManifestLine l
                 JOIN dbo.PhysicalStockMovement m ON m.TenantId=l.TenantId AND m.TripManifestLineId=l.Id
