@@ -48,6 +48,9 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString, string a
     private readonly string tenantDatabase = SqlControlPlaneGuards.ValidateApprovedDatabase(approvedTenantDatabase);
     // TEST ONLY: disposable LocalDB login to verify real SQL permission checks.
     internal Func<SqlConnection, CancellationToken, Task>? InitializeCiSession { get; init; }
+    // Optional only for legacy B.5 disposable tests. The runtime is hard-disabled;
+    // future admission MUST mandate the independently durable B53 guard.
+    internal DurableRevocationGuard? DurableGuard { get; init; }
 
     // Never part of the public API: unrestricted SQL callbacks are confined to
     // explicit friend test assemblies and disposable LocalDB only.
@@ -95,6 +98,11 @@ public sealed class SqlAuthorizationFence(string fenceConnectionString, string a
                 Parameter("@ApprovalSourceId", authority.ApprovalSourceId)
             ]);
             await command.ExecuteNonQueryAsync(cancellationToken);
+            // B53 session watermark lives outside B.3/B.4 restore scope; it is
+            // locked in the same transaction before any protected SQL effect.
+            if (DurableGuard is not null)
+                await DurableGuard.AssertFreshAsync(connection, transaction,
+                    authority, cancellationToken);
             var result = await effect(connection, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return result;
