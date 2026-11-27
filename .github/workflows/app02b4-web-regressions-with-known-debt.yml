@@ -10,7 +10,27 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  web-regressions-with-known-audit-debt:
+  classify:
+    name: doc-ci-b4web-classify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      receipt: ${{ steps.route.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify and verify this workflow's source and light checks
+        id: route
+        uses: ./.github/actions/doc-ci-classify
+
+  run-web-regressions-with-known-audit-debt:
+    name: doc-ci-b4web-run-web-regressions-with-known-audit-debt
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -81,3 +101,65 @@ jobs:
             web/playwright-report/
             web/test-results/
           if-no-files-found: warn
+
+  light-web-regressions-with-known-audit-debt:
+    name: doc-ci-b4web-light-web-regressions-with-known-audit-debt
+    needs: [classify]
+    if: ${{ !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.mode == 'docs-only' }}
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node 26 security baseline
+        shell: pwsh
+        run: |
+          $v = [version](node --version).TrimStart('v')
+          if ($v.Major -ne 26 -or $v -lt [version]'26.13.1') { throw "Node security baseline mismatch: $v" }
+      - name: Reproduce exact frontend lockfile
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Production npm dependency audit remains mandatory
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=low
+      - name: Workbox glob and Node dependency baseline tests
+        working-directory: web
+        run: npm run test:dependencies
+      - name: Tailwind CSS version check
+        working-directory: web
+        run: npm ls tailwindcss @tailwindcss/vite --depth=0
+      - name: Frontend health tests
+        working-directory: web
+        run: npm run test
+      - name: Verify UI-01 theme controller
+        run: node --test web/tests/theme.test.mjs
+      - name: Verify UI-01 token CSS and generated HTML/manifest metadata
+        run: node docs/ui-ux/tools/sync-tokens.mjs --check
+      - name: Verify UI-01 Tailwind compiler contract
+        run: node docs/ui-ux/tools/check-tailwind.mjs
+      - name: Record scoped Light checks (runtime suite NOT_RUN)
+        shell: bash
+        run: echo 'DOC-CI Light static/operator checks passed; full runtime suite NOT_RUN.'
+
+  web-regressions-with-known-audit-debt:
+    name: web-regressions-with-known-audit-debt
+    needs: [classify, run-web-regressions-with-known-audit-debt, light-web-regressions-with-known-audit-debt]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b4-web-regressions-with-known-debt.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py

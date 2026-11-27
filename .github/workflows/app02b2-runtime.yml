@@ -10,7 +10,27 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  runtime-foundation:
+  classify:
+    name: doc-ci-b2-classify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      receipt: ${{ steps.route.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify and verify this workflow's source and light checks
+        id: route
+        uses: ./.github/actions/doc-ci-classify
+
+  run-runtime-foundation:
+    name: doc-ci-b2-run-runtime-foundation
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -119,3 +139,57 @@ jobs:
             TestResults/
             tests/FmcgDms.Preprod.Runtime.Tests/TestResults/
           if-no-files-found: warn
+
+  light-runtime-foundation:
+    name: doc-ci-b2-light-runtime-foundation
+    needs: [classify]
+    if: ${{ !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.mode == 'docs-only' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify private network and workload secret boundaries
+        run: python3 tools/verify_preprod_runtime.py
+      - name: Lint operator probe and validate Caddy TLS routing (CI fixture only)
+        run: |
+          bash -n scripts/Collect-App02B2PreprodEvidence.sh
+          bash -n scripts/Load-App02B2Env.sh
+          bash -n tests/app02b2-env-parser.test.sh
+          bash tests/app02b2-env-parser.test.sh
+          bash -n scripts/Run-App02B2CiPreprod.sh
+          python3 -m py_compile scripts/Check-App02B2CiVaultAudit.py
+          python3 -m py_compile tools/verify_preprod_runtime.py
+          mkdir -p "$RUNNER_TEMP/app02b2-caddy"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj '/CN=preprod.example.invalid' \
+            -keyout "$RUNNER_TEMP/app02b2-caddy/tls.key" \
+            -out "$RUNNER_TEMP/app02b2-caddy/tls.crt" >/dev/null 2>&1
+          docker run --rm -e PREPROD_FQDN=preprod.example.invalid \
+            -v "$PWD/deploy/preprod/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.key:/run/certs/tls.key:ro" \
+            -v "$RUNNER_TEMP/app02b2-caddy/tls.crt:/run/certs/tls.crt:ro" \
+            caddy:2.10.2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Record scoped Light checks (runtime suite NOT_RUN)
+        shell: bash
+        run: echo 'DOC-CI Light static/operator checks passed; full runtime suite NOT_RUN.'
+
+  runtime-foundation:
+    name: runtime-foundation
+    needs: [classify, run-runtime-foundation, light-runtime-foundation]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b2-runtime.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py

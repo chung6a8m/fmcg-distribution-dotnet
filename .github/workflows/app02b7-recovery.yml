@@ -11,7 +11,27 @@ permissions:
   contents: read
 
 jobs:
-  b7-source-safety:
+  classify:
+    name: doc-ci-b7-classify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      receipt: ${{ steps.route.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify and verify this workflow's source and light checks
+        id: route
+        uses: ./.github/actions/doc-ci-classify
+
+  run-b7-source-safety:
+    name: doc-ci-b7-run-b7-source-safety
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -76,7 +96,10 @@ jobs:
             TestResults/*.trx
           if-no-files-found: warn
 
-  b7-localdb-restore:
+  run-b7-localdb-restore:
+    name: doc-ci-b7-run-b7-localdb-restore
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 35
     steps:
@@ -193,3 +216,119 @@ jobs:
             TestResults/LocalDbBootstrap/
             TestResults/LAB-E02/
           if-no-files-found: error
+
+  light-b7-localdb-restore:
+    name: doc-ci-b7-light-b7-localdb-restore
+    needs: [classify]
+    if: ${{ !cancelled() && needs.classify.result == 'success' && needs.classify.outputs.mode == 'docs-only' }}
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact source HEAD for operator-only checks
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:SOURCE_HEAD) { throw 'DOC_CI_SOURCE_HEAD_MISMATCH' }
+      - name: Reject malformed PREPROD operator PowerShell before CI SQL
+        shell: pwsh
+        run: |
+          foreach ($p in @('scripts/Invoke-App02B7Backup.ps1','scripts/Test-App02B7LocalDb.ps1')) {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $p).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -ne 0) { throw "B7_POWERSHELL_PARSE_FAILED: $p $($errors[0])" }
+          }
+      - name: Exercise operator plan-only and fault-deny paths (no SQL writes)
+        shell: pwsh
+        run: |
+          $tenant=[guid]::NewGuid()
+          $root='C:\approved\b7-stage'
+          $db='FmcgPpT_' + $tenant.ToString('N')
+          $leaf=$db+'_Full_20261118T000000Z_'+([guid]::NewGuid().ToString('N'))+'.bak'
+          $arguments=@{
+            TenantId=$tenant; ApprovedBindingId=[guid]::NewGuid(); ApprovedBindingVersion=1
+            Kind='Full'; SqlInstance='sql.private.invalid'
+            ApprovedSqlInstance='sql.private.invalid'
+            ApprovedSqlServerName='approved-sql'
+            SqlServerStageFile=$root+'\'+$leaf
+            ApprovedStagingDirectory=$root
+            EncryptionCertificate='PreprodBackupCertV1'
+            ApprovedChangeRef='CI-PLAN-ONLY'
+          }
+          $plan=@(& ./scripts/Invoke-App02B7Backup.ps1 @arguments)
+          if ($plan.Count -ne 1 -or $plan[0] -notlike 'B7_PLAN_ONLY*') {
+            throw 'B7_DEFAULT_PLAN_ONLY_FAILED'
+          }
+          $arguments.SqlServerStageFile='C:\Windows\Temp\'+$leaf
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_STAGE_NOT_IN_APPROVED_DIRECTORY') }
+          if (!$denied) { throw 'B7_OUT_OF_ROOT_STAGE_WAS_NOT_DENIED' }
+          $arguments.SqlServerStageFile=$root+'\'+$leaf
+          $arguments.ApprovedSqlInstance='sql.other.invalid'
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_APPROVED_PRIVATE_SQL_TARGET_REQUIRED') }
+          if (!$denied) { throw 'B7_SQL_TARGET_SWAP_WAS_NOT_DENIED' }
+          $arguments.ApprovedSqlInstance='sql.private.invalid'
+          $arguments.ApprovedBindingId=[guid]::Empty
+          $denied=$false
+          try { & ./scripts/Invoke-App02B7Backup.ps1 @arguments | Out-Null }
+          catch { $denied=($_.Exception.Message -eq 'B7_EXACT_APPROVED_BINDING_REQUIRED') }
+          if (!$denied) { throw 'B7_EMPTY_APPROVED_BINDING_WAS_NOT_DENIED' }
+          $operatorScript=Get-Content -Raw scripts/Invoke-App02B7Backup.ps1
+          if ([regex]::Matches($operatorScript,'(?m)^\s*& sqlcmd -S ').Count -ne 1 -or
+              $operatorScript -notmatch '(?m)^\s*& sqlcmd -S \$SqlInstance -E -N -b' -or
+              $operatorScript -notmatch 'B7_STAGE_FILE_ALREADY_EXISTS' -or
+              $operatorScript -notmatch 'BindingVersion=\$bindingVersionText') {
+            throw 'B7_SINGLE_TLS_BACKUP_NO_OVERWRITE_AND_BINDING_GUARDS_REQUIRED'
+          }
+      - name: Record scoped Light checks (runtime suite NOT_RUN)
+        shell: bash
+        run: echo 'DOC-CI Light static/operator checks passed; full runtime suite NOT_RUN.'
+
+  b7-source-safety:
+    name: b7-source-safety
+    needs: [classify, run-b7-source-safety, run-b7-localdb-restore, light-b7-localdb-restore]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b7-recovery.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  b7-localdb-restore:
+    name: b7-localdb-restore
+    needs: [classify, run-b7-source-safety, run-b7-localdb-restore, light-b7-localdb-restore]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b7-recovery.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
