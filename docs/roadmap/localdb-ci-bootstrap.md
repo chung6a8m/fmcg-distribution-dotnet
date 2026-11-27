@@ -82,6 +82,30 @@ Giữ [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) cùng
 
 **Non-claims:** G75-01 is verified within REL-75.1; no claim that other failure signatures have been fixed. R75-01 (engine startup), R75-02 (HTTP 500) and R75-03 (recovery assertion) remain unresolved; LAB-E03/E04, #68/#75, physical PREPROD, EV/P0 and production/Pilot status are not advanced.
 
+## 6. REL-75.3 — LocalDB investigation matrix (27/11/2026)
+
+**Scope / status:** `SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING / MATRIX_NOT_RUN`. Owner authorized REL-75.3 after [REL-75.2 closeout](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7219038626). Base `10176d1316b2c6a6e441ebc89f655990f60566be`. R75-01 / LAB-E03 only: gather discriminating evidence; no remediation, production, PREPROD or laptop changes. R75-02 direct 1205 evidence from main attempt 1 is tracked separately in REL-75.4/.6.
+
+### Matrix and controls
+
+| Arm | Runner / instance | Engine policy | Official sample size |
+| --- | --- | --- | ---: |
+| win22-auto | windows-2022 / MSSQLLocalDB | existing 15.0 control helper, sole registered version and corresponding tool | 20 |
+| win22-named | windows-2022 / fresh REL75_<run>_<attempt>_<iteration>_<random> | same 15.0 family, verified default tool, isolated named path | 20 |
+| win25-auto | windows-2025 / MSSQLLocalDB | actual sole installed 15/16/17.0 version and matching tool, use existing control if 15.0 | 20 |
+
+Each sample owns one new GitHub-hosted Windows VM; no reuse, no self-hosted, no laptop. Verify source, event, run, OS build (20348/26100), target directory absence, exact automatic-not-created result or named-list absence before creation; reject ambiguous inventory and foreign/pre-existing/reparse targets. No version installation, delete, stop, reset, DROP, migrations, system-file changes or business SQL. Named create uses verified default utility version, not an explicit potentially incompatible version. Existing `Initialize-LocalDb.ps1` and required-CI gates stay byte-identical. The experimental alternative uses the same create/start/SQL readiness budget: 60s bootstrap; create max 45s, start 15s, info 3s, readiness 12s; only pure login timeout after exact Running verification may retry (max three readiness probes). Read-only master checks IsLocalDB and expected runtime. Separate preflight (15s) and collection are not included in bootstrap timing. Native error or unexpected success text fails even if exit code is zero.
+
+### Usage and evidence
+
+- `.github/workflows/rel75-localdb-matrix.yml` is independent of the ten required workflows. PR changes to harness run 3 smoke samples (one per arm), contract tests and a summary; no push trigger. After merge use Actions → **REL-75.3 LocalDB investigation (non-gating)** → Run workflow → main, `samples_per_arm=20`. Default 20, only 1 or 20 accepted. Max 6 concurrent, 6-minute job timeout. A new manual dispatch is a new experiment; do not replace a failed observation by rerun. Rerun attempts cannot mix older receipts; missing exact-attempt cells are INCOMPLETE.
+- `scripts/Invoke-Rel75LocalDbSample.ps1` writes one `REL75_LOCALDB_SAMPLE_V1` receipt under `TestResults/REL75-Matrix/sample.json` per fresh runner. Source/workflow SHA, run/attempt, arm/iteration, image and OS, tool/registered/selected/engine versions, stages with timings/exit/classification, readiness count, file metadata (fixed system database/log basenames, size and UTC timestamps only), disk format/free/total bytes, bounded SQL numeric signatures (existing 64KiB/16 records per log) and event metadata (max 8) before/after as applicable. No raw native output, event payload, user paths, contents or hashes of system database files. Event records are runner-level correlation, not proof they belong to the target; metadata cannot identify a mismatched file pair by itself.
+- `scripts/rel75_localdb_matrix.py` plans a finite matrix and validates exact per-cell identity/attempt, source, target, version, stage and diagnostic evidence. Missing, invalid, not-cold, unsupported inventory, missing/partial metadata or unexpected artifacts produce INCOMPLETE; no invented denominator. Count READY and BOOTSTRAP_FAILED separately, and include image/version strata and numeric signatures. `COMPLETE_WITH_BOOTSTRAP_FAILURES` is valid investigation evidence but remains a failed workflow, not a gate waiver. `COMPLETE_ALL_READY` reports sample observations, not a claim of zero flake. Artifact names include run/attempt/arm/iteration; always upload receipts, including failures; summary always attempts aggregation; retain original negative history. Export/link relevant artifacts before expiry (30 days).
+- Regressions: Python schema/plan/aggregation tests and PowerShell native-boundary mocks (foreign/non-hosted/collision, valid cold path, zero-exit failure, wrong metadata, pure timeout versus fatal mixed failure). Required Full CI must still pass on reviewed final source and main; smoke and matrix are independent of required workflow success.
+- Acceptance for REL-75.3: reviewed harness + source/main Full receipts + 60 scheduled cold observations with valid exact-attempt summary, per-arm actual counts and stratification, reviewed logs/signatures and evidence-backed root-cause disposition. If not cold, unavailable runner/engine, missing diagnostics, or no reproduced/isolated root cause, report the exact gap and keep native root cause INVESTIGATION_BLOCKED; no automatic repair or claim of fix. A different engine on 2025 confounds OS/engine; do not attribute differences to OS alone. Additional pinned engine comparison needs evidence and a separately scoped decision. Any 5173/528 recurrence is a lead, not proof of which files mismatched.
+
+[Microsoft: SqlLocalDB utility](https://learn.microsoft.com/en-us/sql/tools/sqllocaldb-utility) · [GitHub-hosted runner images](https://github.com/actions/runner-images).
+
 ## Tham chiếu
 
 - [Microsoft: explicit create và start](https://learn.microsoft.com/en-us/sql/connect/php/php-driver-for-sql-server-support-for-localdb).
