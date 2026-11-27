@@ -319,44 +319,74 @@ public sealed partial class App01e2CrossCommandRaceTests
         A4Run(tenant, "A11-09", async s =>
         {
             Guid c;
-            int beforePid;
-            await using (var before = await App01e4ApiProcess.StartAsync(
-                fixture, TestContext.Current.CancellationToken,
-                app02WorkerEnabled: false))
+            void RecordReadiness(string? reference, string? error)
             {
-                beforePid = before.Pid;
-                using var cashier = before.Client(tenant, CashierActor, "cashier");
-                c = Assert.IsType<Guid>((await A4RestartIntake(s, before, cashier, s.C,
-                    "pre-restart-C")).ReceiptId);
-                await A4Capture(s, "os-pending");
+                s.Report.FailureDiagnostic = reference;
+                s.Report.FailureDiagnosticError = error;
             }
+            var before = await App01e4ApiProcess.StartAsync(
+                fixture, TestContext.Current.CancellationToken,
+                app02WorkerEnabled: false, onReadinessFailure: RecordReadiness);
+            await using (before)
+            {
+                var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                string stage = "pre-restart-C";
+                try
+                {
+                    using var cashier = before.Client(tenant, CashierActor, "cashier");
+                    c = Assert.IsType<Guid>((await A4RestartIntake(s, before, cashier, s.C,
+                        "pre-restart-C")).ReceiptId);
+                    stage = "os-pending-oracle";
+                    await A4Capture(s, "os-pending");
+                }
+                catch (Exception ex)
+                {
+                    await A4CaptureRestartFailure(s, before, stage, ex, null, elapsed.ElapsedMilliseconds, 0);
+                    throw;
+                }
+            }
+            RecoveryProcessState previous = before.SnapshotState();
             await using (var after = await App01e4ApiProcess.StartAsync(
                 fixture, TestContext.Current.CancellationToken,
-                app02WorkerEnabled: true))
+                app02WorkerEnabled: true, onReadinessFailure: RecordReadiness))
             {
-                Assert.NotEqual(beforePid, after.Pid);
-                using var sales = after.Client(tenant, SalesActor, "sales");
-                await A4RestartIntake(s, after, sales, s.P, "post-restart-P", beforePid);
-                bool recovered = false;
-                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-                while (DateTimeOffset.UtcNow < until)
+                string stage = "post-restart-P";
+                var elapsed = System.Diagnostics.Stopwatch.StartNew();
+                int polls = 0;
+                try
                 {
-                    using var db = Open(tenant);
-                    recovered = db.ExecuteScalar<int>("""
-                        SELECT COUNT(*) FROM dbo.App02AcceptanceApplication a
-                        JOIN dbo.App02EventProgress p ON p.TenantId=a.TenantId
-                          AND p.ReceiptId=a.CReceiptId
-                        JOIN dbo.App02OutboxDelivery d ON d.TenantId=a.TenantId
-                          AND d.MessageId=a.MessageId
-                        JOIN dbo.App02SyntheticConsumerInbox i
-                          ON i.TenantId=d.TenantId AND i.MessageId=d.MessageId
-                        WHERE a.TenantId=@Tenant AND a.CReceiptId=@Receipt
-                          AND p.Status=N'APPLIED' AND d.Status=N'ACKED'
-                        """, new { Tenant = tenant, Receipt = c }) == 1;
-                    if (recovered) break;
-                    await Task.Delay(150, TestContext.Current.CancellationToken);
+                    Assert.NotEqual(previous.Pid, after.Pid);
+                    using var sales = after.Client(tenant, SalesActor, "sales");
+                    await A4RestartIntake(s, after, sales, s.P, "post-restart-P", previous.Pid);
+                    stage = "recovery-poll";
+                    bool recovered = false;
+                    DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
+                    while (DateTimeOffset.UtcNow < until)
+                    {
+                        polls++;
+                        using var db = Open(tenant);
+                        recovered = db.ExecuteScalar<int>("""
+                            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication a
+                            JOIN dbo.App02EventProgress p ON p.TenantId=a.TenantId
+                              AND p.ReceiptId=a.CReceiptId
+                            JOIN dbo.App02OutboxDelivery d ON d.TenantId=a.TenantId
+                              AND d.MessageId=a.MessageId
+                            JOIN dbo.App02SyntheticConsumerInbox i
+                              ON i.TenantId=d.TenantId AND i.MessageId=d.MessageId
+                            WHERE a.TenantId=@Tenant AND a.CReceiptId=@Receipt
+                              AND p.Status=N'APPLIED' AND d.Status=N'ACKED'
+                            """, new { Tenant = tenant, Receipt = c }) == 1;
+                        if (recovered) break;
+                        await Task.Delay(150, TestContext.Current.CancellationToken);
+                    }
+                    stage = "recovery-deadline";
+                    Assert.True(recovered, "New OS PID failed to resume C and ACK outbox");
                 }
-                Assert.True(recovered, "New OS PID failed to resume C and ACK outbox");
+                catch (Exception ex)
+                {
+                    await A4CaptureRestartFailure(s, after, stage, ex, previous, elapsed.ElapsedMilliseconds, polls);
+                    throw;
+                }
             }
             await A4Capture(s, "os-recovered");
         });

@@ -11,7 +11,8 @@ namespace FmcgDms.Api.Persistence;
 /// THREE separate durable transactions. Repeating after a lost ACK is safe
 /// by immutable MessageId+version+hash; no real provider is contacted.
 /// </summary>
-public sealed class App02a3OutboxService(TenantConnections connections)
+public sealed class App02a3OutboxService(TenantConnections connections,
+    ILogger<App02a3OutboxService>? logger = null)
 {
     public static readonly TimeSpan DeliveryLease = TimeSpan.FromMinutes(2);
 
@@ -171,6 +172,7 @@ public sealed class App02a3OutboxService(TenantConnections connections)
         }
         catch (Exception ex) when (ex is SqlException or TimeoutException)
         {
+            App02a3RecoveryTelemetry.Technical(logger, tenant, "outbox", message, ex);
             await RecordDispatchFailure(tenant, message, owner,
                 attempts, asOfUtc, ct);
             return attempts >= 6 ? "CASE" : "RETRY_SCHEDULED";

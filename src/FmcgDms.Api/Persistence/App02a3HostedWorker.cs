@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading.Channels;
 
 namespace FmcgDms.Api.Persistence;
@@ -46,17 +47,25 @@ public sealed class App02a3HostedWorker(
         {
             await foreach (string tenant in signal.ReadAllAsync(stoppingToken))
             {
+                string phase = "processing";
+                var elapsed = Stopwatch.StartNew();
                 try
                 {
+                    App02a3RecoveryTelemetry.Sweep(logger, tenant, phase, "start", 0, 0);
                     using IServiceScope scope = scopes.CreateScope();
                     var processor = scope.ServiceProvider
                         .GetRequiredService<App02a3ProcessingService>();
                     var outbound = scope.ServiceProvider
                         .GetRequiredService<App02a3OutboxService>();
                     DateTimeOffset now = DateTimeOffset.UtcNow;
-                    await processor.SweepTenantAsync(tenant, now,
+                    int processed = await processor.SweepTenantAsync(tenant, now,
                         triggeredByEvent: true, stoppingToken);
-                    await outbound.SweepTenantAsync(tenant, now, stoppingToken);
+                    App02a3RecoveryTelemetry.Sweep(logger, tenant, phase, "end", processed, elapsed.ElapsedMilliseconds);
+                    phase = "outbox";
+                    elapsed.Restart();
+                    App02a3RecoveryTelemetry.Sweep(logger, tenant, phase, "start", 0, 0);
+                    int handled = await outbound.SweepTenantAsync(tenant, now, stoppingToken);
+                    App02a3RecoveryTelemetry.Sweep(logger, tenant, phase, "end", handled, elapsed.ElapsedMilliseconds);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -66,6 +75,8 @@ public sealed class App02a3HostedWorker(
                 {
                     // Durable rows remain visible for next scan after a
                     // process failure; never acknowledge an uncommitted work item.
+                    App02a3RecoveryTelemetry.Sweep(logger, tenant, phase, "fail", 0, elapsed.ElapsedMilliseconds);
+                    App02a3RecoveryTelemetry.Technical(logger, tenant, phase, Guid.Empty, ex);
                     logger.LogError(ex,
                         "APP-02A.3 synthetic worker sweep failed for {Tenant}", tenant);
                 }

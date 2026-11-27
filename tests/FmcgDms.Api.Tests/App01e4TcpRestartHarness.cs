@@ -57,7 +57,8 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
     }
 
     public static async Task<App01e4ApiProcess> StartAsync(
-        SqlScratchFixture fixture, CancellationToken ct, bool app02WorkerEnabled = false)
+        SqlScratchFixture fixture, CancellationToken ct, bool app02WorkerEnabled = false,
+        Action<string?, string?>? onReadinessFailure = null)
     {
         string? root = AppContext.BaseDirectory;
         while (root is not null && !File.Exists(Path.Combine(root, "FmcgDms.slnx")))
@@ -104,6 +105,12 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         start.Environment["Logging__Console__FormatterOptions__IncludeScopes"] = "true";
         start.Environment["Logging__Console__FormatterOptions__UseUtcTimestamp"] = "true";
         start.Environment["Logging__Console__FormatterOptions__TimestampFormat"] = "O ";
+        if (app02WorkerEnabled)
+        {
+            start.Environment["Logging__LogLevel__FmcgDms.Api.Persistence.App02a3HostedWorker"] = "Information";
+            start.Environment["Logging__LogLevel__FmcgDms.Api.Persistence.App02a3ProcessingService"] = "Warning";
+            start.Environment["Logging__LogLevel__FmcgDms.Api.Persistence.App02a3OutboxService"] = "Warning";
+        }
 
         var host = Launch(start, port, app02WorkerEnabled, AppContext.BaseDirectory);
         try
@@ -133,13 +140,23 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         catch (Exception ex)
         {
             string detail;
+            string? reference = null, diagnosticError = null;
             try
             {
                 string artifact = await host.CaptureFailureAsync("kestrel-readiness",
                     "readiness", CancellationToken.None);
-                detail = $"LAB-E02/{Path.GetFileName(artifact)}";
+                reference = $"LAB-E02/{Path.GetFileName(artifact)}";
+                detail = reference;
             }
-            catch (Exception capture) { detail = $"capture failed ({capture.GetType().Name})"; }
+            catch (Exception capture)
+            {
+                diagnosticError = FailureDiagnostics.Label(capture.GetType().Name);
+                detail = $"capture failed ({diagnosticError})";
+            }
+            // Preserve the safe readiness reference even when the A11-09
+            // oracle report deliberately omits arbitrary exception messages.
+            try { onReadinessFailure?.Invoke(reference, diagnosticError); }
+            catch (Exception) { /* Reporting must not mask readiness failure. */ }
 
             try { await host.DisposeAsync(); }
             catch (Exception cleanup) { detail += $", cleanup failed ({cleanup.GetType().Name})"; }
@@ -163,9 +180,22 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         CancellationToken ct) =>
         CaptureAsync(failureId, stage, request, response, context, ct);
 
+    internal Task<string> CaptureRecoveryFailureAsync(string failureId, string stage,
+        FailureContext context, RecoveryFailureEvidence recovery, CancellationToken ct) =>
+        CaptureAsync(failureId, stage, null, null, context, ct, recovery);
+
+    internal RecoveryProcessState SnapshotState()
+    {
+        lock (lifecycle)
+        {
+            ObserveExit();
+            return new(Pid, Port, workerEnabled, startedUtc, stoppedUtc, exitCode.HasValue, exitCode);
+        }
+    }
+
     private async Task<string> CaptureAsync(string failureId, string stage,
         HttpRequestMessage? request, HttpResponseMessage? response, FailureContext? context,
-        CancellationToken ct)
+        CancellationToken ct, RecoveryFailureEvidence? recovery = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(3));
@@ -175,19 +205,13 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         // The HTTP status or process exit can be observed before the asynchronous
         // console logger and pipe readers have delivered the corresponding lines.
         // Give them one bounded window on failure, with no wait on successful intake.
-        if (response is not null || stage == "readiness")
+        if (response is not null || stage == "readiness" || recovery is not null)
         {
             await Task.WhenAny(drains, Task.Delay(TimeSpan.FromMilliseconds(250), token));
             token.ThrowIfCancellationRequested();
         }
 
-        object state;
-        lock (lifecycle)
-        {
-            ObserveExit();
-            state = new { pid = Pid, port = Port, workerEnabled, startedUtc, stoppedUtc,
-                exited = exitCode.HasValue, exitCode };
-        }
+        RecoveryProcessState state = SnapshotState();
         var output = stdout.Snapshot();
         var error = stderr.Snapshot();
         return await FailureDiagnostics.WriteAsync(evidenceBase, failureId, new
@@ -196,6 +220,7 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
             stage = FailureDiagnostics.Label(stage),
             process = state,
             context,
+            recovery,
             stdout = FailureDiagnostics.RedactedStream(output),
             stderr = FailureDiagnostics.RedactedStream(error),
             http = request is null || response is null ? null :

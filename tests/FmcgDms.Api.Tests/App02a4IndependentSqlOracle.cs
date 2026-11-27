@@ -39,6 +39,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         public string? Failure { get; set; }
         public string? FailureDiagnostic { get; set; }
         public string? FailureDiagnosticError { get; set; }
+        public string? RecoveryDiagnostic { get; set; }
+        public string? RecoveryDiagnosticError { get; set; }
         public string Group { get; init; } = "";
         public string TenantId { get; init; } = "";
         public string Database { get; set; } = "";
@@ -424,7 +426,11 @@ public sealed partial class App01e2CrossCommandRaceTests
         }
         catch (Exception ex)
         {
-            report.Failure = ex.ToString();
+            // Keep the original exception for xUnit, but do not copy arbitrary
+            // SQL/HTTP messages or stack arguments into A11-09 diagnostic JSON.
+            report.Failure = group == "A11-09"
+                ? $"A11-09 failed ({FailureDiagnostics.Label(ex.GetType().Name)})"
+                : ex.ToString();
             failure = ex;
         }
         finally
@@ -485,6 +491,38 @@ public sealed partial class App01e2CrossCommandRaceTests
                 request, response, context, CancellationToken.None);
             s.Report.FailureDiagnostic = $"LAB-E02/{Path.GetFileName(path)}";
         }, error => s.Report.FailureDiagnosticError = error);
+
+    private async Task A4CaptureRestartFailure(A4Session s, App01e4ApiProcess host,
+        string stage, Exception original, RecoveryProcessState? previous, long elapsedMs, int polls)
+    {
+        // Capture before the owned child is disposed. Independent failure-only
+        // budgets: SQL can fail or time out without preventing a process artifact.
+        var result = await RecoveryDiagnostics.TryCaptureAsync(async () =>
+        {
+            var sql = await RecoveryDiagnostics.CaptureSqlAsync(fixture, s.Tenant,
+                s.Scene.Trip, s.Offer, s.P, s.C, CancellationToken.None);
+            var context = new FailureContext(FailureDiagnostics.Label(s.Report.TestRunId),
+                FailureDiagnostics.Sha(s.Report.SourceHeadSha) ?? "INVALID",
+                FailureDiagnostics.Sha(s.Report.WorkflowSha) ?? "INVALID",
+                s.Tenant, s.Report.Group, previous?.Pid);
+            var evidence = new RecoveryFailureEvidence("REL75_RECOVERY_V1",
+                s.Scene.Trip, fixture.Nonce, previous, elapsedMs, polls,
+                RecoveryException.From(original), sql);
+            return await host.CaptureRecoveryFailureAsync(
+                $"{s.Report.Group}-{s.Tenant}-recovery", stage, context, evidence, CancellationToken.None);
+        });
+        if (result.Path is not null)
+        {
+            s.Report.RecoveryDiagnostic = $"LAB-E02/{Path.GetFileName(result.Path)}";
+            // Preserve the existing HTTP artifact when present.
+            s.Report.FailureDiagnostic ??= s.Report.RecoveryDiagnostic;
+        }
+        else
+        {
+            s.Report.RecoveryDiagnosticError = result.Error;
+            s.Report.FailureDiagnosticError ??= result.Error;
+        }
+    }
 
     private static async Task A4IntakeP(A4Session s,
         App02EventInput? p = null)
