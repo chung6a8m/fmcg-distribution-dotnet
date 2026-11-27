@@ -7,14 +7,27 @@ namespace FmcgDms.Api.Tests;
 internal sealed record RecoverySqlError(int Number, int State, int Severity);
 internal sealed record RecoveryException(string Type, RecoverySqlError[] SqlErrors)
 {
+    // HttpClient timeouts may be TaskCanceledException wrapping TimeoutException.
+    // Keep bounded type names only, never messages or arbitrary exception data.
+    public string[] InnerTypes { get; init; } = [];
+
     internal static RecoveryException From(Exception ex)
     {
         var errors = new List<RecoverySqlError>();
-        for (Exception? current = ex; current is not null && errors.Count < 8; current = current.InnerException)
-            if (current is SqlException sql)
+        var innerTypes = new List<string>();
+        int depth = 0;
+        for (Exception? current = ex; current is not null && depth < 8; current = current.InnerException, depth++)
+        {
+            if (depth > 0)
+                innerTypes.Add(FailureDiagnostics.Label(current.GetType().Name));
+            if (current is SqlException sql && errors.Count < 8)
                 errors.AddRange(sql.Errors.Cast<SqlError>().Take(8 - errors.Count).Select(e =>
                     new RecoverySqlError(e.Number, e.State, e.Class)));
-        return new(FailureDiagnostics.Label(ex.GetType().Name), errors.ToArray());
+        }
+        return new(FailureDiagnostics.Label(ex.GetType().Name), errors.ToArray())
+        {
+            InnerTypes = innerTypes.ToArray()
+        };
     }
 }
 
@@ -68,10 +81,16 @@ internal sealed class RecoverySqlState
     private static string? Reason(string? value) => value switch
     {
         null or "TECHNICAL_RETRY" or "TECHNICAL_RETRIES_EXHAUSTED" or
-            "MISSING_PREREQUISITE" or "C_ACTOR_REVOKED" or
-            "P_ACTOR_INVALID_OR_REVOKED" or "COUNT_NOT_VERIFIED" or
-            "OFFER_ALREADY_ACCEPTED" or "DELIVERY_RETRY" or
-            "DELIVERY_RETRIES_EXHAUSTED" => value,
+            "MISSING_PREREQUISITE" or "MISSING_P_24H" or "LATE_P_AFTER_24H" or
+            "C_ACTOR_REVOKED" or "P_ACTOR_INVALID_OR_REVOKED" or "COUNT_NOT_VERIFIED" or
+            // Fixed codes emitted by App01dCashierUnloadService.AcceptAsync
+            // and persisted by App02a3ProcessingService.
+            "ACCEPT_REFERENCE_INVALID" or "SOURCE_ALREADY_USED" or
+            "TRIP_NOT_ELIGIBLE" or "OFFER_NOT_FOUND_OR_INVALID" or
+            "CASHIER_MUST_BE_INDEPENDENT" or "OFFER_ALREADY_ACCEPTED" or
+            "CASHIER_COUNT_NOT_VERIFIED" or "CASHIER_COUNT_ALREADY_USED" or
+            "CUSTODY_SOURCE_DRIFT" or "CUSTODY_INSUFFICIENT" or
+            "DELIVERY_RETRY" or "DELIVERY_RETRIES_EXHAUSTED" => value,
         _ => "[redacted]"
     };
 }
