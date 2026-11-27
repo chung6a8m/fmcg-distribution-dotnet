@@ -237,5 +237,37 @@ public sealed class Rel75RecoveryRedactionTests
         Assert.Equal("[redacted]", state.PStatus);
         Assert.DoesNotContain(marker, JsonSerializer.Serialize(
             RecoveryException.From(new TimeoutException(marker))));
+
+        // Only fixed runtime reason codes are useful diagnostic evidence.
+        // Free-form maker/checker reasons are still redacted.
+        foreach (string reason in new[]
+        {
+            "MISSING_P_24H", "LATE_P_AFTER_24H", "ACCEPT_REFERENCE_INVALID",
+            "SOURCE_ALREADY_USED", "TRIP_NOT_ELIGIBLE", "OFFER_NOT_FOUND_OR_INVALID",
+            "CASHIER_MUST_BE_INDEPENDENT", "CASHIER_COUNT_NOT_VERIFIED",
+            "CASHIER_COUNT_ALREADY_USED", "CUSTODY_SOURCE_DRIFT", "CUSTODY_INSUFFICIENT"
+        })
+        {
+            var known = new RecoverySqlState { CReasonCode = reason };
+            known.Redact();
+            Assert.Equal(reason, known.CReasonCode);
+        }
+
+        // Actual HTTP transport timeout shape: cancellation alone is
+        // indistinguishable from user cancellation without the inner type.
+        var wrapped = RecoveryException.From(new TaskCanceledException(marker,
+            new TimeoutException(marker, new IOException(marker))));
+        Assert.Equal("TaskCanceledException", wrapped.Type);
+        Assert.Equal(new[] { "TimeoutException", "IOException" }, wrapped.InnerTypes);
+        Assert.Empty(wrapped.SqlErrors);
+        Assert.Empty(RecoveryException.From(new TaskCanceledException(marker)).InnerTypes);
+        Assert.DoesNotContain(marker, JsonSerializer.Serialize(wrapped));
+
+        Exception chain = new TimeoutException(marker);
+        for (int i = 0; i < 12; i++)
+            chain = new IOException(marker, chain);
+        var bounded = RecoveryException.From(chain);
+        Assert.Equal(7, bounded.InnerTypes.Length);
+        Assert.DoesNotContain(marker, JsonSerializer.Serialize(bounded));
     }
 }
