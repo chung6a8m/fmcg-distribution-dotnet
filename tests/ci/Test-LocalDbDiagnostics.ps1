@@ -62,6 +62,112 @@ function Stop-OwnedDiagnosticsProcesses {
     }
 }
 
+# Only the test-owned child can publish the acknowledgement. The parent
+# creates its request AFTER the native probe returns. Neither process opens
+# the other process's marker for reading, so no sharing mode or partial text
+# record can race with a reader. A missing or stale marker is a failure.
+function Assert-DiagnosticsChildHandshake {
+    param([string]$RequestPath, [string]$AckPath, [int]$TimeoutMilliseconds = 2000)
+    Assert-Diagnostics (-not [IO.File]::Exists($RequestPath) -and -not [IO.File]::Exists($AckPath)) 'Stale diagnostics handshake marker.'
+    [IO.File]::Open($RequestPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None).Dispose()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
+        if ([IO.File]::Exists($AckPath)) { return }
+        Start-Sleep -Milliseconds 25
+    }
+    throw 'No post-timeout child acknowledgement before deadline.'
+}
+
+function Invoke-DiagnosticsSurvivorProbe {
+    param([string]$Name, [switch]$InheritPipes)
+
+    $directory = Join-Path $testRoot ($Name + '-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $ownedPath = Join-Path $directory 'launcher-and-child.json'
+    $childOwnedPath = Join-Path $directory 'child.json'
+    $requestPath = Join-Path $directory 'request'
+    $ackPath = Join-Path $directory 'ack'
+
+    # The child also publishes its own identity for cleanup if the launcher
+    # is killed before it can publish both identities. JSON is immutable and
+    # published by same-directory rename only after the writer has closed it.
+    $childCode = @'
+$ErrorActionPreference = 'Stop'
+$owned = '__CHILD_OWNED__'
+@{ id = $PID; started = (Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks } |
+    ConvertTo-Json | Set-Content -LiteralPath ($owned + '.tmp')
+[IO.File]::Move($owned + '.tmp', $owned)
+$watch = [Diagnostics.Stopwatch]::StartNew()
+$acknowledged = $false
+while ($watch.ElapsedMilliseconds -lt 30000) {
+    if (-not $acknowledged -and [IO.File]::Exists('__REQUEST__')) {
+        [IO.File]::Open('__ACK__', [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None).Dispose()
+        $acknowledged = $true
+    }
+    Start-Sleep -Milliseconds 50
+}
+'@
+    $childCode = $childCode.Replace('__CHILD_OWNED__', $childOwnedPath.Replace("'", "''"))
+    $childCode = $childCode.Replace('__REQUEST__', $requestPath.Replace("'", "''"))
+    $childCode = $childCode.Replace('__ACK__', $ackPath.Replace("'", "''"))
+    $childEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
+
+    $launcherCode = @'
+$ErrorActionPreference = 'Stop'
+$child = [Diagnostics.Process]::new()
+$child.StartInfo.FileName = '__SHELL__'
+$child.StartInfo.UseShellExecute = $false
+$child.StartInfo.CreateNoWindow = $true
+__REDIRECT__
+foreach ($arg in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', '__CHILD_CODE__')) {
+    $child.StartInfo.ArgumentList.Add($arg)
+}
+[void]$child.Start()
+$owned = '__OWNED__'
+@(@{ id = $PID; started = (Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks },
+    @{ id = $child.Id; started = $child.StartTime.ToUniversalTime().Ticks }) |
+    ConvertTo-Json | Set-Content -LiteralPath ($owned + '.tmp')
+[IO.File]::Move($owned + '.tmp', $owned)
+__FINISH__
+'@
+    $launcherCode = $launcherCode.Replace('__SHELL__', $shell.Replace("'", "''"))
+    $launcherCode = $launcherCode.Replace('__CHILD_CODE__', $childEncoded)
+    $launcherCode = $launcherCode.Replace('__OWNED__', $ownedPath.Replace("'", "''"))
+    if ($InheritPipes) {
+        # The child must inherit the launcher's stdout/stderr so the probe
+        # times out draining those pipes even though the launcher exits 37.
+        $launcherCode = $launcherCode.Replace('__REDIRECT__', '').Replace('__FINISH__', 'exit 37')
+    } else {
+        $redirect = '$child.StartInfo.RedirectStandardOutput = $true' + [Environment]::NewLine +
+            '$child.StartInfo.RedirectStandardError = $true'
+        $launcherCode = $launcherCode.Replace('__REDIRECT__', $redirect).Replace('__FINISH__', 'Start-Sleep -Seconds 30')
+    }
+    $launcherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherCode))
+    try {
+        $result = Invoke-LocalDbProbe $shell @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $launcherEncoded) 4000 -KillEntireProcessTree:$false
+        if ($InheritPipes) {
+            Assert-Diagnostics ($result.status -eq 'TIMEOUT' -and $result.exitCode -eq 37) 'The exited launcher status was lost while its child held the pipes.'
+        } else {
+            Assert-Diagnostics ($result.status -eq 'TIMEOUT' -and $null -eq $result.exitCode) 'A still-running launcher did not return a timeout without an exit code.'
+        }
+        Assert-Diagnostics ([IO.File]::Exists($ownedPath)) 'The launcher did not publish process ownership.'
+        $owned = @([IO.File]::ReadAllText($ownedPath) | ConvertFrom-Json)
+        Assert-Diagnostics ($owned.Count -eq 2 -and $owned[0].id -ne $owned[1].id) 'The launcher and child identities are not distinct.'
+        Assert-DiagnosticsChildHandshake $requestPath $ackPath
+        Assert-Diagnostics ([IO.File]::Exists($childOwnedPath)) 'The acknowledged child did not publish its identity.'
+        $childOwned = [IO.File]::ReadAllText($childOwnedPath) | ConvertFrom-Json
+        Assert-Diagnostics ($childOwned.id -eq $owned[1].id -and $childOwned.started -eq $owned[1].started) 'The acknowledgement does not belong to the launched child.'
+        $child = Get-Process -Id $childOwned.id -ErrorAction SilentlyContinue
+        Assert-Diagnostics ($null -ne $child) 'The acknowledged child is no longer running.'
+        try {
+            Assert-Diagnostics (-not $child.HasExited -and $child.StartTime.ToUniversalTime().Ticks -eq $childOwned.started) 'The acknowledged child identity is no longer live.'
+        } finally { $child.Dispose() }
+    } finally {
+        try { Stop-OwnedDiagnosticsProcesses $ownedPath }
+        finally { Stop-OwnedDiagnosticsProcesses $childOwnedPath }
+    }
+}
+
 function Invoke-DiagnosticsReportFixture {
     param([hashtable]$Values)
     $directory = Join-Path $testRoot ([Guid]::NewGuid().ToString('N'))
@@ -163,76 +269,33 @@ try {
     }
 
     Test-DiagnosticsCase 'Launcher timeout can preserve its owned child process' {
-        $ownedPath = Join-Path $testRoot 'owned-processes.json'
-        $heartbeatPath = Join-Path $testRoot 'owned-heartbeat.txt'
-        $childCode = @"
-for (`$i = 0; `$i -lt 300; `$i++) {
-    [IO.File]::WriteAllText('$($heartbeatPath.Replace("'", "''"))', [string]`$i)
-    Start-Sleep -Milliseconds 100
-}
-"@
-        $childEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
-        $launcherCode = @"
-`$child = [Diagnostics.Process]::new()
-`$child.StartInfo.FileName = '$($shell.Replace("'", "''"))'
-`$child.StartInfo.UseShellExecute = `$false
-`$child.StartInfo.CreateNoWindow = `$true
-`$child.StartInfo.RedirectStandardOutput = `$true
-`$child.StartInfo.RedirectStandardError = `$true
-foreach (`$arg in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', '$childEncoded')) {
-    `$child.StartInfo.ArgumentList.Add(`$arg)
-}
-[void]`$child.Start()
-@(@{ id = `$PID; started = (Get-Process -Id `$PID).StartTime.ToUniversalTime().Ticks },
-    @{ id = `$child.Id; started = `$child.StartTime.ToUniversalTime().Ticks }) |
-    ConvertTo-Json | Set-Content -LiteralPath '$($ownedPath.Replace("'", "''"))'
-Start-Sleep -Seconds 30
-"@
-        $launcherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherCode))
-        try {
-            $result = Invoke-LocalDbProbe $shell @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $launcherEncoded) 4000 -KillEntireProcessTree:$false
-            Assert-Diagnostics ($result.status -eq 'TIMEOUT') 'Launcher did not return the timeout status.'
-            Assert-Diagnostics ([IO.File]::Exists($ownedPath) -and [IO.File]::Exists($heartbeatPath)) 'The owned child did not initialize.'
-            $before = [IO.File]::ReadAllText($heartbeatPath)
-            Start-Sleep -Milliseconds 350
-            $after = [IO.File]::ReadAllText($heartbeatPath)
-            Assert-Diagnostics ($before -ne $after) 'Launcher cleanup killed the child despite the opt-out.'
-        } finally { Stop-OwnedDiagnosticsProcesses $ownedPath }
+        Invoke-DiagnosticsSurvivorProbe 'launcher-timeout'
     }
 
     Test-DiagnosticsCase 'A pipe timeout retains the completed launcher exit code and preserves its child' {
-        $ownedPath = Join-Path $testRoot 'inherited-pipe-processes.json'
-        $heartbeatPath = Join-Path $testRoot 'inherited-pipe-heartbeat.txt'
-        $childCode = @"
-for (`$i = 0; `$i -lt 300; `$i++) {
-    [IO.File]::WriteAllText('$($heartbeatPath.Replace("'", "''"))', [string]`$i)
-    Start-Sleep -Milliseconds 100
-}
-"@
-        $childEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childCode))
-        $launcherCode = @"
-`$child = [Diagnostics.Process]::new()
-`$child.StartInfo.FileName = '$($shell.Replace("'", "''"))'
-`$child.StartInfo.UseShellExecute = `$false
-`$child.StartInfo.CreateNoWindow = `$true
-foreach (`$arg in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', '$childEncoded')) {
-    `$child.StartInfo.ArgumentList.Add(`$arg)
-}
-[void]`$child.Start()
-@(@{ id = `$PID; started = (Get-Process -Id `$PID).StartTime.ToUniversalTime().Ticks },
-    @{ id = `$child.Id; started = `$child.StartTime.ToUniversalTime().Ticks }) |
-    ConvertTo-Json | Set-Content -LiteralPath '$($ownedPath.Replace("'", "''"))'
-exit 37
-"@
-        $launcherEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launcherCode))
-        try {
-            $result = Invoke-LocalDbProbe $shell @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $launcherEncoded) 4000 -KillEntireProcessTree:$false
-            Assert-Diagnostics ($result.status -eq 'TIMEOUT' -and $result.exitCode -eq 37) 'The exited launcher status was lost while its child held the pipes.'
-            Assert-Diagnostics ([IO.File]::Exists($heartbeatPath)) 'The child holding the inherited pipes did not initialize.'
-            $before = [IO.File]::ReadAllText($heartbeatPath)
-            Start-Sleep -Milliseconds 350
-            Assert-Diagnostics ($before -ne [IO.File]::ReadAllText($heartbeatPath)) 'A completed launcher caused its live child to be killed.'
-        } finally { Stop-OwnedDiagnosticsProcesses $ownedPath }
+        Invoke-DiagnosticsSurvivorProbe 'inherited-pipe' -InheritPipes
+    }
+
+    Test-DiagnosticsCase 'Child handshake rejects stale acknowledgement without publishing a request' {
+        $requestPath = Join-Path $testRoot 'stale-request'
+        $ackPath = Join-Path $testRoot 'stale-ack'
+        [IO.File]::Open($ackPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None).Dispose()
+        $failure = $null
+        try { Assert-DiagnosticsChildHandshake $requestPath $ackPath 200 }
+        catch { $failure = $_.Exception.Message }
+        Assert-Diagnostics ($failure -eq 'Stale diagnostics handshake marker.' -and -not [IO.File]::Exists($requestPath)) 'A stale acknowledgement satisfied the handshake.'
+    }
+
+    Test-DiagnosticsCase 'Child handshake fails within a bounded wait when no child acknowledges' {
+        $requestPath = Join-Path $testRoot 'unanswered-request'
+        $ackPath = Join-Path $testRoot 'unanswered-ack'
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $failure = $null
+        try { Assert-DiagnosticsChildHandshake $requestPath $ackPath 200 }
+        catch { $failure = $_.Exception.Message }
+        Assert-Diagnostics ($failure -eq 'No post-timeout child acknowledgement before deadline.' -and
+            [IO.File]::Exists($requestPath) -and -not [IO.File]::Exists($ackPath) -and
+            $watch.ElapsedMilliseconds -ge 200 -and $watch.ElapsedMilliseconds -lt 2000) 'A missing child acknowledgement was not a bounded failure.'
     }
 
     Test-DiagnosticsCase 'Diagnostics correlate the safe receipt basename with job and legacy stages' {
