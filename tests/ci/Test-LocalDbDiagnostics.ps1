@@ -78,6 +78,24 @@ function Assert-DiagnosticsChildHandshake {
     throw 'No post-timeout child acknowledgement before deadline.'
 }
 
+# Read-only check: the probe, not test cleanup, must have stopped the
+# original launcher. A reused PID is not the original process.
+function Assert-DiagnosticsLauncherExited {
+    param($Owned, [int]$TimeoutMilliseconds = 1500)
+    $process = Get-Process -Id $Owned.id -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return }
+    try {
+        if ($process.HasExited) { return }
+        try { $started = $process.StartTime.ToUniversalTime().Ticks }
+        catch {
+            if ($process.HasExited) { return }
+            throw
+        }
+        if ($started -ne $Owned.started) { return }
+        Assert-Diagnostics ($process.WaitForExit($TimeoutMilliseconds)) 'Original diagnostics launcher is still running.'
+    } finally { $process.Dispose() }
+}
+
 function Invoke-DiagnosticsSurvivorProbe {
     param([string]$Name, [switch]$InheritPipes)
 
@@ -153,6 +171,7 @@ __FINISH__
         Assert-Diagnostics ([IO.File]::Exists($ownedPath)) 'The launcher did not publish process ownership.'
         $owned = @([IO.File]::ReadAllText($ownedPath) | ConvertFrom-Json)
         Assert-Diagnostics ($owned.Count -eq 2 -and $owned[0].id -ne $owned[1].id) 'The launcher and child identities are not distinct.'
+        Assert-DiagnosticsLauncherExited $owned[0]
         Assert-DiagnosticsChildHandshake $requestPath $ackPath
         Assert-Diagnostics ([IO.File]::Exists($childOwnedPath)) 'The acknowledged child did not publish its identity.'
         $childOwned = [IO.File]::ReadAllText($childOwnedPath) | ConvertFrom-Json
@@ -274,6 +293,18 @@ try {
 
     Test-DiagnosticsCase 'A pipe timeout retains the completed launcher exit code and preserves its child' {
         Invoke-DiagnosticsSurvivorProbe 'inherited-pipe' -InheritPipes
+    }
+
+    Test-DiagnosticsCase 'Launcher exit assertion rejects a still-running owned process' {
+        # The current test process is a deterministic live identity. The
+        # assertion is read-only: it must neither kill nor wait indefinitely.
+        $self = Get-Process -Id $PID
+        try { $owned = @{ id = $PID; started = $self.StartTime.ToUniversalTime().Ticks } }
+        finally { $self.Dispose() }
+        $failure = $null
+        try { Assert-DiagnosticsLauncherExited $owned 100 }
+        catch { $failure = $_.Exception.Message }
+        Assert-Diagnostics ($failure -eq 'Original diagnostics launcher is still running.') 'A surviving launcher satisfied the exit assertion.'
     }
 
     Test-DiagnosticsCase 'Child handshake rejects stale acknowledgement without publishing a request' {
