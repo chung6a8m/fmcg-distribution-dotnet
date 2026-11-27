@@ -12,18 +12,30 @@ import rel75_localdb_matrix as m
 SOURCE, WORKFLOW, RUN, ATTEMPT = "a"*40,"b"*40,"12345","1"
 
 
+def stage(name,attempt=1,error="None",status="OK",exit_code=0):
+    return {"stage":name,"attempt":attempt,"error":error,"status":status,
+            "exitCode":exit_code,"truncated":False}
+
+
 def receipt(arm, iteration=1, state="READY"):
-    version = "15.0.4382.1"
-    kind = "EXISTING_15_CONTROL" if arm != "win22-named" else "EXPERIMENT_DEFAULT_TOOL"
-    stages = [{"stage":"create","attempt":1,"error":"None"}]
+    # Shape matches the three real smoke receipts (run 46005428554).
+    version = "17.0.4025.3" if arm == "win25-auto" else "15.0.4382.1"
+    kind = "EXISTING_15_CONTROL" if arm == "win22-auto" else "EXPERIMENT_DEFAULT_TOOL"
+    absent = stage("info",error="AutomaticInstanceNotCreated")
+    preflight = [stage("versions"),stage("list") if arm == "win22-named" else copy.deepcopy(absent)]
+    stages = [copy.deepcopy(absent),stage("versions")] if kind == "EXISTING_15_CONTROL" else []
+    stages.append(stage("create",error="None" if state=="READY" else "InstanceStartFailed"))
     if state == "READY":
-        stages += [{"stage":"readiness","attempt":1,"error":"None"}]
-    else:
-        stages[0]["error"] = "InstanceStartFailed"
+        stages += [stage("info"),stage("start"),stage("info"),stage("readiness")]
     ctl = None if kind != "EXISTING_15_CONTROL" else {
         "schemaVersion":"CI_LOCALDB_BOOTSTRAP_V1","mode":"COLD","instance":"MSSQLLocalDB",
         "sourceHeadSha":SOURCE,"workflowSha":WORKFLOW,"runId":RUN,"runAttempt":ATTEMPT,
-        "status":"READY" if state=="READY" else "FAILED","attempts":copy.deepcopy(stages)}
+        "status":"READY" if state=="READY" else "FAILED","attempts":copy.deepcopy(stages),
+        "selectedVersion":version,"installedVersions":[version],
+        "engineVersion":version if state=="READY" else None,
+        "failure":None if state=="READY" else "InstanceStartFailed",
+        "elapsedMilliseconds":3200,"readinessAttempts":int(state=="READY"),
+        "imageVersion":"20261123.376.1"}
     return {
         "schema":m.SCHEMA,"arm":arm,"iteration":iteration,
         "sourceHeadSha":SOURCE,"workflowSha":WORKFLOW,"runId":RUN,"runAttempt":ATTEMPT,
@@ -33,7 +45,10 @@ def receipt(arm, iteration=1, state="READY"):
         "coldVerified":True,"bootstrapKind":kind,"selectedVersion":version,
         "engineVersion":version if state=="READY" else None,
         "elapsedMilliseconds":3200,"readinessAttempts":int(state=="READY"),
-        "preflight":[{"stage":"versions","attempt":1,"error":"None"}],"bootstrap":stages,"controlReceipt":ctl,
+        "installedVersions":[version],
+        "tools":{"localDb":{"status":"OK","version":"2025.170.4025.3" if arm=="win25-auto" else "2019.150.4382.1"},
+                 "sqlcmd":{"status":"OK","version":"2019.150.1300.359"}},
+        "preflight":preflight,"bootstrap":stages,"controlReceipt":ctl,
         "filesBefore":[{"file":name,"status":"MISSING"} for name in sorted(m.FILES)],
         "filesAfter":[{"file":name,"status":"MISSING"} for name in sorted(m.FILES)],
         "diskBefore":{"status":"OK","freeBytes":1000,"totalBytes":2000},
@@ -76,6 +91,54 @@ class MatrixTests(unittest.TestCase):
         result=self.summary()
         self.assertEqual("COMPLETE_ALL_READY",result["status"])
         self.assertEqual(3,result["observed"])
+
+    def test_cold_control_expected_absence_only_at_initial_info(self):
+        self.all()
+        # Original live receipt was falsely rejected by the old blanket rule.
+        self.assertEqual(3,self.summary()["observed"])
+        bad=receipt("win22-auto")
+        bad["bootstrap"][3]["error"]="AutomaticInstanceNotCreated"
+        bad["controlReceipt"]["attempts"]=copy.deepcopy(bad["bootstrap"])
+        self.put("win22-auto",bad)
+        self.assertEqual(1,len(self.summary()["invalid"]))
+
+    def test_ready_native_evidence_and_cold_preflight_are_required(self):
+        self.all()
+        for mutate in (
+            lambda d: d.update(preflight=[]),
+            lambda d: d["bootstrap"].pop(1),
+            lambda d: d["bootstrap"][-1].update(exitCode=1),
+            lambda d: d["bootstrap"][-1].update(truncated=True),
+            lambda d: d.update(readinessAttempts=2),
+            lambda d: d.update(installedVersions=["16.0.1000.1"]),
+            lambda d: d["tools"]["localDb"].update(version="2022.160.1000.1"),
+            lambda d: d["filesBefore"][0].update(status="PRESENT"),
+        ):
+            with self.subTest(mutate=mutate):
+                bad=receipt("win22-named")
+                mutate(bad)
+                self.put("win22-named",bad)
+                self.assertEqual(1,len(self.summary()["invalid"]))
+
+    def test_only_fenced_login_timeout_recovery_is_ready(self):
+        self.all()
+        good=receipt("win22-named")
+        good["bootstrap"][-1:]=[stage("readiness",error="LoginTimeout",status="COMMAND_FAILED",exit_code=1),
+                                stage("info"),stage("info"),stage("readiness",2)]
+        good["readinessAttempts"]=2
+        self.put("win22-named",good)
+        self.assertEqual("COMPLETE_ALL_READY",self.summary()["status"])
+        bad=copy.deepcopy(good)
+        bad["bootstrap"].pop(-2)
+        self.put("win22-named",bad)
+        self.assertEqual(1,len(self.summary()["invalid"]))
+
+    def test_control_metadata_mismatch_is_rejected(self):
+        self.all()
+        bad=receipt("win22-auto")
+        bad["controlReceipt"]["engineVersion"]="15.0.9999.1"
+        self.put("win22-auto",bad)
+        self.assertEqual(1,len(self.summary()["invalid"]))
 
     def test_negative_observation_is_not_lost(self):
         self.all()

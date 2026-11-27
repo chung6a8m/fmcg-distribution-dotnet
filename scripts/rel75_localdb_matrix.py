@@ -55,6 +55,50 @@ def integer(value, low=0, high=2**63-1):
     return type(value) is int and low <= value <= high
 
 
+def require_native(stage, name, attempt=1, error="None"):
+    # An expected absence/readiness timeout may be reported by the native tool
+    # with either zero or nonzero exit. It is not a general success exception.
+    allowed_status = {"OK","COMMAND_FAILED"} if error != "None" else {"OK"}
+    if (stage["stage"] != name or stage["attempt"] != attempt or stage["error"] != error
+            or stage.get("status") not in allowed_status or stage.get("truncated") is not False
+            or stage.get("deadlineExpired",False) is not False
+            or not integer(stage.get("exitCode"),-2**31,2**31-1)
+            or (stage["status"] == "OK") != (stage["exitCode"] == 0)):
+        raise ValueError("native stage evidence mismatch")
+
+
+def validate_ready_sequence(stages, control, attempts):
+    # Match the actual helper, including its one expected cold absence before
+    # versions/create, and the alternative's shorter preflight-separated path.
+    index = 0
+
+    def take(name, attempt=1, error="None"):
+        nonlocal index
+        if index >= len(stages):
+            raise ValueError("missing bootstrap stage")
+        require_native(stages[index],name,attempt,error)
+        index += 1
+
+    if control:
+        take("info",error="AutomaticInstanceNotCreated")
+        take("versions")
+    take("create")
+    take("info")
+    if index < len(stages) and stages[index]["stage"] == "start":
+        take("start")
+        take("info")
+    if not 1 <= attempts <= 3:
+        raise ValueError("invalid ready attempt count")
+    for i in range(1,attempts+1):
+        take("readiness",i,"None" if i == attempts else "LoginTimeout")
+        if i < attempts:
+            # Confirm Running on both sides of the bounded backoff.
+            take("info",i)
+            take("info",i)
+    if index != len(stages):
+        raise ValueError("extra bootstrap stage")
+
+
 def validate(receipt, arm, iteration, source, workflow, run, attempt):
     if (receipt.get("schema"), receipt.get("arm"), receipt.get("iteration"),
         receipt.get("sourceHeadSha"), receipt.get("workflowSha"),
@@ -99,10 +143,6 @@ def validate(receipt, arm, iteration, source, workflow, run, attempt):
     starts = [s for s in stages if s["stage"] == "start"]
     if len(creates) > 1 or len(starts) > 1:
         raise ValueError("unexpected create/start retry")
-    if state == "READY" and any(s["error"] != "None" for s in stages if s["stage"] != "readiness"):
-        raise ValueError("failed bootstrap stage promoted")
-    if state == "READY" and any(s["error"] not in {"None","LoginTimeout"} for s in stages if s["stage"] == "readiness"):
-        raise ValueError("fatal readiness error promoted")
     if state in {"READY","BOOTSTRAP_FAILED"}:
         ver = receipt.get("selectedVersion")
         if receipt.get("coldVerified") is not True or len(creates) != 1:
@@ -111,6 +151,35 @@ def validate(receipt, arm, iteration, source, workflow, run, attempt):
             arm != "win25-auto" and not ver.startswith("15.0.")
         ):
             raise ValueError("wrong runtime")
+        if len(preflight) != 2:
+            raise ValueError("missing cold preflight")
+        require_native(preflight[0],"versions")
+        if arm == "win22-named":
+            require_native(preflight[1],"list")
+        else:
+            require_native(preflight[1],"info",error="AutomaticInstanceNotCreated")
+        if receipt.get("installedVersions") != [ver]:
+            raise ValueError("runtime inventory mismatch")
+        tools = receipt.get("tools")
+        if not isinstance(tools,dict) or any(
+            not isinstance(tools.get(key),dict) or tools[key].get("status") != "OK"
+            for key in ("localDb","sqlcmd")
+        ):
+            raise ValueError("tool evidence missing")
+        version = tools["localDb"].get("version")
+        if not isinstance(version,str):
+            raise ValueError("tool version missing")
+        for prefix,family in (("2019.150.","15.0."),("2022.160.","16.0."),("2025.170.","17.0.")):
+            if version.startswith(prefix):
+                version = family + version[len(prefix):]
+                break
+        if version != ver:
+            raise ValueError("tool/runtime mismatch")
+        before = receipt.get("filesBefore")
+        if not isinstance(before,list) or len(before) != len(FILES) or any(
+            f.get("status") != "MISSING" for f in before
+        ) or {f.get("file") for f in before} != FILES:
+            raise ValueError("cold filesystem evidence mismatch")
         kind = receipt.get("bootstrapKind")
         expected_kind = ("EXISTING_15_CONTROL" if arm != "win22-named" and ver.startswith("15.0.")
                          else "EXPERIMENT_DEFAULT_TOOL")
@@ -123,12 +192,17 @@ def validate(receipt, arm, iteration, source, workflow, run, attempt):
                 "sourceHeadSha":source, "workflowSha":workflow, "runId":run, "runAttempt":attempt
             }.items()) or ctl.get("attempts") != stages:
                 raise ValueError("invalid control receipt")
-            if state == "READY" and ctl.get("status") != "READY":
-                raise ValueError("failed control promoted")
-        if state == "READY" and (receipt.get("engineVersion") != ver or not stages
-                or stages[-1]["stage"] != "readiness" or stages[-1]["error"] != "None"
-                or receipt["readinessAttempts"] < 1):
-            raise ValueError("readiness evidence missing")
+            if any(ctl.get(k) != receipt.get(k) for k in
+                   ("selectedVersion","installedVersions","engineVersion","readinessAttempts","elapsedMilliseconds","failure","imageVersion")):
+                raise ValueError("control evidence mismatch")
+            if ctl.get("status") != ("READY" if state == "READY" else "FAILED"):
+                raise ValueError("control status mismatch")
+        elif receipt.get("controlReceipt") is not None:
+            raise ValueError("unexpected control receipt")
+        if state == "READY":
+            if receipt.get("engineVersion") != ver:
+                raise ValueError("readiness version mismatch")
+            validate_ready_sequence(stages,kind == "EXISTING_15_CONTROL",receipt["readinessAttempts"])
     elif creates and state == "NOT_EXECUTED":
         raise ValueError("create evidence incorrectly classified")
     # Project only fixed categories/numeric metadata into the cross-run report.
