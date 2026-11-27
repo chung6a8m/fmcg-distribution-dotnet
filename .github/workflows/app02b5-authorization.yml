@@ -10,7 +10,27 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  b5-source:
+  classify:
+    name: doc-ci-b5-classify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      receipt: ${{ steps.route.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify and verify this workflow's source and light checks
+        id: route
+        uses: ./.github/actions/doc-ci-classify
+
+  run-b5-source:
+    name: doc-ci-b5-run-b5-source
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -44,7 +64,10 @@ jobs:
             tests/FmcgDms.Preprod.Authorization.Tests/TestResults/
           if-no-files-found: warn
 
-  b5-two-tenant-sql:
+  run-b5-two-tenant-sql:
+    name: doc-ci-b5-run-b5-two-tenant-sql
+    needs: [classify]
+    if: ${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.mode != 'docs-only') }}
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
@@ -172,3 +195,45 @@ jobs:
             TestResults/LocalDbBootstrap/
             TestResults/LAB-E02/
           if-no-files-found: warn
+
+  b5-source:
+    name: b5-source
+    needs: [classify, run-b5-source, run-b5-two-tenant-sql]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b5-authorization.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  b5-two-tenant-sql:
+    name: b5-two-tenant-sql
+    needs: [classify, run-b5-source, run-b5-two-tenant-sql]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: app02b5-authorization.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py

@@ -10,7 +10,27 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  web-glob-input-boundary:
+  classify:
+    name: doc-ci-security-classify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+      receipt: ${{ steps.route.outputs.receipt }}
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify and verify this workflow's source and light checks
+        id: route
+        uses: ./.github/actions/doc-ci-classify
+
+  run-web-glob-input-boundary:
+    name: doc-ci-security-run-web-glob-input-boundary
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -23,7 +43,11 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Fail closed on unreviewed first-party glob input paths and mutations
         run: node --test web/tests/issue59-glob-boundary.test.mjs
-  picomatch-lock-security:
+
+  run-picomatch-lock-security:
+    name: doc-ci-security-run-picomatch-lock-security
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -40,7 +64,10 @@ jobs:
       - name: Fail closed on unapproved picomatch or expired conditional Owner decision
         run: node --test web/tests/picomatch-advisory.test.mjs
 
-  full-npm-security-audit:
+  run-full-npm-security-audit:
+    name: doc-ci-security-run-full-npm-security-audit
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -58,7 +85,10 @@ jobs:
       - name: Full-tree audit (moderate and above, no exclusion)
         run: npm audit --audit-level=moderate
 
-  candidate-metadata-only:
+  run-candidate-metadata-only:
+    name: doc-ci-security-run-candidate-metadata-only
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -87,7 +117,10 @@ jobs:
           path: TestResults/
           if-no-files-found: warn
 
-  candidate-parse-source-diff:
+  run-candidate-parse-source-diff:
+    name: doc-ci-security-run-candidate-parse-source-diff
+    needs: [classify]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -124,3 +157,108 @@ jobs:
           name: issue59-candidate-patch-source-diff-only
           path: TestResults/
           if-no-files-found: warn
+
+  web-glob-input-boundary:
+    name: web-glob-input-boundary
+    needs: [classify, run-web-glob-input-boundary, run-picomatch-lock-security, run-full-npm-security-audit, run-candidate-metadata-only, run-candidate-parse-source-diff]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: security-picomatch-issue59.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  picomatch-lock-security:
+    name: picomatch-lock-security
+    needs: [classify, run-web-glob-input-boundary, run-picomatch-lock-security, run-full-npm-security-audit, run-candidate-metadata-only, run-candidate-parse-source-diff]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: security-picomatch-issue59.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  full-npm-security-audit:
+    name: full-npm-security-audit
+    needs: [classify, run-web-glob-input-boundary, run-picomatch-lock-security, run-full-npm-security-audit, run-candidate-metadata-only, run-candidate-parse-source-diff]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: security-picomatch-issue59.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  candidate-metadata-only:
+    name: candidate-metadata-only
+    needs: [classify, run-web-glob-input-boundary, run-picomatch-lock-security, run-full-npm-security-audit, run-candidate-metadata-only, run-candidate-parse-source-diff]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: security-picomatch-issue59.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py
+
+  candidate-parse-source-diff:
+    name: candidate-parse-source-diff
+    needs: [classify, run-web-glob-input-boundary, run-picomatch-lock-security, run-full-npm-security-audit, run-candidate-metadata-only, run-candidate-parse-source-diff]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout the tested integration tree
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact companion classification and job outcomes
+        env:
+          DOC_CI_COMPANION: security-picomatch-issue59.yml
+          DOC_CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          APP00A_EVENT_NAME: ${{ github.event_name }}
+          APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          APP00A_WORKFLOW_SHA: ${{ github.sha }}
+        run: python3 -B tools/verify_doc_ci_companions.py

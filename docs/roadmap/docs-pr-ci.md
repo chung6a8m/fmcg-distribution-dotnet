@@ -229,8 +229,8 @@ closeout mới.
 | Increment | Phụ thuộc | Phạm vi | Trạng thái |
 | --- | --- | --- | --- |
 | DOC-CI-02A — Consumer audit & document boundaries | v1 | Inventory và tách trạng thái khỏi instruction/hợp đồng; [audit và handoff](doc-ci-02a-consumer-audit.md) | MERGED / MAIN_CI_VERIFIED / CLOSED ([receipt #169](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/169#issuecomment-7188635128)) |
-| DOC-CI-02B — Status/receipt & classifier v2 | 02A | Chuẩn hóa status/receipt, exact candidate allowlist và diagnostics | SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING |
-| DOC-CI-02C — Companion CI routing | 02B | Áp dụng cùng policy cho chín workflow đồng hành | NOT_STARTED |
+| DOC-CI-02B — Status/receipt & classifier v2 | 02A | Chuẩn hóa status/receipt, exact candidate allowlist và diagnostics | MERGED / MAIN_CI_VERIFIED / CLOSED ([PR #170](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/170); [main attempt 3](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/45805234628/attempts/3)) |
+| DOC-CI-02C — Companion CI routing | 02B | Áp dụng cùng policy cho chín workflow đồng hành ([implementation handoff](doc-ci-02c-companion-routing.md)) | SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING |
 | DOC-CI-02D — Independent acceptance & closeout | 02C | Probe hosted, full controls, main receipt và đo hiệu quả | NOT_STARTED |
 
 #### DOC-CI-02A — Consumer audit & document boundaries

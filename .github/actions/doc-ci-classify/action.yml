@@ -1,0 +1,53 @@
+name: DOC-CI shared classification
+description: Classify this run's integration tree and require the common Light checks.
+outputs:
+  mode:
+    description: Verified full or docs-only route
+    value: ${{ steps.classification.outputs.mode }}
+  receipt:
+    description: Source-bound classification receipt v2 from this run
+    value: ${{ steps.classification.outputs.receipt }}
+runs:
+  using: composite
+  steps:
+    - name: Verify integration checkout
+      shell: bash
+      run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+    - name: Classify complete source and integration changes
+      id: classification
+      shell: bash
+      env:
+        APP00A_EVENT_NAME: ${{ github.event_name }}
+        APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        APP00A_WORKFLOW_SHA: ${{ github.sha }}
+      run: python3 -B tools/classify_app00a_pr.py
+    - name: Verify v2 classification receipt before scheduling
+      shell: bash
+      env:
+        DOC_CI_MODE: ${{ steps.classification.outputs.mode }}
+        DOC_CI_RECEIPT: ${{ steps.classification.outputs.receipt }}
+        APP00A_EVENT_NAME: ${{ github.event_name }}
+        APP00A_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        APP00A_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        APP00A_WORKFLOW_SHA: ${{ github.sha }}
+      run: python3 -B tools/verify_doc_ci_companions.py --classification-only
+    - name: Verify immutable business snapshot
+      shell: pwsh
+      run: ./scripts/Verify-Business.ps1
+    - name: Validate business contract and links
+      shell: bash
+      run: python3 -B tools/validate_business.py
+    - name: Validate E-SIM-01
+      shell: bash
+      run: python3 -B tools/validate_e_sim_01.py
+    - name: Run native Git and gate regressions
+      shell: bash
+      run: python3 -B -m unittest discover -s tests/ci -p 'test_*.py' -v
+    - name: Upload this run's classification receipt
+      if: ${{ !cancelled() && steps.classification.outcome == 'success' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: doc-ci-classification-${{ github.run_id }}-${{ github.run_attempt }}
+        path: TestResults/app00a-classification.json
+        if-no-files-found: error
