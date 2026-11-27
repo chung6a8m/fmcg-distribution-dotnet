@@ -41,6 +41,36 @@ internal static partial class FailureDiagnostics
     [GeneratedRegex(@"\A=> SpanId:([a-f0-9]{16}), TraceId:([a-f0-9]{32}), ParentId:([a-f0-9]{16})(?:\s|\z)", RegexOptions.NonBacktracking)]
     private static partial Regex LogScopePattern();
 
+
+    [GeneratedRegex(@"\AREL75_SWEEP tenant=(tenant-[ab]) phase=(processing|outbox) point=(start|end|fail) count=(\d{1,3}) elapsedMs=(\d{1,16}) utcMs=(\d{1,16})\z", RegexOptions.NonBacktracking)]
+    private static partial Regex RecoverySweepPattern();
+
+    [GeneratedRegex(@"\AREL75_TECH tenant=(tenant-[ab]) phase=(processing|outbox) id=([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}) kind=(sql|timeout) number=(-?\d{1,10}) state=(\d{1,3}) severity=(\d{1,3}) utcMs=(\d{1,16})\z", RegexOptions.NonBacktracking)]
+    private static partial Regex RecoveryTechnicalPattern();
+
+    private static object? RecoveryObservation(string line)
+    {
+        Match m = RecoverySweepPattern().Match(line);
+        if (m.Success && int.TryParse(m.Groups[4].Value, out int count)
+            && long.TryParse(m.Groups[5].Value, out long elapsed)
+            && long.TryParse(m.Groups[6].Value, out long utc))
+            return new { kind = "sweep", tenant = m.Groups[1].Value,
+                phase = m.Groups[2].Value, point = m.Groups[3].Value,
+                count, elapsedMs = elapsed, utcMs = utc };
+        m = RecoveryTechnicalPattern().Match(line);
+        if (m.Success && Guid.TryParseExact(m.Groups[3].Value, "D", out Guid id)
+            && int.TryParse(m.Groups[5].Value, out int number)
+            && byte.TryParse(m.Groups[6].Value, out byte state)
+            && byte.TryParse(m.Groups[7].Value, out byte severity)
+            && long.TryParse(m.Groups[8].Value, out utc))
+            return new { kind = "technical", tenant = m.Groups[1].Value,
+                phase = m.Groups[2].Value, id, errorKind = m.Groups[4].Value,
+                sqlErrorNumber = m.Groups[4].Value == "sql" ? (int?)number : null,
+                state = m.Groups[4].Value == "sql" ? (byte?)state : null,
+                severity = m.Groups[4].Value == "sql" ? (byte?)severity : null, utcMs = utc };
+        return null;
+    }
+
     public static string Label(string value) => LabelPattern().IsMatch(value) ? value : "invalid-label";
 
     public static string? Sha(string? value) => value == "LOCAL" ||
@@ -53,6 +83,7 @@ internal static partial class FailureDiagnostics
     public static object RedactedStream((string Tail, long Discarded, bool Complete, string? Error) snapshot)
     {
         var observations = new List<object>();
+        var recoveryObservations = new List<object>();
         string[] lines = snapshot.Tail.Split('\n');
         // A ring can start in the middle of a sensitive line. Never interpret
         // that fragment as a field. A live snapshot can also end mid-line.
@@ -60,6 +91,11 @@ internal static partial class FailureDiagnostics
             i < lines.Length - (snapshot.Complete ? 0 : 1); i++)
         {
             string line = lines[i].Trim();
+            if (RecoveryObservation(line) is { } recovery)
+            {
+                recoveryObservations.Add(recovery);
+                continue;
+            }
             Match match = ExceptionPattern().Match(line.StartsWith("---> ", StringComparison.Ordinal)
                 ? line[5..] : line);
             if (match.Success)
@@ -91,7 +127,9 @@ internal static partial class FailureDiagnostics
             truncated = snapshot.Discarded != 0 || observations.Count > ObservationLimit,
             snapshot.Complete,
             captureError = snapshot.Error,
-            observations = observations.TakeLast(ObservationLimit).ToArray()
+            observations = observations.TakeLast(ObservationLimit).ToArray(),
+            recoveryObservationsTruncated = snapshot.Discarded != 0 || recoveryObservations.Count > 64,
+            recoveryObservations = recoveryObservations.TakeLast(64).ToArray()
         };
     }
 

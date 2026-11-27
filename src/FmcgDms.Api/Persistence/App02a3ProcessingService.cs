@@ -13,7 +13,8 @@ namespace FmcgDms.Api.Persistence;
 /// acceptance/source/ledger authority. An intake COMMIT always precedes this
 /// independent Serializable apply transaction; only the exact named P is valid.
 /// </summary>
-public sealed class App02a3ProcessingService(TenantConnections connections)
+public sealed class App02a3ProcessingService(TenantConnections connections,
+    ILogger<App02a3ProcessingService>? logger = null)
 {
     public const int MaxTechnicalRetries = 6;
     public static readonly TimeSpan SafetyScanInterval = TimeSpan.FromMinutes(15);
@@ -320,6 +321,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections)
         {
             try { await tx.RollbackAsync(CancellationToken.None); }
             catch (InvalidOperationException) { }
+            App02a3RecoveryTelemetry.Technical(logger, tenant, "processing", receiptId, ex);
             return await ScheduleTechnicalRetry(tenant, receiptId, asOfUtc, ct);
         }
         catch

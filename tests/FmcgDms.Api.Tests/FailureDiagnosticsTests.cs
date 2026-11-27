@@ -162,6 +162,56 @@ public sealed class FailureDiagnosticsTests : IDisposable
         Assert.False(Directory.Exists(folder));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Recovery_capture_preserves_original_failure_and_reports_unavailable_sql(bool writerFails)
+    {
+        const string secret = "original-failure-secret";
+        if (writerFails)
+        {
+            Directory.CreateDirectory(folder);
+            await File.WriteAllTextAsync(Path.Combine(folder, "TestResults"), "not a directory", Ct);
+        }
+        await using var host = Launch("");
+        var original = new TimeoutException(secret);
+        (string? Path, string? Error) captured = default;
+        Guid trip = Guid.NewGuid();
+        string nonce = Guid.NewGuid().ToString("N");
+        TimeoutException observed = await Assert.ThrowsAsync<TimeoutException>(async () =>
+        {
+            try { throw original; }
+            catch (Exception ex)
+            {
+                captured = await RecoveryDiagnostics.TryCaptureAsync(() =>
+                    host.CaptureRecoveryFailureAsync("recovery-test", "recovery-deadline", Context,
+                        new("REL75_RECOVERY_V1", trip, nonce, null, 30000, 5,
+                            RecoveryException.From(ex),
+                            new("UNAVAILABLE", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                                null, RecoveryException.From(new TimeoutException(secret)))), Ct));
+                throw;
+            }
+        });
+        Assert.Same(original, observed);
+        if (writerFails)
+        {
+            Assert.Null(captured.Path);
+            Assert.Equal("IOException", captured.Error);
+            return;
+        }
+        Assert.Null(captured.Error);
+        using JsonDocument artifact = await Read(Assert.IsType<string>(captured.Path));
+        JsonElement recovery = artifact.RootElement.GetProperty("recovery");
+        Assert.Equal("REL75_RECOVERY_V1", recovery.GetProperty("schema").GetString());
+        Assert.Equal(trip, recovery.GetProperty("tripId").GetGuid());
+        Assert.Equal(nonce, recovery.GetProperty("fixtureNonce").GetString());
+        Assert.Equal(5, recovery.GetProperty("pollCount").GetInt32());
+        Assert.Equal("UNAVAILABLE", recovery.GetProperty("sql").GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, recovery.GetProperty("sql").GetProperty("state").ValueKind);
+        Assert.Equal(host.Pid, artifact.RootElement.GetProperty("process").GetProperty("pid").GetInt32());
+        Assert.DoesNotContain(secret, artifact.RootElement.GetRawText());
+    }
+
     private sealed class StalledBody : MemoryStream
     {
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer,
