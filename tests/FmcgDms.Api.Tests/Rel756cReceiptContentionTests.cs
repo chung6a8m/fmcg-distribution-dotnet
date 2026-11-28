@@ -42,6 +42,10 @@ public sealed partial class App01e2CrossCommandRaceTests
 
         using var db = test.Open(tenant);
         using var observer = test.Open(tenant);
+        // Open() constructs a closed SqlConnection; keep both SQL sessions
+        // open across the held transaction and DMV observations.
+        await db.OpenAsync(ct);
+        await observer.OpenAsync(ct);
         await using var holder = (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         // Independent literal key (not the implementation helper). This
         // connection holds no receipt, role, Trip or other business locks.
