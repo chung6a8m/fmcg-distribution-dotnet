@@ -37,10 +37,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 namespace Rel755Native {
     public static class VolumeIdentity {
-        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetVolumePathNameW(string path, StringBuilder volume, uint length);
-        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetVolumeNameForVolumeMountPointW(string root, StringBuilder volume, uint length);
         public static string Resolve(string path, string expectedRoot) {

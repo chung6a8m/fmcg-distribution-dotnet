@@ -41,7 +41,11 @@ $onCold={
     $script:observerControl=Join-Path $root ('rel755-'+[Guid]::NewGuid().ToString('N'))
     if ((Get-Rel75PathState $script:observerControl) -ne 'MISSING') { throw 'REL755_CONTROL_EXISTS' }
     [IO.Directory]::CreateDirectory($script:observerControl) | Out-Null
-    $script:observerJob=Start-Job -FilePath (Join-Path $PSScriptRoot 'Measure-Rel755Progress.ps1') -ArgumentList $target,$script:observerControl
+    $monitorPath=Join-Path $PSScriptRoot 'Measure-Rel755Progress.ps1'
+    $script:observerJob=Start-Job -ScriptBlock {
+        param($scriptPath,$instance,$control)
+        & $scriptPath -Target $instance -ControlDir $control
+    } -ArgumentList $monitorPath,$target,$script:observerControl
     $wait=[Diagnostics.Stopwatch]::StartNew()
     while ($wait.ElapsedMilliseconds -lt 10000 -and $script:observerJob.State -in 'NotStarted','Running') {
         if ([IO.File]::Exists((Join-Path $script:observerControl 'ready'))) {
