@@ -11,9 +11,16 @@ permissions:
   contents: read
 
 jobs:
-  settlement-witness:
+  compare-resume:
+    name: APP-03 ${{ matrix.scenario }} / ${{ matrix.arm }} / iteration ${{ matrix.iteration }}
     runs-on: windows-2022
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [VerifyField, VerifySettlement]
+        arm: [baseline, instrumented]
+        iteration: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -82,23 +89,57 @@ jobs:
       - name: Verify APP-03 SQL observer error classification
         shell: powershell
         run: ./tests/ci/Test-App03SqlReadErrors.ps1
-      - name: Record diagnostic source and attempt
+      - name: Record diagnostic source, attempt and arm
         shell: pwsh
         env:
           SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCENARIO: ${{ matrix.scenario }}
+          ARM: ${{ matrix.arm }}
+          ITERATION: ${{ matrix.iteration }}
         run: |
-          Write-Host "Diagnostic only: source=$env:SOURCE_HEAD checkout=$env:GITHUB_SHA run=$env:GITHUB_RUN_ID attempt=$env:GITHUB_RUN_ATTEMPT"
-      - name: APP-03.6 independent witness (does not substitute Full CI)
+          $checkout = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $checkout -cne $env:GITHUB_SHA) { throw 'Unexpected checkout.' }
+          New-Item -ItemType Directory -Path TestResults -Force | Out-Null
+          $receipt = [ordered]@{
+            schema = 'APP03_HTTP_COMPARISON_V1'; sourceHead = $env:SOURCE_HEAD; checkout = $checkout
+            run = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
+            scenario = $env:SCENARIO; arm = $env:ARM; iteration = [int]$env:ITERATION
+            witnessEnabled = ($env:ARM -ceq 'instrumented')
+            utc = [DateTime]::UtcNow.ToString('O')
+          }
+          $receipt | ConvertTo-Json | Set-Content TestResults/app03-http-comparison.json -Encoding utf8
+          Write-Host "Diagnostic only: source=$env:SOURCE_HEAD checkout=$checkout run=$env:GITHUB_RUN_ID attempt=$env:GITHUB_RUN_ATTEMPT scenario=$env:SCENARIO arm=$env:ARM iteration=$env:ITERATION"
+      - name: Execute original scenario once (does not substitute Full CI)
+        id: scenario
         shell: pwsh
         env:
-          FMCG_APP03_SETTLEMENT_WITNESS: '1'
-        run: ./scripts/Run-App03Dev.ps1 -Action VerifySettlement
+          SCENARIO: ${{ matrix.scenario }}
+          FMCG_APP03_SETTLEMENT_WITNESS: ${{ matrix.arm == 'instrumented' && '1' || '0' }}
+        run: |
+          if ($env:SCENARIO -cnotin @('VerifyField', 'VerifySettlement')) { throw 'Unexpected scenario.' }
+          ./scripts/Run-App03Dev.ps1 -Action $env:SCENARIO
+      - name: Record outcome without replacing it
+        if: always()
+        shell: pwsh
+        env:
+          SCENARIO_OUTCOME: ${{ steps.scenario.outcome }}
+        run: |
+          if (Test-Path -LiteralPath TestResults/app03-http-comparison.json -PathType Leaf) {
+            $receipt = Get-Content -LiteralPath TestResults/app03-http-comparison.json -Raw | ConvertFrom-Json
+            $receipt | Add-Member -NotePropertyName scenarioOutcome -NotePropertyValue $env:SCENARIO_OUTCOME
+            $receipt | Add-Member -NotePropertyName endedUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('O'))
+            $receipt | ConvertTo-Json | Set-Content TestResults/app03-http-comparison.json -Encoding utf8
+          }
       - name: Preserve diagnostic evidence even on failure
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: app03-http-investigation-${{ github.run_id }}-${{ github.run_attempt }}
+          name: app03-http-investigation-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}-${{ matrix.arm }}-${{ matrix.iteration }}
           path: |
+            TestResults/app03-http-comparison.json
+            TestResults/app03-5/
             TestResults/app03-6/
+            web/test-results-app03-5/
+            web/test-results-app03-6/
             TestResults/localdb*/
           if-no-files-found: warn
