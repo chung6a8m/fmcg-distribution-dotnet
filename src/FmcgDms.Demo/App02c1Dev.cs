@@ -18,7 +18,8 @@ internal static class App02c1Dev
     internal const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
     internal static async Task Run(string mode, string root, string source, string increment,
-        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null, bool catalogWitness = false)
+        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null, bool catalogWitness = false,
+        App03SettlementHttpWitness.Context? resumeWitness = null, string resumeCheckpoint = "")
     {
         if (mode is not ("Verify" or "Interactive")) throw new ArgumentException("Invalid C.1 DEV mode.");
         string web = Path.Combine(root, "web");
@@ -40,6 +41,8 @@ internal static class App02c1Dev
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
         var run = persistent?.RunId ?? new DemoRun(Guid.NewGuid().ToString("N"));
+        bool traceResume = persistent?.Resume == true && observe is not null && resumeWitness is not null
+            && App03SettlementSqlObserver.Enabled;
         bool integrated = increment == "App03A1";
         bool field = persistent?.UsesField == true;
         bool settlement = persistent?.UsesSettlement == true;
@@ -257,7 +260,7 @@ internal static class App02c1Dev
             {
                 apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
                 apiStart.Environment["App03__Workspace"] = "true";
-                if (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled)
+                if (traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled))
                     apiStart.Environment["App03__CatalogWitness"] = "true";
                 if (persistent.UsesBusinessDay)
                     apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
@@ -316,6 +319,9 @@ internal static class App02c1Dev
             var viteStart = StartInfo("node", web, vite, "--host", "127.0.0.1", "--port",
                 webPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "--strictPort");
             if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
+            viteStart.Environment.Remove("FMCG_APP03_RESUME_PROXY");
+            if (traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled))
+                viteStart.Environment["FMCG_APP03_RESUME_PROXY"] = "1";
             viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
@@ -323,7 +329,13 @@ internal static class App02c1Dev
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                using var response = await client.SendAsync(request, lifetime.Token);
+                using var response = await App03SettlementHttpWitness.ObserveSession(
+                    traceResume ? resumeWitness : null, resumeCheckpoint, tenant, api.Id, viteProcess.Id,
+                    client.Timeout, lifetime.Token, id =>
+                    {
+                        if (id is not null) request.Headers.Add(App03SettlementHttpWitness.Header, id);
+                        return client.SendAsync(request, lifetime.Token);
+                    });
                 // API startup already checked the database bindings. A valid, newly signed token may
                 // be forbidden here if the business role was revoked while the host was stopped.
                 if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;

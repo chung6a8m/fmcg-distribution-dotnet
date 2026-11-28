@@ -86,7 +86,8 @@ internal sealed class App03DevSession
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
         bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false,
         bool closeReadiness = false, bool tripClosure = false, bool successor = false, bool splitSuccessorLots = false,
-        bool catalogWitness = false)
+        bool catalogWitness = false, App03SettlementHttpWitness.Context? resumeWitness = null,
+        string resumeCheckpoint = "")
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
@@ -168,7 +169,8 @@ internal sealed class App03DevSession
             session.StopToken = stop.Token;
             if (operation == "Start") await session.Begin();
             else await session.Verify();
-            await App02c1Dev.Run("Interactive", root, source, "App03A1", session, observe, catalogWitness);
+            await App02c1Dev.Run("Interactive", root, source, "App03A1", session, observe, catalogWitness,
+                resumeWitness, resumeCheckpoint);
         }
         finally
         {

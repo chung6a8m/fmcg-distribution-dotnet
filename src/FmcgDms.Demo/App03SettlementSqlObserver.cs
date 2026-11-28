@@ -22,14 +22,14 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         && Environment.GetEnvironmentVariable("RUNNER_OS") == "Windows";
 
     internal static App03SettlementHttpWitness.Context? TryCreateContext(string root, string runId,
-        string output, string source)
+        string output, string source, string profile = "app03-6")
     {
-        if (!Enabled) return null;
+        if (!Enabled || profile is not ("app03-5" or "app03-6")) return null;
         // A rejected directory must never receive even a diagnostic startup receipt.
         try
         {
             string directory = Path.GetFullPath(root);
-            foreach (string part in new[] { "TestResults", "app03-6", new DemoRun(runId).Id })
+            foreach (string part in new[] { "TestResults", profile, new DemoRun(runId).Id })
             {
                 directory = Path.Combine(directory, part);
                 if (!Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
@@ -43,9 +43,13 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
     }
 
     internal static async Task<App03SettlementSqlObserver?> Start(string root, string runId,
-        string output, string source, CancellationToken ct)
+        string output, string source, CancellationToken ct, string profile = "app03-6", string tenant = "tenant-a")
     {
-        if (TryCreateContext(root, runId, output, source) is null) return null;
+        if (TryCreateContext(root, runId, output, source, profile) is null || tenant is not ("tenant-a" or "tenant-b")) return null;
+        bool legacy = profile == "app03-6" && tenant == "tenant-a";
+        string suffix = tenant == "tenant-a" ? "a" : "b";
+        string sampleName = legacy ? "sql-reads.ndjson" : $"sql-resume-{suffix}.ndjson";
+        string receiptName = legacy ? "sql-catalog-observer.json" : $"sql-resume-{suffix}-observer.json";
         App03SettlementSqlObserver? observer = null;
         string status = "unavailable";
         int? pid = null;
@@ -53,8 +57,8 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
         try
         {
-            if (File.Exists(Path.Combine(output, "sql-reads.ndjson"))
-                || File.Exists(Path.Combine(output, "sql-catalog-observer.json")))
+            if (File.Exists(Path.Combine(output, sampleName))
+                || File.Exists(Path.Combine(output, receiptName)))
             {
                 status = "existingOutput";
                 return null;
@@ -67,9 +71,14 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
             };
             foreach (string arg in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
-                Path.Combine(root, "scripts", "Watch-App03SqlReads.ps1"), "-ProfileName", "app03-6",
+                Path.Combine(root, "scripts", "Watch-App03SqlReads.ps1"), "-ProfileName", profile,
                 "-RunId", runId, "-ReporterPid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) })
                 info.ArgumentList.Add(arg);
+            if (!legacy)
+            {
+                info.ArgumentList.Add("-ResumeTenant");
+                info.ArgumentList.Add(tenant);
+            }
             info.Environment.Clear();
             foreach (string name in new[] { "SystemRoot", "LOCALAPPDATA", "USERPROFILE", "TEMP", "TMP" })
                 if (Environment.GetEnvironmentVariable(name) is string value) info.Environment[name] = value;
@@ -104,7 +113,7 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
 
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(8));
-            string sampleFile = Path.Combine(output, "sql-reads.ndjson");
+            string sampleFile = Path.Combine(output, sampleName);
             while (!observer.child.HasExited)
             {
                 deadline.Token.ThrowIfCancellationRequested();
@@ -125,7 +134,8 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                         var e = row.RootElement;
                         string? kind = e.GetProperty("event").GetString();
                         if (i == 0)
-                            identified = kind == "start" && e.GetProperty("profile").GetString() == "app03-6"
+                            identified = kind == "start" && e.GetProperty("profile").GetString() == profile
+                                && e.GetProperty("tenant").GetString() == tenant
                                 && e.GetProperty("runId").GetString() == runId && e.GetProperty("pid").GetInt32() == pid;
                         if (!identified || kind is "unavailable" or "stop") { unavailable = true; break; }
                         if (kind == "available") available = true;
@@ -149,12 +159,12 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                 await observer.DisposeAsync();
             try
             {
-                using var receipt = File.Open(Path.Combine(output, "sql-catalog-observer.json"), FileMode.CreateNew);
+                using var receipt = File.Open(Path.Combine(output, receiptName), FileMode.CreateNew);
                 JsonSerializer.Serialize(receipt, new { schema = "APP03_SETTLEMENT_SQL_OBSERVER_V1",
-                    source, runId, profile = "app03-6", pid, status, startedUtc,
+                    source, runId, profile, tenant, pid, status, startedUtc,
                     endedUtc = DateTimeOffset.UtcNow, elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
             }
-            catch { Console.Error.WriteLine("APP-03 catalog SQL observer receipt unavailable."); }
+            catch { Console.Error.WriteLine("APP-03 SQL observer receipt unavailable."); }
         }
         return null;
     }
@@ -171,7 +181,7 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
             }
         }
-        catch { Console.Error.WriteLine("APP-03 catalog SQL observer cleanup unavailable."); }
+        catch { Console.Error.WriteLine("APP-03 SQL observer cleanup unavailable."); }
         finally
         {
             job.Dispose();

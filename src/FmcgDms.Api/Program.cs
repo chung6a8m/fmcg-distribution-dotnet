@@ -63,7 +63,7 @@ if (app02d4)
     await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
 bool app02c6 = !app02d1 && !devF03 && !devF04 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
 // The opt-in synthetic witness logs only a fixed route and a validated correlation ID.
-if (app03Settlement && app.Environment.IsEnvironment("IntegrationTest")
+if (app.Configuration.GetValue<bool>("App03:Workspace") && app.Environment.IsEnvironment("IntegrationTest")
     && app.Configuration.GetValue<bool>("App03:CatalogWitness"))
     app.Use(next => context => App03CatalogTrace.Observe(context, () => next(context), Console.WriteLine));
 

@@ -151,6 +151,55 @@ public sealed class App03CatalogWitnessTests : IDisposable
         Assert.Equal(204, context.Response.StatusCode);
     }
 
+    [Fact]
+    public async Task Resume_session_witness_distinguishes_tenants_and_preserves_status()
+    {
+        var witness = new App03SettlementHttpWitness.Context(output, "source", "run");
+        int calls = 0;
+        foreach (string tenant in new[] { "tenant-a", "tenant-b" })
+        {
+            using var response = await App03SettlementHttpWitness.ObserveSession(witness, "nextday-1", tenant,
+                1, 2, TimeSpan.FromSeconds(3), CancellationToken.None, id =>
+                {
+                    calls++;
+                    Assert.NotNull(id);
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden));
+                });
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        Assert.Equal(2, calls);
+        var rows = Directory.GetFiles(output, "resume-session-http-*-end.json").Select(file =>
+        {
+            using var json = JsonDocument.Parse(File.ReadAllText(file));
+            return json.RootElement.Clone();
+        }).ToArray();
+        Assert.Equal(2, rows.Length);
+        Assert.Equal(new[] { "tenant-a", "tenant-b" }, rows.Select(r => r.GetProperty("tenant").GetString()).Order().ToArray());
+        Assert.All(rows, r =>
+        {
+            Assert.Equal(403, r.GetProperty("status").GetInt32());
+            Assert.Equal(App03SettlementHttpWitness.SessionRoute, r.GetProperty("route").GetString());
+        });
+        Assert.Empty(Directory.GetFiles(output, "catalog-http-*.json"));
+    }
+
+    [Fact]
+    public async Task Api_trace_accepts_session_but_not_unrelated_paths()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = App03SettlementHttpWitness.SessionRoute;
+        context.Request.Headers[App03SettlementHttpWitness.Header] = Guid.NewGuid().ToString("N");
+        var lines = new List<string>();
+        await App03CatalogTrace.Observe(context, () => Task.CompletedTask, lines.Add);
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, line => Assert.Contains(App03SettlementHttpWitness.SessionRoute, line));
+        lines.Clear();
+        context.Request.Path = "/api/synthetic/app02c1/customers";
+        await App03CatalogTrace.Observe(context, () => Task.CompletedTask, lines.Add);
+        Assert.Empty(lines);
+    }
+
     private Task<int> Observe(CancellationToken ct, Func<string, Task<int>> send) =>
         App03SettlementHttpWitness.ObserveIfEnabled(new(output, "source", "run"), "day", 1, 2,
             TimeSpan.FromSeconds(3), ct, id => send(id!));

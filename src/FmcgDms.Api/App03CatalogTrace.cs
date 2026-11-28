@@ -5,14 +5,16 @@ namespace FmcgDms.Api;
 
 internal static class App03CatalogTrace
 {
-    private const string Route = "/api/synthetic/app02c2/catalog";
+    private const string Catalog = "/api/synthetic/app02c2/catalog";
+    private const string Session = "/api/synthetic/app02c1/session";
     private const string Header = "X-Fmcg-App03-Catalog-Witness";
 
     internal static async Task Observe(HttpContext context, Func<Task> next, Action<string> write)
     {
         // No arbitrary request fields, SQL values, tokens, URLs or exception messages are recorded.
+        string? route = context.Request.Path.Value;
         if (!HttpMethods.IsGet(context.Request.Method)
-            || !string.Equals(context.Request.Path.Value, Route, StringComparison.Ordinal)
+            || route is not (Catalog or Session)
             || !context.Request.Headers.TryGetValue(Header, out var value) || value.Count != 1
             || !Guid.TryParseExact(value.ToString(), "N", out Guid parsed)
             || parsed.ToString("N") != value.ToString())
@@ -22,7 +24,7 @@ internal static class App03CatalogTrace
         }
         string id = parsed.ToString("N");
         long started = Stopwatch.GetTimestamp();
-        Emit(new { schema = "APP03_SETTLEMENT_API_V1", phase = "start", id, route = Route,
+        Emit(new { schema = "APP03_SETTLEMENT_API_V1", phase = "start", id, route,
             apiPid = Environment.ProcessId, utc = DateTimeOffset.UtcNow });
         bool faulted = true;
         try
@@ -32,7 +34,7 @@ internal static class App03CatalogTrace
         }
         finally
         {
-            Emit(new { schema = "APP03_SETTLEMENT_API_V1", phase = "end", id, route = Route,
+            Emit(new { schema = "APP03_SETTLEMENT_API_V1", phase = "end", id, route,
                 apiPid = Environment.ProcessId, utc = DateTimeOffset.UtcNow,
                 elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                 status = context.Response.StatusCode, responseStarted = context.Response.HasStarted,

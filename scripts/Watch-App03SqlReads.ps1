@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5', 'app03-6')][string]$ProfileName,
     [Parameter(Mandatory)][string]$RunId,
-    [Parameter(Mandatory)][int]$ReporterPid
+    [Parameter(Mandatory)][int]$ReporterPid,
+    [ValidateSet("tenant-a", "tenant-b")][string]$ResumeTenant
 )
 
 Set-StrictMode -Version Latest
@@ -13,6 +14,13 @@ if ($env:FMCG_APP03_READ_DIAGNOSTICS -cne '1' -or $env:GITHUB_ACTIONS -cne 'true
 # Fail closed before opening any file or database. The caller cannot supply a server,
 # connection string, database, SQL text or free-form destination.
 if ($RunId -cnotmatch '\A[0-9a-f]{32}\z' -or $ReporterPid -le 0) { exit 2 }
+$tenant = "tenant-a"
+$sampleName = "sql-reads.ndjson"
+if ($ResumeTenant) {
+    if ($ProfileName -cnotin @("app03-5", "app03-6")) { exit 2 }
+    $tenant = $ResumeTenant
+    $sampleName = if ($tenant -ceq "tenant-a") { "sql-resume-a.ndjson" } else { "sql-resume-b.ndjson" }
+}
 $directory = Split-Path -Parent $PSScriptRoot
 foreach ($part in @('TestResults', $ProfileName, $RunId)) {
     $directory = Join-Path $directory $part
@@ -87,13 +95,14 @@ try {
     $parent = [Diagnostics.Process]::GetProcessById($ReporterPid)
     $inputPipe = [Console]::OpenStandardInput()
     $pipeRead = $inputPipe.BeginRead((New-Object byte[] 1), 0, 1, $null, $null)
-    $file = [IO.File]::Open((Join-Path $directory 'sql-reads.ndjson'), 'CreateNew', 'Write', 'Read')
+    $file = [IO.File]::Open((Join-Path $directory $sampleName), 'CreateNew', 'Write', 'Read')
     $writer = [IO.StreamWriter]::new($file, [Text.UTF8Encoding]::new($false))
-    Write-Record @{ event='start'; profile=$ProfileName; runId=$RunId; pid=$PID }
+    Write-Record @{ event='start'; profile=$ProfileName; tenant=$tenant; runId=$RunId; pid=$PID }
 
     $phase = 'connection'
     Add-Type -AssemblyName System.Data
-    $database = "Fmcg_App00_${RunId}_A"
+    $suffix = if ($tenant -ceq "tenant-a") { "A" } else { "B" }
+    $database = "Fmcg_App00_${RunId}_${suffix}"
     $db = [System.Data.SqlClient.SqlConnection]::new(
         "Server=(localdb)\MSSQLLocalDB;Database=$database;Integrated Security=true;Pooling=false;Connect Timeout=2;ConnectRetryCount=0;Application Name=APP03 read observer")
     $db.Open()
@@ -104,13 +113,15 @@ try {
     $command.CommandText = @'
 SELECT CASE WHEN DB_NAME()=@database
  AND (SELECT COUNT(*) FROM dbo.LocalDemoOwner o JOIN dbo.App00ScratchMarker m ON m.Nonce=o.RunId WHERE o.RunId=@run)=1
- AND (SELECT COUNT(*) FROM dbo.LocalApp03Session WHERE RunId=@run AND TenantId='tenant-a')=1
- AND (SELECT COUNT(*) FROM dbo.AppTenantBinding WHERE Slot=1 AND TenantId='tenant-a')=1 THEN 1 ELSE 0 END;
+ AND (SELECT COUNT(*) FROM dbo.LocalApp03Session WHERE RunId=@run AND TenantId=@tenant)=1
+ AND (SELECT COUNT(*) FROM dbo.AppTenantBinding WHERE Slot=1 AND TenantId=@tenant)=1 THEN 1 ELSE 0 END;
 '@
     $null = $command.Parameters.Add('@database', [System.Data.SqlDbType]::NVarChar, 128)
     $command.Parameters['@database'].Value = $database
     $null = $command.Parameters.Add('@run', [System.Data.SqlDbType]::VarChar, 32)
     $command.Parameters['@run'].Value = $RunId
+    $null = $command.Parameters.Add('@tenant', [System.Data.SqlDbType]::NVarChar, 32)
+    $command.Parameters['@tenant'].Value = $tenant
     if ([int]$command.ExecuteScalar() -ne 1) { throw 'ownership' }
     $phase = 'visibility'
     $command.Parameters.Clear()

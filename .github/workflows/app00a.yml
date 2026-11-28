@@ -1056,7 +1056,7 @@ jobs:
         working-directory: web
         run: npx playwright install chromium
       - name: Verify APP-03 read diagnostics boundaries
-        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs
+        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs web/tests/app03-resume-proxy.test.mjs
       - name: Verify APP-03 SQL observer error classification
         shell: powershell
         run: ./tests/ci/Test-App03SqlReadErrors.ps1
@@ -1078,6 +1078,7 @@ jobs:
         shell: pwsh
         env:
           FMCG_APP03_READ_DIAGNOSTICS: '1'
+          FMCG_APP03_SETTLEMENT_WITNESS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyField
       - name: APP-03.6 Field to Cashier and Warehouse handoff through Chromium and LocalDB
         shell: pwsh
