@@ -261,7 +261,8 @@ def graph_cycles(s, start_ms, capture_ms):
     require(all(integer(x[k]) and x[k] == 0 for k in ("TargetDroppedCount", "SessionDroppedEvents",
                 "SessionDroppedBuffers", "LargestDroppedEventSize", "UnprojectedReports")), "XE_DROPPED_OR_UNSCOPED")
     require(integer(x["DatabaseId"], 1) and integer(x["EventCount"])
-            and x["TotalEventsProcessed"] == x["EventCount"] == len(x["Graphs"]), "XE_EVENT_COUNT")
+            and integer(x["ParsedEventCount"]) and x["TotalEventsProcessed"] == x["EventCount"]
+            == x["ParsedEventCount"] == len(x["Graphs"]), "XE_EVENT_COUNT")
     cycles = 0
     modes = {"S", "U", "X", "IS", "IU", "IX", "SIX", "SIU", "UIX", "Sch-S", "Sch-M",
              "RangeS-S", "RangeS-U", "RangeI-N", "RangeI-S", "RangeI-U", "RangeI-X",
