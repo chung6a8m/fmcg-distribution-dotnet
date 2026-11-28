@@ -58,7 +58,8 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
 
     public static async Task<App01e4ApiProcess> StartAsync(
         SqlScratchFixture fixture, CancellationToken ct, bool app02WorkerEnabled = false,
-        Action<string?, string?>? onReadinessFailure = null)
+        Action<string?, string?>? onReadinessFailure = null,
+        string? rel75Tenant = null, string[]? rel75Phases = null, bool rel75Reverse = false)
     {
         string? root = AppContext.BaseDirectory;
         while (root is not null && !File.Exists(Path.Combine(root, "FmcgDms.slnx")))
@@ -101,6 +102,15 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
         start.Environment["SyntheticAuth__Audience"] = "fmcg-synthetic-app00";
         start.Environment["TenantDatabases__tenant-a"] = fixture.TenantAConnectionString;
         start.Environment["TenantDatabases__tenant-b"] = fixture.TenantBConnectionString;
+        // Never inherit probe activation from the parent or normal CI.
+        start.Environment["Rel75Probe__Enabled"] = rel75Tenant is null ? "false" : "true";
+        if (rel75Tenant is not null)
+        {
+            start.Environment["Rel75Probe__Tenant"] = rel75Tenant;
+            start.Environment["Rel75Probe__Nonce"] = fixture.Nonce;
+            start.Environment["Rel75Probe__Phases"] = string.Join(",", rel75Phases ?? []);
+            start.Environment["Rel75Probe__ReverseStartup"] = rel75Reverse ? "true" : "false";
+        }
         start.Environment["DOTNET_NOLOGO"] = "1";
         start.Environment["Logging__Console__FormatterOptions__IncludeScopes"] = "true";
         start.Environment["Logging__Console__FormatterOptions__UseUtcTimestamp"] = "true";
@@ -174,6 +184,10 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
 
     public Task<string> CaptureFailureAsync(string failureId, string stage, CancellationToken ct) =>
         CaptureAsync(failureId, stage, null, null, null, ct);
+
+    internal Task<string> CaptureRel75ObservationAsync(string failureId, string stage,
+        FailureContext context, CancellationToken ct) =>
+        CaptureAsync(failureId, stage, null, null, context, ct);
 
     internal Task<string> CaptureHttpFailureAsync(string failureId, string stage,
         HttpRequestMessage request, HttpResponseMessage response, FailureContext context,

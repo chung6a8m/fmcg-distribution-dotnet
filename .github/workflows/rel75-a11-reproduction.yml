@@ -1,0 +1,203 @@
+name: REL-75.4 A11-09 reproduction (non-gating)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rel75-a11-reproduction.yml'
+      - 'scripts/rel75_a11_matrix.py'
+      - 'tests/ci/test_rel75_a11_matrix.py'
+      - 'tests/FmcgDms.Api.Tests/Rel75*.cs'
+      - 'tests/FmcgDms.Api.Tests/App01e4TcpRestartHarness.cs'
+      - 'tests/FmcgDms.Api.Tests/App02a4*.cs'
+      - 'tests/FmcgDms.Api.Tests/FailureDiagnostics.cs'
+      - 'tests/FmcgDms.Api.Tests/RecoveryDiagnostics.cs'
+      - 'tests/FmcgDms.Api.Tests/Fixtures/app02a4-expected.json'
+      - 'src/FmcgDms.Api/Persistence/Rel75Probe.cs'
+      - 'src/FmcgDms.Api/Persistence/App02a3*.cs'
+      - 'src/FmcgDms.Api/Tenancy/TenantConnections.cs'
+  workflow_dispatch:
+    inputs:
+      samples_per_arm:
+        description: 'Fresh runners per arm and tenant (5 = official 60-cell matrix; 1 = smoke)'
+        required: true
+        type: choice
+        default: '5'
+        options:
+          - '1'
+          - '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: REL75-A11-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REL75_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  REL75_SAMPLES: ${{ inputs.samples_per_arm || '1' }}
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Verify exact source and dispatch boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REL75_SOURCE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+          else
+            test "$GITHUB_EVENT_NAME" = pull_request
+            test "$REL75_SAMPLES" = 1
+          fi
+      - name: Matrix contract regressions
+        run: python -m unittest discover -s tests/ci -p 'test_rel75_a11_matrix.py' -v
+      - name: Build finite matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(python scripts/rel75_a11_matrix.py plan --samples "$REL75_SAMPLES")"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  sample:
+    needs: plan
+    name: Sample (${{ matrix.arm }} / ${{ matrix.tenant }} / ${{ matrix.iteration }})
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify disposable hosted runner and exact source
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_ACTIONS -cne 'true') { throw 'Hosted runner required' }
+          if ((git rev-parse HEAD).Trim() -cne $env:REL75_SOURCE_SHA) { throw 'Wrong checkout' }
+          if ((dotnet --version).Trim() -cne '10.0.404') { throw 'Wrong SDK' }
+          ./scripts/Verify-Business.ps1
+      - name: Start LocalDB once with existing budget
+        id: localdb
+        shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ env.REL75_SOURCE_SHA }}
+        run: ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ env.REL75_SOURCE_SHA }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: Restore and build Release
+        shell: pwsh
+        run: |
+          dotnet restore FmcgDms.slnx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build FmcgDms.slnx -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: One real OS sample with fresh fixture
+        shell: pwsh
+        env:
+          APP00A_SQL_SERVER: '(localdb)\MSSQLLocalDB'
+          APP02A4_SOURCE_HEAD_SHA: ${{ env.REL75_SOURCE_SHA }}
+          REL75_A11_SAMPLE: '1'
+          REL75_A11_ARM: ${{ matrix.arm }}
+          REL75_A11_TENANT: ${{ matrix.tenant }}
+          REL75_A11_ITERATION: ${{ matrix.iteration }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $trxDir = Join-Path $env:GITHUB_WORKSPACE 'TestResults/REL75-A11-TRX'
+          $receiptDir = Join-Path $env:GITHUB_WORKSPACE 'TestResults/REL75-A11-Execution'
+          New-Item -ItemType Directory -Path $trxDir,$receiptDir -Force | Out-Null
+          # Raw test stdout/TRX can contain arbitrary SQL exception text.
+          # Do not publish it as diagnostic evidence; project only counts below.
+          $privateLog = Join-Path $env:RUNNER_TEMP 'rel75-a11-test-output.txt'
+          dotnet test --project tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 1 -- --filter-method FmcgDms.Api.Tests.App01e2CrossCommandRaceTests.Rel75_Probe_contract_and_opt_in_sample --report-trx --results-directory "$trxDir" *> $privateLog
+          $exitCode = $LASTEXITCODE
+          Remove-Item -LiteralPath $privateLog -ErrorAction Stop
+          $trx = @(Get-ChildItem $trxDir -File -Filter '*.trx' -Recurse)
+          $count = 0
+          $correct = $false
+          $outcome = 'UNKNOWN'
+          if ($trx.Count -eq 1) {
+            [xml]$doc = Get-Content $trx[0].FullName -Raw
+            $rows = @($doc.SelectNodes("//*[local-name()='UnitTestResult']"))
+            $count = $rows.Count
+            if ($count -eq 1) {
+              $correct = $rows[0].testName -clike '*Rel75_Probe_contract_and_opt_in_sample'
+              if ($rows[0].outcome -cin @('Passed','Failed')) { $outcome = $rows[0].outcome }
+            }
+          }
+          @{
+            schema = 'REL75_A11_EXECUTION_V1'; source = $env:REL75_SOURCE_SHA
+            workflow = $env:GITHUB_SHA; run = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
+            arm = $env:REL75_A11_ARM; tenant = $env:REL75_A11_TENANT; iteration = [int]$env:REL75_A11_ITERATION
+            trxCount = $trx.Count; testCount = $count; correctMethod = $correct; outcome = $outcome; exitCode = $exitCode
+          } | ConvertTo-Json | Set-Content (Join-Path $receiptDir 'execution.json') -Encoding utf8NoBOM
+          if ($count -ne 1 -or -not $correct -or $outcome -cne 'Passed' -or $exitCode -ne 0) {
+            throw 'REL75 sample failed or did not execute exactly one test'
+          }
+      - name: Retain exact cell evidence (no raw XML/SQL/TRX)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rel75-a11-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arm }}-${{ matrix.tenant }}-${{ matrix.iteration }}
+          path: |
+            **/TestResults/REL75-A11/sample.json
+            **/TestResults/APP-02A4/*-A11-09-oracle.json
+            **/TestResults/LAB-E02/*.json
+            TestResults/REL75-A11-Execution/execution.json
+            TestResults/LocalDbBootstrap/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  summarize:
+    if: ${{ always() && needs.plan.result == 'success' }}
+    needs: [plan, sample]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Verify exact summary source
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$REL75_SOURCE_SHA"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rel75-a11-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: TestResults/REL75-A11/inputs
+      - name: Validate exact-attempt evidence and classify
+        if: always()
+        shell: bash
+        run: python scripts/rel75_a11_matrix.py summarize --samples "$REL75_SAMPLES" --root TestResults/REL75-A11/inputs --output TestResults/REL75-A11/summary.json
+      - name: Retain summary including failures and incomplete observations
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rel75-a11-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: TestResults/REL75-A11/summary.json
+          if-no-files-found: error
+          retention-days: 30

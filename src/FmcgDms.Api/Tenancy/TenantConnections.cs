@@ -56,6 +56,10 @@ public sealed class TenantConnections(IConfiguration config, IHostEnvironment ho
         return connectionString;
     }
 
+    // REL-75.4 only: called after the normal connection/ownership guard.
+    internal Task Rel75CheckpointAsync(SqlConnection db, string tenant, string phase,
+        CancellationToken ct) => Rel75Probe.CheckpointAsync(config, host, db, tenant, phase, ct);
+
     /// <summary>
     /// Fail closed unless the signed synthetic tenant maps to its own, marked LocalDB scratch.
     /// Production APP-01 tenant connections must use a separate real-authenticated path.

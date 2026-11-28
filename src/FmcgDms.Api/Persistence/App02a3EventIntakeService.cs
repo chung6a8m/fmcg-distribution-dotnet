@@ -145,6 +145,8 @@ public sealed class App02a3EventIntakeService(
             // Current role is a tenant-bound SQL fact, not merely a JWT
             // issued before a possible synthetic revocation.
             await App02a3Sql.RequireRole(db, tx, tenant, actor, requiredRole, ct);
+            if (requiredRole == "sales")
+                await connections.Rel75CheckpointAsync(db, tenant, "PAfterRole", ct);
 
             var saved = await db.QuerySingleOrDefaultAsync<ReceiptRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.ActorId,r.PayloadVersion,r.PayloadHash,p.Status
@@ -233,6 +235,8 @@ public sealed class App02a3EventIntakeService(
                     StateChangedAtUtc=SYSUTCDATETIME()
                 WHERE TenantId=@Tenant AND ReceiptId=@Receipt
                 """, new { State = state, Tenant = tenant, Receipt = receipt }, tx, ct));
+            if (requiredRole == "sales")
+                await connections.Rel75CheckpointAsync(db, tenant, "PBeforeCommit", ct);
             await tx.CommitAsync(ct);
             signal.Wake(tenant);
             return new("RECEIVED_COMMITTED", state, "DURABLE_INTAKE", receipt, false);

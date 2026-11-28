@@ -113,6 +113,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections,
                 return "CASE";
             }
 
+            await connections.Rel75CheckpointAsync(db, tenant, "CBeforePrerequisite", ct);
             PRow? p = await db.QuerySingleOrDefaultAsync<PRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.OfferId,r.OfferedAmount,r.ActorId,r.ReceivedAtUtc
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)
@@ -337,6 +338,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections,
     {
         var worker = App02a3Sql.WorkerPrincipal(tenant);
         await using var db = await connections.OpenSyntheticScratchAsync(worker, ct);
+        await connections.Rel75CheckpointAsync(db, tenant, "SweepBeforeSelect", ct);
         var rows = (await db.QueryAsync<Guid>(App02a3Sql.Cmd("""
             SELECT TOP(100) r.ReceiptId
             FROM dbo.App02EventReceipt r

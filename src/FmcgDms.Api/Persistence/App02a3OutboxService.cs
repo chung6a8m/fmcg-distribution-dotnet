@@ -73,6 +73,7 @@ public sealed class App02a3OutboxService(TenantConnections connections,
                     await lease.CommitAsync(ct);
                     return "IDLE";
                 }
+                await connections.Rel75CheckpointAsync(sender, tenant, "OutboxAfterClaimRead", ct);
                 if (row.PayloadVersion != 1 ||
                     !CryptographicOperations.FixedTimeEquals(
                         row.PayloadHash, SHA256.HashData(row.CanonicalBytes)))

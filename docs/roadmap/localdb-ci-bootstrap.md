@@ -84,7 +84,7 @@ Giữ [LAB-E03](app-02b-local-preprod/04-evidence-and-closeout.md#lab-e03) cùng
 
 ## 6. REL-75.3 — LocalDB investigation matrix (27/11/2026)
 
-**Scope / status:** `SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING / MATRIX_NOT_RUN`. Owner authorized REL-75.3 after [REL-75.2 closeout](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7219038626). Base `10176d1316b2c6a6e441ebc89f655990f60566be`. R75-01 / LAB-E03 only: gather discriminating evidence; no remediation, production, PREPROD or laptop changes. R75-02 direct 1205 evidence from main attempt 1 is tracked separately in REL-75.4/.6.
+**Scope / status:** `CLOSED / MAIN_CI_VERIFIED / MATRIX_COMPLETE_WITH_BOOTSTRAP_FAILURES` (investigation only). Owner authorized REL-75.3 after [REL-75.2 closeout](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7219038626). Base `10176d1316b2c6a6e441ebc89f655990f60566be`. R75-01 / LAB-E03 only: gather discriminating evidence; no remediation, production, PREPROD or laptop changes. R75-02 direct 1205 evidence from main attempt 1 is tracked separately in REL-75.4/.6.
 
 ### Matrix and controls
 
@@ -105,6 +105,20 @@ Each sample owns one new GitHub-hosted Windows VM; no reuse, no self-hosted, no 
 - Acceptance for REL-75.3: reviewed harness + source/main Full receipts + 60 scheduled cold observations with valid exact-attempt summary, per-arm actual counts and stratification, reviewed logs/signatures and evidence-backed root-cause disposition. If not cold, unavailable runner/engine, missing diagnostics, or no reproduced/isolated root cause, report the exact gap and keep native root cause INVESTIGATION_BLOCKED; no automatic repair or claim of fix. A different engine on 2025 confounds OS/engine; do not attribute differences to OS alone. Additional pinned engine comparison needs evidence and a separately scoped decision. Any 5173/528 recurrence is a lead, not proof of which files mismatched.
 
 [Microsoft: SqlLocalDB utility](https://learn.microsoft.com/en-us/sql/tools/sqllocaldb-utility) · [GitHub-hosted runner images](https://github.com/actions/runner-images).
+
+### Official closeout and remediation handoff
+
+**REL-75.3 closeout:** `CLOSED / MAIN_CI_VERIFIED / MATRIX_COMPLETE_WITH_BOOTSTRAP_FAILURES` — investigation scope only, 27/11/2026. [PR #178](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/178), reviewed source `e105f328594365dbe2a595fab4af29816e8f6ee5`, merge `fcd914247c52ec05d69e3111d15a1cfb02101a0c`. [Source receipt](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/178#issuecomment-7220259611), [main Full receipt](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7220883809), [official closeout](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7221415264). Source/main required 10/10 workflows, 53 success/3 policy skips, 406/406 .NET and 1440/1440 oracle cells; main attempt 1. 19 Python + 11 PowerShell matrix regressions, 3/3 smoke READY. Official [run 46016885607 attempt 1](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/46016885607/attempts/1): 60/60 fresh cells, 52 READY, 8 failed; all 61 ZIPs independently CRC/SHA-256 verified, no missing/invalid/partial artifacts or replacement. [Summary 15206354389](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/46016885607/artifacts/15206354389), SHA-256 `db5b35b070639b27cb28b6300cca2514f4e7cb3287149105d7929c4b9e77efd0`. Export archive SHA-256 `acbcb33a8f3e7d294f77e3b6d0dbf7a8252b6d4935d904f2f62d39baae1e735f`; retention 30 days, preserve Owner export.
+
+| Arm | Actual engine | READY / FAILED | READY median ms |
+| --- | --- | --- | ---: |
+| win22-auto | 15.0.4382.1 | 17 / 3 | 14394 |
+| win22-named | 15.0.4382.1 | 19 / 1 | 20870 |
+| win25-auto | 17.0.4025.3 | 16 / 4 | 13016 |
+
+All eight failures occurred before readiness: two create InstanceStartFailed / SqlServerStartupFailed with SQL 5178/state 1/severity 16 and Event 528 (including named instance), six NativeProcessTimeout (five create, one start), no recorded SQL/event in timeout family. No evidence proving earlier 5173 and 5178 identical, exact affected filename/sector geometry or native timeout mechanism. Windows 2025 comparison confounds OS/engine; no default runner/engine, timeout, storage or registry change. R75-01 `REPRODUCED / FAILURE_SIGNATURES_CLASSIFIED / NATIVE_ROOT_CAUSE_INVESTIGATION_BLOCKED`, G75-02 OPEN. REL-75.5 must collect read-only exact-volume sectorinfo and original/actual sector size if reliably available, separately classify create/start native progress, then select evidence-backed remediation. Retain the separate two SQL 1205 HTTP recurrences for REL-75.4/.6; no claim that LocalDB startup and A11-09 share a root cause.
+
+Next runtime investigation: [REL-75.4](rel75-a11-reproduction.md), independent of REL-75.5.
 
 ## Tham chiếu
 

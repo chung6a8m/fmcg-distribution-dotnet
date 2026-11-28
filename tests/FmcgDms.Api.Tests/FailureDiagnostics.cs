@@ -5,7 +5,17 @@ using System.Text.RegularExpressions;
 namespace FmcgDms.Api.Tests;
 
 internal sealed record FailureContext(string TestRunId, string SourceHeadSha, string WorkflowSha,
-    string TenantId, string Group, int? PreviousPid = null);
+    string TenantId, string Group, int? PreviousPid = null)
+{
+    // Only REL-75 matrix observations populate these; ordinary A11-09
+    // diagnostics retain their established JSON contract.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? FixtureNonce { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Arm { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? Iteration { get; init; }
+}
 
 // Keep only known diagnostic fields. Arbitrary messages, arguments, header values
 // and payloads can contain credentials even when no secret name is present.
