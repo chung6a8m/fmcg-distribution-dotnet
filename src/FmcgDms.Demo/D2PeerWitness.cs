@@ -20,6 +20,7 @@ internal sealed class D2PeerWitness : IAsyncDisposable
     ];
     private readonly Task[] observers;
     private int ordinal;
+    private string phase = "origin-seed";
 
     internal static bool Enabled => OperatingSystem.IsWindows() &&
         Environment.GetEnvironmentVariable("FMCG_D2_PEER_WITNESS") == "1" &&
@@ -71,28 +72,47 @@ internal sealed class D2PeerWitness : IAsyncDisposable
         }
     }
 
-    internal sealed record Ticket(string Id, string Tenant, string Route, int Ordinal, int ApiPid, int VitePid,
+    internal void SelectPhase(string value)
+    {
+        if (value is not ("origin-seed" or "peer-seed" or "peer-checks")) return;
+        phase = value;
+        ordinal = 0;
+    }
+
+    internal sealed record Ticket(string Id, string Tenant, string Route, string CasePhase, int Ordinal, int ApiPid, int VitePid,
         DateTimeOffset StartedUtc, long Stamp, double TimeoutMs);
 
     internal Ticket? Begin(string tenant, HttpRequestMessage request, TimeSpan timeout)
     {
         try
         {
-            // All requests originate in the frozen PeerCase; only normalized labels are retained.
+            // Includes the existing C/D HTTP requests while building both PeerCase fixtures.
             string? path = request.RequestUri?.AbsolutePath;
-            string? route = request.Method == HttpMethod.Post && path == "/api/synthetic/app02d2/sales"
-                ? "D2_POST" : request.Method == HttpMethod.Get &&
-                path?.StartsWith("/api/synthetic/app02d2/sales/", StringComparison.Ordinal) == true
-                ? "D2_LOOKUP" : null;
+            string? route = request.Method == HttpMethod.Post ? path switch
+            {
+                "/api/synthetic/app02d2/sales" => "D2_POST",
+                "/api/synthetic/app02c1/ship-to-selections" => "C1_SHIP_TO",
+                "/api/synthetic/app02c2/drafts" => "C2_DRAFT",
+                "/api/synthetic/app02c2/confirm" => "C2_CONFIRM",
+                "/api/synthetic/app02c2/reserve" => "C2_RESERVE",
+                "/api/synthetic/app02d1/quota" => "D1_QUOTA",
+                "/api/synthetic/app02d1/credit" => "D1_CREDIT",
+                "/api/synthetic/app02d1/load" => "D1_LOAD",
+                "/api/synthetic/app02c3/load" => "C3_LOAD",
+                _ => null
+            }
+                : request.Method == HttpMethod.Get && path?.StartsWith("/api/synthetic/app02d2/sales/", StringComparison.Ordinal) == true
+                    && path["/api/synthetic/app02d2/sales/".Length..].Split('/') is { Length: 2 } parts
+                    && parts.All(p => p.Length != 0) ? "D2_LOOKUP" : null;
             if (route is null || tenant is not ("tenant-a" or "tenant-b")) return null;
             var pid = pids();
             string id = Guid.NewGuid().ToString("N");
             if (!request.Headers.TryAddWithoutValidation("X-Fmcg-D2-Peer-Witness", id)) return null;
             int index = ++ordinal;
-            var ticket = new Ticket(id, tenant, route, index, pid.ApiPid, pid.VitePid,
+            var ticket = new Ticket(id, tenant, route, phase, index, pid.ApiPid, pid.VitePid,
                 DateTimeOffset.UtcNow, Stopwatch.GetTimestamp(), timeout.TotalMilliseconds);
             Write($"d2-peer-{direction}-{id}-start.json", new { schema = "D2_PEER_CLIENT_V1", phase = "start",
-                source, runId, direction, id, tenant, route, ordinal = index, apiPid = pid.ApiPid,
+                source, runId, direction, id, tenant, route, casePhase = phase, ordinal = index, apiPid = pid.ApiPid,
                 vitePid = pid.VitePid, startedUtc = ticket.StartedUtc, timeoutMs = ticket.TimeoutMs });
             return ticket;
         }
@@ -115,7 +135,7 @@ internal sealed class D2PeerWitness : IAsyncDisposable
         };
         Write($"d2-peer-{direction}-{ticket.Id}-end.json", new { schema = "D2_PEER_CLIENT_V1", phase = "end",
             source, runId, direction, id = ticket.Id, tenant = ticket.Tenant, route = ticket.Route,
-            ordinal = ticket.Ordinal, apiPid = ticket.ApiPid, vitePid = ticket.VitePid,
+            casePhase = ticket.CasePhase, ordinal = ticket.Ordinal, apiPid = ticket.ApiPid, vitePid = ticket.VitePid,
             startedUtc = ticket.StartedUtc, endedUtc = DateTimeOffset.UtcNow,
             elapsedMs = Stopwatch.GetElapsedTime(ticket.Stamp).TotalMilliseconds,
             timeoutMs = ticket.TimeoutMs, status, outcome, callerCancelled = caller.IsCancellationRequested });

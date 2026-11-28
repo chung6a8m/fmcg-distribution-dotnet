@@ -31,6 +31,8 @@ internal sealed partial class App02d1Dev(string root, DemoRun run, string source
     private readonly List<Result> results = [];
     private readonly List<HttpObservation> http = [];
     private HttpClient client = null!;
+    // Set only for the scoped D2-16 investigation, never the regular D.1 matrix.
+    internal D2PeerWitness? D2PeerDiagnostic { get; set; }
     private string url = "";
     private CancellationToken ct;
 
@@ -270,14 +272,24 @@ internal sealed partial class App02d1Dev(string root, DemoRun run, string source
         request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",credential??Credential(s.Tenant,role));
         if(forged) request.Headers.Add("X-Tenant-Id",s.Tenant=="tenant-a"?"tenant-b":"tenant-a");
         if(payload is not null) request.Content=JsonContent.Create(payload);
-        using var response=await client.SendAsync(request,ct);
-        string body=await response.Content.ReadAsStringAsync(ct);
-        var parsed=body.TrimStart().StartsWith('{')||body.TrimStart().StartsWith('[') ? JsonSerializer.Deserialize<JsonElement>(body) : default;
-        var result=new Reply(response.StatusCode,parsed);
-        Guid? sourceId=parsed.ValueKind==JsonValueKind.Object && parsed.TryGetProperty("sourceId",out var value) &&
-            value.ValueKind==JsonValueKind.String && value.TryGetGuid(out Guid id) ? id : null;
-        lock(http) http.Add(new(s.Tenant,role,method.Method,path,(int)response.StatusCode,result.Reason,sourceId));
-        return result;
+        var diagnostic = D2PeerDiagnostic;
+        var ticket = diagnostic?.Begin(s.Tenant, request, client.Timeout);
+        int? diagnosticStatus = null;
+        Exception? diagnosticFailure = null;
+        try
+        {
+            using var response=await client.SendAsync(request,ct);
+            diagnosticStatus = (int)response.StatusCode;
+            string body=await response.Content.ReadAsStringAsync(ct);
+            var parsed=body.TrimStart().StartsWith('{')||body.TrimStart().StartsWith('[') ? JsonSerializer.Deserialize<JsonElement>(body) : default;
+            var result=new Reply(response.StatusCode,parsed);
+            Guid? sourceId=parsed.ValueKind==JsonValueKind.Object && parsed.TryGetProperty("sourceId",out var value) &&
+                value.ValueKind==JsonValueKind.String && value.TryGetGuid(out Guid id) ? id : null;
+            lock(http) http.Add(new(s.Tenant,role,method.Method,path,(int)response.StatusCode,result.Reason,sourceId));
+            return result;
+        }
+        catch (Exception ex) { diagnosticFailure = ex; throw; }
+        finally { diagnostic?.End(ticket, diagnosticStatus, diagnosticFailure, ct); }
     }
 
     private static void Expect<T>(T actual,T expected,string label)

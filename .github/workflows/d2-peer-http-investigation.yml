@@ -79,7 +79,9 @@ jobs:
         run: npx playwright install chromium
       - name: Verify D2 peer witness regression
         shell: pwsh
-        run: dotnet test tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build -- --filter-class FmcgDms.Api.Tests.D2PeerHttpTraceTests --report-trx --results-directory TestResults/d2-peer-regression
+        run: |
+          $results = Join-Path $PWD 'TestResults/d2-peer-regression'
+          dotnet test tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 17 -- --filter-class FmcgDms.Api.Tests.D2PeerHttpTraceTests --report-trx --results-directory $results
       - name: Record diagnostic source and attempt
         shell: pwsh
         env:

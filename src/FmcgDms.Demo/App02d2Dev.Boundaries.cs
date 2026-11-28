@@ -123,16 +123,20 @@ internal sealed partial class App02d2Dev
 
     private async Task PeerCase(string tenant, string peer)
     {
-        var own = await d1.SeedD2(tenant, $"D2-16-OUT-{Slot(tenant)}");
-        var foreign = await d1.SeedD2(peer, $"D2-16-IN-{Slot(tenant)}");
-        var input = Request(own, await d1.SeedD2Cash(own, 60), 60);
-        var peerRequest = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60);
-        string ownBefore = await D2Sql.Fingerprint(run, tenant);
-        string peerBefore = await D2Sql.Fingerprint(run, peer);
-        await using var diagnostic = await D2PeerWitness.TryStart(root, evidence, source, run, tenant, witnessPids, ct);
+        await using var diagnostic = await D2PeerWitness.TryStart(root, this.evidence, source, run, tenant, witnessPids, ct);
         peerWitness = diagnostic;
+        d1.D2PeerDiagnostic = diagnostic;
         try
         {
+            diagnostic?.SelectPhase("origin-seed");
+            var own = await d1.SeedD2(tenant, $"D2-16-OUT-{Slot(tenant)}");
+            diagnostic?.SelectPhase("peer-seed");
+            var foreign = await d1.SeedD2(peer, $"D2-16-IN-{Slot(tenant)}");
+            var input = Request(own, await d1.SeedD2Cash(own, 60), 60);
+            var peerRequest = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60);
+            string ownBefore = await D2Sql.Fingerprint(run, tenant);
+            string peerBefore = await D2Sql.Fingerprint(run, peer);
+            diagnostic?.SelectPhase("peer-checks");
             foreach (var variant in new[]
             {
                 peerRequest with { ProducerId = Actor(tenant) },
@@ -155,6 +159,6 @@ internal sealed partial class App02d2Dev
             Verify(await D2Sql.Fingerprint(run, tenant), ownBefore, "Origin tenant protected rows unchanged");
             Verify(await D2Sql.Fingerprint(run, peer), peerBefore, "Peer tenant protected rows unchanged");
         }
-        finally { peerWitness = null; }
+        finally { peerWitness = null; d1.D2PeerDiagnostic = null; }
     }
 }

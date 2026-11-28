@@ -12,7 +12,19 @@ internal static class D2PeerHttpTrace
 
     internal static string? Route(string method, string? path)
     {
-        if (HttpMethods.IsPost(method) && path == Sales) return "D2_POST";
+        if (HttpMethods.IsPost(method)) return path switch
+            {
+                "/api/synthetic/app02d2/sales" => "D2_POST",
+                "/api/synthetic/app02c1/ship-to-selections" => "C1_SHIP_TO",
+                "/api/synthetic/app02c2/drafts" => "C2_DRAFT",
+                "/api/synthetic/app02c2/confirm" => "C2_CONFIRM",
+                "/api/synthetic/app02c2/reserve" => "C2_RESERVE",
+                "/api/synthetic/app02d1/quota" => "D1_QUOTA",
+                "/api/synthetic/app02d1/credit" => "D1_CREDIT",
+                "/api/synthetic/app02d1/load" => "D1_LOAD",
+                "/api/synthetic/app02c3/load" => "C3_LOAD",
+                _ => null
+            };
         if (!HttpMethods.IsGet(method) || path is null ||
             !path.StartsWith(Sales + "/", StringComparison.Ordinal)) return null;
         string[] parts = path[(Sales.Length + 1)..].Split('/');
