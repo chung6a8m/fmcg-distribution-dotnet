@@ -41,3 +41,18 @@ foreach ($case in @(@(-2,'Open',$true), @(-2,'Broken',$false), @(1205,'Open',$fa
 $unrelated = Get-App03SqlReadFailure ([ComponentModel.Win32Exception]::new(258)) Open
 if ($null -ne $unrelated.Number -or $unrelated.Continue) { throw 'A native error alone is not a SQL timeout.' }
 Write-Output 'APP-03 SQL exception classification: four cases passed.'
+
+. (Join-Path $PSScriptRoot '../../scripts/Get-App03SqlObserverStopDecision.ps1')
+foreach ($case in @(
+    @($false,$false,$true,$false,'sample'),
+    @($false,$true,$true,$false,'drain'),
+    @($false,$true,$false,$false,'parentEnded'),
+    @($true,$true,$true,$false,'parentEnded'),
+    @($true,$false,$true,$false,'parentEnded'),
+    @($false,$true,$true,$true,'sizeLimit'),
+    @($false,$false,$true,$true,'sizeLimit')
+)) {
+    $actual = Get-App03SqlObserverStopDecision -ParentExited $case[0] -PipeCompleted $case[1] -DrainOnStop $case[2] -AtSizeLimit $case[3]
+    if ($actual -cne $case[4]) { throw 'Incorrect terminal SQL sample decision.' }
+}
+Write-Output 'APP-03 SQL observer terminal sample decision: seven cases passed.'

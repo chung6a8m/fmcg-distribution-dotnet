@@ -41,8 +41,7 @@ internal sealed class D2PeerWitness : IAsyncDisposable
 
     internal void SelectPhase(string value)
     {
-        if (value is not ("initial" or "origin-seed" or "peer-seed" or "peer-checks" or "seed" or
-            "ack" or "restart-lookup" or "replay-checks" or "channel-off" or "channel-on")) return;
+        if (!DevSqlObserverProtocol.IsD2Phase(value)) return;
         phase = value;
         Interlocked.Exchange(ref ordinal, 0);
     }

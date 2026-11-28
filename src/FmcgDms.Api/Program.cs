@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Dapper;
+using FmcgDms.Api;
 using FmcgDms.Api.Authentication;
 using FmcgDms.Api.Persistence;
 using FmcgDms.Api.Tenancy;
@@ -61,7 +62,12 @@ if ((devF03 || devF04) && ((!app03Field && (app02d1 || app02d2)) || (!app03Settl
 if (app02d4)
     await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
 bool app02c6 = !app02d1 && !devF03 && !devF04 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
-// Opt-in on the dedicated D.2 / DEV-F06 synthetic CI host, including the D.2 off/legacy restart.
+// The opt-in synthetic witness logs only a fixed route and a validated correlation ID.
+if (app.Configuration.GetValue<bool>("App03:Workspace") && app.Environment.IsEnvironment("IntegrationTest")
+    && app.Configuration.GetValue<bool>("App03:CatalogWitness"))
+    app.Use(next => context => App03CatalogTrace.Observe(context, () => next(context), Console.WriteLine));
+
+// Opt-in only on the dedicated D.2 / DEV-F01 / DEV-F06 synthetic hosted CI host.
 if (!app03A1 && app.Environment.IsEnvironment("IntegrationTest")
     && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
     && app.Configuration.GetValue<bool>("App02C1:Enabled")
@@ -69,6 +75,7 @@ if (!app03A1 && app.Environment.IsEnvironment("IntegrationTest")
     && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
     && Environment.GetEnvironmentVariable("RUNNER_OS") == "Windows")
     app.Use(next => context => D2PeerHttpTrace.Observe(context, () => next(context), Console.WriteLine));
+
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {

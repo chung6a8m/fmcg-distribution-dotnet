@@ -935,6 +935,8 @@ jobs:
         run: ./scripts/Run-App02C5.ps1 -Verify
       - name: DEV-F01 AC-17 visit browser, API and SQL side-effect comparison
         shell: pwsh
+        env:
+          FMCG_D2_PEER_WITNESS: '1'
         run: ./scripts/Run-App02C1.ps1 -Increment DevF01 -Verify
       - name: DEV-F02 AC-20 employee advance and cashier recovery through Chromium and SQL
         shell: pwsh
@@ -1058,7 +1060,9 @@ jobs:
         working-directory: web
         run: npx playwright install chromium
       - name: Verify APP-03 read diagnostics boundaries
-        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs
+        run: node --test web/tests/app03-read-http.test.mjs web/tests/app03-read-reporter.test.mjs web/tests/app03-resume-proxy.test.mjs
+      - name: Verify APP-03 real Vite diagnostic transport and launcher boundary
+        run: node --test web/tests/app03-resume-vite.integration.test.mjs
       - name: Verify APP-03 SQL observer error classification
         shell: powershell
         run: ./tests/ci/Test-App03SqlReadErrors.ps1
@@ -1080,9 +1084,12 @@ jobs:
         shell: pwsh
         env:
           FMCG_APP03_READ_DIAGNOSTICS: '1'
+          FMCG_APP03_SETTLEMENT_WITNESS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyField
       - name: APP-03.6 Field to Cashier and Warehouse handoff through Chromium and LocalDB
         shell: pwsh
+        env:
+          FMCG_APP03_SETTLEMENT_WITNESS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifySettlement
       - name: APP-03.7 Finance queue, correction, costing and refund through Chromium and LocalDB
         shell: pwsh

@@ -18,7 +18,8 @@ internal static class App02c1Dev
     internal const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
     internal static async Task Run(string mode, string root, string source, string increment,
-        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null)
+        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null, bool catalogWitness = false,
+        App03SettlementHttpWitness.Context? resumeWitness = null, string resumeCheckpoint = "")
     {
         if (mode is not ("Verify" or "Interactive")) throw new ArgumentException("Invalid C.1 DEV mode.");
         string web = Path.Combine(root, "web");
@@ -40,6 +41,8 @@ internal static class App02c1Dev
         ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; lifetime.Cancel(); };
         Console.CancelKeyPress += cancel;
         var run = persistent?.RunId ?? new DemoRun(Guid.NewGuid().ToString("N"));
+        bool traceResume = persistent?.Resume == true && observe is not null && resumeWitness is not null
+            && App03SettlementSqlObserver.Enabled;
         bool integrated = increment == "App03A1";
         bool field = persistent?.UsesField == true;
         bool settlement = persistent?.UsesSettlement == true;
@@ -60,7 +63,7 @@ internal static class App02c1Dev
         bool d4 = increment == "App02D4";
         bool d3 = d4 || increment == "App02D3";
         bool d2 = increment == "App02D2";
-        bool sharedHttpWitness = persistent is null && mode == "Verify" && (d2 || adjustments) && D2PeerWitness.Enabled;
+        bool sharedHttpWitness = persistent is null && mode == "Verify" && (d2 || adjustments || increment == "DevF01") && D2PeerWitness.Enabled;
         bool d1 = d3 || d2 || increment == "App02D1";
         if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
         bool c5 = returnLane || pricing || fefo || d1 || c6 || increment == "App02C5";
@@ -258,6 +261,8 @@ internal static class App02c1Dev
             {
                 apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
                 apiStart.Environment["App03__Workspace"] = "true";
+                if (traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled))
+                    apiStart.Environment["App03__CatalogWitness"] = "true";
                 if (persistent.UsesBusinessDay)
                     apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
             }
@@ -282,6 +287,7 @@ internal static class App02c1Dev
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
+            apiStart.Environment.Remove("App02D2__PeerWitness");
             if (sharedHttpWitness)
                 apiStart.Environment["App02D2__PeerWitness"] = "true";
             if (field)
@@ -314,20 +320,29 @@ internal static class App02c1Dev
             await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
             int webPort = persistent?.WebPort ?? FreePort();
             string webUrl = $"http://127.0.0.1:{webPort}";
-            string portText = webPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            var viteStart = sharedHttpWitness
-                ? StartInfo("node", web, Path.Combine(web, "ci", "run-dev-http-vite.mjs"), portText)
-                : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portText, "--strictPort");
+            bool traceProxy = traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled);
+            string portArg = webPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // The canonical Vite configuration is unchanged. Only the hosted synthetic
+            // diagnostic host uses the fenced programmatic DEV launcher.
+            var viteStart = traceProxy
+                ? StartInfo("node", web, Path.Combine(web, "ci", "run-app03-resume-vite.mjs"), portArg)
+                : sharedHttpWitness
+                    ? StartInfo("node", web, Path.Combine(web, "ci", "run-dev-http-vite.mjs"), portArg)
+                    : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portArg, "--strictPort");
+            if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
+            viteStart.Environment.Remove("FMCG_APP03_RESUME_PROXY");
+            if (traceProxy) viteStart.Environment["FMCG_APP03_RESUME_PROXY"] = "1";
             viteStart.Environment.Remove("FMCG_DEV_HTTP_PROXY");
             if (sharedHttpWitness) viteStart.Environment["FMCG_DEV_HTTP_PROXY"] = "1";
-            if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
             viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
-            // Same original initial session requests; opt-in witness only in D2/F06.
+            // Preserve the merged APP-03 resume/catalog path and its original session assertions.
+            // The shared witness is exclusive to standalone, explicitly opted-in D2/F01/F06.
             {
                 await using var initialWitness = sharedHttpWitness
-                    ? await D2PeerWitness.TryStart(root, source, run, d2 ? "app02d2" : "dev-f06", "initial",
+                    ? await D2PeerWitness.TryStart(root, source, run,
+                        d2 ? "app02d2" : adjustments ? "dev-f06" : "dev-f01", "initial",
                         () => (api!.Id, viteProcess!.Id), lifetime.Token) : null;
                 initialWitness?.SelectPhase("initial");
                 foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
@@ -339,19 +354,23 @@ internal static class App02c1Dev
                     Exception? probeFailure = null;
                     try
                     {
-                        using var response = await client.SendAsync(request, lifetime.Token);
-                        status = (int)response.StatusCode;
-                    // API startup already checked the database bindings. A valid, newly signed token may
-                    // be forbidden here if the business role was revoked while the host was stopped.
-                    if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;
-                    response.EnsureSuccessStatusCode();
-                    using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
-                    if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
-                        payload.RootElement.GetProperty("sessionId").GetString() != run.Id)
-                        throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
+                        await App03SettlementHttpWitness.ObserveSession(
+                            traceResume ? resumeWitness : null, resumeCheckpoint, tenant, run.Id, persistent is not null,
+                            api.Id, viteProcess.Id, client.Timeout, lifetime.Token, id =>
+                            {
+                                if (id is not null) request.Headers.Add(App03SettlementHttpWitness.Header, id);
+                                return ticket is null ? client.SendAsync(request, lifetime.Token) : SendWitnessed();
+                            });
                     }
                     catch (Exception ex) { probeFailure = ex; throw; }
                     finally { initialWitness?.End(ticket, status, probeFailure, lifetime.Token); }
+
+                    async Task<HttpResponseMessage> SendWitnessed()
+                    {
+                        var response = await client.SendAsync(request, lifetime.Token);
+                        status = (int)response.StatusCode;
+                        return response;
+                    }
                 }
             }
 

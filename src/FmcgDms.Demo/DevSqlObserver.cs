@@ -43,14 +43,9 @@ internal sealed class DevSqlObserver : IAsyncDisposable
             throw new InvalidOperationException("Diagnostic child exit unconfirmed; retain owned scratch for safe cleanup.");
     }
 
-    private static bool IsScope(string profile, string scope) =>
-        (profile is "app03-5" or "app03-6") && scope == "resume"
-        || profile == "app02d2" && scope is ("D2-14-A" or "D2-14-B" or "D2-15-A" or "D2-15-B" or "A-to-B" or "B-to-A" or "initial")
-        || profile == "dev-f06" && scope == "initial";
-
     internal static string? EvidenceDirectory(string root, string runId, string profile, string scope, bool create = false)
     {
-        if (!Hosted || !IsScope(profile, scope)) return null;
+        if (!Hosted || !DevSqlObserverProtocol.IsScope(profile, scope)) return null;
         try
         {
             _ = new DemoRun(runId);

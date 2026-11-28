@@ -240,7 +240,7 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
         {
             string? diagnosticScope = id switch
             {
-                "D2-14" or "D2-15" => id + "-" + scope,
+                "D2-07" or "D2-14" or "D2-15" => id + "-" + scope,
                 "D2-16" => scope,
                 _ => null
             };

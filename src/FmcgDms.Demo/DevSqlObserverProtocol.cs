@@ -4,6 +4,24 @@ namespace FmcgDms.Demo;
 
 internal static class DevSqlObserverProtocol
 {
+    // Fixed profile/scope and phase labels only: never accept arbitrary paths or business identifiers.
+    internal static bool IsScope(string profile, string scope) =>
+        (profile is "app03-5" or "app03-6") && scope == "resume"
+        || profile == "app02d2" && scope is ("D2-07-A" or "D2-07-B" or "D2-14-A" or "D2-14-B"
+            or "D2-15-A" or "D2-15-B" or "A-to-B" or "B-to-A" or "initial")
+        || (profile is "dev-f01" or "dev-f06") && scope == "initial";
+
+    internal static bool IsD2Phase(string value) =>
+        value is "initial" or "origin-seed" or "peer-seed" or "peer-checks" or "seed"
+            or "ack" or "restart-lookup" or "replay-checks" or "channel-off" or "channel-on"
+            or "evidence-foreign-seed" or "evidence-prepare"
+            or "evidence-cash-missing" or "evidence-cash-amount" or "evidence-cash-pending"
+            or "evidence-cash-future" or "evidence-cash-self" or "evidence-cash-foreign"
+            or "evidence-bank-missing" or "evidence-bank-pending" or "evidence-credit-missing"
+            or "evidence-bank-binding" or "evidence-credit-origin" or "evidence-credit-reserve"
+            or "evidence-credit-excess" or "evidence-credit-foreign" or "evidence-posting"
+            or "evidence-cash-reuse" or "evidence-credit-reuse";
+
     internal static bool VerifyStartup(string path, string runId, string profile, string scope, string tenant, int pid, out string status)
     {
         status = "unavailable";
