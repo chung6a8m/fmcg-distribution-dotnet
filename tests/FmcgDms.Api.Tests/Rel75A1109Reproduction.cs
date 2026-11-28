@@ -13,7 +13,7 @@ public sealed partial class App01e2CrossCommandRaceTests
 {
     private sealed class Rel75Sample
     {
-        public string Schema { get; init; } = "REL75_A11_09_V1";
+        public string Schema { get; init; } = "REL75_A11_09_V2";
         public string Arm { get; init; } = "";
         public string Tenant { get; init; } = "";
         public int Iteration { get; init; }
@@ -37,7 +37,10 @@ public sealed partial class App01e2CrossCommandRaceTests
         public bool OverlapObserved { get; set; }
         public string GraphCapture { get; set; } = "NOT_RUN";
         public string? GraphError { get; set; }
-        public List<Rel75Graph> Graphs { get; } = [];
+        public Rel75XeObservation? XeObservation { get; set; }
+        public RecoveryProcessState? PreviousProcess { get; set; }
+        public string? IntakeObservation { get; set; }
+        public decimal[]? WorkerOffFacts { get; set; }
         public List<Rel75Boundary> Boundaries { get; } = [];
         public string? HttpDiagnostic { get; set; }
         public string? RecoveryDiagnostic { get; set; }
@@ -140,6 +143,17 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Empty(Rel75DeadlockWitness.Project(xml, 8, 123));
         Assert.Empty(Rel75DeadlockWitness.Project(xml, 7, 124));
         Assert.Empty(Rel75DeadlockWitness.Project(xml.Replace("hostpid=\"123\" hostname", "hostpid=\"124\" hostname"), 7, 123));
+        string buffer = xml.Replace("<RingBufferTarget>",
+            "<RingBufferTarget truncated=\"0\" totalEventsProcessed=\"1\" eventCount=\"1\" droppedCount=\"0\">")
+            .Replace("<event>", "<event name=\"xml_deadlock_report\" timestamp=\"2026-11-28T00:00:00Z\">");
+        var complete = Rel75DeadlockWitness.ProjectBuffer(buffer, 7, [123], 0, 0, 0);
+        Assert.True(complete.Complete);
+        Assert.Single(complete.Graphs);
+        Assert.NotNull(complete.Graphs[0].EventUtcMs);
+        Assert.False(Rel75DeadlockWitness.ProjectBuffer(buffer, 7, [124], 0, 0, 0).Complete);
+        Assert.False(Rel75DeadlockWitness.ProjectBuffer(buffer, 7, [123], 1, 0, 0).Complete);
+        Assert.False(Rel75DeadlockWitness.ProjectBuffer(buffer.Replace("totalEventsProcessed=\"1\"", "totalEventsProcessed=\"2\""), 7, [123], 0, 0, 0).Complete);
+        Assert.False(Rel75DeadlockWitness.ProjectBuffer(buffer.Replace("truncated=\"0\"", "truncated=\"1\""), 7, [123], 0, 0, 0).Complete);
         Assert.Throws<ArgumentException>(() => Rel75Phases("unapproved"));
         Assert.Equal(3, Rel75Phases("c-p-overlap").Length);
 
@@ -255,12 +269,20 @@ public sealed partial class App01e2CrossCommandRaceTests
             ? x : x with { BlockingSpid = 0 }).ToArray();
     }
 
+    private static int[] Rel75Transactions(Rel75SqlSession[] sessions) =>
+        sessions.Where(x => x.HasUserTransaction).Select(x => x.Spid).Distinct().ToArray();
+
     private static bool Rel75Overlap(Rel75Boundary first, Rel75Boundary second)
     {
-        int[] initial = first.Sessions.Where(x => x.HasUserTransaction).Select(x => x.Spid).Distinct().ToArray();
-        int[] both = second.Sessions.Where(x => x.HasUserTransaction).Select(x => x.Spid).Distinct().ToArray();
-        return initial.Length == 1 && both.Length >= 2 && both.Contains(initial[0]);
+        int[] initial = Rel75Transactions(first.Sessions);
+        int[] both = Rel75Transactions(second.Sessions);
+        return initial.Length == 1 && both.Length == 2 && both.Contains(initial[0]);
     }
+
+    private static FailureContext Rel75Context(Rel75Sample sample) =>
+        new($"app02a4-{sample.Run}-{sample.Attempt}", sample.SourceSha, sample.WorkflowSha,
+            sample.Tenant, "A11-09", sample.OldPid)
+        { FixtureNonce = sample.Nonce, Arm = sample.Arm, Iteration = sample.Iteration };
 
     private async Task Rel75BoundaryAt(Rel75Sample sample, string phase, string point, int pid,
         CancellationToken ct)
@@ -278,9 +300,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         sample.HttpStatus = (int)response.StatusCode;
         await RequireAcceptedA3Async(request, response, async (req, res) =>
         {
-            var context = new FailureContext(FailureDiagnostics.Label(s.Report.TestRunId),
-                FailureDiagnostics.Sha(s.Report.SourceHeadSha) ?? "INVALID",
-                FailureDiagnostics.Sha(s.Report.WorkflowSha) ?? "INVALID", s.Tenant, s.Report.Group, sample.OldPid);
+            var context = Rel75Context(sample);
             string path = await host.CaptureHttpFailureAsync($"A11-09-{s.Tenant}", "post-restart-P",
                 req, res, context, CancellationToken.None);
             s.Report.FailureDiagnostic = $"LAB-E02/{Path.GetFileName(path)}";
@@ -343,9 +363,16 @@ public sealed partial class App01e2CrossCommandRaceTests
         }
         var previous = before.SnapshotState();
         Assert.True(previous.Exited);
+        sample.PreviousProcess = previous;
 
         using var gates = new Rel75Gates(fixture.Nonce, s.Tenant, phases);
         var capture = new Rel75DeadlockCapture(Open(s.Tenant), fixture.Nonce);
+        void Release(string phase)
+        {
+            // Record the actual controller release, not a post-ACK approximation.
+            sample.Boundaries.Add(new(phase, "released", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), []));
+            gates.Release(phase);
+        }
         App01e4ApiProcess? current = null;
         Task<App02IntakeResult>? intake = null;
         var elapsed = Stopwatch.StartNew();
@@ -383,40 +410,55 @@ public sealed partial class App01e2CrossCommandRaceTests
                 await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
                 sample.OverlapObserved = Rel75Overlap(sample.Boundaries[0], sample.Boundaries[^1]);
                 Assert.True(sample.OverlapObserved, "REL75 expected two actual user transactions");
-                gates.Release("PAfterRole");
+                int cSpid = Rel75Transactions(sample.Boundaries[0].Sessions).Single();
+                int pSpid = Rel75Transactions(sample.Boundaries[^1].Sessions).Single(x => x != cSpid);
+                Release("PAfterRole");
                 // Let the real P statements proceed while C still holds its
                 // real locks. Observe either P's pre-COMMIT barrier or a
                 // scoped SQL blocking edge, never manufacture an unrelated lock.
                 var watch = Stopwatch.StartNew();
+                bool progressObserved = false;
                 while (watch.Elapsed < TimeSpan.FromSeconds(3))
                 {
                     var sessions = await Rel75Observe(s.Tenant, current.Pid, ct);
+                    var active = Rel75Transactions(sessions);
+                    bool pairHeld = active.Length == 2 && active.Contains(cSpid) && active.Contains(pSpid);
                     bool atCommit = gates.Reached("PBeforeCommit");
-                    if (atCommit || sessions.Any(x => x.BlockingSpid > 0))
+                    bool directedWait = sessions.Any(x => x.Spid == pSpid && x.BlockingSpid == cSpid);
+                    if (pairHeld && (atCommit || directedWait))
                     {
                         sample.Boundaries.Add(new("PBeforeCommit", atCommit ? "reached" : "sql-wait",
                             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessions));
+                        progressObserved = true;
                         break;
                     }
                     if (intake.IsCompleted) break;
                     await Task.Delay(50, ct);
                 }
-                gates.Release("CBeforePrerequisite");
-                gates.Release("PBeforeCommit");
+                Release("CBeforePrerequisite");
+                Release("PBeforeCommit");
+                // If intake has already failed, preserve the original HTTP assertion.
+                if (!progressObserved && intake.IsCompleted) await intake;
+                Assert.True(progressObserved, "REL75 missing directed P progress while C holds locks");
             }
             else if (sample.Arm == "p-commit-sweep")
             {
                 await gates.WaitAsync("PBeforeCommit", ct);
                 await Rel75BoundaryAt(sample, "PBeforeCommit", "reached", current.Pid, ct);
-                gates.Release("SweepBeforeSelect");
+                int pSpid = Assert.Single(Rel75Transactions(sample.Boundaries[^1].Sessions));
+                Release("SweepBeforeSelect");
                 // P remains uncommitted until the actual startup sweep either
                 // enters C processing or is seen waiting on a scoped SQL session.
                 var watch = Stopwatch.StartNew();
                 while (watch.Elapsed < TimeSpan.FromSeconds(3))
                 {
                     var sessions = await Rel75Observe(s.Tenant, current.Pid, ct);
-                    bool inC = gates.Reached("CBeforePrerequisite");
-                    if (inC || sessions.Any(x => x.BlockingSpid > 0))
+                    var active = Rel75Transactions(sessions);
+                    bool inC = gates.Reached("CBeforePrerequisite")
+                        && active.Length == 2 && active.Contains(pSpid);
+                    bool directedWait = active.Contains(pSpid)
+                        && sessions.Any(x => x.Spid != pSpid && x.BlockingSpid == pSpid);
+                    if (inC || directedWait)
                     {
                         sample.Boundaries.Add(new("SweepInFlight", inC ? "reached" : "sql-wait",
                             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessions));
@@ -425,8 +467,8 @@ public sealed partial class App01e2CrossCommandRaceTests
                     await Task.Delay(50, ct);
                 }
                 Assert.Contains(sample.Boundaries, x => x.Phase == "SweepInFlight");
-                gates.Release("PBeforeCommit");
-                gates.Release("CBeforePrerequisite");
+                Release("PBeforeCommit");
+                Release("CBeforePrerequisite");
             }
             else if (sample.Arm == "outbox-overlap")
             {
@@ -434,25 +476,24 @@ public sealed partial class App01e2CrossCommandRaceTests
                 await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
                 sample.OverlapObserved = Rel75Overlap(sample.Boundaries[0], sample.Boundaries[^1]);
                 Assert.True(sample.OverlapObserved, "REL75 expected actual sender and intake transactions");
-                gates.Release("OutboxAfterClaimRead");
-                gates.Release("PAfterRole");
+                Release("OutboxAfterClaimRead");
+                Release("PAfterRole");
             }
             // In the before-sweep and reversed arms P commits BEFORE release.
             await intake;
             long ack = Assert.IsType<long>(sample.IntakeAckUtcMs);
             DateTimeOffset until = DateTimeOffset.FromUnixTimeMilliseconds(ack).AddSeconds(30);
-            if (first is not null)
-            {
-                gates.ReleaseAll();
-                sample.Boundaries.Add(new(first, "released", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), []));
-            }
+            if (sample.Arm is "before-sweep" or "reverse-backlog")
+                Release("SweepBeforeSelect");
             if (workerOff)
             {
-                var facts = A4ReadSql(s.Tenant, s.Scene.Trip);
-                Assert.Equal(1, facts.PReceipts);
-                Assert.Equal(1, facts.Pending);
-                Assert.Equal(0, facts.Applications);
-                Assert.Equal(0, facts.Outbox);
+                sample.WorkerOffFacts = A4ReadSql(s.Tenant, s.Scene.Trip).Values();
+                using var expected = JsonDocument.Parse(File.ReadAllBytes(A4FixturePath()));
+                Assert.Equal(expected.RootElement.GetProperty("states").GetProperty("ready")
+                    .EnumerateArray().Select(x => x.GetDecimal()).ToArray(), sample.WorkerOffFacts);
+                string intakePath = await current.CaptureRel75ObservationAsync($"rel75-{s.Tenant}",
+                    "rel75-worker-off-intake", Rel75Context(sample), CancellationToken.None);
+                sample.IntakeObservation = $"LAB-E02/{Path.GetFileName(intakePath)}";
                 // Negative control: committed P is not a business application.
                 // Stop the second worker-OFF PID, then recover in a third real
                 // PID with the same original 30s deadline from the P ACK.
@@ -512,9 +553,9 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 try
                 {
-                    foreach (int pid in new[] { sample.IntakePid, sample.RecoveryPid }.OfType<int>().Distinct())
-                        sample.Graphs.AddRange(await capture.CaptureAsync(pid));
-                    sample.GraphCapture = "CAPTURED";
+                    sample.XeObservation = await capture.CaptureAsync(
+                        new[] { sample.IntakePid, sample.RecoveryPid }.OfType<int>().Distinct().ToArray());
+                    sample.GraphCapture = sample.XeObservation.Complete ? "CAPTURED" : "PARTIAL";
                 }
                 catch (Exception ex)
                 {
@@ -526,11 +567,13 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 try
                 {
-                    string path = await current.CaptureFailureAsync($"rel75-{s.Tenant}", "rel75-observation", CancellationToken.None);
+                    string path = await current.CaptureRel75ObservationAsync($"rel75-{s.Tenant}",
+                        "rel75-observation", Rel75Context(sample), CancellationToken.None);
                     sample.ProcessObservation = $"LAB-E02/{Path.GetFileName(path)}";
                 }
                 catch (Exception ex) { sample.DiagnosticError ??= FailureDiagnostics.Label(ex.GetType().Name); }
-                await current.DisposeAsync();
+                try { await current.DisposeAsync(); }
+                catch (Exception ex) { sample.DiagnosticError ??= FailureDiagnostics.Label(ex.GetType().Name); }
             }
             try { await capture.DisposeAsync(); }
             catch (Exception ex)
@@ -542,6 +585,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         sample.Stage = "witness-and-oracle";
         Assert.Equal("CAPTURED", sample.GraphCapture);
         Assert.NotNull(sample.ProcessObservation);
+        Assert.Null(sample.DiagnosticError);
         await A4Capture(s, "os-recovered");
     }
 }
