@@ -1,18 +1,33 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5')][string]$ProfileName,
+    [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5', 'app03-6')][string]$ProfileName,
     [Parameter(Mandatory)][string]$RunId,
-    [Parameter(Mandatory)][int]$ReporterPid
+    [Parameter(Mandatory)][int]$ReporterPid,
+    [ValidateSet("tenant-a", "tenant-b")][string]$ResumeTenant,
+    [switch]$DrainOnStop
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Fixed milestones only; no inputs, paths, exception text or SQL in stdout.
+function Write-StartupStage([string]$Stage) {
+    if ($DrainOnStop) { [Console]::WriteLine("APP03_SQL_OBSERVER_STARTUP_V1 $Stage") }
+}
+Write-StartupStage 'entered'
 if ($env:FMCG_APP03_READ_DIAGNOSTICS -cne '1' -or $env:GITHUB_ACTIONS -cne 'true' -or
     $env:RUNNER_OS -cne 'Windows' -or [Environment]::OSVersion.Platform -ne 'Win32NT') { exit 2 }
 
 # Fail closed before opening any file or database. The caller cannot supply a server,
 # connection string, database, SQL text or free-form destination.
 if ($RunId -cnotmatch '\A[0-9a-f]{32}\z' -or $ReporterPid -le 0) { exit 2 }
+if ($DrainOnStop -and $ProfileName -cnotin @("app03-5", "app03-6")) { exit 2 }
+$tenant = "tenant-a"
+$sampleName = "sql-reads.ndjson"
+if ($ResumeTenant) {
+    if ($ProfileName -cnotin @("app03-5", "app03-6")) { exit 2 }
+    $tenant = $ResumeTenant
+    $sampleName = if ($tenant -ceq "tenant-a") { "sql-resume-a.ndjson" } else { "sql-resume-b.ndjson" }
+}
 $directory = Split-Path -Parent $PSScriptRoot
 foreach ($part in @('TestResults', $ProfileName, $RunId)) {
     $directory = Join-Path $directory $part
@@ -21,9 +36,12 @@ foreach ($part in @('TestResults', $ProfileName, $RunId)) {
 }
 if (![string]::Equals($directory, $env:APP03_EVIDENCE_DIR, [StringComparison]::OrdinalIgnoreCase)) { exit 2 }
 
+Write-StartupStage 'guarded'
+
 # Keep SQL values, client identity, full batch text and free-form wait_resource at the server.
 # Only known statement families and object names may cross the diagnostic connection.
 . (Join-Path $PSScriptRoot 'Get-App03SqlReadFailure.ps1')
+. (Join-Path $PSScriptRoot 'Get-App03SqlObserverStopDecision.ps1')
 $sampleSql = @'
 SELECT TOP (33) r.session_id AS spid, r.request_id AS requestId,
     COALESCE(r.wait_type, '') AS waitType, r.wait_time AS waitMs, r.total_elapsed_time AS elapsedMs,
@@ -37,6 +55,11 @@ SELECT TOP (33) r.session_id AS spid, r.request_id AS requestId,
          WHEN txt.text LIKE '%SELECT t.Id,t.Code,CASE WHEN @Field=1%' AND txt.text LIKE '%dbo.C4DeliveryWriter%' THEN 'C4TripList'
          WHEN txt.text LIKE '%FROM dbo.App02ActorRoleGrant WITH(UPDLOCK,HOLDLOCK)%' THEN 'RoleCheck'
          WHEN txt.text LIKE '%SELECT Nonce FROM dbo.App00ScratchMarker%' AND txt.text LIKE '%dbo.C3TripWriter%' THEN 'D1Catalog'
+         WHEN txt.text LIKE '%FROM dbo.Customer WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code%'
+              AND txt.text LIKE '%@CurrentDayOnly%' AND txt.text LIKE '%@Settlement%' THEN 'C2Catalog'
+         WHEN txt.text LIKE '%SELECT u.SkuId,u.UomCode,u.Factor,u.Step FROM dbo.F03Unit u%' THEN 'C2Units'
+         WHEN txt.text LIKE '%FROM dbo.App02ActorRoleGrant WITH (HOLDLOCK)%'
+              AND txt.text LIKE '%@Sales%' AND txt.text LIKE '%@Warehouse%' THEN 'C2RoleCheck'
          ELSE 'Other' END AS family,
     COALESCE(l.kind, 'none') AS lockKind, COALESCE(l.obj, 'none') AS lockObject
 FROM sys.dm_exec_requests r
@@ -47,7 +70,10 @@ OUTER APPLY (
         CASE WHEN locks.resource_type IN ('KEY','RID','PAGE','OBJECT','APPLICATION') THEN locks.resource_type ELSE 'other' END AS kind,
         CASE COALESCE(OBJECT_NAME(p.object_id,DB_ID()),
                 CASE WHEN locks.resource_type='OBJECT' THEN OBJECT_NAME(TRY_CONVERT(int,locks.resource_associated_entity_id),DB_ID()) END)
-            WHEN 'App02ActorRoleGrant' THEN 'App02ActorRoleGrant' WHEN 'Trip' THEN 'Trip' ELSE 'other' END AS obj
+            WHEN 'App02ActorRoleGrant' THEN 'App02ActorRoleGrant' WHEN 'Trip' THEN 'Trip'
+            WHEN 'Customer' THEN 'Customer' WHEN 'Sku' THEN 'Sku'
+            WHEN 'StockLocation' THEN 'StockLocation' WHEN 'StockPool' THEN 'StockPool'
+            WHEN 'F03Unit' THEN 'F03Unit' ELSE 'other' END AS obj
     FROM sys.dm_tran_locks locks
     LEFT JOIN sys.partitions p ON locks.resource_type IN ('KEY','RID','PAGE')
         AND p.hobt_id=locks.resource_associated_entity_id
@@ -77,18 +103,23 @@ function Write-Record([hashtable]$Data) {
 
 try {
     $parent = [Diagnostics.Process]::GetProcessById($ReporterPid)
+    Write-StartupStage 'parent-open'
     $inputPipe = [Console]::OpenStandardInput()
     $pipeRead = $inputPipe.BeginRead((New-Object byte[] 1), 0, 1, $null, $null)
-    $file = [IO.File]::Open((Join-Path $directory 'sql-reads.ndjson'), 'CreateNew', 'Write', 'Read')
+    Write-StartupStage 'pipe-open'
+    $file = [IO.File]::Open((Join-Path $directory $sampleName), 'CreateNew', 'Write', 'Read')
     $writer = [IO.StreamWriter]::new($file, [Text.UTF8Encoding]::new($false))
-    Write-Record @{ event='start'; profile=$ProfileName; runId=$RunId; pid=$PID }
+    Write-StartupStage 'file-open'
+    Write-Record @{ event='start'; profile=$ProfileName; tenant=$tenant; runId=$RunId; pid=$PID }
 
     $phase = 'connection'
     Add-Type -AssemblyName System.Data
-    $database = "Fmcg_App00_${RunId}_A"
+    $suffix = if ($tenant -ceq "tenant-a") { "A" } else { "B" }
+    $database = "Fmcg_App00_${RunId}_${suffix}"
     $db = [System.Data.SqlClient.SqlConnection]::new(
         "Server=(localdb)\MSSQLLocalDB;Database=$database;Integrated Security=true;Pooling=false;Connect Timeout=2;ConnectRetryCount=0;Application Name=APP03 read observer")
     $db.Open()
+    Write-StartupStage 'connection-open'
     $command = $db.CreateCommand()
     $command.CommandTimeout = 1
     $phase = 'ownership'
@@ -96,14 +127,17 @@ try {
     $command.CommandText = @'
 SELECT CASE WHEN DB_NAME()=@database
  AND (SELECT COUNT(*) FROM dbo.LocalDemoOwner o JOIN dbo.App00ScratchMarker m ON m.Nonce=o.RunId WHERE o.RunId=@run)=1
- AND (SELECT COUNT(*) FROM dbo.LocalApp03Session WHERE RunId=@run AND TenantId='tenant-a')=1
- AND (SELECT COUNT(*) FROM dbo.AppTenantBinding WHERE Slot=1 AND TenantId='tenant-a')=1 THEN 1 ELSE 0 END;
+ AND (SELECT COUNT(*) FROM dbo.LocalApp03Session WHERE RunId=@run AND TenantId=@tenant)=1
+ AND (SELECT COUNT(*) FROM dbo.AppTenantBinding WHERE Slot=1 AND TenantId=@tenant)=1 THEN 1 ELSE 0 END;
 '@
     $null = $command.Parameters.Add('@database', [System.Data.SqlDbType]::NVarChar, 128)
     $command.Parameters['@database'].Value = $database
     $null = $command.Parameters.Add('@run', [System.Data.SqlDbType]::VarChar, 32)
     $command.Parameters['@run'].Value = $RunId
+    $null = $command.Parameters.Add('@tenant', [System.Data.SqlDbType]::NVarChar, 32)
+    $command.Parameters['@tenant'].Value = $tenant
     if ([int]$command.ExecuteScalar() -ne 1) { throw 'ownership' }
+    Write-StartupStage 'ownership-verified'
     $phase = 'visibility'
     $command.Parameters.Clear()
     $command.CommandText = @'
@@ -113,15 +147,22 @@ SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 OR
          ELSE HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE') END=1 THEN 1 ELSE 0 END;
 '@
     if ([int]$command.ExecuteScalar() -ne 1) { throw 'visibility' }
+    Write-StartupStage 'visibility-verified'
 
     $phase = 'sample'
     $command.CommandText = $sampleSql
     $reason = 'deadline'
+    $finalSampleStatus = if ($DrainOnStop) { 'notAttempted' } else { 'notRequested' }
     Write-Record @{ event='available'; sampleIntervalMs=250; commandTimeoutMs=1000 }
+    Write-StartupStage 'sample-loop'
     while ($clock.Elapsed.TotalSeconds -lt 240) {
-        if ($parent.HasExited -or $pipeRead.IsCompleted) { $reason='parentEnded'; break }
-        # The reserved space accommodates one maximum-sized sample and the final status.
-        if ($file.Position -ge (2MB - 64KB)) { $reason='sizeLimit'; break }
+        # Only a live parent closing its input pipe normally can request the last sample.
+        # The 240s observer limit, 2MB bound and 1s SQL command timeout still apply.
+        $decision = Get-App03SqlObserverStopDecision -ParentExited $parent.HasExited -PipeCompleted $pipeRead.IsCompleted `
+            -DrainOnStop $DrainOnStop.IsPresent -AtSizeLimit ($file.Position -ge (2MB - 64KB))
+        if ($decision -in @('parentEnded','sizeLimit')) { $reason=$decision; break }
+        $finalSample = $decision -ceq 'drain'
+        if ($finalSample -and $inputPipe.EndRead($pipeRead) -ne 0) { $reason='parentEnded'; break }
         $started = $clock.ElapsedMilliseconds
         $rows = [Collections.Generic.List[object]]::new()
         $overflow = $false
@@ -146,16 +187,22 @@ SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 OR
         } catch {
             $failure = Get-App03SqlReadFailure $_.Exception $db.State
             if ($failure.Continue) {
-                Write-Record @{ event='sampleUnavailable'; reason='commandTimeout'; sqlNumber=$failure.Number; queryMs=($clock.ElapsedMilliseconds - $started) }
+                Write-Record @{ event='sampleUnavailable'; reason='commandTimeout'; sqlNumber=$failure.Number; queryMs=($clock.ElapsedMilliseconds - $started); finalSample=$finalSample }
+                if ($finalSample) { $finalSampleStatus='unavailable'; $reason='parentEnded'; break }
                 Start-Sleep -Milliseconds 250
                 continue
             }
             throw
         } finally { if ($null -ne $reader) { $reader.Dispose() } }
-        Write-Record @{ event='sample'; queryMs=($clock.ElapsedMilliseconds - $started); truncated=$overflow; rows=$rows.ToArray() }
+        Write-Record @{ event='sample'; queryMs=($clock.ElapsedMilliseconds - $started); truncated=$overflow; rows=$rows.ToArray(); finalSample=$finalSample }
+        if ($finalSample) {
+            $finalSampleStatus = if ($overflow) { 'truncated' } else { 'usable' }
+            $reason='parentEnded'
+            break
+        }
         Start-Sleep -Milliseconds 250
     }
-    Write-Record @{ event='stop'; reason=$reason }
+    Write-Record @{ event='stop'; reason=$reason; finalSampleStatus=$finalSampleStatus }
     $exitCode = 0
 } catch {
     if ($null -ne $writer) {

@@ -16,6 +16,11 @@ internal static class App03WorkspaceEvidence
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var ct = deadline.Token;
         Task? host = null;
+        Exception? failure = null;
+        var resumeWitness = settlement || field
+            ? App03SettlementSqlObserver.TryCreateContext(root, run.Id, evidence.FullName, source, profile)
+            : null;
+        var catalogWitness = settlement ? resumeWitness : null;
         try
         {
             // .3 checks the original A/F workspace. .5 verifies the upgrade from that
@@ -65,30 +70,39 @@ internal static class App03WorkspaceEvidence
                 if (!handoff && !field && !settlement) await RevokeSales(browser);
                 await browser.WaitForExitAsync(ct);
                 if (browser.ExitCode != 0) throw new InvalidOperationException($"APP-03 Chromium exited {browser.ExitCode}.");
+                // Keep the post-browser observers alive across Stop, NextDay, Resume and the
+                // C# probes. Browser-owned sql-reads.ndjson is never overwritten in .5.
+                await using var observer = resumeWitness is null ? null
+                    : await App03SettlementSqlObserver.Start(root, run.Id, evidence.FullName, source, ct, profile);
+                await using var peerObserver = resumeWitness is null ? null
+                    : await App03SettlementSqlObserver.Start(root, run.Id, evidence.FullName, source, ct, profile, "tenant-b");
                 if (settlement)
                 {
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(1), settlement: true);
-                    active = await Open("Resume", enableSettlement: true);
+                    active = await Open("Resume", enableSettlement: true, enableCatalogWitness: catalogWitness is not null,
+                        resumeCheckpoint: "nextday-1");
                     await App03SettlementEvidence.Review(run, active, evidence.FullName, source, upgrade!, ct);
-                    var secondTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261124-A", load: true, ct);
+                    var secondTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261124-A", load: true, ct, catalogWitness);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(2), settlement: true);
-                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
-                    var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true, enableCatalogWitness: catalogWitness is not null,
+                        resumeCheckpoint: "nextday-2");
+                    var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct, catalogWitness);
                     await App03OwnerEvidence.ReviewTripCoverage(run, active, secondTrip, thirdTrip,
                         evidence.FullName, source, ct);
                     await App03SettlementEvidence.VerifyVehicleReuse(run, active, secondTrip, thirdTrip, evidence.FullName, ct);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(3), settlement: true);
-                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
-                    var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true, enableCatalogWitness: catalogWitness is not null,
+                        resumeCheckpoint: "nextday-3");
+                    var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct, catalogWitness);
                     await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
                     await Stop();
-                    active = await Open("Resume", enableSettlement: true, enableFinance: true);
+                    active = await Open("Resume", enableSettlement: true, enableFinance: true, resumeCheckpoint: "same-day-final");
                     await App03OwnerEvidence.ReviewSettlement(run, active, evidence.FullName, source, ct);
                 }
                 else if (field)
@@ -96,7 +110,7 @@ internal static class App03WorkspaceEvidence
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(1));
-                    active = await Open("Resume");
+                    active = await Open("Resume", resumeCheckpoint: "nextday-1");
                     var recovery = await App03FieldEvidence.CheckRecovery(run, active, ct);
                     await App03FieldEvidence.Review(run, evidence.FullName, source, recovery, upgrade!, ct);
                 }
@@ -112,18 +126,33 @@ internal static class App03WorkspaceEvidence
                 }
             }
         }
+        catch (Exception ex) { failure = ex; throw; }
         finally
         {
+            // The observer is disposed before this receipt; never change the business outcome.
+            if (catalogWitness is not null) App03SettlementWitnessCoverage.Write(catalogWitness);
+            if (resumeWitness is not null) App03ResumeWitnessCoverage.Write(resumeWitness, profile);
             try { await Stop(); }
+            catch when (failure is not null) { ReportSecondaryCleanupFailure(); }
             finally
             {
-                if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
+                try
+                {
+                    if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
+                }
+                catch when (failure is not null) { ReportSecondaryCleanupFailure(); }
             }
         }
         Console.WriteLine($"{(settlement ? "APP-03.6" : field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
 
+        static void ReportSecondaryCleanupFailure()
+        {
+            try { Console.Error.WriteLine("APP-03 secondary cleanup failed; preserving primary failure."); } catch { }
+        }
+
         async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false,
-            bool enableSettlement = false, bool enableFinance = false)
+            bool enableSettlement = false, bool enableFinance = false, bool enableCatalogWitness = false,
+            string resumeCheckpoint = "")
         {
             var ready = new TaskCompletionSource<App03DevHost>(TaskCreationOptions.RunContinuationsAsynchronously);
             host = App03DevSession.Run(operation, root, source, run.Id, active =>
@@ -131,7 +160,8 @@ internal static class App03WorkspaceEvidence
                 ready.SetResult(active);
                 return Task.CompletedTask;
             }, verifyHandoff: handoff, verifyField: verifyField, startBeforeField: startBeforeField,
-                settlement: enableSettlement, finance: enableFinance);
+                settlement: enableSettlement, finance: enableFinance, catalogWitness: enableCatalogWitness,
+                resumeWitness: resumeCheckpoint.Length == 0 ? null : resumeWitness, resumeCheckpoint: resumeCheckpoint);
             if (await Task.WhenAny(ready.Task, host).WaitAsync(ct) == host) await host;
             return await ready.Task.WaitAsync(ct);
         }

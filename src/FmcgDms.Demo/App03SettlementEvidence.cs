@@ -115,10 +115,12 @@ internal static partial class App03SettlementEvidence
         }
     }
 
-    private static async Task<T> Send<T>(App03DevHost host, CancellationToken ct, string path, string token, object? body = null)
+    private static async Task<T> Send<T>(App03DevHost host, CancellationToken ct, string path, string token, object? body = null,
+        string? witnessId = null)
     {
         using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, host.WebUrl + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (witnessId is not null) request.Headers.Add(App03SettlementHttpWitness.Header, witnessId);
         if (body is not null) request.Content = JsonContent.Create(body);
         using var response = await host.Client.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();

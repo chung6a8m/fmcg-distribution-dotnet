@@ -85,6 +85,7 @@ internal sealed class DemoRun(string id)
 
     public async Task Remove(bool app03Session = false, bool allowUnbound = false)
     {
+        DevSqlObserver.RequireCleanupSafe(Id);
         await using var master = new SqlConnection(Connection());
         var existing = new List<string>();
         foreach (string tenant in Tenants)
@@ -109,6 +110,7 @@ internal sealed class DemoRun(string id)
 
     public async Task RemoveDevSlot(string tenant)
     {
+        DevSqlObserver.RequireCleanupSafe(Id);
         if (tenant is not ("tenant-a" or "tenant-b")) throw new ArgumentException("Unknown DEV tenant.", nameof(tenant));
         await using var master = new SqlConnection(Connection());
         string name = Name(tenant);
