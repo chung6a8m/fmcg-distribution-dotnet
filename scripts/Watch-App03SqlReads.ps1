@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5')][string]$ProfileName,
+    [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5', 'app03-6')][string]$ProfileName,
     [Parameter(Mandatory)][string]$RunId,
     [Parameter(Mandatory)][int]$ReporterPid
 )
@@ -37,6 +37,9 @@ SELECT TOP (33) r.session_id AS spid, r.request_id AS requestId,
          WHEN txt.text LIKE '%SELECT t.Id,t.Code,CASE WHEN @Field=1%' AND txt.text LIKE '%dbo.C4DeliveryWriter%' THEN 'C4TripList'
          WHEN txt.text LIKE '%FROM dbo.App02ActorRoleGrant WITH(UPDLOCK,HOLDLOCK)%' THEN 'RoleCheck'
          WHEN txt.text LIKE '%SELECT Nonce FROM dbo.App00ScratchMarker%' AND txt.text LIKE '%dbo.C3TripWriter%' THEN 'D1Catalog'
+         WHEN txt.text LIKE '%FROM dbo.Customer WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code%'
+              AND txt.text LIKE '%@CurrentDayOnly%' AND txt.text LIKE '%@Settlement%' THEN 'C2Catalog'
+         WHEN txt.text LIKE '%SELECT u.SkuId,u.UomCode,u.Factor,u.Step FROM dbo.F03Unit u%' THEN 'C2Units'
          ELSE 'Other' END AS family,
     COALESCE(l.kind, 'none') AS lockKind, COALESCE(l.obj, 'none') AS lockObject
 FROM sys.dm_exec_requests r
@@ -47,7 +50,10 @@ OUTER APPLY (
         CASE WHEN locks.resource_type IN ('KEY','RID','PAGE','OBJECT','APPLICATION') THEN locks.resource_type ELSE 'other' END AS kind,
         CASE COALESCE(OBJECT_NAME(p.object_id,DB_ID()),
                 CASE WHEN locks.resource_type='OBJECT' THEN OBJECT_NAME(TRY_CONVERT(int,locks.resource_associated_entity_id),DB_ID()) END)
-            WHEN 'App02ActorRoleGrant' THEN 'App02ActorRoleGrant' WHEN 'Trip' THEN 'Trip' ELSE 'other' END AS obj
+            WHEN 'App02ActorRoleGrant' THEN 'App02ActorRoleGrant' WHEN 'Trip' THEN 'Trip'
+            WHEN 'Customer' THEN 'Customer' WHEN 'Sku' THEN 'Sku'
+            WHEN 'StockLocation' THEN 'StockLocation' WHEN 'StockPool' THEN 'StockPool'
+            WHEN 'F03Unit' THEN 'F03Unit' ELSE 'other' END AS obj
     FROM sys.dm_tran_locks locks
     LEFT JOIN sys.partitions p ON locks.resource_type IN ('KEY','RID','PAGE')
         AND p.hobt_id=locks.resource_associated_entity_id

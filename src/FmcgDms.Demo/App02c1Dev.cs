@@ -257,6 +257,8 @@ internal static class App02c1Dev
             {
                 apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
                 apiStart.Environment["App03__Workspace"] = "true";
+                if (settlement && observe is not null && App03SettlementSqlObserver.Enabled)
+                    apiStart.Environment["App03__CatalogWitness"] = "true";
                 if (persistent.UsesBusinessDay)
                     apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
             }

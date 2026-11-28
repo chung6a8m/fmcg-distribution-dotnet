@@ -67,17 +67,18 @@ internal static class App03WorkspaceEvidence
                 if (browser.ExitCode != 0) throw new InvalidOperationException($"APP-03 Chromium exited {browser.ExitCode}.");
                 if (settlement)
                 {
+                    await using var observer = await App03SettlementSqlObserver.Start(root, run.Id, evidence.FullName, source, ct);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(1), settlement: true);
                     active = await Open("Resume", enableSettlement: true);
                     await App03SettlementEvidence.Review(run, active, evidence.FullName, source, upgrade!, ct);
-                    var secondTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261124-A", load: true, ct);
+                    var secondTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261124-A", load: true, ct, evidence.FullName, source, run.Id);
                     await Stop();
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(2), settlement: true);
                     active = await Open("Resume", enableSettlement: true, enableFinance: true);
-                    var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct);
+                    var thirdTrip = await App03SettlementEvidence.PrepareB(active, "DEV-20261125-A", load: true, ct, evidence.FullName, source, run.Id);
                     await App03OwnerEvidence.ReviewTripCoverage(run, active, secondTrip, thirdTrip,
                         evidence.FullName, source, ct);
                     await App03SettlementEvidence.VerifyVehicleReuse(run, active, secondTrip, thirdTrip, evidence.FullName, ct);
@@ -85,7 +86,7 @@ internal static class App03WorkspaceEvidence
                     await App03DevSession.Run("NextDay", root, source, run.Id,
                         businessDate: App03DayBootstrap.FirstDay.AddDays(3), settlement: true);
                     active = await Open("Resume", enableSettlement: true, enableFinance: true);
-                    var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct);
+                    var quotaOnly = await App03SettlementEvidence.PrepareB(active, "DEV-20261126-A", load: false, ct, evidence.FullName, source, run.Id);
                     await App03SettlementEvidence.VerifyQuotaOnly(run, active, quotaOnly, evidence.FullName, ct);
                     await Stop();
                     active = await Open("Resume", enableSettlement: true, enableFinance: true);

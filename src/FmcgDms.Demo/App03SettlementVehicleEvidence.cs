@@ -9,9 +9,12 @@ internal static partial class App03SettlementEvidence
 {
     private const string D1 = "/api/synthetic/app02d1";
 
-    internal static async Task<Guid> PrepareB(App03DevHost host, string label, bool load, CancellationToken ct)
+    internal static async Task<Guid> PrepareB(App03DevHost host, string label, bool load, CancellationToken ct,
+        string output, string source, string runId)
     {
-        var catalog = await Send<C2Catalog>(host, ct, "/api/synthetic/app02c2/catalog", host.SourceToken);
+        var catalog = await App03SettlementHttpWitness.Observe(output, source, runId, label,
+            host.ApiPid, host.VitePid, host.Client.Timeout, ct, witnessId =>
+                Send<C2Catalog>(host, ct, App03SettlementHttpWitness.Route, host.SourceToken, witnessId: witnessId));
         Guid trip = catalog.Trips.Single(option => option.Label == label).Id;
         Guid sku = catalog.Skus.Single(option => option.Label.StartsWith("Z-FIELD-EA ·", StringComparison.Ordinal)).Id;
         Guid warehouse = catalog.Warehouses.Single(option => option.Label == "C2-MAIN").Id;

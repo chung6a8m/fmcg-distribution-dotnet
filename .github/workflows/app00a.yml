@@ -1081,6 +1081,8 @@ jobs:
         run: ./scripts/Run-App03Dev.ps1 -Action VerifyField
       - name: APP-03.6 Field to Cashier and Warehouse handoff through Chromium and LocalDB
         shell: pwsh
+        env:
+          FMCG_APP03_SETTLEMENT_WITNESS: '1'
         run: ./scripts/Run-App03Dev.ps1 -Action VerifySettlement
       - name: APP-03.7 Finance queue, correction, costing and refund through Chromium and LocalDB
         shell: pwsh

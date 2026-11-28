@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <ProjectReference Include="../../src/FmcgDms.Api/FmcgDms.Api.csproj" />
+    <Compile Include="../../src/FmcgDms.Demo/App03SettlementHttpWitness.cs" Link="App03SettlementHttpWitness.cs" />
     <None Include="../../business/reference-data/expected-results/golden-oracles.json" Link="golden-oracles.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../business/reference-data/expected-results/additional-oracles.json" Link="additional-oracles.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures/app02a4-expected.json" Link="app02a4-expected.json" CopyToOutputDirectory="PreserveNewest" />

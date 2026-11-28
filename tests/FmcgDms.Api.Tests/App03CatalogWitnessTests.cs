@@ -1,0 +1,120 @@
+using System.Net;
+using System.Text.Json;
+using FmcgDms.Api;
+using FmcgDms.Demo;
+using Microsoft.AspNetCore.Http;
+using Xunit;
+
+namespace FmcgDms.Api.Tests;
+
+public sealed class App03CatalogWitnessTests : IDisposable
+{
+    private readonly string output = Directory.CreateTempSubdirectory("app03-catalog-").FullName;
+
+    [Fact]
+    public async Task Witness_preserves_success_and_correlates_both_records()
+    {
+        int calls = 0;
+        string? observedId = null;
+        int result = await Observe(CancellationToken.None, id =>
+        {
+            calls++;
+            observedId = id;
+            return Task.FromResult(42);
+        });
+        Assert.Equal(42, result);
+        Assert.Equal(1, calls);
+        Assert.Equal(observedId, Record("start").GetProperty("id").GetString());
+        var end = Record("end");
+        Assert.Equal(observedId, end.GetProperty("id").GetString());
+        Assert.Equal("SUCCESS", end.GetProperty("outcome").GetString());
+        Assert.Equal(3000, end.GetProperty("timeoutMs").GetDouble());
+    }
+
+    [Fact]
+    public async Task Real_http_client_timeout_is_recorded_and_not_retried()
+    {
+        using var handler = new NeverRespond();
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(50) };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            App03SettlementHttpWitness.Observe(output, "source", "run", "day", 1, 2, client.Timeout,
+                CancellationToken.None, id => client.GetAsync("http://localhost" + App03SettlementHttpWitness.Route)));
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("HTTP_TIMEOUT", Record("end").GetProperty("outcome").GetString());
+        Assert.Equal(50, Record("end").GetProperty("timeoutMs").GetDouble());
+    }
+
+    [Fact]
+    public async Task Caller_cancellation_and_writer_failure_do_not_replace_original_exception()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var original = new OperationCanceledException(cancelled.Token);
+        var caught = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Observe(cancelled.Token, _ => Task.FromException<int>(original)));
+        Assert.Same(original, caught);
+        Assert.Equal("CALLER_CANCELLED", Record("end").GetProperty("outcome").GetString());
+
+        var http = new HttpRequestException("private-message", null, HttpStatusCode.ServiceUnavailable);
+        var preserved = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            App03SettlementHttpWitness.Observe(Path.Combine(output, "missing"), "source", "run", "day", 1, 2,
+                TimeSpan.FromSeconds(3), CancellationToken.None, _ => Task.FromException<int>(http)));
+        Assert.Same(http, preserved);
+    }
+
+    [Fact]
+    public async Task Api_trace_is_allowlisted_and_does_not_swallow_failure()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = App03SettlementHttpWitness.Route;
+        context.Request.QueryString = new QueryString("?key=private-query");
+        context.Request.Headers["Authorization"] = "Bearer private-token";
+        string id = Guid.NewGuid().ToString("N");
+        context.Request.Headers[App03SettlementHttpWitness.Header] = id;
+        var lines = new List<string>();
+        var original = new InvalidOperationException("private-error");
+        var caught = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            App03CatalogTrace.Observe(context, () => Task.FromException(original), lines.Add));
+        Assert.Same(original, caught);
+        Assert.Equal(2, lines.Count);
+        Assert.All(lines, line =>
+        {
+            Assert.Contains(id, line);
+            Assert.DoesNotContain("private", line);
+        });
+        Assert.Contains("\"faulted\":true", lines[1]);
+
+        lines.Clear();
+        context.Request.Method = HttpMethods.Post;
+        await App03CatalogTrace.Observe(context, () => Task.CompletedTask, lines.Add);
+        Assert.Empty(lines);
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Headers[App03SettlementHttpWitness.Header] = "private-invalid";
+        await App03CatalogTrace.Observe(context, () => Task.CompletedTask, lines.Add);
+        Assert.Empty(lines);
+    }
+
+    private Task<int> Observe(CancellationToken ct, Func<string, Task<int>> send) =>
+        App03SettlementHttpWitness.Observe(output, "source", "run", "day", 1, 2,
+            TimeSpan.FromSeconds(3), ct, send);
+
+    private JsonElement Record(string phase)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(output, $"catalog-http-*-{phase}.json").Single()));
+        return document.RootElement.Clone();
+    }
+
+    public void Dispose() => Directory.Delete(output, recursive: true);
+
+    private sealed class NeverRespond : HttpMessageHandler
+    {
+        internal int Calls { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("Unexpected completion");
+        }
+    }
+}
