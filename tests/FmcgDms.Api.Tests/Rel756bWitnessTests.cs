@@ -85,7 +85,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Contains("Retries: expected=0 actual=1", error.Message);
         Assert.Equal(48, report.CheckedCells);
         Assert.Equal(47, report.MatchedCells);
-        var mismatch = Assert.Single(report.Checkpoints.SelectMany(x => x.Cells).Where(x => !x.Match));
+        var mismatch = Assert.Single(report.Checkpoints.SelectMany(x => x.Cells), x => !x.Match);
         Assert.Equal("Retries", mismatch.Metric);
         Assert.Equal(0m, mismatch.Expected);
         Assert.Equal(1m, mismatch.Actual);
@@ -119,8 +119,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal("ACKED", state.GetProperty("deliveryStatus").GetString());
         Assert.Equal(1, state.GetProperty("technicalRetryCount").GetInt32());
         Assert.Equal(JsonValueKind.Null, state.GetProperty("nextAttemptAtUtc").ValueKind);
-        var retry = Assert.Single(root.GetProperty("history").GetProperty("rows").EnumerateArray()
-            .Where(x => x.GetProperty("reasonCode").GetString() == "TECHNICAL_RETRY"));
+        var retry = Assert.Single(root.GetProperty("history").GetProperty("rows").EnumerateArray(),
+            x => x.GetProperty("reasonCode").GetString() == "TECHNICAL_RETRY");
         Assert.Equal(due, retry.GetProperty("nextAttemptAtUtc").GetDateTime());
         var candidate = Assert.Single(root.GetProperty("retryCandidates").EnumerateArray());
         Assert.Equal(1, candidate.GetProperty("retryCount").GetInt32());
