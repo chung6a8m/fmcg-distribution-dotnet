@@ -185,6 +185,10 @@ internal sealed class App01e4ApiProcess : IAsyncDisposable
     public Task<string> CaptureFailureAsync(string failureId, string stage, CancellationToken ct) =>
         CaptureAsync(failureId, stage, null, null, null, ct);
 
+    internal Task<string> CaptureRel75ObservationAsync(string failureId, string stage,
+        FailureContext context, CancellationToken ct) =>
+        CaptureAsync(failureId, stage, null, null, context, ct);
+
     internal Task<string> CaptureHttpFailureAsync(string failureId, string stage,
         HttpRequestMessage request, HttpResponseMessage response, FailureContext context,
         CancellationToken ct) =>
