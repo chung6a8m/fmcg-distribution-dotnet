@@ -281,6 +281,8 @@ internal static class App02c1Dev
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
+            if (d2 && mode == "Verify" && D2PeerWitness.Enabled)
+                apiStart.Environment["App02D2__PeerWitness"] = "true";
             if (field)
             {
                 apiStart.Environment["App02D1__Enabled"] = "true";
@@ -616,7 +618,8 @@ internal static class App02c1Dev
                     api = Start(apiStart);
                     await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
                 }
-                await d2Run.Initialize(client, webUrl, lifetime.Token, Restart);
+                await d2Run.Initialize(client, webUrl, lifetime.Token, Restart,
+                    d2 && mode == "Verify" && D2PeerWitness.Enabled ? () => (api!.Id, viteProcess!.Id) : null);
                 d2Run.ConfigureBrowser(browserStart);
                 browser = Start(browserStart);
                 await d2Run.Serve(browser);

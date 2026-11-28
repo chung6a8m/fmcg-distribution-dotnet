@@ -32,6 +32,8 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
     private readonly List<CaseResult> results = [];
     private readonly List<object> observations = [];
     private HttpClient client = null!;
+    private Func<(int ApiPid, int VitePid)>? witnessPids;
+    private D2PeerWitness? peerWitness;
     private CancellationToken ct;
     private Func<string, Task> restart = null!;
     private string url = "";
@@ -68,8 +70,9 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
     }
 
     internal async Task Initialize(HttpClient http, string webUrl, CancellationToken cancellationToken,
-        Func<string, Task> restartApi)
+        Func<string, Task> restartApi, Func<(int ApiPid, int VitePid)>? diagnosticPids = null)
     {
+        witnessPids = diagnosticPids;
         client = http;
         url = webUrl;
         ct = cancellationToken;
@@ -188,16 +191,26 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
         using var request = new HttpRequestMessage(method, url + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", d1.D2Credential(tenant, role));
         if (data is not null) request.Content = JsonContent.Create(data, options: Json);
-        using var response = await client.SendAsync(request, ct);
-        string body = await response.Content.ReadAsStringAsync(ct);
-        JsonElement fields = body.TrimStart().StartsWith('{') ? JsonSerializer.Deserialize<JsonElement>(body) : default;
-        string? Property(string name) => fields.ValueKind == JsonValueKind.Object &&
-            fields.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() : null;
-        var reply = new Reply((int)response.StatusCode, Property("status"), Property("reasonCode") ?? Property("code"),
-            Guid.TryParse(Property("sourceId"), out Guid parsed) ? parsed : null,
-            fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("replayed", out var replay) && replay.ValueKind == JsonValueKind.True);
-        lock (observations) observations.Add(new { tenant, role, method = method.Method, path, reply });
-        return reply;
+        var diagnostic = peerWitness;
+        var ticket = diagnostic?.Begin(tenant, request, client.Timeout);
+        int? diagnosticStatus = null;
+        Exception? diagnosticFailure = null;
+        try
+        {
+            using var response = await client.SendAsync(request, ct);
+            diagnosticStatus = (int)response.StatusCode;
+            string body = await response.Content.ReadAsStringAsync(ct);
+            JsonElement fields = body.TrimStart().StartsWith('{') ? JsonSerializer.Deserialize<JsonElement>(body) : default;
+            string? Property(string name) => fields.ValueKind == JsonValueKind.Object &&
+                fields.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+            var reply = new Reply((int)response.StatusCode, Property("status"), Property("reasonCode") ?? Property("code"),
+                Guid.TryParse(Property("sourceId"), out Guid parsed) ? parsed : null,
+                fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("replayed", out var replay) && replay.ValueKind == JsonValueKind.True);
+            lock (observations) observations.Add(new { tenant, role, method = method.Method, path, reply });
+            return reply;
+        }
+        catch (Exception ex) { diagnosticFailure = ex; throw; }
+        finally { diagnostic?.End(ticket, diagnosticStatus, diagnosticFailure, ct); }
     }
 
     private static Guid Applied(Reply reply, string label)

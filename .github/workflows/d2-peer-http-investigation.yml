@@ -1,0 +1,104 @@
+name: D2-16 peer HTTP investigation (diagnostic only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/d2-peer-http-investigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  peer-witness:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        shell: pwsh
+        run: |
+          $actual = (dotnet --version).Trim()
+          if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
+      - name: Start SQL Server LocalDB
+        id: localdb
+        shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Enable same-job Demo build reuse
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the built checkout SHA.' }
+          $sourceCommit = "$sourceCommit".Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full git commit SHA for the built checkout.' }
+          $sourceStatus = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the built checkout is clean.' }
+          if ($sourceStatus) { throw 'Cannot reuse the Demo build from a dirty checkout.' }
+          "FMCG_CI_PREBUILT_SHA=$sourceCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Verify D2 peer witness regression
+        shell: pwsh
+        run: dotnet test tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build -- --filter-class FmcgDms.Api.Tests.D2PeerHttpTraceTests --report-trx --results-directory TestResults/d2-peer-regression
+      - name: Record diagnostic source and attempt
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          Write-Host "Diagnostic only: source=$env:SOURCE_HEAD checkout=$env:GITHUB_SHA run=$env:GITHUB_RUN_ID attempt=$env:GITHUB_RUN_ATTEMPT"
+      - name: D2 full original matrix with peer witness (does not substitute Full CI)
+        shell: pwsh
+        env:
+          FMCG_D2_PEER_WITNESS: '1'
+        run: ./scripts/Run-App02D2.ps1
+      - name: Preserve diagnostic evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: d2-peer-http-investigation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            TestResults/app02d2/
+            TestResults/d2-peer-regression/
+            web/test-results-app02d2/
+            TestResults/localdb*/
+          if-no-files-found: warn

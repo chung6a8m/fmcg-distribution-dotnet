@@ -129,26 +129,32 @@ internal sealed partial class App02d2Dev
         var peerRequest = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60);
         string ownBefore = await D2Sql.Fingerprint(run, tenant);
         string peerBefore = await D2Sql.Fingerprint(run, peer);
-        foreach (var variant in new[]
+        await using var diagnostic = await D2PeerWitness.TryStart(root, evidence, source, run, tenant, witnessPids, ct);
+        peerWitness = diagnostic;
+        try
         {
-            peerRequest with { ProducerId = Actor(tenant) },
-            Fresh(input) with { TripId = foreign.Trip },
-            Fresh(input) with { CustomerId = foreign.Customer, OutletId = foreign.Outlet },
-            Fresh(input) with { ShipToSnapshotId = foreign.ShipTo, SelectionId = foreign.Selection },
-            Fresh(input) with { TripManifestLineId = foreign.B20 },
-            Fresh(input) with { VerificationEvidenceRef = peerRequest.VerificationEvidenceRef }
-        })
-            await NoEffect(tenant, variant, "Peer identifiers denied without D.2 source");
-        var prior = browserScenes[(peer, "D2-02")];
-        var evidenceFile = Path.Combine(Checkpoints, $"{Slot(peer)}-D2-02.json");
-        var evidence = System.Text.Json.JsonSerializer.Deserialize<BrowserResult>(await File.ReadAllTextAsync(evidenceFile, ct), Json)!;
-        var lookup = await Send(tenant, HttpMethod.Get, Lookup(prior.Request with
-        {
-            CommandId = evidence.CommandId, ProducerId = evidence.ProducerId
-        }));
-        Verify(lookup.Http is 403 or 404, true, "Peer terminal outcome inaccessible");
-        Verify(lookup.Source, (Guid?)null, "Peer outcome has no source disclosure");
-        Verify(await D2Sql.Fingerprint(run, tenant), ownBefore, "Origin tenant protected rows unchanged");
-        Verify(await D2Sql.Fingerprint(run, peer), peerBefore, "Peer tenant protected rows unchanged");
+            foreach (var variant in new[]
+            {
+                peerRequest with { ProducerId = Actor(tenant) },
+                Fresh(input) with { TripId = foreign.Trip },
+                Fresh(input) with { CustomerId = foreign.Customer, OutletId = foreign.Outlet },
+                Fresh(input) with { ShipToSnapshotId = foreign.ShipTo, SelectionId = foreign.Selection },
+                Fresh(input) with { TripManifestLineId = foreign.B20 },
+                Fresh(input) with { VerificationEvidenceRef = peerRequest.VerificationEvidenceRef }
+            })
+                await NoEffect(tenant, variant, "Peer identifiers denied without D.2 source");
+            var prior = browserScenes[(peer, "D2-02")];
+            var evidenceFile = Path.Combine(Checkpoints, $"{Slot(peer)}-D2-02.json");
+            var evidence = System.Text.Json.JsonSerializer.Deserialize<BrowserResult>(await File.ReadAllTextAsync(evidenceFile, ct), Json)!;
+            var lookup = await Send(tenant, HttpMethod.Get, Lookup(prior.Request with
+            {
+                CommandId = evidence.CommandId, ProducerId = evidence.ProducerId
+            }));
+            Verify(lookup.Http is 403 or 404, true, "Peer terminal outcome inaccessible");
+            Verify(lookup.Source, (Guid?)null, "Peer outcome has no source disclosure");
+            Verify(await D2Sql.Fingerprint(run, tenant), ownBefore, "Origin tenant protected rows unchanged");
+            Verify(await D2Sql.Fingerprint(run, peer), peerBefore, "Peer tenant protected rows unchanged");
+        }
+        finally { peerWitness = null; }
     }
 }

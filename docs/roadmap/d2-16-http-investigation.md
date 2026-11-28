@@ -1,0 +1,19 @@
+# D2-16 peer HTTP reliability — diagnostic only
+
+Owner-directed follow-up to PR #184, [review of f2239f06](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/184#issuecomment-7240619722). Historical distribution job [140999614188](https://github.com/chung6a8m/fmcg-distribution-dotnet/actions/runs/46151690296/job/140999614188): D2-16/B-to-A client timeout at 13:57:45.244Z, SQL cancellation logged after it; 35/36 case receipts PASS. Root cause UNCONFIRMED. Do not equate this with historical APP-03 post-Resume timeout or injected D.2 SQL faults.
+
+## Scope
+
+Separate diagnostic PR against main `686be2dadd38a4dfb8367621fb12e14e7682697a`. Dedicated Windows CI workflow executes the entire existing D.2 browser and 36-case synthetic matrix once per job on fresh nonce-owned databases; no filter removes the predecessor workload. Only D2-16 in both directions is instrumented, only with explicit Windows hosted CI opt-in. Full required CI continues unchanged. No new business request, retry, timeout increase, isolation change, schema change, proxy config change, dependency, fixture or approved contract change.
+
+The existing six POST variants and one GET lookup have ordinal 1–7: full peer input, peer trip, peer customer/outlet, peer ShipTo/selection, peer manifest line, peer cash witness, peer terminal lookup. Client receipts name only fixed route family, direction, tenant, ordinal, ID, source/run, expected API/Vite process IDs, UTC, original 3s timeout, response status if observed, elapsed and outcome. RESPONSE_PARSED is transport/parse evidence, not PASS of the denial/fingerprint assertions. Never log path parameters/query, token, payload or exception text in the new witness.
+
+API opt-in marker logs the same GUID only on the fixed D.2 POST/GET shapes, before auth/endpoint handling; records API PID, UTC, status, response-started, aborted and faulted. It changes no auth or tenant routing. Vite remains canonical and uninstrumented here: absence of API start is not sufficient to locate the client/proxy/transport fault.
+
+Concurrent read-only observers connect only to the two DemoRun LocalDB scratch names with Integrated Security; verify DB_NAME, ownership/nonce, tenant binding and DMV visibility on the same connection before sampling. Fixed statement-family hints, wait types, elapsed, CPU/reads, same-database blocker SPID/transaction count only; no raw SQL or other database identity. Bounded two-second connect, one-second query, no connection retry, 250ms cadence, 90s cap, 2MB per file, single final sample on normal stop. Startup attempts can add up to four seconds before the original peer requests; missing startup/sample/terminal evidence is INCOMPLETE, never proof of no contention. SQL observer failures do not change original business outcomes. Each case must still pass original denial, no disclosure and both tenant fingerprints.
+
+## Review gates
+
+Use raw artifacts and actual job logs, bind workflow run/attempt, checkout/source and fixture nonce. Verify exact client start/end pairs for all executed ordinals, corresponding API markers (or document absence), status/PIDs and UTC; check both tenant NDJSON start/available/stop, sample bracket of each request (review gap at most 1s, no unavailable/truncated rows), and any matching time-window wait/blocker. This is temporal evidence, not a unique HTTP-to-SPID mapping. For a failed case do not claim unexecuted ordinals passed. Preserve all attempts; compare with the uninstrumented Full distribution execution, but do not treat a green run or temporal association as a fix.
+
+If no recurrence or insufficient evidence, keep ROOT_CAUSE_UNCONFIRMED / RUNTIME_REMEDIATION_DEFERRED. No merge until independent source review, required Full CI on final HEAD and diagnostic evidence disposition; main Full CI separately required before unblocking PR #180. Diagnostic workflow never substitutes for Full CI. Issue #75 remains open.
