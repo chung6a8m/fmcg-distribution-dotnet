@@ -33,7 +33,7 @@ def require(condition, code):
 
 def one(root, name):
     found = list(root.rglob(name))
-    require(len(found) == 1, "MISSING_OR_DUPLICATE_" + name)
+    require(len(found) == 1, "MISSING_OR_DUPLICATE_" + re.sub(r"[^A-Z0-9]+", "_", name.upper()))
     require(found[0].stat().st_size <= 2_000_000, "RECEIPT_TOO_LARGE")
     return json.loads(found[0].read_text(encoding="utf-8-sig"))
 
@@ -127,7 +127,7 @@ def validate(root, key, identity):
         require((s["RecoveryPid"] != s["IntakePid"]) if arm == "worker-off"
                 else (s["RecoveryPid"] == s["IntakePid"]), "WORKER_CONTROL")
         require(0 <= s["RecoveryUtcMs"] - s["IntakeAckUtcMs"] <= 30000, "RECOVERY_DEADLINE")
-        return s["Nonce"], "PASS", graph_cycles
+        return s["Nonce"], "PASS_WITH_STRUCTURAL_WITNESS" if graph_cycles else "PASS", graph_cycles
     # Retain negative observations, not a successful sample or a waived gate.
     require(s["RecoveryDiagnostic"] is not None, "MISSING_RECOVERY_DIAGNOSTIC")
     diagnostic(root, s["RecoveryDiagnostic"])
@@ -169,6 +169,7 @@ def summarize(samples, root, identity):
     counts = Counter(row["disposition"] for row in rows)
     status = ("INCOMPLETE" if unexpected or counts["INCOMPLETE"] else
               "COMPLETE_NO_REPRODUCTION" if counts["PASS"] == len(expected) else
+              "COMPLETE_WITH_STRUCTURAL_WITNESSES" if counts["PASS"] + counts["PASS_WITH_STRUCTURAL_WITNESS"] == len(expected) else
               "COMPLETE_WITH_FAILURES")
     return {"schema": "REL75_A11_SUMMARY_V1", "source": source, "workflow": workflow,
             "run": run, "attempt": attempt, "samples_per_arm_tenant": samples,
