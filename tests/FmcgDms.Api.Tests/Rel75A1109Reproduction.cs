@@ -49,7 +49,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         public bool PeerUnchanged { get; set; }
     }
 
-    private sealed record Rel75SqlSession(int Spid, int BlockingSpid);
+    private sealed record Rel75SqlSession(int Spid, int BlockingSpid, bool HasUserTransaction);
     private sealed record Rel75Boundary(string Phase, string Point, long UtcMs, Rel75SqlSession[] Sessions);
 
     private sealed class Rel75Gates : IDisposable
@@ -107,8 +107,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         "worker-off" => [],
         "before-sweep" => ["SweepBeforeSelect"],
         "c-p-overlap" => ["CBeforePrerequisite", "PAfterRole", "PBeforeCommit"],
-        "p-commit-sweep" => ["SweepBeforeSelect", "PBeforeCommit"],
-        "outbox-overlap" => ["OutboxBeforeClaim"],
+        "p-commit-sweep" => ["SweepBeforeSelect", "PBeforeCommit", "CBeforePrerequisite"],
+        "outbox-overlap" => ["OutboxAfterClaimRead", "PAfterRole"],
         "reverse-backlog" => ["SweepBeforeSelect"],
         _ => throw new ArgumentException("REL75_INVALID_ARM")
     };
@@ -239,17 +239,27 @@ public sealed partial class App01e2CrossCommandRaceTests
         using var db = Open(tenant);
         var rows = await db.QueryAsync<Rel75SqlSession>(new CommandDefinition("""
             SELECT DISTINCT CONVERT(int,s.session_id) AS Spid,
-                CONVERT(int,CASE WHEN r.blocking_session_id>0 THEN r.blocking_session_id ELSE 0 END) AS BlockingSpid
+                CONVERT(int,CASE WHEN r.blocking_session_id>0 THEN r.blocking_session_id ELSE 0 END) AS BlockingSpid,
+                CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM sys.dm_tran_session_transactions t
+                  WHERE t.session_id=s.session_id AND t.is_user_transaction=1) THEN 1 ELSE 0 END) AS HasUserTransaction
             FROM sys.dm_exec_sessions s
-            JOIN sys.dm_tran_session_transactions t ON t.session_id=s.session_id AND t.is_user_transaction=1
             LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id
             WHERE s.host_process_id=@Pid AND s.database_id=DB_ID()
+              AND (r.session_id IS NOT NULL OR EXISTS(SELECT 1 FROM sys.dm_tran_session_transactions t
+                  WHERE t.session_id=s.session_id AND t.is_user_transaction=1))
             ORDER BY Spid,BlockingSpid
             """, new { Pid = pid }, commandTimeout: 3, cancellationToken: ct));
         var observed = rows.ToArray();
         // Only retain blocking relationships whose other endpoint is also in scope.
         return observed.Select(x => observed.Any(o => o.Spid == x.BlockingSpid)
             ? x : x with { BlockingSpid = 0 }).ToArray();
+    }
+
+    private static bool Rel75Overlap(Rel75Boundary first, Rel75Boundary second)
+    {
+        int[] initial = first.Sessions.Where(x => x.HasUserTransaction).Select(x => x.Spid).Distinct().ToArray();
+        int[] both = second.Sessions.Where(x => x.HasUserTransaction).Select(x => x.Spid).Distinct().ToArray();
+        return initial.Length == 1 && both.Length >= 2 && both.Contains(initial[0]);
     }
 
     private async Task Rel75BoundaryAt(Rel75Sample sample, string phase, string point, int pid,
@@ -358,7 +368,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 "c-p-overlap" => "CBeforePrerequisite",
                 "before-sweep" or "p-commit-sweep" or "reverse-backlog" => "SweepBeforeSelect",
-                "outbox-overlap" => "OutboxBeforeClaim",
+                "outbox-overlap" => "OutboxAfterClaimRead",
                 _ => null
             };
             if (first is not null)
@@ -371,7 +381,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             {
                 await gates.WaitAsync("PAfterRole", ct);
                 await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
-                sample.OverlapObserved = sample.Boundaries[^1].Sessions.Select(x => x.Spid).Distinct().Count() >= 2;
+                sample.OverlapObserved = Rel75Overlap(sample.Boundaries[0], sample.Boundaries[^1]);
                 Assert.True(sample.OverlapObserved, "REL75 expected two actual user transactions");
                 gates.Release("PAfterRole");
                 // Let the real P statements proceed while C still holds its
@@ -399,13 +409,33 @@ public sealed partial class App01e2CrossCommandRaceTests
                 await gates.WaitAsync("PBeforeCommit", ct);
                 await Rel75BoundaryAt(sample, "PBeforeCommit", "reached", current.Pid, ct);
                 gates.Release("SweepBeforeSelect");
+                // P remains uncommitted until the actual startup sweep either
+                // enters C processing or is seen waiting on a scoped SQL session.
+                var watch = Stopwatch.StartNew();
+                while (watch.Elapsed < TimeSpan.FromSeconds(3))
+                {
+                    var sessions = await Rel75Observe(s.Tenant, current.Pid, ct);
+                    bool inC = gates.Reached("CBeforePrerequisite");
+                    if (inC || sessions.Any(x => x.BlockingSpid > 0))
+                    {
+                        sample.Boundaries.Add(new("SweepInFlight", inC ? "reached" : "sql-wait",
+                            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessions));
+                        break;
+                    }
+                    await Task.Delay(50, ct);
+                }
+                Assert.Contains(sample.Boundaries, x => x.Phase == "SweepInFlight");
                 gates.Release("PBeforeCommit");
+                gates.Release("CBeforePrerequisite");
             }
             else if (sample.Arm == "outbox-overlap")
             {
-                // The worker is inside the actual sender transaction; allow
-                // intake and outbox dispatch to progress concurrently.
-                gates.Release("OutboxBeforeClaim");
+                await gates.WaitAsync("PAfterRole", ct);
+                await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
+                sample.OverlapObserved = Rel75Overlap(sample.Boundaries[0], sample.Boundaries[^1]);
+                Assert.True(sample.OverlapObserved, "REL75 expected actual sender and intake transactions");
+                gates.Release("OutboxAfterClaimRead");
+                gates.Release("PAfterRole");
             }
             // In the before-sweep and reversed arms P commits BEFORE release.
             await intake;
