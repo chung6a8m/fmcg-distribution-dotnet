@@ -192,7 +192,10 @@ def validate_boundaries(s):
         require(len(ids) == len(sessions) and all(
             integer(x["Spid"], 1) and integer(x["BlockingSpid"])
             and (x["BlockingSpid"] == 0 or x["BlockingSpid"] in ids - {x["Spid"]})
-            and type(x["HasUserTransaction"]) is bool for x in sessions), "BOUNDARY_SESSION")
+            and type(x["HasUserTransaction"]) is bool
+            and type(x.get("ReceiptGateWait")) is bool
+            and (not x["ReceiptGateWait"] or (x["HasUserTransaction"] and x["BlockingSpid"] != 0))
+            for x in sessions), "BOUNDARY_SESSION")
         require(b["Point"] != "released" or not sessions, "RELEASE_HAS_SESSIONS")
     def at(phase, point):
         require((phase, point) in points, "CONTROLLED_BOUNDARY_NOT_REACHED")
@@ -221,17 +224,16 @@ def validate_boundaries(s):
                 and first["UtcMs"] <= s["IntakeAckUtcMs"] <= release["UtcMs"]
                 and s["OverlapObserved"] is False, "SWEEP_RELEASE_BEFORE_ACK")
     elif arm == "c-p-overlap":
-        first, role = at("CBeforePrerequisite", "reached"), at("PAfterRole", "reached")
-        c, p = pair(first, role)
-        role_release = at("PAfterRole", "released")
-        before = progress("PBeforeCommit")
-        cr, pr = at("CBeforePrerequisite", "released"), at("PBeforeCommit", "released")
-        sequence(first, role, role_release, before, cr, pr)
-        require(transactions(before) == {c, p}, "P_PROGRESS_PAIR")
-        if before["Point"] == "sql-wait":
-            require(any(x["Spid"] == p and x["BlockingSpid"] == c for x in before["Sessions"]),
-                    "P_WAIT_DIRECTION")
-        released_before_ack(cr, pr)
+        first, wait = at("CBeforePrerequisite", "reached"), at("PReceiptGate", "sql-wait")
+        c, p = pair(first, wait)
+        cr = at("CBeforePrerequisite", "released")
+        role, rr = at("PAfterRole", "reached"), at("PAfterRole", "released")
+        before, pr = at("PBeforeCommit", "reached"), at("PBeforeCommit", "released")
+        sequence(first, wait, cr, role, rr, before, pr)
+        require(any(x["Spid"] == p and x["BlockingSpid"] == c and x["ReceiptGateWait"]
+                    for x in wait["Sessions"]), "P_WAIT_DIRECTION")
+        require(p in transactions(role) and p in transactions(before), "P_PROGRESS_PAIR")
+        released_before_ack(cr, rr, pr)
     elif arm == "p-commit-sweep":
         first, p_hold = at("SweepBeforeSelect", "reached"), at("PBeforeCommit", "reached")
         pids = transactions(p_hold)

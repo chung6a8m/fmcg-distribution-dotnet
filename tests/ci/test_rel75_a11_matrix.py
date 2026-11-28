@@ -26,8 +26,9 @@ def at(ms):
     return datetime.fromtimestamp(ms / 1000, timezone.utc).isoformat(timespec="milliseconds")
 
 
-def session(spid, blocker=0, tx=True):
-    return {"Spid": spid, "BlockingSpid": blocker, "HasUserTransaction": tx}
+def session(spid, blocker=0, tx=True, receipt_gate=False):
+    return {"Spid": spid, "BlockingSpid": blocker, "HasUserTransaction": tx,
+            "ReceiptGateWait": receipt_gate}
 
 
 def boundary(phase, point, ms, *sessions):
@@ -67,10 +68,11 @@ def fixture(root, key, nonce="1" * 32):
                       boundary("SweepBeforeSelect", "released", 1010)]
     elif arm == "c-p-overlap":
         boundaries = [boundary("CBeforePrerequisite", "reached", 500, session(51)),
-                      boundary("PAfterRole", "reached", 550, session(51), session(52)),
-                      boundary("PAfterRole", "released", 560),
-                      boundary("PBeforeCommit", "sql-wait", 600, session(51), session(52, 51)),
-                      boundary("CBeforePrerequisite", "released", 610),
+                      boundary("PReceiptGate", "sql-wait", 550, session(51), session(52, 51, receipt_gate=True)),
+                      boundary("CBeforePrerequisite", "released", 560),
+                      boundary("PAfterRole", "reached", 570, session(52)),
+                      boundary("PAfterRole", "released", 580),
+                      boundary("PBeforeCommit", "reached", 600, session(52)),
                       boundary("PBeforeCommit", "released", 620)]
     elif arm == "p-commit-sweep":
         boundaries = [boundary("SweepBeforeSelect", "reached", 500),
@@ -282,9 +284,19 @@ class Rel75A11MatrixTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "XE_DROPPED_OR_UNSCOPED"):
                     M.validate(root, key, IDENTITY)
             s, e, o = copy.deepcopy(base)
-            s["Boundaries"][3]["Sessions"] = [session(51, 52), session(52)]
+            s["Boundaries"][1]["Sessions"] = [session(51, 52, receipt_gate=True), session(52)]
             save(root, key, s, e, o)
             with self.assertRaisesRegex(ValueError, "P_WAIT_DIRECTION"):
+                M.validate(root, key, IDENTITY)
+            s, e, o = copy.deepcopy(base)
+            s["Boundaries"][1]["Sessions"][1]["ReceiptGateWait"] = False
+            save(root, key, s, e, o)
+            with self.assertRaisesRegex(ValueError, "P_WAIT_DIRECTION"):
+                M.validate(root, key, IDENTITY)
+            s, e, o = copy.deepcopy(base)
+            s["Boundaries"][5]["Sessions"] = [session(53)]
+            save(root, key, s, e, o)
+            with self.assertRaisesRegex(ValueError, "P_PROGRESS_PAIR"):
                 M.validate(root, key, IDENTITY)
 
     def test_reverse_and_worker_off_controls_have_independent_proof(self):
