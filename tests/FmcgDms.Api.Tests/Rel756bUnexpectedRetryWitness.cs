@@ -19,13 +19,18 @@ internal sealed record Rel756bRetryCandidate(int RetryCount, DateTime LoggedAtUt
 // the error that caused this C's committed retry.
 internal static class Rel756bProcessEvidence
 {
+    internal static bool RequiredRecoveryReferencePresent(bool failed, string? reference, string? error) =>
+        error is null && (!failed || !string.IsNullOrWhiteSpace(reference));
+
     internal static Rel756bProcessProjection Project(JsonElement root, string tenant,
         Guid receipt, int pid, string nonce, string testRunId, string source, string workflow,
         DateTimeOffset start, DateTimeOffset outcome)
     {
         var context = root.GetProperty("context");
         var process = root.GetProperty("process");
-        bool scope = context.GetProperty("tenantId").GetString() == tenant
+        bool scope = FailureDiagnostics.Sha(source) is not null
+            && FailureDiagnostics.Sha(workflow) is not null
+            && context.GetProperty("tenantId").GetString() == tenant
             && context.GetProperty("group").GetString() == "A11-09"
             && context.GetProperty("fixtureNonce").GetString() == nonce
             && context.GetProperty("testRunId").GetString() == testRunId
@@ -300,6 +305,8 @@ public sealed partial class App01e2CrossCommandRaceTests
             && (retries == 0 || (projection is { Technical.Length: > 0 }
                 && candidates.Count == Math.Min(retries ?? 0, 5)
                 && candidates.All(x => x.CandidateErrors.Length > 0)))
+            && Rel756bProcessEvidence.RequiredRecoveryReferencePresent(failure is not null,
+                s.Report.RecoveryDiagnostic, s.Report.RecoveryDiagnosticError)
             && s.Report.UnexpectedRetryWitnessError is null;
         // A numeric worker signature and a scoped structural graph are
         // separate observations, not an automatic causal/lock-order verdict.
@@ -320,6 +327,7 @@ public sealed partial class App01e2CrossCommandRaceTests
                 recoveredObservedUtc = timeline.RecoveredObservedUtc,
                 previousProcess = previous, process = current, processReference, processError, projection,
                 recoveryDiagnostic = s.Report.RecoveryDiagnostic,
+                recoveryDiagnosticError = s.Report.RecoveryDiagnosticError,
                 oracleChecked = s.Report.CheckedCells, oracleMatched = s.Report.MatchedCells,
                 recoveredCheckpointPresent = checkpoint is not null, mismatches,
                 sql, history, historyAgrees, retryCandidates = candidates,
