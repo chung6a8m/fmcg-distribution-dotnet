@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import test from 'node:test'
-import { resumeIdentity, resumeProxyWitness } from '../ci/app03-resume-proxy.ts'
+import { resumeIdentity, resumeProxyWitness } from '../ci/app03-resume-proxy.mjs'
 
 const id = 'abcdef0123456789'.repeat(2)
 const request = (route = '/api/synthetic/app02c1/session', method = 'GET', value = id) =>
@@ -11,7 +11,7 @@ test('only fixed GET routes and canonical IDs are eligible', () => {
   for (const route of ['/api/synthetic/app02c1/session', '/api/synthetic/app02c2/catalog'])
     assert.deepEqual(resumeIdentity(request(route + '?private=value')), { route, id })
   for (const req of [request('/api/private'), request(undefined, 'POST'), request(undefined, 'GET', id.toUpperCase()),
-    request(undefined, 'GET', [id, id]), request(undefined, 'GET', 'private-id')])
+    request(undefined, 'GET', id + '\n'), request(undefined, 'GET', [id, id]), request(undefined, 'GET', 'private-id')])
     assert.equal(resumeIdentity(req), null)
 })
 
@@ -41,4 +41,13 @@ test('disabled proxy is unchanged; failing sink does not interfere with events',
   assert.equal(proxy.listenerCount('proxyReq'), 0)
   resumeProxyWitness(true, () => { throw new Error('sink failure') }).configure(proxy)
   assert.doesNotThrow(() => proxy.emit('proxyReq', {}, request()))
+})
+
+test('proxy error exposes only an allowlisted code and incomplete responses remain visible', () => {
+  const lines = [], proxy = new EventEmitter()
+  resumeProxyWitness(true, line => lines.push(JSON.parse(line.slice('APP03_RESUME_PROXY '.length)))).configure(proxy)
+  proxy.emit('error', { code: 'ECONNREFUSED', message: 'private' }, request())
+  proxy.emit('error', { code: 'private', message: 'private' }, request())
+  assert.deepEqual(lines.map(x => x.errorCode), ['ECONNREFUSED', 'other'])
+  assert.ok(!JSON.stringify(lines).includes('private'))
 })

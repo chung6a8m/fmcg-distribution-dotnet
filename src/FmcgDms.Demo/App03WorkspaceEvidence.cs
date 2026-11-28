@@ -129,6 +129,7 @@ internal static class App03WorkspaceEvidence
         {
             // The observer is disposed before this receipt; never change the business outcome.
             if (catalogWitness is not null) App03SettlementWitnessCoverage.Write(catalogWitness);
+            if (resumeWitness is not null) App03ResumeWitnessCoverage.Write(resumeWitness, profile);
             try { await Stop(); }
             finally
             {

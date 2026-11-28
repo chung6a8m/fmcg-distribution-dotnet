@@ -2,10 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { resumeProxyWitness } from './ci/app03-resume-proxy'
+import { isResumeProxyEnabled, resumeProxyWitness } from './ci/app03-resume-proxy.mjs'
 
-const witnessEnabled = process.env.FMCG_APP03_RESUME_PROXY === '1'
-  && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_OS === 'Windows'
+const witnessEnabled = isResumeProxyEnabled()
 const witness = resumeProxyWitness(witnessEnabled)
 
 export default defineConfig({
