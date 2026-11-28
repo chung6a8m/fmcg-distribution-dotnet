@@ -370,6 +370,32 @@ public sealed class App02a3ProcessingService(TenantConnections connections,
         return rows.Count();
     }
 
+    /// <summary>
+    /// Scheduling hint only: committed C technical retries in this owned
+    /// tenant. The sweep and ProcessAsync remain the authoritative due fences.
+    /// A null result arms no timer; startup/event/safety sweeps rediscover it.
+    /// </summary>
+    internal async Task<DateTimeOffset?> ReadNextTechnicalRetryDueAsync(
+        string tenant, CancellationToken ct)
+    {
+        var worker = App02a3Sql.WorkerPrincipal(tenant);
+        await using var db = await connections.OpenSyntheticScratchAsync(worker, ct);
+        DateTime? due = await db.ExecuteScalarAsync<DateTime?>(App02a3Sql.Cmd("""
+            SELECT MIN(p.NextAttemptAtUtc)
+            FROM dbo.App02EventReceipt r
+            JOIN dbo.App02EventProgress p ON p.TenantId=r.TenantId
+                AND p.ReceiptId=r.ReceiptId
+            WHERE r.TenantId=@Tenant
+              AND r.EventKind=N'CashierAcceptanceRequested'
+              AND p.Status IN(N'RECEIVED',N'PENDING_DEPENDENCY')
+              AND p.ReasonCode=N'TECHNICAL_RETRY'
+              AND p.NextAttemptAtUtc IS NOT NULL
+            """, new { Tenant = tenant }, null, ct));
+        return due is { } value
+            ? new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc))
+            : null;
+    }
+
     private static Task<bool> RoleActive(SqlConnection db, IDbTransaction tx,
         string tenant, string actor, string role, CancellationToken ct) =>
         db.ExecuteScalarAsync<bool>(App02a3Sql.Cmd("""

@@ -126,6 +126,8 @@ Next runtime investigation: [REL-75.4](rel75-a11-reproduction.md), independent o
 
 [Implementation/acceptance contract](rel755-native-evidence.md). Phase A: read-only sector geometry and source-bound original/actual pair when supported; separate create/start timeout timeline and exit evidence. Same three hosted arms as REL-75.3, 3-cell PR smoke, 60-cell official experiment after merge/main Full. Phase B: choose separately scoped evidence-backed remediation only if the observation establishes the applicable cause. Existing bootstrap, budgets, required workflows, runner defaults and business contract unchanged. R75-01/G75-02 remain OPEN; R75-02/03 are separate.
 
+**REL-75.5A integration (28/11/2026):** [PR #180 previous Full failure](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7235071132) was worker-side SQL1205 and an overdue committed C retry, distinct from R75-01. Owner authorized independent REL-75.6A prerequisite; its [main receipt](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/181#issuecomment-7235566600) is verified on `458108b75e0e268a41cef3dd3716af06c34fe55a`. Resume #180 against that main, preserving all V2 finding fixes and historical failed attempts. New integrated source Full CI and native V2 smoke are required before merge, then exact main Full before official 60-cell native experiment. No root-cause claim, no waiver, no REL-75.4 closeout.
+
 ## Tham chiếu
 
 - [Microsoft: explicit create và start](https://learn.microsoft.com/en-us/sql/connect/php/php-driver-for-sql-server-support-for-localdb).
