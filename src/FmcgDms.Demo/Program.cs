@@ -15,6 +15,11 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The demo requires Windows LocalDB.");
+if (args is ["DevSqlObserver", var observerRoot, var observerSource, var observerRun, var observerProfile, var observerScope, var observerTenant])
+{
+    Environment.ExitCode = await DevSqlObserver.RunChild(observerRoot, observerSource, observerRun, observerProfile, observerScope, observerTenant);
+    return;
+}
 if (args is ["App03Session", var sessionAction, var sessionRoot, var sessionSource, var sessionId])
 {
     await App03DevSession.Run(sessionAction, sessionRoot, sessionSource, sessionId == "-" ? null : sessionId, settlement: true, finance: true);
