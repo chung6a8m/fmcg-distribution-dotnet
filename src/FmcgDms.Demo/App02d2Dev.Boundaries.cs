@@ -61,6 +61,8 @@ internal sealed partial class App02d2Dev
 
     private async Task RecoveryCase(string tenant)
     {
+        var diagnostic = peerWitness;
+        diagnostic?.SelectPhase("seed");
         var s = await d1.SeedD2(tenant, "D2-14");
         var input = Request(s, await d1.SeedD2Cash(s, 60), 60);
         var opening = await D2Sql.Read(run, s);
@@ -71,20 +73,45 @@ internal sealed partial class App02d2Dev
         var upstream = new TaskCompletionSource<Reply>(TaskCreationOptions.RunContinuationsAsynchronously);
         proxy.MapPost("/drop-ack", async context =>
         {
-            try { upstream.TrySetResult(await Send(tenant, HttpMethod.Post, Sales, input)); }
-            catch (Exception ex) { upstream.TrySetException(ex); }
-            finally { context.Abort(); }
+            async Task Forward()
+            {
+                try { upstream.TrySetResult(await Send(tenant, HttpMethod.Post, Sales, input)); }
+                catch (Exception ex) { upstream.TrySetException(ex); }
+                finally { context.Abort(); }
+            }
+            if (diagnostic is null) await Forward();
+            else await diagnostic.ObserveAckProxy(context, Forward);
         });
         await proxy.StartAsync(ct);
         bool lost = false;
-        try { using var ignored = await client.PostAsJsonAsync(proxy.Urls.Single() + "/drop-ack", new { }, ct); }
-        catch (HttpRequestException) { lost = true; }
+        diagnostic?.SelectPhase("ack");
+        if (diagnostic is null)
+        {
+            try { using var ignored = await client.PostAsJsonAsync(proxy.Urls.Single() + "/drop-ack", new { }, ct); }
+            catch (HttpRequestException) { lost = true; }
+        }
+        else
+        {
+            using var ackRequest = new HttpRequestMessage(HttpMethod.Post, proxy.Urls.Single() + "/drop-ack")
+            { Content = JsonContent.Create(new { }) };
+            var ticket = diagnostic.Begin(tenant, ackRequest, client.Timeout);
+            int? status = null;
+            Exception? error = null;
+            try { using var ignored = await client.SendAsync(ackRequest, ct); status = (int)ignored.StatusCode; }
+            catch (HttpRequestException ex) { error = ex; lost = true; }
+            catch (Exception ex) { error = ex; throw; }
+            finally { diagnostic.End(ticket, status, error, ct); }
+        }
         Verify(lost, true, "Caller did not receive ACK");
         Guid sourceId = Applied(await upstream.Task.WaitAsync(ct), "Actual API committed before ACK was dropped");
+        diagnostic?.SelectPhase("restart-lookup");
+        diagnostic?.Mark("restart-start");
         await restart("on");
+        diagnostic?.Mark("restart-end");
         var lookup = await Send(tenant, HttpMethod.Get, Lookup(input));
         Verify(lookup.Source, (Guid?)sourceId, "Original source found after API restart");
         Verify(lookup.Status, "APPLIED", "Recovered original terminal outcome");
+        diagnostic?.SelectPhase("replay-checks");
         var retry = await Send(tenant, HttpMethod.Post, Sales, input);
         Verify(retry.Replayed, true, "Identical authorized retry is replayed");
         Verify(retry.Source, (Guid?)sourceId, "Replay returns original source");
@@ -96,15 +123,26 @@ internal sealed partial class App02d2Dev
 
     private async Task ChannelCase(string tenant)
     {
+        var diagnostic = peerWitness;
+        diagnostic?.SelectPhase("seed");
         var s = await d1.SeedD2(tenant, "D2-15");
         var input = Request(s, await d1.SeedD2Cash(s, 60), 60);
+        diagnostic?.SelectPhase("channel-off");
+        diagnostic?.Mark("restart-start");
         await restart("off");
+        diagnostic?.Mark("restart-end");
         try
         {
             var blocked = await NoEffect(tenant, input, "Missing synthetic channel profile");
             Verify(blocked.Reason, "B_NO_CHANNEL", "Missing channel is rejected explicitly");
         }
-        finally { await restart("on"); }
+        finally
+        {
+            diagnostic?.SelectPhase("channel-on");
+            diagnostic?.Mark("restart-start");
+            await restart("on");
+            diagnostic?.Mark("restart-end");
+        }
         var altered = System.Text.Json.JsonSerializer.SerializeToNode(input, Json)!.AsObject();
         altered["invoiceEligible"] = true;
         var opening = await D2Sql.Read(run, s);
@@ -123,42 +161,36 @@ internal sealed partial class App02d2Dev
 
     private async Task PeerCase(string tenant, string peer)
     {
-        await using var diagnostic = await D2PeerWitness.TryStart(root, this.evidence, source, run, tenant, witnessPids, ct);
-        peerWitness = diagnostic;
-        d1.D2PeerDiagnostic = diagnostic;
-        try
+        var diagnostic = peerWitness;
+        diagnostic?.SelectPhase("origin-seed");
+        var own = await d1.SeedD2(tenant, $"D2-16-OUT-{Slot(tenant)}");
+        diagnostic?.SelectPhase("peer-seed");
+        var foreign = await d1.SeedD2(peer, $"D2-16-IN-{Slot(tenant)}");
+        var input = Request(own, await d1.SeedD2Cash(own, 60), 60);
+        var peerRequest = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60);
+        string ownBefore = await D2Sql.Fingerprint(run, tenant);
+        string peerBefore = await D2Sql.Fingerprint(run, peer);
+        diagnostic?.SelectPhase("peer-checks");
+        foreach (var variant in new[]
         {
-            diagnostic?.SelectPhase("origin-seed");
-            var own = await d1.SeedD2(tenant, $"D2-16-OUT-{Slot(tenant)}");
-            diagnostic?.SelectPhase("peer-seed");
-            var foreign = await d1.SeedD2(peer, $"D2-16-IN-{Slot(tenant)}");
-            var input = Request(own, await d1.SeedD2Cash(own, 60), 60);
-            var peerRequest = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60);
-            string ownBefore = await D2Sql.Fingerprint(run, tenant);
-            string peerBefore = await D2Sql.Fingerprint(run, peer);
-            diagnostic?.SelectPhase("peer-checks");
-            foreach (var variant in new[]
-            {
-                peerRequest with { ProducerId = Actor(tenant) },
-                Fresh(input) with { TripId = foreign.Trip },
-                Fresh(input) with { CustomerId = foreign.Customer, OutletId = foreign.Outlet },
-                Fresh(input) with { ShipToSnapshotId = foreign.ShipTo, SelectionId = foreign.Selection },
-                Fresh(input) with { TripManifestLineId = foreign.B20 },
-                Fresh(input) with { VerificationEvidenceRef = peerRequest.VerificationEvidenceRef }
-            })
-                await NoEffect(tenant, variant, "Peer identifiers denied without D.2 source");
-            var prior = browserScenes[(peer, "D2-02")];
-            var evidenceFile = Path.Combine(Checkpoints, $"{Slot(peer)}-D2-02.json");
-            var evidence = System.Text.Json.JsonSerializer.Deserialize<BrowserResult>(await File.ReadAllTextAsync(evidenceFile, ct), Json)!;
-            var lookup = await Send(tenant, HttpMethod.Get, Lookup(prior.Request with
-            {
-                CommandId = evidence.CommandId, ProducerId = evidence.ProducerId
-            }));
-            Verify(lookup.Http is 403 or 404, true, "Peer terminal outcome inaccessible");
-            Verify(lookup.Source, (Guid?)null, "Peer outcome has no source disclosure");
-            Verify(await D2Sql.Fingerprint(run, tenant), ownBefore, "Origin tenant protected rows unchanged");
-            Verify(await D2Sql.Fingerprint(run, peer), peerBefore, "Peer tenant protected rows unchanged");
-        }
-        finally { peerWitness = null; d1.D2PeerDiagnostic = null; }
+            peerRequest with { ProducerId = Actor(tenant) },
+            Fresh(input) with { TripId = foreign.Trip },
+            Fresh(input) with { CustomerId = foreign.Customer, OutletId = foreign.Outlet },
+            Fresh(input) with { ShipToSnapshotId = foreign.ShipTo, SelectionId = foreign.Selection },
+            Fresh(input) with { TripManifestLineId = foreign.B20 },
+            Fresh(input) with { VerificationEvidenceRef = peerRequest.VerificationEvidenceRef }
+        })
+            await NoEffect(tenant, variant, "Peer identifiers denied without D.2 source");
+        var prior = browserScenes[(peer, "D2-02")];
+        var evidenceFile = Path.Combine(Checkpoints, $"{Slot(peer)}-D2-02.json");
+        var evidence = System.Text.Json.JsonSerializer.Deserialize<BrowserResult>(await File.ReadAllTextAsync(evidenceFile, ct), Json)!;
+        var lookup = await Send(tenant, HttpMethod.Get, Lookup(prior.Request with
+        {
+            CommandId = evidence.CommandId, ProducerId = evidence.ProducerId
+        }));
+        Verify(lookup.Http is 403 or 404, true, "Peer terminal outcome inaccessible");
+        Verify(lookup.Source, (Guid?)null, "Peer outcome has no source disclosure");
+        Verify(await D2Sql.Fingerprint(run, tenant), ownBefore, "Origin tenant protected rows unchanged");
+        Verify(await D2Sql.Fingerprint(run, peer), peerBefore, "Peer tenant protected rows unchanged");
     }
 }

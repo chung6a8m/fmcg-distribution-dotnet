@@ -238,7 +238,18 @@ internal sealed partial class App02d2Dev(string root, DemoRun run, string source
         Current.Value = comparisons;
         try
         {
-            await test();
+            string? diagnosticScope = id switch
+            {
+                "D2-14" or "D2-15" => id + "-" + scope,
+                "D2-16" => scope,
+                _ => null
+            };
+            await using var diagnostic = diagnosticScope is null ? null :
+                await D2PeerWitness.TryStart(root, source, run, "app02d2", diagnosticScope, witnessPids, ct);
+            peerWitness = diagnostic;
+            d1.D2PeerDiagnostic = diagnostic;
+            try { await test(); }
+            finally { peerWitness = null; d1.D2PeerDiagnostic = null; }
             results.Add(new(id, scope, "PASS", comparisons.ToArray(), null));
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
