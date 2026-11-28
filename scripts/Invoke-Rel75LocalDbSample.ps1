@@ -241,7 +241,8 @@ function Write-Rel75Receipt([System.Collections.IDictionary]$Report) {
     try { [IO.File]::Move($tmp,$path) } finally { [IO.File]::Delete($tmp) }
 }
 
-function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
+function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample,
+    [scriptblock]$OnCold = $null, [scriptblock]$OnFinished = $null) {
     Assert-Rel75Runner $SelectedArm
     $target = New-Rel75Name $SelectedArm $Sample
     $profilePath = [Environment]::GetFolderPath('LocalApplicationData')
@@ -266,6 +267,10 @@ function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
         $version = Get-Rel75Runtime $pre $SelectedArm $report
         Assert-Rel75Cold $pre $target $dir
         $report.coldVerified = $true
+        # REL-75.5 opt-in observation runs outside the bootstrap deadline.
+        # Only the separate diagnostic runner supplies callbacks; the original
+        # command-line entry point and required-CI helper never do.
+        if ($null -ne $OnCold) { & $OnCold $target $dir | Out-Null }
         $report.status = 'BOOTSTRAP_FAILED'
         $boot.watch.Start()
         if ($target -ceq 'MSSQLLocalDB' -and $version -cmatch '\A15\.0\.') {
@@ -297,6 +302,9 @@ function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
         }
         if ($report.status -eq 'BOOTSTRAP_FAILED' -and @($report.bootstrap | Where-Object stage -eq 'create').Count -eq 0) {
             $report.status = 'NOT_EXECUTED'
+        }
+        if ($null -ne $OnFinished) {
+            try { & $OnFinished $target $dir | Out-Null } catch { }
         }
         # Collection failure must not replace the actual bootstrap outcome.
         try { $report.diskAfter = Get-Rel75Disk $dir; $report.filesAfter = @(Get-Rel75Files $dir) } catch { }
