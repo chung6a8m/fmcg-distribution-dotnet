@@ -1,0 +1,163 @@
+name: Shared DEV HTTP investigation (diagnostic only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/d2-peer-http-investigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  peer-witness:
+    name: DEV HTTP ${{ matrix.scenario }} / ${{ matrix.arm }} / iteration ${{ matrix.iteration }}
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [D2, F01, F06]
+        arm: [baseline, instrumented]
+        iteration: [1, 2]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Use runner temporary NuGet package directory
+        shell: pwsh
+        run: |
+          $packages = Join-Path $env:RUNNER_TEMP 'app00a-nuget-packages'
+          "NUGET_PACKAGES=$packages" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.404'
+      - name: Verify pinned SDK
+        shell: pwsh
+        run: |
+          $actual = (dotnet --version).Trim()
+          if ($actual -ne '10.0.404') { throw "Expected SDK 10.0.404, got $actual" }
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+      - name: Verify Node.js 26 LTS
+        shell: pwsh
+        run: |
+          $actual = (node --version).Trim()
+          if ($actual -notmatch '^v26\.\d+\.\d+$') { throw "Expected Node.js >=26.13.1 <27, got $actual" }
+          if ([version]$actual.Substring(1) -lt [version]'26.13.1') { throw "Node.js 26.13.1+ security baseline is required; got $actual" }
+      - name: Start SQL Server LocalDB
+        id: localdb
+        shell: pwsh
+        env:
+          CI_LOCALDB_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Initialize-LocalDb.ps1
+      - name: Collect redacted LocalDB startup failure diagnostics
+        if: always() && steps.localdb.outcome == 'failure'
+        timeout-minutes: 1
+        shell: pwsh
+        env:
+          LAB_E02_BOOTSTRAP: ${{ steps.localdb.outputs.bootstrap }}
+          CI_LOCALDB_BOOTSTRAP_RECEIPT: ${{ steps.localdb.outputs.receipt }}
+          LAB_E02_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Collect-LocalDbDiagnostics.ps1
+      - name: .NET restore
+        run: dotnet restore FmcgDms.slnx
+      - name: Build .NET solution
+        run: dotnet build FmcgDms.slnx -c Release --no-restore
+      - name: Enable same-job Demo build reuse
+        shell: pwsh
+        run: |
+          $sourceCommit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the built checkout SHA.' }
+          $sourceCommit = "$sourceCommit".Trim()
+          if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full git commit SHA for the built checkout.' }
+          $sourceStatus = git status --porcelain --untracked-files=all
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot verify the built checkout is clean.' }
+          if ($sourceStatus) { throw 'Cannot reuse the Demo build from a dirty checkout.' }
+          "FMCG_CI_PREBUILT_SHA=$sourceCommit" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install chromium
+      - name: Verify D2 peer witness regression
+        shell: pwsh
+        run: |
+          $results = Join-Path $PWD 'TestResults/d2-peer-regression'
+          dotnet test tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 19 -- --filter-class FmcgDms.Api.Tests.D2PeerHttpTraceTests --report-trx --results-directory $results
+      - name: Verify shared observer protocol and fixed scope/phase guards
+        shell: pwsh
+        run: |
+          $results = Join-Path $PWD 'TestResults/dev-observer-regression'
+          dotnet test tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 81 -- --filter-class FmcgDms.Api.Tests.DevSqlObserverProtocolTests --report-trx --results-directory $results
+      - name: Verify shared Vite diagnostic boundary and transport
+        run: node --test web/tests/dev-http-proxy.test.mjs web/tests/dev-http-vite.integration.test.mjs
+      - name: Verify diagnostic evidence validator regression
+        run: python -B -m unittest discover -s tests/ci -p test_verify_dev_http_evidence.py -v
+      - name: Record diagnostic source and attempt
+        shell: pwsh
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCENARIO: ${{ matrix.scenario }}
+          ARM: ${{ matrix.arm }}
+          ITERATION: ${{ matrix.iteration }}
+        run: |
+          $checkout = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $checkout -cne $env:GITHUB_SHA) { throw 'Unexpected checkout.' }
+          New-Item -ItemType Directory -Path TestResults -Force | Out-Null
+          [ordered]@{schema='DEV_HTTP_COMPARISON_V1';sourceHead=$env:SOURCE_HEAD;checkout=$checkout;
+            run=$env:GITHUB_RUN_ID;attempt=$env:GITHUB_RUN_ATTEMPT;scenario=$env:SCENARIO;arm=$env:ARM;
+            iteration=[int]$env:ITERATION;witnessEnabled=($env:ARM -ceq 'instrumented');utc=[DateTime]::UtcNow.ToString('O')} |
+            ConvertTo-Json | Set-Content TestResults/dev-http-comparison.json -Encoding utf8
+      - name: Execute original scenario once (does not substitute Full CI)
+        id: scenario
+        shell: pwsh
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          FMCG_D2_PEER_WITNESS: ${{ matrix.arm == 'instrumented' && '1' || '0' }}
+        run: |
+          if ($env:SCENARIO -ceq 'D2') { ./scripts/Run-App02D2.ps1 }
+          elseif ($env:SCENARIO -ceq 'F01') { ./scripts/Run-App02C1.ps1 -Increment DevF01 -Verify }
+          elseif ($env:SCENARIO -ceq 'F06') { ./scripts/Run-App02C1.ps1 -Increment DevF06 -Verify }
+          else { throw 'Unexpected scenario.' }
+      - name: Record original scenario outcome
+        if: always()
+        shell: pwsh
+        env:
+          SCENARIO_OUTCOME: ${{ steps.scenario.outcome }}
+        run: |
+          if (Test-Path -LiteralPath TestResults/dev-http-comparison.json -PathType Leaf) {
+            $receipt = Get-Content -LiteralPath TestResults/dev-http-comparison.json -Raw | ConvertFrom-Json
+            $receipt | Add-Member -NotePropertyName scenarioOutcome -NotePropertyValue $env:SCENARIO_OUTCOME
+            $receipt | Add-Member -NotePropertyName endedUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('O'))
+            $receipt | ConvertTo-Json | Set-Content TestResults/dev-http-comparison.json -Encoding utf8
+          }
+      - name: Verify run-bound browser and observer evidence (diagnostic only)
+        if: steps.scenario.outcome == 'success'
+        env:
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          SCENARIO: ${{ matrix.scenario }}
+          ARM: ${{ matrix.arm }}
+          ITERATION: ${{ matrix.iteration }}
+        run: python -B tools/verify_dev_http_evidence.py
+      - name: Preserve diagnostic evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dev-http-investigation-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.scenario }}-${{ matrix.arm }}-${{ matrix.iteration }}
+          path: |
+            TestResults/dev-http-comparison.json
+            TestResults/dev-http-evidence-verification.json
+            TestResults/app02d2/
+            TestResults/dev-f01/
+            TestResults/dev-f06/
+            web/test-results-app02c5/
+            TestResults/d2-peer-regression/
+            TestResults/dev-observer-regression/
+            web/test-results-app02d2/
+            TestResults/localdb*/
+          if-no-files-found: warn

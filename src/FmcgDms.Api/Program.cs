@@ -67,6 +67,15 @@ if (app.Configuration.GetValue<bool>("App03:Workspace") && app.Environment.IsEnv
     && app.Configuration.GetValue<bool>("App03:CatalogWitness"))
     app.Use(next => context => App03CatalogTrace.Observe(context, () => next(context), Console.WriteLine));
 
+// Opt-in only on the dedicated D.2 / DEV-F01 / DEV-F06 synthetic hosted CI host.
+if (!app03A1 && app.Environment.IsEnvironment("IntegrationTest")
+    && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
+    && app.Configuration.GetValue<bool>("App02C1:Enabled")
+    && app.Configuration.GetValue<bool>("App02D2:PeerWitness")
+    && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
+    && Environment.GetEnvironmentVariable("RUNNER_OS") == "Windows")
+    app.Use(next => context => D2PeerHttpTrace.Observe(context, () => next(context), Console.WriteLine));
+
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>
 {

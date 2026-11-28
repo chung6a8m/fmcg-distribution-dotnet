@@ -21,7 +21,7 @@ internal sealed class DevSqlObserver : IAsyncDisposable
     private readonly string directory, runId, source, profile, scope, tenant, receipt;
     private readonly object gate = new();
     private readonly List<string> observed = [];
-    private readonly TaskCompletionSource<string> ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly List<(string Stage, DateTimeOffset ReceivedUtc)> stageReceipts = [];
     private bool stderrObserved, disposed;
     private int? exitCode;
     private string cleanup = "notStarted";
@@ -43,14 +43,9 @@ internal sealed class DevSqlObserver : IAsyncDisposable
             throw new InvalidOperationException("Diagnostic child exit unconfirmed; retain owned scratch for safe cleanup.");
     }
 
-    private static bool IsScope(string profile, string scope) =>
-        (profile is "app03-5" or "app03-6") && scope == "resume"
-        || profile == "app02d2" && scope is ("D2-14-A" or "D2-14-B" or "D2-15-A" or "D2-15-B" or "A-to-B" or "B-to-A" or "initial")
-        || profile == "dev-f06" && scope == "initial";
-
     internal static string? EvidenceDirectory(string root, string runId, string profile, string scope, bool create = false)
     {
-        if (!Hosted || !IsScope(profile, scope)) return null;
+        if (!Hosted || !DevSqlObserverProtocol.IsScope(profile, scope)) return null;
         try
         {
             _ = new DemoRun(runId);
@@ -95,6 +90,11 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         DevSqlObserver? observer = null;
         string status = "unavailable", failure = "none";
         int? pid = null;
+        TimeSpan startupBudget = TimeSpan.FromSeconds(scope == "resume" ? 8 : 4);
+        long? startupStamp = null;
+        DateTimeOffset? handshakeStartedUtc = null, handshakeSentUtc = null, startupDecisionUtc = null;
+        double? startupElapsedMs = null;
+        DevSqlObserverProtocol.StartupProof? startupProof = null;
         try
         {
             string dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? throw new InvalidOperationException();
@@ -125,20 +125,43 @@ internal sealed class DevSqlObserver : IAsyncDisposable
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            startup.CancelAfter(TimeSpan.FromSeconds(scope == "resume" ? 8 : 4));
+            long budgetStart = Stopwatch.GetTimestamp();
+            startupStamp = budgetStart;
+            DateTimeOffset handshakeStart = DateTimeOffset.UtcNow;
+            handshakeStartedUtc = handshakeStart;
+            startup.CancelAfter(startupBudget);
             await process.StandardInput.WriteLineAsync("start").WaitAsync(startup.Token);
             await process.StandardInput.FlushAsync().WaitAsync(startup.Token);
-            var exit = process.WaitForExitAsync(startup.Token);
-            if (await Task.WhenAny(observer.ready.Task, exit).WaitAsync(startup.Token) == observer.ready.Task &&
-                !process.HasExited && DevSqlObserverProtocol.VerifyStartup(Path.Combine(directory, names.Sample), runId, profile, scope, tenant, process.Id,
-                    out string sampleStatus) && sampleStatus == observer.ready.Task.Result)
+            handshakeSentUtc = DateTimeOffset.UtcNow;
+            var decision = await DevSqlObserverProtocol.WaitForStartup(
+                () => DevSqlObserverProtocol.ReadStartup(Path.Combine(directory, names.Sample), source,
+                    runId, profile, scope, tenant, process.Id, handshakeStart, DateTimeOffset.UtcNow),
+                () => process.HasExited, () => Stopwatch.GetElapsedTime(budgetStart), startupBudget,
+                (delay, token) => Task.Delay(delay, token), startup.Token);
+            // Recheck at the actual parent admission boundary. Never promote after timeout/cleanup.
+            startup.Token.ThrowIfCancellationRequested();
+            bool exited = process.HasExited;
+            startupDecisionUtc = DateTimeOffset.UtcNow;
+            startupElapsedMs = Stopwatch.GetElapsedTime(budgetStart).TotalMilliseconds;
+            if (startupElapsedMs.Value >= startupBudget.TotalMilliseconds || decision.Failure == "deadline")
             {
-                status = sampleStatus;
+                status = "startupTimeout";
+                failure = "deadline";
+            }
+            else if (exited || decision.Failure == "childExited") failure = "childExited";
+            else if (decision.Proof is { } proof)
+            {
+                startupProof = proof;
+                status = proof.Status;
                 return observer;
             }
-            failure = "missingStartupProof";
+            else failure = "missingStartupProof";
         }
-        catch (OperationCanceledException) { status = ct.IsCancellationRequested ? "callerCancelled" : "startupTimeout"; }
+        catch (OperationCanceledException)
+        {
+            status = ct.IsCancellationRequested ? "callerCancelled" : "startupTimeout";
+            failure = ct.IsCancellationRequested ? "callerCancelled" : "deadline";
+        }
         catch (Exception ex)
         {
             failure = ex switch
@@ -151,6 +174,9 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         }
         finally
         {
+            // Freeze the decision before cleanup; late stdout cannot rewrite admission.
+            startupDecisionUtc ??= DateTimeOffset.UtcNow;
+            if (startupStamp is long started) startupElapsedMs ??= Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             if (status is not ("ready" or "startedWithoutSample"))
             {
                 if (observer is not null) await observer.DisposeAsync();
@@ -170,16 +196,31 @@ internal sealed class DevSqlObserver : IAsyncDisposable
             try
             {
                 string[] stages = [];
+                object[] receivedStages = [];
                 bool stderr = false;
                 if (observer is not null)
-                    lock (observer.gate) { stages = observer.observed.ToArray(); stderr = observer.stderrObserved; }
+                    lock (observer.gate)
+                    {
+                        stages = observer.observed.ToArray();
+                        receivedStages = observer.stageReceipts.Select(x => new { stage = x.Stage, receivedUtc = x.ReceivedUtc }).ToArray();
+                        stderr = observer.stderrObserved;
+                    }
                 using var file = File.Open(Path.Combine(directory, names.Receipt), FileMode.CreateNew);
                 JsonSerializer.Serialize(file, new
                 {
                     schema = scope == "resume" ? "APP03_SETTLEMENT_SQL_OBSERVER_V1" : "DEV_SQL_OBSERVER_V1",
                     source, runId, profile, scope, tenant, pid, status, startedUtc,
                     endedUtc = DateTimeOffset.UtcNow, elapsedMs = Stopwatch.GetElapsedTime(stamp).TotalMilliseconds,
-                    startupStages = stages, stderrObserved = stderr, startupFailure = failure,
+                    startupStages = stages, startupStageReceipts = receivedStages, stderrObserved = stderr, startupFailure = failure,
+                    startupBudgetMs = startupBudget.TotalMilliseconds, handshakeStartedUtc, handshakeSentUtc,
+                    startupDecisionUtc, startupElapsedMs,
+                    readinessSource = startupProof is null ? null : "flushedSample",
+                    startupProof = startupProof is null ? null : new
+                    {
+                        status = startupProof.Status, handshakeUtc = startupProof.HandshakeUtc,
+                        childStartUtc = startupProof.ChildStartUtc, availableUtc = startupProof.AvailableUtc,
+                        firstSampleStartedUtc = startupProof.FirstSampleStartedUtc, firstSampleUtc = startupProof.FirstSampleUtc
+                    },
                     cleanup = observer?.cleanup ?? "notStarted", cleanupExitCode = observer?.exitCode,
                     implementation = "managedChild"
                 });
@@ -194,8 +235,14 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         if (line is null || !line.StartsWith(Marker, StringComparison.Ordinal)) return;
         string stage = line[Marker.Length..];
         if (!Stages.Contains(stage, StringComparer.Ordinal)) return;
-        lock (gate) { if (!observed.Contains(stage, StringComparer.Ordinal)) observed.Add(stage); }
-        if (stage is "ready" or "startedWithoutSample") ready.TrySetResult(stage);
+        lock (gate)
+        {
+            if (!observed.Contains(stage, StringComparer.Ordinal))
+            {
+                observed.Add(stage);
+                stageReceipts.Add((stage, DateTimeOffset.UtcNow));
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -239,6 +286,7 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         if (directory is null || tenant is not ("tenant-a" or "tenant-b")) return 2;
         Emit("guarded");
         if (Console.ReadLine() != "start") return 2;
+        var handshakeUtc = DateTimeOffset.UtcNow;
         Emit("handshake");
         // Read the parent pipe off the SQL sampling path. EOF means graceful stop;
         // the job object handles parent death/forced cleanup.
@@ -254,7 +302,7 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         {
             writer = new StreamWriter(File.Open(Path.Combine(directory, names.Sample), FileMode.CreateNew, FileAccess.Write, FileShare.Read));
             Row(new { @event = "start", schema = "DEV_SQL_OBSERVER_V1", source, runId, profile, scope, tenant,
-                pid = Environment.ProcessId, observerPid = Environment.ProcessId, utc = DateTimeOffset.UtcNow, observerMs = 0 });
+                pid = Environment.ProcessId, observerPid = Environment.ProcessId, handshakeUtc, utc = DateTimeOffset.UtcNow, observerMs = 0 });
             Emit("file-open");
             phase = "connection";
             var settings = new SqlConnectionStringBuilder(run.Connection(tenant))

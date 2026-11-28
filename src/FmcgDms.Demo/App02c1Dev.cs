@@ -63,6 +63,7 @@ internal static class App02c1Dev
         bool d4 = increment == "App02D4";
         bool d3 = d4 || increment == "App02D3";
         bool d2 = increment == "App02D2";
+        bool sharedHttpWitness = persistent is null && mode == "Verify" && (d2 || adjustments || increment == "DevF01") && D2PeerWitness.Enabled;
         bool d1 = d3 || d2 || increment == "App02D1";
         if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
         bool c5 = returnLane || pricing || fefo || d1 || c6 || increment == "App02C5";
@@ -286,6 +287,9 @@ internal static class App02c1Dev
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
+            apiStart.Environment.Remove("App02D2__PeerWitness");
+            if (sharedHttpWitness)
+                apiStart.Environment["App02D2__PeerWitness"] = "true";
             if (field)
             {
                 apiStart.Environment["App02D1__Enabled"] = "true";
@@ -322,24 +326,52 @@ internal static class App02c1Dev
             // diagnostic host uses the fenced programmatic DEV launcher.
             var viteStart = traceProxy
                 ? StartInfo("node", web, Path.Combine(web, "ci", "run-app03-resume-vite.mjs"), portArg)
-                : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portArg, "--strictPort");
+                : sharedHttpWitness
+                    ? StartInfo("node", web, Path.Combine(web, "ci", "run-dev-http-vite.mjs"), portArg)
+                    : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portArg, "--strictPort");
             if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
             viteStart.Environment.Remove("FMCG_APP03_RESUME_PROXY");
             if (traceProxy) viteStart.Environment["FMCG_APP03_RESUME_PROXY"] = "1";
+            viteStart.Environment.Remove("FMCG_DEV_HTTP_PROXY");
+            if (sharedHttpWitness) viteStart.Environment["FMCG_DEV_HTTP_PROXY"] = "1";
             viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
-            foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
+            // Preserve the merged APP-03 resume/catalog path and its original session assertions.
+            // The shared witness is exclusive to standalone, explicitly opted-in D2/F01/F06.
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                await App03SettlementHttpWitness.ObserveSession(
-                    traceResume ? resumeWitness : null, resumeCheckpoint, tenant, run.Id, persistent is not null,
-                    api.Id, viteProcess.Id, client.Timeout, lifetime.Token, id =>
+                await using var initialWitness = sharedHttpWitness
+                    ? await D2PeerWitness.TryStart(root, source, run,
+                        d2 ? "app02d2" : adjustments ? "dev-f06" : "dev-f01", "initial",
+                        () => (api!.Id, viteProcess!.Id), lifetime.Token) : null;
+                initialWitness?.SelectPhase("initial");
+                foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    var ticket = initialWitness?.Begin(tenant, request, client.Timeout);
+                    int? status = null;
+                    Exception? probeFailure = null;
+                    try
                     {
-                        if (id is not null) request.Headers.Add(App03SettlementHttpWitness.Header, id);
-                        return client.SendAsync(request, lifetime.Token);
-                    });
+                        await App03SettlementHttpWitness.ObserveSession(
+                            traceResume ? resumeWitness : null, resumeCheckpoint, tenant, run.Id, persistent is not null,
+                            api.Id, viteProcess.Id, client.Timeout, lifetime.Token, id =>
+                            {
+                                if (id is not null) request.Headers.Add(App03SettlementHttpWitness.Header, id);
+                                return ticket is null ? client.SendAsync(request, lifetime.Token) : SendWitnessed();
+                            });
+                    }
+                    catch (Exception ex) { probeFailure = ex; throw; }
+                    finally { initialWitness?.End(ticket, status, probeFailure, lifetime.Token); }
+
+                    async Task<HttpResponseMessage> SendWitnessed()
+                    {
+                        var response = await client.SendAsync(request, lifetime.Token);
+                        status = (int)response.StatusCode;
+                        return response;
+                    }
+                }
             }
 
             if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);
@@ -626,7 +658,8 @@ internal static class App02c1Dev
                     api = Start(apiStart);
                     await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
                 }
-                await d2Run.Initialize(client, webUrl, lifetime.Token, Restart);
+                await d2Run.Initialize(client, webUrl, lifetime.Token, Restart,
+                    sharedHttpWitness ? () => (api!.Id, viteProcess!.Id) : null);
                 d2Run.ConfigureBrowser(browserStart);
                 browser = Start(browserStart);
                 await d2Run.Serve(browser);

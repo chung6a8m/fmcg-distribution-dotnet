@@ -20,43 +20,58 @@ internal sealed partial class App02d2Dev
 
     private async Task EvidenceCase(string tenant)
     {
+        peerWitness?.SelectPhase("seed");
         var s = await d1.SeedD2(tenant, "D2-07");
+        peerWitness?.SelectPhase("evidence-foreign-seed");
         var foreign = await d1.SeedD2(tenant, "D2-07-FOREIGN");
+        peerWitness?.SelectPhase("evidence-prepare");
         string valid = await d1.SeedD2Cash(s, 60);
         var input = Request(s, valid, 60);
-        var checks = new (D2Request Input, string Label)[]
+        var checks = new (D2Request Input, string Label, string Phase)[]
         {
-            (input with { VerificationEvidenceRef = "missing" }, "Missing cash witness"),
-            (input with { ReceivedCashAmount = 61 }, "Cash amount mismatch"),
-            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "pending") }, "Pending cash witness"),
-            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "future") }, "Future cash witness"),
-            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "self") }, "Seller as witness"),
-            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(foreign, 60) }, "Cash witness outside scope"),
-            (input with { ReceivedCashAmount = 0, VerificationEvidenceRef = "", PendingBankEvidenceRef = "missing" }, "Missing bank evidence"),
-            (input with { PendingBankEvidenceRef = await d1.SeedD2Bank(s) }, "Bank pending cannot be shown as cash"),
-            (input with { CustomerCreditReservationId = Guid.NewGuid() }, "Credit without reservation")
+            (input with { VerificationEvidenceRef = "missing" }, "Missing cash witness", "evidence-cash-missing"),
+            (input with { ReceivedCashAmount = 61 }, "Cash amount mismatch", "evidence-cash-amount"),
+            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "pending") }, "Pending cash witness", "evidence-cash-pending"),
+            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "future") }, "Future cash witness", "evidence-cash-future"),
+            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(s, 60, "self") }, "Seller as witness", "evidence-cash-self"),
+            (input with { VerificationEvidenceRef = await d1.SeedD2Cash(foreign, 60) }, "Cash witness outside scope", "evidence-cash-foreign"),
+            (input with { ReceivedCashAmount = 0, VerificationEvidenceRef = "", PendingBankEvidenceRef = "missing" }, "Missing bank evidence", "evidence-bank-missing"),
+            (input with { PendingBankEvidenceRef = await d1.SeedD2Bank(s) }, "Bank pending cannot be shown as cash", "evidence-bank-pending"),
+            (input with { CustomerCreditReservationId = Guid.NewGuid() }, "Credit without reservation", "evidence-credit-missing")
         };
-        foreach (var (data, label) in checks) await NoEffect(tenant, Fresh(data), label);
+        foreach (var (data, label, phase) in checks)
+        {
+            peerWitness?.SelectPhase(phase);
+            await NoEffect(tenant, Fresh(data), label);
+        }
+        peerWitness?.SelectPhase("evidence-bank-binding");
         var pending = Request(s) with { PendingBankEvidenceRef = await d1.SeedD2Bank(s) };
         var claimedVerified = System.Text.Json.JsonSerializer.SerializeToNode(pending, Json)!.AsObject();
         claimedVerified["bankVerified"] = true;
         Verify((await NoEffect(tenant, claimedVerified, "Client cannot verify a pending bank report")).Http, 400,
             "Unrecognized bank verification flag fails request binding");
 
+        peerWitness?.SelectPhase("evidence-credit-origin");
         var origin = Request(s, await d1.SeedD2Cash(s, 120), 120) with { TripManifestLineId = s.B10 };
         Guid creditSource = Applied(await Send(tenant, HttpMethod.Post, Sales, origin), "Credit fixture posted");
+        peerWitness?.SelectPhase("evidence-credit-reserve");
         Guid reserved = await d1.ReserveD2CustomerCredit(s, creditSource);
+        peerWitness?.SelectPhase("evidence-credit-excess");
         await NoEffect(tenant, Fresh(input) with
         {
             CustomerCreditReservationId = reserved, BaseQuantity = 7
         }, "Reservation exceeds residual sale");
+        peerWitness?.SelectPhase("evidence-credit-foreign");
         var wrongCredit = Request(foreign, await d1.SeedD2Cash(foreign, 60), 60) with { CustomerCreditReservationId = reserved };
         await NoEffect(tenant, wrongCredit, "Credit reservation for another customer and trip");
+        peerWitness?.SelectPhase("evidence-posting");
         var opening = await D2Sql.Read(run, s);
         Guid sourceId = Applied(await Send(tenant, HttpMethod.Post, Sales, input), "Witness survives failed attempts");
         await VerifyPosting(s, input, sourceId, opening, expected["D2-02"]);
+        peerWitness?.SelectPhase("evidence-cash-reuse");
         await NoEffect(tenant, Fresh(input), "Cash evidence cannot be consumed twice");
 
+        peerWitness?.SelectPhase("evidence-credit-reuse");
         var creditSale = browserScenes[(tenant, "D2-05")];
         await NoEffect(tenant, Fresh(creditSale.Request) with
         {
