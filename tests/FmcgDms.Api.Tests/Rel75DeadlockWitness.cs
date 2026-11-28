@@ -13,11 +13,11 @@ internal sealed record Rel75Graph(int HostPid, int DatabaseId, int[] Spids, int[
 }
 internal sealed record Rel75XeObservation(int DatabaseId, long TotalEventsProcessed, long EventCount,
     long TargetDroppedCount, int SessionDroppedEvents, int SessionDroppedBuffers,
-    int LargestDroppedEventSize, int UnprojectedReports, bool Truncated, Rel75Graph[] Graphs)
+    int LargestDroppedEventSize, int UnprojectedReports, bool Truncated, Rel75Graph[] Graphs, int ParsedEventCount)
 {
     public bool Complete => !Truncated && TotalEventsProcessed == EventCount && TargetDroppedCount == 0
         && SessionDroppedEvents == 0 && SessionDroppedBuffers == 0 && LargestDroppedEventSize == 0
-        && UnprojectedReports == 0 && Graphs.LongLength == EventCount;
+        && UnprojectedReports == 0 && Graphs.LongLength == EventCount && ParsedEventCount == EventCount;
 }
 
 /// <summary>Project the engine's XML witness in memory; never persist XML, input
@@ -78,10 +78,8 @@ internal static class Rel75DeadlockWitness
             { unprojected++; continue; }
             graphs.Add(candidates[0] with { EventUtcMs = timestamp.ToUnixTimeMilliseconds() });
         }
-        if (events.LongLength != count)
-            throw new InvalidOperationException("REL75_XE_EVENT_COUNT_MISMATCH");
         return new(dbId, total, count, dropped, droppedEvents, droppedBuffers,
-            largestDroppedEventSize, unprojected, truncated == "1", graphs.ToArray());
+            largestDroppedEventSize, unprojected, truncated == "1", graphs.ToArray(), events.Length);
     }
 
     private static int Number(XElement e, string name) =>
