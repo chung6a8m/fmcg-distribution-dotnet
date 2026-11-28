@@ -105,3 +105,9 @@ Workflow APP-03 HTTP investigation chạy .6 độc lập ngay cả khi .5 chặ
 - P2: C1 transport RESPONSE_RECEIVED tách khỏi assertion PASSED / EXPECTED_FORBIDDEN / HTTP_STATUS_REJECTED / ASSERTION_FAILED. Giữ nguyên status/tenant/nonce checks và exception khi witness disabled; ghi thời điểm nhận HTTP và assertion riêng, không đổi 3s timeout. Coverage xác minh cả outcome/status/assertion/response time; timeout không bị đổi thành PASS bởi sample cuối.
 
 Trạng thái SOURCE_CANDIDATE / FINAL_HEAD_REVIEW_AND_HOSTED_CI_PENDING. Không suy diễn nguyên nhân HTTP, không thay đổi REL-75.6C, không merge hoặc unblock PR #180.
+
+#### Review `f2239f06` — SQL observer startup witness
+
+[Review raw evidence](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/184#issuecomment-7240619722): Full APP-03 and independent .6 completed, 24/24 HTTP/Vite/API correlations, but independent both observers timed out before NDJSON was created (0/11 SQL brackets). Full SQL brackets 13/13. D2-16/B-to-A separately timed out in distribution; Full CI FAILED. No common runtime cause established.
+
+Startup receipt retains only exact, bounded child milestones (script entered, guards passed, parent/pipe/file open, SQL connection, ownership, visibility, sample loop), stderr presence flag, parent-side allowlisted failure category, pre-cleanup exit code when observed, bounded cleanup result and exit code when observed. No raw stream content or secrets. Missing stages remain missing; READY still requires the original NDJSON proof, not stdout. Keep startup 8s, cleanup limits, SQL timeouts, tenant guards and all business assertions unchanged. Regression covers duplicate/unrecognized marker filtering and absent stages. New source requires hosted verification; no runtime remediation or issue closeout.

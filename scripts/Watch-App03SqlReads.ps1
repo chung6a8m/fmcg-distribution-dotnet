@@ -9,6 +9,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# Fixed milestones only; no inputs, paths, exception text or SQL in stdout.
+function Write-StartupStage([string]$Stage) {
+    if ($DrainOnStop) { [Console]::WriteLine("APP03_SQL_OBSERVER_STARTUP_V1 $Stage") }
+}
+Write-StartupStage 'entered'
 if ($env:FMCG_APP03_READ_DIAGNOSTICS -cne '1' -or $env:GITHUB_ACTIONS -cne 'true' -or
     $env:RUNNER_OS -cne 'Windows' -or [Environment]::OSVersion.Platform -ne 'Win32NT') { exit 2 }
 
@@ -30,6 +35,8 @@ foreach ($part in @('TestResults', $ProfileName, $RunId)) {
         [IO.File]::GetAttributes($directory).HasFlag([IO.FileAttributes]::ReparsePoint)) { exit 2 }
 }
 if (![string]::Equals($directory, $env:APP03_EVIDENCE_DIR, [StringComparison]::OrdinalIgnoreCase)) { exit 2 }
+
+Write-StartupStage 'guarded'
 
 # Keep SQL values, client identity, full batch text and free-form wait_resource at the server.
 # Only known statement families and object names may cross the diagnostic connection.
@@ -96,10 +103,13 @@ function Write-Record([hashtable]$Data) {
 
 try {
     $parent = [Diagnostics.Process]::GetProcessById($ReporterPid)
+    Write-StartupStage 'parent-open'
     $inputPipe = [Console]::OpenStandardInput()
     $pipeRead = $inputPipe.BeginRead((New-Object byte[] 1), 0, 1, $null, $null)
+    Write-StartupStage 'pipe-open'
     $file = [IO.File]::Open((Join-Path $directory $sampleName), 'CreateNew', 'Write', 'Read')
     $writer = [IO.StreamWriter]::new($file, [Text.UTF8Encoding]::new($false))
+    Write-StartupStage 'file-open'
     Write-Record @{ event='start'; profile=$ProfileName; tenant=$tenant; runId=$RunId; pid=$PID }
 
     $phase = 'connection'
@@ -109,6 +119,7 @@ try {
     $db = [System.Data.SqlClient.SqlConnection]::new(
         "Server=(localdb)\MSSQLLocalDB;Database=$database;Integrated Security=true;Pooling=false;Connect Timeout=2;ConnectRetryCount=0;Application Name=APP03 read observer")
     $db.Open()
+    Write-StartupStage 'connection-open'
     $command = $db.CreateCommand()
     $command.CommandTimeout = 1
     $phase = 'ownership'
@@ -126,6 +137,7 @@ SELECT CASE WHEN DB_NAME()=@database
     $null = $command.Parameters.Add('@tenant', [System.Data.SqlDbType]::NVarChar, 32)
     $command.Parameters['@tenant'].Value = $tenant
     if ([int]$command.ExecuteScalar() -ne 1) { throw 'ownership' }
+    Write-StartupStage 'ownership-verified'
     $phase = 'visibility'
     $command.Parameters.Clear()
     $command.CommandText = @'
@@ -135,12 +147,14 @@ SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 OR
          ELSE HAS_PERMS_BY_NAME(NULL,NULL,'VIEW SERVER STATE') END=1 THEN 1 ELSE 0 END;
 '@
     if ([int]$command.ExecuteScalar() -ne 1) { throw 'visibility' }
+    Write-StartupStage 'visibility-verified'
 
     $phase = 'sample'
     $command.CommandText = $sampleSql
     $reason = 'deadline'
     $finalSampleStatus = if ($DrainOnStop) { 'notAttempted' } else { 'notRequested' }
     Write-Record @{ event='available'; sampleIntervalMs=250; commandTimeoutMs=1000 }
+    Write-StartupStage 'sample-loop'
     while ($clock.Elapsed.TotalSeconds -lt 240) {
         # Only a live parent closing its input pipe normally can request the last sample.
         # The 240s observer limit, 2MB bound and 1s SQL command timeout still apply.

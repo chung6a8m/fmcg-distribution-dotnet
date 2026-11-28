@@ -9,6 +9,8 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
 {
     private readonly Process child;
     private readonly App03ChildJob job;
+    private int? cleanupExitCode;
+    private string cleanup = "notStarted";
 
     private App03SettlementSqlObserver(Process child, App03ChildJob job)
     {
@@ -53,6 +55,9 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         App03SettlementSqlObserver? observer = null;
         string status = "unavailable";
         int? pid = null;
+        int? exitedBeforeCleanup = null;
+        string startupFailure = "none";
+        var startup = new App03SqlObserverStartupWitness();
         long started = Stopwatch.GetTimestamp();
         DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
         try
@@ -95,8 +100,8 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                 observer = new App03SettlementSqlObserver(child, job);
                 pid = child.Id;
                 // Drain child streams without publishing untrusted messages.
-                child.OutputDataReceived += (_, _) => { };
-                child.ErrorDataReceived += (_, _) => { };
+                child.OutputDataReceived += (_, e) => startup.Stdout(e.Data);
+                child.ErrorDataReceived += (_, e) => startup.Stderr(e.Data);
                 child.BeginOutputReadLine();
                 child.BeginErrorReadLine();
             }
@@ -152,17 +157,35 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) { status = ct.IsCancellationRequested ? "callerCancelled" : "startupTimeout"; }
-        catch { status = "unavailable"; }
+        catch (Exception ex)
+        {
+            status = "unavailable";
+            startupFailure = ex switch
+            {
+                System.ComponentModel.Win32Exception => "nativeProcess",
+                IOException => "io",
+                JsonException => "invalidSample",
+                UnauthorizedAccessException => "access",
+                _ => "other"
+            };
+        }
         finally
         {
             if (status is not ("ready" or "startedWithoutSample") && observer is not null)
+            {
+                try { if (observer.child.HasExited) exitedBeforeCleanup = observer.child.ExitCode; } catch { }
                 await observer.DisposeAsync();
+            }
             try
             {
+                var startupSnapshot = startup.Snapshot();
                 using var receipt = File.Open(Path.Combine(output, receiptName), FileMode.CreateNew);
                 JsonSerializer.Serialize(receipt, new { schema = "APP03_SETTLEMENT_SQL_OBSERVER_V1",
                     source, runId, profile, tenant, pid, status, startedUtc,
-                    endedUtc = DateTimeOffset.UtcNow, elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds });
+                    endedUtc = DateTimeOffset.UtcNow, elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    startupStages = startupSnapshot.Stages, stderrObserved = startupSnapshot.StderrObserved,
+                    startupFailure, exitedBeforeCleanup, cleanupExitCode = observer?.cleanupExitCode,
+                    cleanup = observer?.cleanup ?? "notStarted" });
             }
             catch { Console.Error.WriteLine("APP-03 SQL observer receipt unavailable."); }
         }
@@ -174,16 +197,22 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         try
         {
             child.StandardInput.Close();
-            try { await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(4)); }
+            try
+            {
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(4));
+                cleanup = "exited";
+            }
             catch (TimeoutException)
             {
                 job.Dispose();
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                cleanup = "jobClosed";
             }
         }
-        catch { ReportCleanupFailure(); }
+        catch { cleanup = "unconfirmed"; ReportCleanupFailure(); }
         finally
         {
+            try { if (child.HasExited) cleanupExitCode = child.ExitCode; } catch { }
             try { job.Dispose(); } catch { ReportCleanupFailure(); }
             try { child.Dispose(); } catch { ReportCleanupFailure(); }
         }
