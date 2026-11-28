@@ -6,7 +6,7 @@ namespace FmcgDms.Api.Tests;
 
 internal sealed record Rel75Edge(int OwnerSpid, int WaiterSpid, string OwnerMode, string WaiterMode);
 internal sealed record Rel75Resource(string Kind, string Table, long? HobtId, Rel75Edge[] Edges);
-internal sealed record Rel75Graph(int[] Spids, int[] VictimSpids, Rel75Resource[] Resources, bool Cycle);
+internal sealed record Rel75Graph(int HostPid, int DatabaseId, int[] Spids, int[] VictimSpids, Rel75Resource[] Resources, bool Cycle);
 
 /// <summary>Project the engine's XML witness in memory; never persist XML, input
 /// buffers, SQL text, host names, resource keys, file paths or arbitrary attributes.</summary>
@@ -80,7 +80,7 @@ internal static class Rel75DeadlockWitness
             start == goal || (seen.Add(start) && edgesAll.Where(x => x.WaiterSpid == start)
                 .Any(x => Reaches(x.OwnerSpid, goal, seen)));
         bool cycle = edgesAll.Any(e => Reaches(e.OwnerSpid, e.WaiterSpid, []));
-        return new(spids.Values.Distinct().Order().ToArray(), victims.Distinct().Order().ToArray(),
+        return new(hostPid, dbId, spids.Values.Distinct().Order().ToArray(), victims.Distinct().Order().ToArray(),
             resources.ToArray(), cycle);
     }
 }
