@@ -93,7 +93,7 @@ def fixture(root, key, nonce="1" * 32):
          "OracleChecked": 48, "OracleMatched": 48, "PeerUnchanged": True,
          "GraphCapture": "CAPTURED", "GraphError": None, "DiagnosticError": None,
          "XeObservation": {"DatabaseId": 7, "Complete": True, "Truncated": False,
-                           "TotalEventsProcessed": 0, "EventCount": 0, "TargetDroppedCount": 0,
+                           "TotalEventsProcessed": 0, "EventCount": 0, "ParsedEventCount": 0, "TargetDroppedCount": 0,
                            "SessionDroppedEvents": 0, "SessionDroppedBuffers": 0,
                            "LargestDroppedEventSize": 0, "UnprojectedReports": 0, "Graphs": []},
          "ProcessObservation": "LAB-E02/observe.json", "IntakeObservation": None,
@@ -201,7 +201,7 @@ class Rel75A11MatrixTests(unittest.TestCase):
             fail(root, s, e, o, http=True)
             save(root, key, s, e, o)
             self.assertEqual(("1" * 32, "HTTP_500_WITH_1205_LOG", 0), M.validate(root, key, IDENTITY))
-            s["XeObservation"].update(Graphs=[witness(s)], EventCount=1, TotalEventsProcessed=1)
+            s["XeObservation"].update(Graphs=[witness(s)], EventCount=1, TotalEventsProcessed=1, ParsedEventCount=1)
             save(root, key, s, e, o)
             self.assertEqual(1, M.validate(root, key, IDENTITY)[2])
             s["XeObservation"]["Graphs"][0]["HostPid"] = 99
