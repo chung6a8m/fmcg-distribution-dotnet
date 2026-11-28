@@ -43,6 +43,7 @@ public sealed class App02a3OutboxService(TenantConnections connections,
         {
             try
             {
+                await connections.Rel75CheckpointAsync(sender, tenant, "OutboxBeforeClaim", ct);
                 DeliveryRow? row = await sender.QuerySingleOrDefaultAsync<DeliveryRow>(
                     App02a3Sql.Cmd("""
                     SELECT TOP(1) d.MessageId,d.Status,d.AttemptCount,
