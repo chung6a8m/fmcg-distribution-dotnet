@@ -9,6 +9,7 @@ Assert-Rel75Runner $Arm
 $script:rel755=[ordered]@{ schema='REL755_NATIVE_EVIDENCE_V1'; arm=$Arm; iteration=$Iteration
     sourceHeadSha=$env:REL75_SOURCE_SHA; workflowSha=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT
     instance=$null; originalReceiptSha256=$null; sectorBefore=$null; sectorAfter=$null; sectorErrors=@()
+    bootstrapStartUtc=$null; bootstrapEndUtc=$null
     monitor=@{status='NOT_STARTED'; cadenceMs=500; snapshots=@()}; startedUtc=[DateTime]::UtcNow.ToString('o'); completedUtc=$null }
 $script:observerJob=$null
 $script:observerControl=$null
@@ -43,13 +44,16 @@ $onCold={
     $script:observerJob=Start-Job -FilePath (Join-Path $PSScriptRoot 'Measure-Rel755Progress.ps1') -ArgumentList $target,$script:observerControl
     $wait=[Diagnostics.Stopwatch]::StartNew()
     while ($wait.ElapsedMilliseconds -lt 10000 -and $script:observerJob.State -in 'NotStarted','Running') {
-        if ([IO.File]::Exists((Join-Path $script:observerControl 'ready'))) { return }
+        if ([IO.File]::Exists((Join-Path $script:observerControl 'ready'))) {
+            $script:rel755.bootstrapStartUtc=[DateTime]::UtcNow.ToString('o'); return
+        }
         Start-Sleep -Milliseconds 100
     }
     throw 'REL755_MONITOR_NOT_READY'
 }
 $onFinished={
     param($target,$directory)
+    if ($null -ne $script:rel755.bootstrapStartUtc) { $script:rel755.bootstrapEndUtc=[DateTime]::UtcNow.ToString('o') }
     Stop-Rel755Observer
     if ($script:rel755.instance -cne $target) { return }
     $script:rel755.sectorAfter=Get-Rel755Volume $directory
