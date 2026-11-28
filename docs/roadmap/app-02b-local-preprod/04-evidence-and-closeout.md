@@ -372,7 +372,9 @@ All eight failures occurred before readiness: two create InstanceStartFailed / S
 
 ## REL-75.6B — Unexpected Retry Witness & Contention Diagnosis (28/11/2026)
 
-**Status:** SOURCE_CANDIDATE / INDEPENDENT_REVIEW_AND_CI_PENDING. Owner authorized independent diagnostic PR before #180 continuation. [Integrated #180 recurrence](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7235779211): recovered A11-09 tenant-b, one unexpected retry and missing scoped worker witness. [Contract](../rel756b-unexpected-retry-witness.md). Preserve original assertions, retry history and exact live PID/DB witness; no runtime repair without actual evidence. REL-75.4 remains blocked, #180 not merged, #75/#68/#176 and all operational gates unchanged.
+**Status:** SOURCE_MERGED / WITNESS_CAPTURE_VERIFIED / MAIN_FULL_FAILED / ACTUAL_CONTENTION_WITNESSED. Owner authorized independent diagnostic PR before #180 continuation. [Integrated #180 recurrence](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7235779211): recovered A11-09 tenant-b, one unexpected retry and missing scoped worker witness. [Contract](../rel756b-unexpected-retry-witness.md). Preserve original assertions, retry history and exact live PID/DB witness; no runtime repair without actual evidence. REL-75.4 remains blocked, #180 not merged, #75/#68/#176 and all operational gates unchanged.
+
+[Main #182 receipt](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/182#issuecomment-7237511631): 9/10 Full, 419/420 .NET, 1439/1440 SQL, 3/3 witnesses captured; actual ordinary B worker 1205 and receipt keylock cycle. Owner authorized independent [REL-75.6C](../rel756c-contention-remediation.md) candidate on main `655202748f8abc797ab6beb06f4b77dcf83f1320`; verification pending. #180 remains blocked, REL-75.4 incomplete, no operational closeout.
 
 <a id="lab-e04"></a>
 ## LAB-E04 — Fix HTTP 500 sau OS restart

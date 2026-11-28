@@ -57,6 +57,7 @@ public sealed class App02a3CorrectionService(TenantConnections connections)
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             await App02a3Sql.RequireRole(db, tx, tenant, maker, "cashier_supervisor", ct);
             Original? original = await db.QuerySingleOrDefaultAsync<Original>(
                 App02a3Sql.Cmd("""
@@ -104,6 +105,7 @@ public sealed class App02a3CorrectionService(TenantConnections connections)
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             await App02a3Sql.RequireRole(db, tx, tenant, checker, "case_checker", ct);
             Proposal? proposal = await db.QuerySingleOrDefaultAsync<Proposal>(
                 App02a3Sql.Cmd("""

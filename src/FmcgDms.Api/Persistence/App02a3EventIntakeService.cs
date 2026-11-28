@@ -98,6 +98,18 @@ internal static class App02a3Sql
         if (result < 0) throw new TimeoutException("APP02 transaction lock was not granted.");
     }
 
+    // REL-75.6C: the observed U/RangeS-U cycle is on Receipt key ranges;
+    // identity or trip locks alone cannot fence ranges across index keys.
+    // Take this database/tenant-scoped transaction lock FIRST, before any
+    // role, identity, Trip, receipt/progress or source SQL locks. Never hold
+    // it across transactions, an outbox dispatch, or a worker wake.
+    internal static string ReceiptDomainKey(string tenant) => tenant is "tenant-a" or "tenant-b"
+        ? "APP02:RECEIPT:" + tenant
+        : throw new UnauthorizedAccessException("Unsupported receipt tenant.");
+
+    internal static Task LockReceiptDomainAsync(SqlConnection db, IDbTransaction tx,
+        string tenant, CancellationToken ct) => Lock(db, tx, ReceiptDomainKey(tenant), ct);
+
     public static string IdentityLock(string tenant, string producer, string eventId) =>
         "APP02:EVENT:" + Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(tenant + "\0" + producer + "\0" + eventId)));
@@ -140,6 +152,7 @@ public sealed class App02a3EventIntakeService(
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             await App02a3Sql.Lock(db, tx,
                 App02a3Sql.IdentityLock(tenant, input.ProducerId, input.EventId), ct);
             // Current role is a tenant-bound SQL fact, not merely a JWT
@@ -270,6 +283,7 @@ public sealed class App02a3EventIntakeService(
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             var found = await db.QuerySingleOrDefaultAsync<LookupRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.EventKind,p.Status,p.ReasonCode,
                     a.AcceptanceId

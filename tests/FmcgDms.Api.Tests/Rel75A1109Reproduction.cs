@@ -52,7 +52,7 @@ public sealed partial class App01e2CrossCommandRaceTests
         public bool PeerUnchanged { get; set; }
     }
 
-    private sealed record Rel75SqlSession(int Spid, int BlockingSpid, bool HasUserTransaction);
+    private sealed record Rel75SqlSession(int Spid, int BlockingSpid, bool HasUserTransaction, bool ReceiptGateWait);
     private sealed record Rel75Boundary(string Phase, string Point, long UtcMs, Rel75SqlSession[] Sessions);
 
     private sealed class Rel75Gates : IDisposable
@@ -255,18 +255,32 @@ public sealed partial class App01e2CrossCommandRaceTests
             SELECT DISTINCT CONVERT(int,s.session_id) AS Spid,
                 CONVERT(int,CASE WHEN r.blocking_session_id>0 THEN r.blocking_session_id ELSE 0 END) AS BlockingSpid,
                 CONVERT(bit,CASE WHEN EXISTS(SELECT 1 FROM sys.dm_tran_session_transactions t
-                  WHERE t.session_id=s.session_id AND t.is_user_transaction=1) THEN 1 ELSE 0 END) AS HasUserTransaction
+                  WHERE t.session_id=s.session_id AND t.is_user_transaction=1) THEN 1 ELSE 0 END) AS HasUserTransaction,
+                CONVERT(bit,CASE WHEN EXISTS(
+                    SELECT 1 FROM sys.dm_tran_locks w
+                    JOIN sys.dm_tran_locks g ON g.resource_type=w.resource_type
+                      AND g.resource_database_id=w.resource_database_id
+                      AND g.resource_associated_entity_id=w.resource_associated_entity_id
+                      AND g.resource_description=w.resource_description
+                    WHERE w.request_session_id=s.session_id
+                      AND g.request_session_id=r.blocking_session_id
+                      AND w.resource_type=N'APPLICATION' AND w.resource_database_id=DB_ID()
+                      AND CHARINDEX(@Gate,w.resource_description)>0
+                      AND w.request_owner_type=N'TRANSACTION' AND w.request_mode=N'X'
+                      AND w.request_status=N'WAIT'
+                      AND g.request_owner_type=N'TRANSACTION' AND g.request_mode=N'X'
+                      AND g.request_status=N'GRANT') THEN 1 ELSE 0 END) AS ReceiptGateWait
             FROM sys.dm_exec_sessions s
             LEFT JOIN sys.dm_exec_requests r ON r.session_id=s.session_id
             WHERE s.host_process_id=@Pid AND s.database_id=DB_ID()
               AND (r.session_id IS NOT NULL OR EXISTS(SELECT 1 FROM sys.dm_tran_session_transactions t
                   WHERE t.session_id=s.session_id AND t.is_user_transaction=1))
             ORDER BY Spid,BlockingSpid
-            """, new { Pid = pid }, commandTimeout: 3, cancellationToken: ct));
+            """, new { Pid = pid, Gate = App02a3Sql.ReceiptDomainKey(tenant) }, commandTimeout: 3, cancellationToken: ct));
         var observed = rows.ToArray();
         // Only retain blocking relationships whose other endpoint is also in scope.
         return observed.Select(x => observed.Any(o => o.Spid == x.BlockingSpid)
-            ? x : x with { BlockingSpid = 0 }).ToArray();
+            ? x : x with { BlockingSpid = 0, ReceiptGateWait = false }).ToArray();
     }
 
     private static int[] Rel75Transactions(Rel75SqlSession[] sessions) =>
@@ -406,40 +420,41 @@ public sealed partial class App01e2CrossCommandRaceTests
             intake = Rel75PostP(s, sample, current, sales, ct);
             if (sample.Arm == "c-p-overlap")
             {
-                await gates.WaitAsync("PAfterRole", ct);
-                await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
-                sample.OverlapObserved = Rel75Overlap(sample.Boundaries[0], sample.Boundaries[^1]);
-                Assert.True(sample.OverlapObserved, "REL75 expected two actual user transactions");
-                int cSpid = Rel75Transactions(sample.Boundaries[0].Sessions).Single();
-                int pSpid = Rel75Transactions(sample.Boundaries[^1].Sessions).Single(x => x != cSpid);
-                Release("PAfterRole");
-                // Let the real P statements proceed while C still holds its
-                // real locks. Observe either P's pre-COMMIT barrier or a
-                // scoped SQL blocking edge, never manufacture an unrelated lock.
+                // C holds the receipt-domain gate at its original real
+                // prerequisite boundary. P must now wait on that precise SQL
+                // application lock BEFORE acquiring any role/receipt locks.
+                int cSpid = Assert.Single(Rel75Transactions(sample.Boundaries[0].Sessions));
                 var watch = Stopwatch.StartNew();
-                bool progressObserved = false;
+                int pSpid = 0;
                 while (watch.Elapsed < TimeSpan.FromSeconds(3))
                 {
                     var sessions = await Rel75Observe(s.Tenant, current.Pid, ct);
                     var active = Rel75Transactions(sessions);
-                    bool pairHeld = active.Length == 2 && active.Contains(cSpid) && active.Contains(pSpid);
-                    bool atCommit = gates.Reached("PBeforeCommit");
-                    bool directedWait = sessions.Any(x => x.Spid == pSpid && x.BlockingSpid == cSpid);
-                    if (pairHeld && (atCommit || directedWait))
+                    var waiting = sessions.SingleOrDefault(x => x.Spid != cSpid
+                        && x.BlockingSpid == cSpid && x.ReceiptGateWait);
+                    if (waiting is not null && active.Length == 2
+                        && active.Contains(cSpid) && active.Contains(waiting.Spid))
                     {
-                        sample.Boundaries.Add(new("PBeforeCommit", atCommit ? "reached" : "sql-wait",
+                        pSpid = waiting.Spid;
+                        sample.Boundaries.Add(new("PReceiptGate", "sql-wait",
                             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), sessions));
-                        progressObserved = true;
+                        sample.OverlapObserved = true;
                         break;
                     }
-                    if (intake.IsCompleted) break;
+                    if (intake.IsCompleted || gates.Reached("PAfterRole")) break;
                     await Task.Delay(50, ct);
                 }
+                if (intake.IsCompleted) await intake;
+                Assert.True(sample.OverlapObserved, "REL756C expected P to wait on C receipt-domain gate");
                 Release("CBeforePrerequisite");
+                await gates.WaitAsync("PAfterRole", ct);
+                await Rel75BoundaryAt(sample, "PAfterRole", "reached", current.Pid, ct);
+                Assert.Contains(pSpid, Rel75Transactions(sample.Boundaries[^1].Sessions));
+                Release("PAfterRole");
+                await gates.WaitAsync("PBeforeCommit", ct);
+                await Rel75BoundaryAt(sample, "PBeforeCommit", "reached", current.Pid, ct);
+                Assert.Contains(pSpid, Rel75Transactions(sample.Boundaries[^1].Sessions));
                 Release("PBeforeCommit");
-                // If intake has already failed, preserve the original HTTP assertion.
-                if (!progressObserved && intake.IsCompleted) await intake;
-                Assert.True(progressObserved, "REL75 missing directed P progress while C holds locks");
             }
             else if (sample.Arm == "p-commit-sweep")
             {

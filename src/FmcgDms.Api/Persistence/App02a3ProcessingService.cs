@@ -69,6 +69,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections,
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             var c = await db.QuerySingleOrDefaultAsync<CRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.TenantId,r.ProducerId,r.EventId,r.EventKind,
                     r.ActorId,r.TripId,r.PrerequisiteProducerId,r.PrerequisiteEventId,
@@ -434,6 +435,7 @@ public sealed class App02a3ProcessingService(TenantConnections connections,
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             CRow? c = await db.QuerySingleOrDefaultAsync<CRow>(App02a3Sql.Cmd("""
                 SELECT r.ReceiptId,r.TenantId,r.ReceivedAtUtc,p.Status,p.TechnicalRetryCount
                 FROM dbo.App02EventReceipt r WITH(UPDLOCK,HOLDLOCK)

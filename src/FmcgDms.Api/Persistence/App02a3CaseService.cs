@@ -51,6 +51,7 @@ public sealed class App02a3CaseService(
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             await App02a3Sql.RequireRole(db, tx, tenant, maker, "cashier_supervisor", ct);
             var current = await db.QuerySingleOrDefaultAsync<ProposalRow>(App02a3Sql.Cmd("""
                 SELECT c.CaseId,p.Status,p.ActiveCaseId,r.ActorId AS CActorId
@@ -98,6 +99,7 @@ public sealed class App02a3CaseService(
             (SqlTransaction)await db.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         try
         {
+            await App02a3Sql.LockReceiptDomainAsync(db, tx, tenant, ct);
             await App02a3Sql.RequireRole(db, tx, tenant, checker, "case_checker", ct);
             ProposalRow? proposal = await db.QuerySingleOrDefaultAsync<ProposalRow>(
                 App02a3Sql.Cmd("""
