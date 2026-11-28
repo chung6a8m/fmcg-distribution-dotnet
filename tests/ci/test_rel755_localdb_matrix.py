@@ -26,19 +26,26 @@ def vol(resolution="EXISTING_PATH", physical=4096):
 def fixture(arm, failed=False):
     orig=receipt(arm,state="BOOTSTRAP_FAILED" if failed else "READY")
     stages=orig["bootstrap"]
+    orig.update(startedUtc=utc(100),completedUtc=utc(5500))
     for i,s in enumerate(stages,1):
         s["elapsedMilliseconds"]=min(3200,i*400)
+        s["startedUtc"]=utc(1000+(i-1)*400)
+        s["timeoutMilliseconds"]={"info":3000,"versions":3000,"create":45000,
+                                 "start":15000,"readiness":12000}[s["stage"]]
     if orig["controlReceipt"]:
-        orig["controlReceipt"].update(startedUtc=utc(1000),attempts=copy.deepcopy(stages))
-        for i,s in enumerate(stages):
-            s["startedUtc"]=utc(1000+i*400)
-        orig["controlReceipt"]["attempts"]=copy.deepcopy(stages)
+        orig["controlReceipt"].update(startedUtc=utc(1000),completedUtc=utc(4200),
+                                      attempts=copy.deepcopy(stages))
+    for log in orig["logs"]:
+        log["observation"]["truncated"]=False
+        next(x for x in orig["filesAfter"] if x["file"]==log["file"]).update(
+            status="PRESENT",sizeBytes=100,createdUtc=utc(1100),modifiedUtc=utc(4000))
     native={"schema":m.SCHEMA,"arm":arm,"iteration":1,"sourceHeadSha":SOURCE,"workflowSha":WORKFLOW,
             "runId":RUN,"runAttempt":ATTEMPT,"instance":orig["instance"],
             "originalReceiptSha256":None,"startedUtc":utc(0),"completedUtc":utc(6000),
             "bootstrapStartUtc":utc(1000),"bootstrapEndUtc":utc(4400),
             "sectorBefore":vol("NEAREST_EXISTING_ANCESTOR"),"sectorAfter":vol(),
-            "sectorErrors":[{"file":f,"status":"OK","bytesRead":100,"tailOnly":False,"pairs":[]}
+            "sectorErrors":[{"file":f,"status":"OK","bytesRead":100,"tailOnly":False,"pairs":[],
+                             "fileLength":100,"createdUtc":utc(1100),"modifiedUtc":utc(4000),"stable":True}
                             for f in sorted(m.LOGS)],
             "monitor":{"status":"COMPLETE","cadenceMs":500,"snapshots":[]}}
     for i,t in enumerate(range(500,5001,500)):
@@ -111,7 +118,8 @@ class NativeMatrixTests(unittest.TestCase):
         n["sectorAfter"]=vol(physical=8192)
         log=next(x for x in n["sectorErrors"] if x["file"]==orig["logs"][0]["file"])
         log["pairs"]=[{"error":5178,"severity":16,"state":1,"scope":"OWNED_FILE","file":"master.mdf",
-                       "originalBytes":4096,"actualBytes":8192,"volume":vol(physical=8192)}]
+                       "originalBytes":4096,"actualBytes":8192,"headerUtc":utc(1800),
+                       "messageUtc":utc(1900),"volume":vol(physical=8192)}]
         return orig,n,log
 
     def test_exact_correlated_5178(self):
@@ -164,12 +172,68 @@ class NativeMatrixTests(unittest.TestCase):
             lambda n:n["sectorAfter"].update(rootDrive="D:"),
             lambda n:n["sectorAfter"].update(volumeIdentitySha256="e"*64),
             lambda n:n["monitor"]["snapshots"][2].update(processStatus="PARTIAL"),
+            lambda n:n["monitor"]["snapshots"][2].update(elapsedMs=1501),
             lambda n:n["sectorAfter"]["sector"].update(maxPhysicalBytes=512),
         ):
             orig,n=fixture("win22-auto")
             mutate(n)
             self.put("win22-auto",orig,n)
             self.assertEqual("INCOMPLETE",self.summary()["status"])
+
+    def test_no_corroboration_for_stale_or_partial_pair(self):
+        for mutate in (
+            lambda n,p,l:p.update(headerUtc=utc(4500),messageUtc=utc(4600)),
+            lambda n,p,l:p.update(headerUtc=utc(200),messageUtc=utc(300)),
+            lambda n,p,l:l.update(modifiedUtc=utc(4001)),
+            lambda n,p,l:n["sectorBefore"].update(volumeIdentitySha256="e"*64),
+            lambda n,p,l:n["monitor"].update(status="LIMIT_REACHED"),
+            lambda n,p,l:l.update(stable=False),
+        ):
+            with self.subTest(mutate=mutate):
+                orig,n,log=self.pair_fixture()
+                mutate(n,log["pairs"][0],log)
+                self.put("win22-auto",orig,n)
+                row=self.summary()["rows"][0]
+                self.assertNotEqual("5178_EXACT_FILE_SECTOR_MISMATCH_CORROBORATED",
+                                    row.get("sectorDisposition"))
+                self.assertTrue(all(not p["corroborated"] for p in row.get("sectorPairs",[])))
+
+    def test_log_inventory_and_byte_accounting(self):
+        self.all()
+        for mutate in (
+            lambda n:n["sectorErrors"][0].update(bytesRead=103),
+            lambda n:n["sectorErrors"][0].update(fileLength=101),
+            lambda n:n["sectorErrors"][0].update(status="MISSING",fileLength=None,bytesRead=0,stable=False),
+            lambda n:n["sectorErrors"][0].update(status="CHANGED_DURING_READ",stable=False),
+            lambda n:n["sectorErrors"][0].update(modifiedUtc=utc(4100)),
+        ):
+            orig,n=fixture("win22-auto")
+            mutate(n)
+            self.put("win22-auto",orig,n)
+            self.assertEqual("INCOMPLETE",self.summary()["status"])
+
+    def test_stage_and_controller_windows_bound_to_original(self):
+        self.all()
+        for mutate in (
+            lambda o,n:o["controlReceipt"].update(startedUtc=utc(200)),
+            lambda o,n:n.update(startedUtc=utc(200)),
+            lambda o,n:n.update(bootstrapEndUtc=utc(5400)),
+            lambda o,n:o.update(completedUtc=utc(4400)),
+            lambda o,n:o["bootstrap"][-1].update(startedUtc=utc(5000)),
+            lambda o,n:o["bootstrap"][-1].update(timeoutMilliseconds=45000),
+        ):
+            orig,n=fixture("win22-auto")
+            mutate(orig,n)
+            orig["controlReceipt"]["attempts"]=copy.deepcopy(orig["bootstrap"])
+            self.put("win22-auto",orig,n)
+            self.assertEqual("INCOMPLETE",self.summary()["status"])
+
+    def test_alternative_requires_real_stage_start(self):
+        self.all()
+        orig,n=fixture("win22-named")
+        orig["bootstrap"][0].pop("startedUtc")
+        self.put("win22-named",orig,n)
+        self.assertEqual("INCOMPLETE",self.summary()["status"])
 
     def test_stale_source_digest_and_foreign_artifact(self):
         self.all()
