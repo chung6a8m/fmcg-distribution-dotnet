@@ -40,6 +40,8 @@ SELECT TOP (33) r.session_id AS spid, r.request_id AS requestId,
          WHEN txt.text LIKE '%FROM dbo.Customer WHERE TenantId=@Tenant AND IsActive=1 ORDER BY Code%'
               AND txt.text LIKE '%@CurrentDayOnly%' AND txt.text LIKE '%@Settlement%' THEN 'C2Catalog'
          WHEN txt.text LIKE '%SELECT u.SkuId,u.UomCode,u.Factor,u.Step FROM dbo.F03Unit u%' THEN 'C2Units'
+         WHEN txt.text LIKE '%FROM dbo.App02ActorRoleGrant WITH (HOLDLOCK)%'
+              AND txt.text LIKE '%@Sales%' AND txt.text LIKE '%@Warehouse%' THEN 'C2RoleCheck'
          ELSE 'Other' END AS family,
     COALESCE(l.kind, 'none') AS lockKind, COALESCE(l.obj, 'none') AS lockObject
 FROM sys.dm_exec_requests r

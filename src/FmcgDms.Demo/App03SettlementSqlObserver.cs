@@ -25,6 +25,20 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         string output, string source, CancellationToken ct)
     {
         if (!Enabled) return null;
+        // A rejected directory must never receive even a diagnostic startup receipt.
+        try
+        {
+            string directory = Path.GetFullPath(root);
+            foreach (string part in new[] { "TestResults", "app03-6", new DemoRun(runId).Id })
+            {
+                directory = Path.Combine(directory, part);
+                if (!Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+                    return null;
+            }
+            if (!string.Equals(Path.GetFullPath(output), directory, StringComparison.OrdinalIgnoreCase))
+                return null;
+        }
+        catch { return null; }
         App03SettlementSqlObserver? observer = null;
         string status = "unavailable";
         int? pid = null;
@@ -32,10 +46,12 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
         try
         {
-            string expected = Path.GetFullPath(Path.Combine(root, "TestResults", "app03-6", new DemoRun(runId).Id));
-            if (!string.Equals(Path.GetFullPath(output), expected, StringComparison.OrdinalIgnoreCase)
-                || File.Exists(Path.Combine(output, "sql-reads.ndjson")))
+            if (File.Exists(Path.Combine(output, "sql-reads.ndjson"))
+                || File.Exists(Path.Combine(output, "sql-catalog-observer.json")))
+            {
+                status = "existingOutput";
                 return null;
+            }
             string windows = Environment.GetEnvironmentVariable("SystemRoot")
                 ?? throw new InvalidOperationException();
             var info = new ProcessStartInfo(Path.Combine(windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
@@ -106,8 +122,9 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                                 && e.GetProperty("runId").GetString() == runId && e.GetProperty("pid").GetInt32() == pid;
                         if (!identified || kind is "unavailable" or "stop") { unavailable = true; break; }
                         if (kind == "available") available = true;
-                        if (available && kind is "sample" or "sampleUnavailable")
+                        if (available && kind is ("sample" or "sampleUnavailable"))
                         {
+                            if (observer.child.HasExited) break;
                             status = kind == "sample" ? "ready" : "readySampleUnavailable";
                             return observer;
                         }

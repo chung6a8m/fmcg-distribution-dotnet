@@ -95,6 +95,33 @@ public sealed class App03CatalogWitnessTests : IDisposable
         Assert.Empty(lines);
     }
 
+    [Fact]
+    public async Task Status_failure_and_api_sink_failure_preserve_original_behavior()
+    {
+        var original = new HttpRequestException("private-http-message", null, HttpStatusCode.ServiceUnavailable);
+        var caught = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            Observe(CancellationToken.None, _ => Task.FromException<int>(original)));
+        Assert.Same(original, caught);
+        var end = Record("end");
+        Assert.Equal("HTTP_STATUS_FAILURE", end.GetProperty("outcome").GetString());
+        Assert.Equal(503, end.GetProperty("status").GetInt32());
+        Assert.DoesNotContain("private", end.GetRawText());
+
+        var context = new DefaultHttpContext();
+        context.Request.Method = HttpMethods.Get;
+        context.Request.Path = App03SettlementHttpWitness.Route;
+        context.Request.Headers[App03SettlementHttpWitness.Header] = Guid.NewGuid().ToString("N");
+        int calls = 0;
+        await App03CatalogTrace.Observe(context, () =>
+        {
+            calls++;
+            context.Response.StatusCode = 204;
+            return Task.CompletedTask;
+        }, _ => throw new IOException("private-sink-message"));
+        Assert.Equal(1, calls);
+        Assert.Equal(204, context.Response.StatusCode);
+    }
+
     private Task<int> Observe(CancellationToken ct, Func<string, Task<int>> send) =>
         App03SettlementHttpWitness.Observe(output, "source", "run", "day", 1, 2,
             TimeSpan.FromSeconds(3), ct, send);
