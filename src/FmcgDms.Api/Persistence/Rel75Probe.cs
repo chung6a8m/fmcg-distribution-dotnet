@@ -57,6 +57,10 @@ internal static class Rel75Probe
         SqlConnection db, string tenant, string phase, CancellationToken ct)
     {
         if (!Enabled(config, host)) return;
+        // Keep this explicit platform guard in the call-site control flow:
+        // CA1416 does not infer Windows support from ValidateConfiguration.
+        if (!OperatingSystem.IsWindows())
+            throw new InvalidOperationException("REL75_INVALID_PROBE_CONFIGURATION");
         var (nonce, target, selected) = ValidateConfiguration(config);
         if (db.DataSource != @"(localdb)\MSSQLLocalDB"
             || tenant is not ("tenant-a" or "tenant-b")
