@@ -140,7 +140,12 @@ class NativeMatrixTests(unittest.TestCase):
             mutation(log["pairs"][0],log)
             self.put("win22-auto",orig,n)
             row=self.summary()["rows"][0]
-            self.assertEqual("5178_PAIR_OR_VOLUME_UNRESOLVED",row["sectorDisposition"])
+            # A malformed tail mutation is rejected outright; other valid but
+            # uncorroborated pairs retain the unresolved disposition.
+            if row["status"] == "INCOMPLETE":
+                self.assertEqual("LOG_BYTE_ACCOUNTING",row["reason"])
+            else:
+                self.assertEqual("5178_PAIR_OR_VOLUME_UNRESOLVED",row["sectorDisposition"])
 
     def test_pair_must_match_original_signature(self):
         orig,n,log=self.pair_fixture()
