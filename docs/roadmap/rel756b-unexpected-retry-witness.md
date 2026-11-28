@@ -1,6 +1,6 @@
 # REL-75.6B — Unexpected Retry Witness & Contention Diagnosis (28/11/2026)
 
-**Status:** SOURCE_CANDIDATE / INDEPENDENT_REVIEW_AND_CI_PENDING / CONTENTION_CAUSE_UNDETERMINED. Owner authorized an independent PR on main `458108b75e0e268a41cef3dd3716af06c34fe55a` before resuming #180. This is a test/diagnostics increment, not authorization for a speculative runtime lock-order fix.
+**Status:** SOURCE_MERGED / WITNESS_CAPTURE_VERIFIED / MAIN_FULL_FAILED / ACTUAL_CONTENTION_WITNESSED. Owner authorized an independent PR on main `458108b75e0e268a41cef3dd3716af06c34fe55a` before resuming #180. This is a test/diagnostics increment, not authorization for a speculative runtime lock-order fix.
 
 ## Evidence
 
