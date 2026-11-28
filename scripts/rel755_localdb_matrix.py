@@ -116,7 +116,8 @@ def monitor(receipt, native):
     require(begin <= end and 0 <= end-begin <= 70000, "OBSERVATION_WINDOW")
     complete = (status == "COMPLETE" and len(samples) >= 2 and first <= begin <= end <= last
                 and largest_gap <= 3000 and end-begin >= receipt["elapsedMilliseconds"]-1000
-                and samples[0]["log"]["status"] == "MISSING")
+                and samples[0]["log"]["status"] == "MISSING"
+                and all(x["log"]["status"] in ("PRESENT","MISSING") for x in samples))
     # Correlate session observations with receipt stages, never attribute an
     # unrelated process to a specific launcher or infer a pipe-handle cause.
     baseline = {(p["kind"], p["pid"], p["startedUtc"]) for p in samples[0]["processes"]} if samples else set()
@@ -135,6 +136,7 @@ def monitor(receipt, native):
             require(stage["status"] == "TIMEOUT" and stage["error"] == "NativeProcessTimeout",
                     "TIMEOUT_STAGE_MISMATCH")
             inside = [x for x in samples if start <= time_ms(x["utc"]) <= stop]
+            complete = complete and bool(inside)
             new = [(p["kind"], p["pid"], p["startedUtc"], p["cpuMs"])
                    for x in inside for p in x["processes"]
                    if (p["kind"], p["pid"], p["startedUtc"]) not in baseline
@@ -165,6 +167,7 @@ def sector_pairs(original, native, after):
     findings = []
     partial = len(logs) != 3
     original_logs = {x["file"]: x["observation"] for x in original["logs"]}
+    present_files = {x["file"] for x in original["filesAfter"] if x["status"] == "PRESENT"}
     for log in logs:
         filename = log["file"]
         require(filename in LOGS and filename not in seen and positive_int(log["bytesRead"], 0, 65536)
@@ -195,7 +198,8 @@ def sector_pairs(original, native, after):
                                 and p["actualBytes"] in (file_volume["physicalAtomicityBytes"],
                                                          file_volume["physicalPerformanceBytes"],
                                                          file_volume["effectiveAtomicityBytes"])
-                                and p["actualBytes"] > p["originalBytes"] and not log["tailOnly"])
+                                and p["file"] in present_files and p["actualBytes"] > p["originalBytes"]
+                                and log["status"] == "OK" and not log["tailOnly"])
             findings.append({"error": 5178, "file": p["file"], "scope": p["scope"],
                              "originalBytes": p["originalBytes"], "actualBytes": p["actualBytes"],
                              "volume": file_volume, "corroborated": corroborated})

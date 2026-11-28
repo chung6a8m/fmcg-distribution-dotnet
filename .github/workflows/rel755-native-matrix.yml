@@ -1,0 +1,139 @@
+name: REL-75.5 Native LocalDB evidence (non-gating)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rel755-native-matrix.yml'
+      - 'scripts/Invoke-Rel755LocalDbSample.ps1'
+      - 'scripts/Rel755-ReadOnlyEvidence.ps1'
+      - 'scripts/Measure-Rel755Progress.ps1'
+      - 'scripts/rel755_localdb_matrix.py'
+      - 'tests/ci/Test-Rel755ReadOnlyEvidence.ps1'
+      - 'tests/ci/test_rel755_localdb_matrix.py'
+      - 'scripts/Invoke-Rel75LocalDbSample.ps1'
+      - 'scripts/rel75_localdb_matrix.py'
+      - 'scripts/Initialize-LocalDb.ps1'
+      - 'scripts/Collect-LocalDbDiagnostics.ps1'
+      - 'tests/ci/Test-Rel75LocalDbMatrix.ps1'
+      - 'tests/ci/test_rel75_localdb_matrix.py'
+  workflow_dispatch:
+    inputs:
+      samples_per_arm:
+        description: 'Fresh hosted runners per arm (20 = investigation; 1 = smoke)'
+        required: true
+        type: choice
+        default: '20'
+        options:
+          - '1'
+          - '20'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: REL755-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REL75_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  REL75_SAMPLES: ${{ inputs.samples_per_arm || '1' }}
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Validate exact source and dispatch boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$REL75_SOURCE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            test "$GITHUB_REF" = refs/heads/main
+          else
+            test "$GITHUB_EVENT_NAME" = pull_request
+            test "$REL75_SAMPLES" = 1
+          fi
+      - name: Matrix contract tests
+        run: python -m unittest discover -s tests/ci -p 'test_rel75*localdb_matrix.py' -v
+      - name: Native boundary and classifier tests (no real SQL)
+        shell: pwsh
+        run: ./tests/ci/Test-Rel75LocalDbMatrix.ps1
+      - name: Read-only projection and redaction tests
+        shell: pwsh
+        run: ./tests/ci/Test-Rel755ReadOnlyEvidence.ps1
+      - name: Build finite matrix
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix="$(python scripts/rel755_localdb_matrix.py plan --samples "$REL75_SAMPLES")"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  sample:
+    needs: plan
+    name: Sample (${{ matrix.arm }} / ${{ matrix.iteration }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Cold observation on this disposable runner
+        shell: pwsh
+        env:
+          REL75_ARM: ${{ matrix.arm }}
+          REL75_ITERATION: ${{ matrix.iteration }}
+        run: |
+          ./scripts/Invoke-Rel755LocalDbSample.ps1 -Arm $env:REL75_ARM -Iteration ([int]$env:REL75_ITERATION)
+      - name: Retain positive or negative receipt
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rel755-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arm }}-${{ matrix.iteration }}
+          path: TestResults/REL75-Matrix/
+          if-no-files-found: error
+          retention-days: 30
+
+  summarize:
+    if: ${{ always() && needs.plan.result == 'success' }}
+    needs: [plan, sample]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.REL75_SOURCE_SHA }}
+          persist-credentials: false
+      - name: Verify summary source
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$REL75_SOURCE_SHA"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rel755-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: TestResults/REL75-5/inputs
+      - name: Aggregate exact-attempt observations (fail closed)
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          python scripts/rel755_localdb_matrix.py summarize --samples "$REL75_SAMPLES" --root TestResults/REL75-5/inputs --output TestResults/REL75-5/summary.json
+      - name: Retain matrix report even if incomplete or a sample fails
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rel755-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: TestResults/REL75-5/summary.json
+          if-no-files-found: error
+          retention-days: 30

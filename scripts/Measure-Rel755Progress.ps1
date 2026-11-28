@@ -21,6 +21,9 @@ $rows=[Collections.Generic.List[object]]::new()
 $status='LIMIT_REACHED'
 try {
     do {
+        # Check stop before sampling so the final timestamp is necessarily
+        # after the controller recorded bootstrapEndUtc.
+        $stopSeen=[IO.File]::Exists((Join-Path $control.FullName 'stop'))
         $processes=@(foreach ($p in @(Get-Process -Name SqlLocalDB,sqlservr -ErrorAction SilentlyContinue)) {
             try {
                 if ($p.SessionId -ne $session) { continue }
@@ -43,7 +46,7 @@ try {
             $ready=[IO.File]::Open((Join-Path $control.FullName 'ready'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
             $ready.Dispose()
         }
-        if ([IO.File]::Exists((Join-Path $control.FullName 'stop'))) { $status='COMPLETE'; break }
+        if ($stopSeen) { $status='COMPLETE'; break }
         Start-Sleep -Milliseconds 500
     } while ($watch.ElapsedMilliseconds -lt 85000 -and $rows.Count -lt 170)
 } finally {

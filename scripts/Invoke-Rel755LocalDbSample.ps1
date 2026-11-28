@@ -66,7 +66,7 @@ finally {
     $original=Join-Path $PSScriptRoot '../TestResults/REL75-Matrix/sample.json'
     if ((Get-Rel75PathState $original) -eq 'PRESENT') { $script:rel755.originalReceiptSha256=(Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant() }
     $script:rel755.completedUtc=[DateTime]::UtcNow.ToString('o')
-    $root=Join-Path $PSScriptRoot '../TestResults/REL75-5'
+    $root=Join-Path $PSScriptRoot '../TestResults/REL75-Matrix'
     if ((Get-Rel75PathState $root) -notin 'PRESENT','MISSING') { throw 'REL755_UNSAFE_OUTPUT' }
     [IO.Directory]::CreateDirectory($root) | Out-Null
     $path=Join-Path $root 'native.json'

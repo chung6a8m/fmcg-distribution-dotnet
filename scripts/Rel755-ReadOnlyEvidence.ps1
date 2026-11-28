@@ -72,7 +72,7 @@ function Get-Rel755LogText([string]$Path) {
         $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
         $length=$stream.Length
         $header=[byte[]]::new([Math]::Min(3,$length))
-        $stream.ReadExactly($header)
+        $stream.ReadExactly($header,0,$header.Length)
         $row.bytesRead=$header.Length
         $utf16=$header.Length -ge 2 -and $header[0] -eq 255 -and $header[1] -eq 254
         if (($utf16 -and ($length%2 -ne 0)) -or ($header.Length -ge 2 -and $header[0] -eq 254 -and $header[1] -eq 255)) {
@@ -83,7 +83,7 @@ function Get-Rel755LogText([string]$Path) {
         $row.tailOnly=$offset -gt 0
         $stream.Position=$offset
         $buffer=[byte[]]::new([int]($length-$offset))
-        $stream.ReadExactly($buffer)
+        $stream.ReadExactly($buffer,0,$buffer.Length)
         $row.bytesRead+=$buffer.Length
         $from=0
         if ($row.tailOnly) {
@@ -137,11 +137,18 @@ function ConvertFrom-Rel755SectorErrors([string]$Text,[string]$Directory) {
 }
 
 function Get-Rel755SectorErrors([string]$Directory) {
+    $volumeCache=@{}
     return @(foreach ($name in 'error.log','error1.log','error2.log') {
         $log=Get-Rel755LogText (Join-Path $Directory $name)
         $parsed=if ($log.status -eq 'OK') { ConvertFrom-Rel755SectorErrors $log.text $Directory } else { @{ status=$log.status; pairs=@() } }
         $pairs=@(foreach ($pair in $parsed.pairs) {
-            $pair['volume']=if ($pair.scope -eq 'OWNED_FILE') { Get-Rel755Volume (Join-Path $Directory $pair.file) } else { $null }
+            $pair['volume']=$null
+            if ($pair.scope -eq 'OWNED_FILE') {
+                if (!$volumeCache.ContainsKey($pair.file)) {
+                    $volumeCache[$pair.file]=Get-Rel755Volume (Join-Path $Directory $pair.file)
+                }
+                $pair['volume']=$volumeCache[$pair.file]
+            }
             $pair
         })
         @{ file=$name; status=$parsed.status; bytesRead=$log.bytesRead; tailOnly=$log.tailOnly; pairs=$pairs }
