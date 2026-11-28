@@ -60,6 +60,7 @@ internal static class App02c1Dev
         bool d4 = increment == "App02D4";
         bool d3 = d4 || increment == "App02D3";
         bool d2 = increment == "App02D2";
+        bool sharedHttpWitness = persistent is null && mode == "Verify" && (d2 || adjustments) && D2PeerWitness.Enabled;
         bool d1 = d3 || d2 || increment == "App02D1";
         if (d1 && mode != "Verify") throw new ArgumentException("D.1 requires Verify mode.");
         bool c5 = returnLane || pricing || fefo || d1 || c6 || increment == "App02C5";
@@ -281,7 +282,7 @@ internal static class App02c1Dev
                 apiStart.Environment["App02C6__ClockFile"] = d1Run.ClockPath;
             }
             if (d3) apiStart.Environment["App02D2__Enabled"] = "true";
-            if (d2 && mode == "Verify" && D2PeerWitness.Enabled)
+            if (sharedHttpWitness)
                 apiStart.Environment["App02D2__PeerWitness"] = "true";
             if (field)
             {
@@ -313,25 +314,45 @@ internal static class App02c1Dev
             await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
             int webPort = persistent?.WebPort ?? FreePort();
             string webUrl = $"http://127.0.0.1:{webPort}";
-            var viteStart = StartInfo("node", web, vite, "--host", "127.0.0.1", "--port",
-                webPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "--strictPort");
+            string portText = webPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var viteStart = sharedHttpWitness
+                ? StartInfo("node", web, Path.Combine(web, "ci", "run-dev-http-vite.mjs"), portText)
+                : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portText, "--strictPort");
+            viteStart.Environment.Remove("FMCG_DEV_HTTP_PROXY");
+            if (sharedHttpWitness) viteStart.Environment["FMCG_DEV_HTTP_PROXY"] = "1";
             if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
             viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
-            foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
+            // Same original initial session requests; opt-in witness only in D2/F06.
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                using var response = await client.SendAsync(request, lifetime.Token);
-                // API startup already checked the database bindings. A valid, newly signed token may
-                // be forbidden here if the business role was revoked while the host was stopped.
-                if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;
-                response.EnsureSuccessStatusCode();
-                using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
-                if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
-                    payload.RootElement.GetProperty("sessionId").GetString() != run.Id)
-                    throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
+                await using var initialWitness = sharedHttpWitness
+                    ? await D2PeerWitness.TryStart(root, source, run, d2 ? "app02d2" : "dev-f06", "initial",
+                        () => (api!.Id, viteProcess!.Id), lifetime.Token) : null;
+                initialWitness?.SelectPhase("initial");
+                foreach (var (tenant, token) in new[] { ("tenant-a", tokenA), ("tenant-b", tokenB) })
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    var ticket = initialWitness?.Begin(tenant, request, client.Timeout);
+                    int? status = null;
+                    Exception? probeFailure = null;
+                    try
+                    {
+                        using var response = await client.SendAsync(request, lifetime.Token);
+                        status = (int)response.StatusCode;
+                    // API startup already checked the database bindings. A valid, newly signed token may
+                    // be forbidden here if the business role was revoked while the host was stopped.
+                    if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;
+                    response.EnsureSuccessStatusCode();
+                    using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
+                    if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
+                        payload.RootElement.GetProperty("sessionId").GetString() != run.Id)
+                        throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
+                    }
+                    catch (Exception ex) { probeFailure = ex; throw; }
+                    finally { initialWitness?.End(ticket, status, probeFailure, lifetime.Token); }
+                }
             }
 
             if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);
@@ -619,7 +640,7 @@ internal static class App02c1Dev
                     await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
                 }
                 await d2Run.Initialize(client, webUrl, lifetime.Token, Restart,
-                    d2 && mode == "Verify" && D2PeerWitness.Enabled ? () => (api!.Id, viteProcess!.Id) : null);
+                    sharedHttpWitness ? () => (api!.Id, viteProcess!.Id) : null);
                 d2Run.ConfigureBrowser(browserStart);
                 browser = Start(browserStart);
                 await d2Run.Serve(browser);

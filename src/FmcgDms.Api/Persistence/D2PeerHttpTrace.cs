@@ -25,6 +25,7 @@ internal static class D2PeerHttpTrace
                 "/api/synthetic/app02c3/load" => "C3_LOAD",
                 _ => null
             };
+        if (HttpMethods.IsGet(method) && path == "/api/synthetic/app02c1/session") return "C1_SESSION";
         if (!HttpMethods.IsGet(method) || path is null ||
             !path.StartsWith(Sales + "/", StringComparison.Ordinal)) return null;
         string[] parts = path[(Sales.Length + 1)..].Split('/');

@@ -61,9 +61,13 @@ if ((devF03 || devF04) && ((!app03Field && (app02d1 || app02d2)) || (!app03Settl
 if (app02d4)
     await app.Services.GetRequiredService<App02d4Runtime>().Verify(CancellationToken.None);
 bool app02c6 = !app02d1 && !devF03 && !devF04 && App02c6Clock.GetConfiguredPath(app.Configuration, app.Environment) is not null;
-// Opt-in only on the dedicated D.2 synthetic CI host; no authorization or routing changes.
-if (app02d2 && !app03A1 && app.Environment.IsEnvironment("IntegrationTest")
-    && app.Configuration.GetValue<bool>("App02D2:PeerWitness"))
+// Opt-in on the dedicated D.2 / DEV-F06 synthetic CI host, including the D.2 off/legacy restart.
+if (!app03A1 && app.Environment.IsEnvironment("IntegrationTest")
+    && app.Configuration.GetValue<bool>("SyntheticAuth:Enabled")
+    && app.Configuration.GetValue<bool>("App02C1:Enabled")
+    && app.Configuration.GetValue<bool>("App02D2:PeerWitness")
+    && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
+    && Environment.GetEnvironmentVariable("RUNNER_OS") == "Windows")
     app.Use(next => context => D2PeerHttpTrace.Observe(context, () => next(context), Console.WriteLine));
 // Do not reveal misrouted tenant connection information or allow a fallback DB.
 app.Use(async (context, next) =>

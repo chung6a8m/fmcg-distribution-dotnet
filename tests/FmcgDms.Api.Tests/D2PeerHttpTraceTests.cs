@@ -18,6 +18,8 @@ public sealed class D2PeerHttpTraceTests
     [InlineData("POST", "/api/synthetic/app02d1/load", "D1_LOAD")]
     [InlineData("POST", "/api/synthetic/app02c3/load", "C3_LOAD")]
     [InlineData("GET", "/api/synthetic/app02d2/sales/private-producer/private-command", "D2_LOOKUP")]
+    [InlineData("GET", "/api/synthetic/app02c1/session", "C1_SESSION")]
+    [InlineData("POST", "/api/synthetic/app02c1/session", null)]
     [InlineData("GET", "/api/synthetic/app02d2/sales", null)]
     [InlineData("GET", "/api/synthetic/app02d2/sales/one/two/three", null)]
     [InlineData("POST", "/api/synthetic/app02d2/sales/one/two", null)]
