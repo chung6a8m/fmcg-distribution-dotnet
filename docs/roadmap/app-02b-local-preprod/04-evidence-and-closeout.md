@@ -356,11 +356,17 @@ All eight failures occurred before readiness: two create InstanceStartFailed / S
 
 ## REL-75.4 — Deterministic A11-09 reproduction (R75-02/R75-03; 28/11/2026)
 
-**Status:** `SOURCE_CANDIDATE / REVIEW_AND_CI_PENDING / MATRIX_NOT_RUN`. Owner authorized on new main `fcd914247c52ec05d69e3111d15a1cfb02101a0c`. [Investigation contract and operator procedure](../rel75-a11-reproduction.md).
+**Status:** `SOURCE_MERGED / MAIN_FULL_VERIFIED / OFFICIAL_MATRIX_INCOMPLETE / CLOSEOUT_BLOCKED`. Owner authorized on new main `fcd914247c52ec05d69e3111d15a1cfb02101a0c`. [Investigation contract and operator procedure](../rel75-a11-reproduction.md).
 
 - Use both [main 1205](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7218506288) and [PR #178 recurrence](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7219739935): tenant-b P HTTP 500, 1205/state 51/severity 13, no P/business posting, C pending. Direct victim signatures, not a proven cycle or cause for R75-03.
 - Real OS restart, six arms (worker OFF, before sweep, in-flight C/P, P commit during sweep, concurrent outbox, reverse order/backlog), both tenants; 12 PR smoke cells, official 60 fresh hosted samples (5 per arm/tenant) on merged main after Full acceptance. Bounded nonce-owned IntegrationTest checkpoints, scoped DMV and in-memory redacted structural XE witness; unchanged original A11-09 HTTP 202/RECEIVED_COMMITTED, 30s recovery, independent oracle/peer digest. No command or test retry, no runtime remediation, no LocalDB change.
 - Separate non-gating investigation workflow; failed or incomplete observations retained, distinguish 1205/HTTP from ACK/recovery; independent review, required Full CI final source/main and exact-attempt evidence before REL-75.4 closeout. REL-75.6 needs supported disposition; #68/#75/#176 and LAB-E03/E04 remain OPEN, physical PREPROD/EV/P0/Pilot unchanged.
+
+**Current receipt:** [official matrix 59/60, one infrastructure-blocked cell](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7234372400); Owner selected REL-75.5 without accepting missing cell. [PR #180](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/180) remains blocked by original A11-09 worker-side SQL1205 and overdue scheduled C ([direct evidence](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7235071132)).
+
+## REL-75.6A — Durable due-time recovery scheduling (28/11/2026)
+
+**Status:** SOURCE_CANDIDATE / INDEPENDENT_REVIEW_AND_CI_PENDING. Owner authorized an independent source PR on main ccfd7b7df533f08e284e0b73e86a8ba7fc46592c before resuming #180. [Contract](../rel756-durable-due-recovery.md). Fix C technical due-time wake gap, not deadlock root cause. No policy/backoff/deadline/oracle/LocalDB change. Exact PR/main Full and independent real SQL regression evidence required; no LAB-E03/E04 or issue closeout.
 
 <a id="lab-e04"></a>
 ## LAB-E04 — Fix HTTP 500 sau OS restart
