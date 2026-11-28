@@ -21,8 +21,8 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
         && Environment.GetEnvironmentVariable("RUNNER_OS") == "Windows";
 
-    internal static async Task<App03SettlementSqlObserver?> Start(string root, string runId,
-        string output, string source, CancellationToken ct)
+    internal static App03SettlementHttpWitness.Context? TryCreateContext(string root, string runId,
+        string output, string source)
     {
         if (!Enabled) return null;
         // A rejected directory must never receive even a diagnostic startup receipt.
@@ -37,8 +37,15 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
             }
             if (!string.Equals(Path.GetFullPath(output), directory, StringComparison.OrdinalIgnoreCase))
                 return null;
+            return new(directory, source, runId);
         }
         catch { return null; }
+    }
+
+    internal static async Task<App03SettlementSqlObserver?> Start(string root, string runId,
+        string output, string source, CancellationToken ct)
+    {
+        if (TryCreateContext(root, runId, output, source) is null) return null;
         App03SettlementSqlObserver? observer = null;
         string status = "unavailable";
         int? pid = null;
@@ -125,7 +132,7 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                         if (available && kind is ("sample" or "sampleUnavailable"))
                         {
                             if (observer.child.HasExited) break;
-                            status = kind == "sample" ? "ready" : "readySampleUnavailable";
+                            status = kind == "sample" ? "ready" : "startedWithoutSample";
                             return observer;
                         }
                     }
@@ -138,7 +145,7 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
         catch { status = "unavailable"; }
         finally
         {
-            if (status is not ("ready" or "readySampleUnavailable") && observer is not null)
+            if (status is not ("ready" or "startedWithoutSample") && observer is not null)
                 await observer.DisposeAsync();
             try
             {

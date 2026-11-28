@@ -85,7 +85,8 @@ internal sealed class App03DevSession
     internal static async Task Run(string operation, string root, string source, string? id = null,
         Func<App03DevHost, Task>? observe = null, DateOnly? businessDate = null, bool verifyHandoff = false,
         bool verifyField = false, bool startBeforeField = false, bool settlement = false, bool finance = false,
-        bool closeReadiness = false, bool tripClosure = false, bool successor = false, bool splitSuccessorLots = false)
+        bool closeReadiness = false, bool tripClosure = false, bool successor = false, bool splitSuccessorLots = false,
+        bool catalogWitness = false)
     {
         if (operation == "Verify") { await App03DevSessionEvidence.Run(root, source); return; }
         if (operation == "VerifyWorkspace") { await App03WorkspaceEvidence.Run(root, source); return; }
@@ -167,7 +168,7 @@ internal sealed class App03DevSession
             session.StopToken = stop.Token;
             if (operation == "Start") await session.Begin();
             else await session.Verify();
-            await App02c1Dev.Run("Interactive", root, source, "App03A1", session, observe);
+            await App02c1Dev.Run("Interactive", root, source, "App03A1", session, observe, catalogWitness);
         }
         finally
         {

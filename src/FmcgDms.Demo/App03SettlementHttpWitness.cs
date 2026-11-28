@@ -9,6 +9,14 @@ internal static class App03SettlementHttpWitness
     internal const string Route = "/api/synthetic/app02c2/catalog";
     internal const string Header = "X-Fmcg-App03-Catalog-Witness";
 
+    internal sealed record Context(string Output, string Source, string RunId);
+
+    // No diagnostic context means no GUID, header, file, or changed request outcome.
+    internal static Task<T> ObserveIfEnabled<T>(Context? witness, string checkpoint,
+        int apiPid, int vitePid, TimeSpan timeout, CancellationToken caller, Func<string?, Task<T>> send) =>
+        witness is null ? send(null) : Observe(witness.Output, witness.Source, witness.RunId,
+            checkpoint, apiPid, vitePid, timeout, caller, id => send(id));
+
     internal static async Task<T> Observe<T>(string output, string source, string runId, string checkpoint,
         int apiPid, int vitePid, TimeSpan timeout, CancellationToken caller, Func<string, Task<T>> send)
     {
@@ -59,7 +67,7 @@ internal static class App03SettlementHttpWitness
             catch
             {
                 // Diagnostics must not replace the actual request outcome, even on a full disk.
-                Console.Error.WriteLine("APP-03 catalog HTTP witness unavailable.");
+                try { Console.Error.WriteLine("APP-03 catalog HTTP witness unavailable."); } catch { }
             }
         }
     }

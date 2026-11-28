@@ -9,10 +9,14 @@ internal static partial class App03SettlementEvidence
 {
     private const string D1 = "/api/synthetic/app02d1";
 
+    // Preserve the original APP-05 call contract and uninstrumented request.
+    internal static Task<Guid> PrepareB(App03DevHost host, string label, bool load, CancellationToken ct) =>
+        PrepareB(host, label, load, ct, null);
+
     internal static async Task<Guid> PrepareB(App03DevHost host, string label, bool load, CancellationToken ct,
-        string output, string source, string runId)
+        App03SettlementHttpWitness.Context? witness)
     {
-        var catalog = await App03SettlementHttpWitness.Observe(output, source, runId, label,
+        var catalog = await App03SettlementHttpWitness.ObserveIfEnabled(witness, label,
             host.ApiPid, host.VitePid, host.Client.Timeout, ct, witnessId =>
                 Send<C2Catalog>(host, ct, App03SettlementHttpWitness.Route, host.SourceToken, witnessId: witnessId));
         Guid trip = catalog.Trips.Single(option => option.Label == label).Id;

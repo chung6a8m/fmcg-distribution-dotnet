@@ -32,6 +32,35 @@ public sealed class App03CatalogWitnessTests : IDisposable
     }
 
     [Fact]
+    public async Task Disabled_witness_preserves_legacy_send_without_id_or_files()
+    {
+        int calls = 0;
+        int value = await App03SettlementHttpWitness.ObserveIfEnabled<int>(null, "day", 1, 2,
+            TimeSpan.FromSeconds(3), CancellationToken.None, id =>
+            {
+                calls++;
+                Assert.Null(id);
+                return Task.FromResult(42);
+            });
+        Assert.Equal(42, value);
+        Assert.Equal(1, calls);
+        Assert.Empty(Directory.GetFiles(output));
+
+        var original = new InvalidOperationException("original");
+        var caught = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            App03SettlementHttpWitness.ObserveIfEnabled<int>(null, "day", 1, 2,
+                TimeSpan.FromSeconds(3), CancellationToken.None, id =>
+                {
+                    calls++;
+                    Assert.Null(id);
+                    return Task.FromException<int>(original);
+                }));
+        Assert.Same(original, caught);
+        Assert.Equal(2, calls);
+        Assert.Empty(Directory.GetFiles(output));
+    }
+
+    [Fact]
     public async Task Real_http_client_timeout_is_recorded_and_not_retried()
     {
         using var handler = new NeverRespond();
@@ -123,8 +152,8 @@ public sealed class App03CatalogWitnessTests : IDisposable
     }
 
     private Task<int> Observe(CancellationToken ct, Func<string, Task<int>> send) =>
-        App03SettlementHttpWitness.Observe(output, "source", "run", "day", 1, 2,
-            TimeSpan.FromSeconds(3), ct, send);
+        App03SettlementHttpWitness.ObserveIfEnabled(new(output, "source", "run"), "day", 1, 2,
+            TimeSpan.FromSeconds(3), ct, id => send(id!));
 
     private JsonElement Record(string phase)
     {

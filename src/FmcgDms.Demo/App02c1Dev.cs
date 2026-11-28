@@ -18,7 +18,7 @@ internal static class App02c1Dev
     internal const int ApiPort = 5116; // Existing Vite API/health proxy target.
 
     internal static async Task Run(string mode, string root, string source, string increment,
-        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null)
+        App03DevSession? persistent = null, Func<App03DevHost, Task>? observe = null, bool catalogWitness = false)
     {
         if (mode is not ("Verify" or "Interactive")) throw new ArgumentException("Invalid C.1 DEV mode.");
         string web = Path.Combine(root, "web");
@@ -257,7 +257,7 @@ internal static class App02c1Dev
             {
                 apiStart.Environment["App02C6__ClockFile"] = persistent.ClockPath;
                 apiStart.Environment["App03__Workspace"] = "true";
-                if (settlement && observe is not null && App03SettlementSqlObserver.Enabled)
+                if (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled)
                     apiStart.Environment["App03__CatalogWitness"] = "true";
                 if (persistent.UsesBusinessDay)
                     apiStart.Environment["App03__DayBootstrap"] = App03DayBootstrap.Version;
