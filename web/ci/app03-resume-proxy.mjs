@@ -13,9 +13,17 @@ export function resumeIdentity(req) {
 
 const safeProxyError = error => ['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH'].includes(error?.code) ? error.code : 'other'
 
-export function isResumeProxyEnabled() {
-  return process.env.FMCG_APP03_RESUME_PROXY === '1'
-    && process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_OS === 'Windows'
+export function isResumeProxyEnabled(env = process.env, platform = process.platform) {
+  return platform === 'win32' && env.FMCG_APP03_RESUME_PROXY === '1'
+    && env.GITHUB_ACTIONS === 'true' && env.RUNNER_OS === 'Windows'
+}
+
+export function resumeProxyPort(args) {
+  if (args.length !== 1 || typeof args[0] !== 'string') throw new Error('Expected one loopback port')
+  const port = Number(args[0])
+  if (!Number.isInteger(port) || String(port) !== args[0] || port < 1024 || port > 65535 || port === 5116)
+    throw new Error('Invalid loopback port')
+  return port
 }
 
 export function resumeProxyWitness(enabled, write = console.log) {

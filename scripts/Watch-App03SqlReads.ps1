@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][ValidateSet('app03-4', 'app03-5', 'app03-6')][string]$ProfileName,
     [Parameter(Mandatory)][string]$RunId,
     [Parameter(Mandatory)][int]$ReporterPid,
-    [ValidateSet("tenant-a", "tenant-b")][string]$ResumeTenant
+    [ValidateSet("tenant-a", "tenant-b")][string]$ResumeTenant,
+    [switch]$DrainOnStop
 )
 
 Set-StrictMode -Version Latest
@@ -14,6 +15,7 @@ if ($env:FMCG_APP03_READ_DIAGNOSTICS -cne '1' -or $env:GITHUB_ACTIONS -cne 'true
 # Fail closed before opening any file or database. The caller cannot supply a server,
 # connection string, database, SQL text or free-form destination.
 if ($RunId -cnotmatch '\A[0-9a-f]{32}\z' -or $ReporterPid -le 0) { exit 2 }
+if ($DrainOnStop -and $ProfileName -cnotin @("app03-5", "app03-6")) { exit 2 }
 $tenant = "tenant-a"
 $sampleName = "sql-reads.ndjson"
 if ($ResumeTenant) {
@@ -32,6 +34,7 @@ if (![string]::Equals($directory, $env:APP03_EVIDENCE_DIR, [StringComparison]::O
 # Keep SQL values, client identity, full batch text and free-form wait_resource at the server.
 # Only known statement families and object names may cross the diagnostic connection.
 . (Join-Path $PSScriptRoot 'Get-App03SqlReadFailure.ps1')
+. (Join-Path $PSScriptRoot 'Get-App03SqlObserverStopDecision.ps1')
 $sampleSql = @'
 SELECT TOP (33) r.session_id AS spid, r.request_id AS requestId,
     COALESCE(r.wait_type, '') AS waitType, r.wait_time AS waitMs, r.total_elapsed_time AS elapsedMs,
@@ -136,11 +139,16 @@ SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 OR
     $phase = 'sample'
     $command.CommandText = $sampleSql
     $reason = 'deadline'
+    $finalSampleStatus = if ($DrainOnStop) { 'notAttempted' } else { 'notRequested' }
     Write-Record @{ event='available'; sampleIntervalMs=250; commandTimeoutMs=1000 }
     while ($clock.Elapsed.TotalSeconds -lt 240) {
-        if ($parent.HasExited -or $pipeRead.IsCompleted) { $reason='parentEnded'; break }
-        # The reserved space accommodates one maximum-sized sample and the final status.
-        if ($file.Position -ge (2MB - 64KB)) { $reason='sizeLimit'; break }
+        # Only a live parent closing its input pipe normally can request the last sample.
+        # The 240s observer limit, 2MB bound and 1s SQL command timeout still apply.
+        $decision = Get-App03SqlObserverStopDecision -ParentExited $parent.HasExited -PipeCompleted $pipeRead.IsCompleted `
+            -DrainOnStop $DrainOnStop.IsPresent -AtSizeLimit ($file.Position -ge (2MB - 64KB))
+        if ($decision -in @('parentEnded','sizeLimit')) { $reason=$decision; break }
+        $finalSample = $decision -ceq 'drain'
+        if ($finalSample -and $inputPipe.EndRead($pipeRead) -ne 0) { $reason='parentEnded'; break }
         $started = $clock.ElapsedMilliseconds
         $rows = [Collections.Generic.List[object]]::new()
         $overflow = $false
@@ -165,16 +173,22 @@ SELECT CASE WHEN IS_SRVROLEMEMBER('sysadmin')=1 OR
         } catch {
             $failure = Get-App03SqlReadFailure $_.Exception $db.State
             if ($failure.Continue) {
-                Write-Record @{ event='sampleUnavailable'; reason='commandTimeout'; sqlNumber=$failure.Number; queryMs=($clock.ElapsedMilliseconds - $started) }
+                Write-Record @{ event='sampleUnavailable'; reason='commandTimeout'; sqlNumber=$failure.Number; queryMs=($clock.ElapsedMilliseconds - $started); finalSample=$finalSample }
+                if ($finalSample) { $finalSampleStatus='unavailable'; $reason='parentEnded'; break }
                 Start-Sleep -Milliseconds 250
                 continue
             }
             throw
         } finally { if ($null -ne $reader) { $reader.Dispose() } }
-        Write-Record @{ event='sample'; queryMs=($clock.ElapsedMilliseconds - $started); truncated=$overflow; rows=$rows.ToArray() }
+        Write-Record @{ event='sample'; queryMs=($clock.ElapsedMilliseconds - $started); truncated=$overflow; rows=$rows.ToArray(); finalSample=$finalSample }
+        if ($finalSample) {
+            $finalSampleStatus = if ($overflow) { 'truncated' } else { 'usable' }
+            $reason='parentEnded'
+            break
+        }
         Start-Sleep -Milliseconds 250
     }
-    Write-Record @{ event='stop'; reason=$reason }
+    Write-Record @{ event='stop'; reason=$reason; finalSampleStatus=$finalSampleStatus }
     $exitCode = 0
 } catch {
     if ($null -ne $writer) {

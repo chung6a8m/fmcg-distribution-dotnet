@@ -77,6 +77,11 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: web
         run: npx playwright install chromium
+      - name: Verify APP-03 diagnostic boundaries
+        run: node --test web/tests/app03-resume-proxy.test.mjs web/tests/app03-resume-vite.integration.test.mjs
+      - name: Verify APP-03 SQL observer error classification
+        shell: powershell
+        run: ./tests/ci/Test-App03SqlReadErrors.ps1
       - name: Record diagnostic source and attempt
         shell: pwsh
         env:

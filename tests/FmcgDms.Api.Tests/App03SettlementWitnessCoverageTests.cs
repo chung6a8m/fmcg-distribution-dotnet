@@ -29,6 +29,7 @@ public sealed class App03SettlementWitnessCoverageTests : IDisposable
     [InlineData("missingStop")]
     [InlineData("wrongPid")]
     [InlineData("missingPair")]
+    [InlineData("lastTimeoutNoDrain")]
     public void Incomplete_evidence_is_not_promoted_to_ready(string scenario)
     {
         Build(scenario);
@@ -62,13 +63,13 @@ public sealed class App03SettlementWitnessCoverageTests : IDisposable
             if (!(i == 1 && scenario == "missingPair"))
                 Save($"catalog-http-{id}-end.json", new { schema = "APP03_SETTLEMENT_HTTP_V1", source = "source",
                     runId = "run", checkpoint, id, route = App03SettlementHttpWitness.Route, method = "GET",
-                    apiPid = 1, vitePid = 2, startedUtc, endedUtc, timeoutMs = 3000, elapsedMs = 300, outcome = "SUCCESS" });
+                    apiPid = 1, vitePid = 2, startedUtc, endedUtc, timeoutMs = 3000, elapsedMs = 300, outcome = i == 2 && scenario == "lastTimeoutNoDrain" ? "HTTP_TIMEOUT" : "SUCCESS" });
             rows.Add(new { @event = "sample", utc = startedUtc.AddMilliseconds(-100), truncated = false });
             if (i == 1 && scenario == "sampleUnavailable")
                 rows.Add(new { @event = "sampleUnavailable", utc = startedUtc.AddMilliseconds(100) });
             if (i == 1 && scenario == "truncated")
                 rows.Add(new { @event = "sample", utc = startedUtc.AddMilliseconds(100), truncated = true });
-            rows.Add(new { @event = "sample", utc = endedUtc.AddMilliseconds(i == 1 && scenario == "gap" ? 1500 : 100), truncated = false });
+            rows.Add(new { @event = "sample", utc = endedUtc.AddMilliseconds(i == 1 && scenario == "gap" ? 1500 : i == 2 && scenario == "lastTimeoutNoDrain" ? -10 : 100), truncated = false });
         }
         if (scenario != "missingStop") rows.Add(new { @event = "stop", reason = "parentEnded" });
         File.WriteAllLines(Path.Combine(output, "sql-reads.ndjson"), rows.Select(row => JsonSerializer.Serialize(row)));

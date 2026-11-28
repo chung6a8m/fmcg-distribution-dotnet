@@ -158,14 +158,13 @@ public sealed class App03CatalogWitnessTests : IDisposable
         int calls = 0;
         foreach (string tenant in new[] { "tenant-a", "tenant-b" })
         {
-            using var response = await App03SettlementHttpWitness.ObserveSession(witness, "nextday-1", tenant,
+            await App03SettlementHttpWitness.ObserveSession(witness, "nextday-1", tenant, "run", true,
                 1, 2, TimeSpan.FromSeconds(3), CancellationToken.None, id =>
                 {
                     calls++;
                     Assert.NotNull(id);
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden));
                 });
-            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
         Assert.Equal(2, calls);
         var rows = Directory.GetFiles(output, "resume-session-http-*-end.json").Select(file =>
@@ -178,9 +177,50 @@ public sealed class App03CatalogWitnessTests : IDisposable
         Assert.All(rows, r =>
         {
             Assert.Equal(403, r.GetProperty("status").GetInt32());
+            Assert.Equal("RESPONSE_RECEIVED", r.GetProperty("outcome").GetString());
+            Assert.Equal("EXPECTED_FORBIDDEN", r.GetProperty("assertion").GetString());
             Assert.Equal(App03SettlementHttpWitness.SessionRoute, r.GetProperty("route").GetString());
         });
         Assert.Empty(Directory.GetFiles(output, "catalog-http-*.json"));
+    }
+
+    [Theory]
+    [InlineData(200, true, true, "PASSED")]
+    [InlineData(200, false, true, "ASSERTION_FAILED")]
+    [InlineData(401, true, true, "HTTP_STATUS_REJECTED")]
+    [InlineData(500, true, true, "HTTP_STATUS_REJECTED")]
+    [InlineData(403, true, false, "HTTP_STATUS_REJECTED")]
+    public async Task Session_transport_is_separate_from_status_and_identity_assertion(int status, bool identityMatches,
+        bool allowForbidden, string expected)
+    {
+        int calls = 0;
+        var witness = new App03SettlementHttpWitness.Context(output, "source", "run");
+        Task Run(App03SettlementHttpWitness.Context? enabled) =>
+            App03SettlementHttpWitness.ObserveSession(enabled, "nextday-1", "tenant-a", "run", allowForbidden,
+                1, 2, TimeSpan.FromSeconds(3), CancellationToken.None, id =>
+                {
+                    calls++;
+                    if (enabled is null) Assert.Null(id); else Assert.NotNull(id);
+                    return Task.FromResult(new HttpResponseMessage((HttpStatusCode)status)
+                    {
+                        Content = new StringContent(identityMatches
+                            ? """{"tenantId":"tenant-a","sessionId":"run"}"""
+                            : """{"tenantId":"tenant-b","sessionId":"private-wrong"}""")
+                    });
+                });
+        foreach (var enabled in new App03SettlementHttpWitness.Context?[] { null, witness })
+        {
+            if (expected == "PASSED") await Run(enabled);
+            else if (expected == "HTTP_STATUS_REJECTED") await Assert.ThrowsAsync<HttpRequestException>(() => Run(enabled));
+            else await Assert.ThrowsAsync<InvalidOperationException>(() => Run(enabled));
+        }
+        Assert.Equal(2, calls);
+        using var json = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(output, "resume-session-http-*-end.json").Single()));
+        var row = json.RootElement;
+        Assert.Equal("RESPONSE_RECEIVED", row.GetProperty("outcome").GetString());
+        Assert.Equal(status, row.GetProperty("status").GetInt32());
+        Assert.Equal(expected, row.GetProperty("assertion").GetString());
+        Assert.DoesNotContain("private-wrong", row.GetRawText());
     }
 
     [Fact]

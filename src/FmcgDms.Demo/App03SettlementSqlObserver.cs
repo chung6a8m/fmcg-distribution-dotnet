@@ -72,7 +72,7 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
             };
             foreach (string arg in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                 Path.Combine(root, "scripts", "Watch-App03SqlReads.ps1"), "-ProfileName", profile,
-                "-RunId", runId, "-ReporterPid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+                "-RunId", runId, "-ReporterPid", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), "-DrainOnStop" })
                 info.ArgumentList.Add(arg);
             if (!legacy)
             {
@@ -181,11 +181,16 @@ internal sealed class App03SettlementSqlObserver : IAsyncDisposable
                 await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
             }
         }
-        catch { Console.Error.WriteLine("APP-03 SQL observer cleanup unavailable."); }
+        catch { ReportCleanupFailure(); }
         finally
         {
-            job.Dispose();
-            child.Dispose();
+            try { job.Dispose(); } catch { ReportCleanupFailure(); }
+            try { child.Dispose(); } catch { ReportCleanupFailure(); }
+        }
+
+        static void ReportCleanupFailure()
+        {
+            try { Console.Error.WriteLine("APP-03 SQL observer cleanup unavailable."); } catch { }
         }
     }
 }

@@ -316,12 +316,16 @@ internal static class App02c1Dev
             await WaitFor(api, client, apiUrl + "/health/live", lifetime.Token);
             int webPort = persistent?.WebPort ?? FreePort();
             string webUrl = $"http://127.0.0.1:{webPort}";
-            var viteStart = StartInfo("node", web, vite, "--host", "127.0.0.1", "--port",
-                webPort.ToString(System.Globalization.CultureInfo.InvariantCulture), "--strictPort");
+            bool traceProxy = traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled);
+            string portArg = webPort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            // The canonical Vite configuration is unchanged. Only the hosted synthetic
+            // diagnostic host uses the fenced programmatic DEV launcher.
+            var viteStart = traceProxy
+                ? StartInfo("node", web, Path.Combine(web, "ci", "run-app03-resume-vite.mjs"), portArg)
+                : StartInfo("node", web, vite, "--host", "127.0.0.1", "--port", portArg, "--strictPort");
             if (d4) viteStart.Environment["NODE_OPTIONS"] = "--dns-result-order=ipv4first";
             viteStart.Environment.Remove("FMCG_APP03_RESUME_PROXY");
-            if (traceResume || (catalogWitness && settlement && observe is not null && App03SettlementSqlObserver.Enabled))
-                viteStart.Environment["FMCG_APP03_RESUME_PROXY"] = "1";
+            if (traceProxy) viteStart.Environment["FMCG_APP03_RESUME_PROXY"] = "1";
             viteProcess = Start(viteStart, childJob);
             await WaitFor(viteProcess, client, webUrl + "/sales/customers", lifetime.Token);
 
@@ -329,21 +333,13 @@ internal static class App02c1Dev
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, webUrl + "/api/synthetic/app02c1/session");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-                using var response = await App03SettlementHttpWitness.ObserveSession(
-                    traceResume ? resumeWitness : null, resumeCheckpoint, tenant, api.Id, viteProcess.Id,
-                    client.Timeout, lifetime.Token, id =>
+                await App03SettlementHttpWitness.ObserveSession(
+                    traceResume ? resumeWitness : null, resumeCheckpoint, tenant, run.Id, persistent is not null,
+                    api.Id, viteProcess.Id, client.Timeout, lifetime.Token, id =>
                     {
                         if (id is not null) request.Headers.Add(App03SettlementHttpWitness.Header, id);
                         return client.SendAsync(request, lifetime.Token);
                     });
-                // API startup already checked the database bindings. A valid, newly signed token may
-                // be forbidden here if the business role was revoked while the host was stopped.
-                if (persistent is not null && response.StatusCode == HttpStatusCode.Forbidden) continue;
-                response.EnsureSuccessStatusCode();
-                using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(lifetime.Token));
-                if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
-                    payload.RootElement.GetProperty("sessionId").GetString() != run.Id)
-                    throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
             }
 
             if (persistent is not null) monitor = MonitorPersistentHosts(api, viteProcess);

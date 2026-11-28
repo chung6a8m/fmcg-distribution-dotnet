@@ -23,15 +23,41 @@ internal static class App03SettlementHttpWitness
         ObserveCore(output, source, runId, checkpoint, apiPid, vitePid, timeout, caller, send,
             Route, "tenant-a", "catalog-http", "APP03_SETTLEMENT_HTTP_V1");
 
-    internal static Task<T> ObserveSession<T>(Context? witness, string checkpoint, string tenant,
-        int apiPid, int vitePid, TimeSpan timeout, CancellationToken caller, Func<string?, Task<T>> send) =>
-        witness is null ? send(null) : ObserveCore(witness.Output, witness.Source, witness.RunId,
-            checkpoint, apiPid, vitePid, timeout, caller, id => send(id), SessionRoute, tenant,
-            "resume-session-http", "APP03_RESUME_HTTP_V1");
+    internal static async Task ObserveSession(Context? witness, string checkpoint, string tenant,
+        string expectedSession, bool allowForbidden, int apiPid, int vitePid, TimeSpan timeout,
+        CancellationToken caller, Func<string?, Task<HttpResponseMessage>> send)
+    {
+        if (witness is null)
+        {
+            using var response = await send(null);
+            await Verify(response);
+            return;
+        }
+        await ObserveCore(witness.Output, witness.Source, witness.RunId, checkpoint, apiPid, vitePid,
+            timeout, caller, id => send(id), SessionRoute, tenant, "resume-session-http", "APP03_RESUME_HTTP_V1",
+            async response =>
+            {
+                using (response) return await Verify(response);
+            });
+
+        async Task<string> Verify(HttpResponseMessage response)
+        {
+            // Preserve the original status/identity checks even with the witness disabled.
+            // A revoked business role is allowed to return Forbidden on a persistent session.
+            if (allowForbidden && response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                return "EXPECTED_FORBIDDEN";
+            response.EnsureSuccessStatusCode();
+            using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(caller));
+            if (payload.RootElement.GetProperty("tenantId").GetString() != tenant ||
+                payload.RootElement.GetProperty("sessionId").GetString() != expectedSession)
+                throw new InvalidOperationException("C.1 proxy did not reach the expected tenant runtime.");
+            return "PASSED";
+        }
+    }
 
     private static async Task<T> ObserveCore<T>(string output, string source, string runId, string checkpoint,
         int apiPid, int vitePid, TimeSpan timeout, CancellationToken caller, Func<string, Task<T>> send,
-        string route, string tenant, string prefix, string schema)
+        string route, string tenant, string prefix, string schema, Func<T, Task<string>>? verify = null)
     {
         string id = Guid.NewGuid().ToString("N");
         DateTimeOffset startedUtc = DateTimeOffset.UtcNow;
@@ -39,13 +65,28 @@ internal static class App03SettlementHttpWitness
             route, method = "GET", apiPid, vitePid, startedUtc, timeoutMs = timeout.TotalMilliseconds });
         long started = Stopwatch.GetTimestamp();
         string outcome = "UNEXPECTED_FAILURE";
+        string assertion = verify is null ? "NOT_APPLICABLE" : "NOT_RUN";
+        DateTimeOffset? responseReceivedUtc = null;
+        double? responseElapsedMs = null;
         int? status = null;
         try
         {
             T result = await send(id);
-            if (result is HttpResponseMessage response) status = (int)response.StatusCode;
-            outcome = "SUCCESS";
+            if (result is HttpResponseMessage response)
+            {
+                status = (int)response.StatusCode;
+                responseReceivedUtc = DateTimeOffset.UtcNow;
+                responseElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                outcome = "RESPONSE_RECEIVED";
+            }
+            else outcome = "SUCCESS"; // Catalog deserialization/validation returned normally.
+            if (verify is not null) assertion = await verify(result);
             return result;
+        }
+        catch (Exception ex) when (verify is not null && outcome == "RESPONSE_RECEIVED")
+        {
+            assertion = ex is HttpRequestException { StatusCode: not null } ? "HTTP_STATUS_REJECTED" : "ASSERTION_FAILED";
+            throw;
         }
         catch (OperationCanceledException) when (caller.IsCancellationRequested)
         {
@@ -68,7 +109,7 @@ internal static class App03SettlementHttpWitness
             Write("end", new { schema, source, runId, checkpoint, tenant, id,
                 route, method = "GET", apiPid, vitePid, startedUtc, endedUtc = DateTimeOffset.UtcNow,
                 elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds, timeoutMs = timeout.TotalMilliseconds,
-                outcome, status, callerCancelled = caller.IsCancellationRequested });
+                outcome, status, assertion, responseReceivedUtc, responseElapsedMs, callerCancelled = caller.IsCancellationRequested });
         }
 
         void Write(string phase, object record)

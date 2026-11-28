@@ -6,7 +6,7 @@ namespace FmcgDms.Demo;
 internal static class App03ResumeWitnessCoverage
 {
     internal sealed record Probe(string Checkpoint, string Tenant, string? Id, string? Outcome,
-        int? Status, string Coverage, double? LargestGapMs);
+        int? Status, string? Assertion, string Coverage, double? LargestGapMs);
     internal sealed record Receipt(string Schema, string Source, string RunId, string Profile, string Status,
         string Correlation, string[] Issues, Probe[] Probes);
 
@@ -74,7 +74,7 @@ internal static class App03ResumeWitnessCoverage
 
             foreach (string checkpoint in checkpoints)
             {
-                string? id = null, outcome = null;
+                string? id = null, outcome = null, assertion = null;
                 int? status = null;
                 double? gap = null;
                 string coverage = "INCOMPLETE";
@@ -106,6 +106,19 @@ internal static class App03ResumeWitnessCoverage
                     outcome = end.Row.GetProperty("outcome").GetString();
                     var statusValue = end.Row.GetProperty("status");
                     if (statusValue.ValueKind != JsonValueKind.Null) status = statusValue.GetInt32();
+                    assertion = end.Row.GetProperty("assertion").GetString();
+                    if (outcome == "RESPONSE_RECEIVED")
+                    {
+                        if (status is null || status < 100 || status > 599 || assertion is not ("PASSED" or "EXPECTED_FORBIDDEN" or "HTTP_STATUS_REJECTED" or "ASSERTION_FAILED"))
+                            throw new InvalidDataException();
+                        if (assertion == "EXPECTED_FORBIDDEN" && status != 403 || assertion == "PASSED" && (status < 200 || status > 299))
+                            throw new InvalidDataException();
+                        var received = end.Row.GetProperty("responseReceivedUtc").GetDateTimeOffset();
+                        if (received < from || received > to || end.Row.GetProperty("responseElapsedMs").GetDouble() < 0)
+                            throw new InvalidDataException();
+                    }
+                    else if (assertion != "NOT_RUN" || status is not null && outcome != "HTTP_STATUS_FAILURE")
+                        throw new InvalidDataException();
                     if (samples is not null)
                     {
                         int before = samples.FindLastIndex(s => s.Utc <= from && !s.Unusable);
@@ -123,7 +136,7 @@ internal static class App03ResumeWitnessCoverage
                 }
                 catch { issues.Add("HTTP_PAIR_INVALID_OR_MISSING:" + checkpoint + ":" + tenant); }
                 if (coverage != "BRACKETED") issues.Add("SQL_REQUEST_COVERAGE_INCOMPLETE:" + checkpoint + ":" + tenant);
-                probes.Add(new(checkpoint, tenant, id, outcome, status, coverage, gap));
+                probes.Add(new(checkpoint, tenant, id, outcome, status, assertion, coverage, gap));
             }
         }
         return new("APP03_RESUME_WITNESS_COVERAGE_V1", witness.Source, witness.RunId, profile,

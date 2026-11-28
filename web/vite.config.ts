@@ -2,14 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { isResumeProxyEnabled, resumeProxyWitness } from './ci/app03-resume-proxy.mjs'
-
-const witnessEnabled = isResumeProxyEnabled()
-const witness = resumeProxyWitness(witnessEnabled)
 
 export default defineConfig({
   plugins: [
-    witness.ingress,
     react(),
     tailwindcss(),
     VitePWA({
@@ -29,5 +24,5 @@ export default defineConfig({
       }
     })
   ],
-  server: { proxy: { '/health': 'http://localhost:5116', '/api': witnessEnabled ? { target: 'http://localhost:5116', configure: witness.configure } : 'http://localhost:5116' } }
+  server: { proxy: { '/health': 'http://localhost:5116', '/api': 'http://localhost:5116' } }
 })

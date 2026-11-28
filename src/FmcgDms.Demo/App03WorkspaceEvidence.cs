@@ -16,6 +16,7 @@ internal static class App03WorkspaceEvidence
         using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(4));
         var ct = deadline.Token;
         Task? host = null;
+        Exception? failure = null;
         var resumeWitness = settlement || field
             ? App03SettlementSqlObserver.TryCreateContext(root, run.Id, evidence.FullName, source, profile)
             : null;
@@ -125,18 +126,29 @@ internal static class App03WorkspaceEvidence
                 }
             }
         }
+        catch (Exception ex) { failure = ex; throw; }
         finally
         {
             // The observer is disposed before this receipt; never change the business outcome.
             if (catalogWitness is not null) App03SettlementWitnessCoverage.Write(catalogWitness);
             if (resumeWitness is not null) App03ResumeWitnessCoverage.Write(resumeWitness, profile);
             try { await Stop(); }
+            catch when (failure is not null) { ReportSecondaryCleanupFailure(); }
             finally
             {
-                if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
+                try
+                {
+                    if (App03DevSession.HasManifest(run.Id)) await App03DevSession.Run("Remove", root, source, run.Id);
+                }
+                catch when (failure is not null) { ReportSecondaryCleanupFailure(); }
             }
         }
         Console.WriteLine($"{(settlement ? "APP-03.6" : field ? "APP-03.5" : handoff ? "APP-03.4" : "APP-03.3")} workspace PASS: {evidence.FullName}");
+
+        static void ReportSecondaryCleanupFailure()
+        {
+            try { Console.Error.WriteLine("APP-03 secondary cleanup failed; preserving primary failure."); } catch { }
+        }
 
         async Task<App03DevHost> Open(string operation, bool verifyField = false, bool startBeforeField = false,
             bool enableSettlement = false, bool enableFinance = false, bool enableCatalogWitness = false,

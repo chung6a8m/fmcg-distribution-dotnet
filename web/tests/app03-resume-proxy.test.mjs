@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import test from 'node:test'
-import { resumeIdentity, resumeProxyWitness } from '../ci/app03-resume-proxy.mjs'
+import { isResumeProxyEnabled, resumeProxyPort, resumeIdentity, resumeProxyWitness } from '../ci/app03-resume-proxy.mjs'
 
 const id = 'abcdef0123456789'.repeat(2)
 const request = (route = '/api/synthetic/app02c1/session', method = 'GET', value = id) =>
@@ -50,4 +50,14 @@ test('proxy error exposes only an allowlisted code and incomplete responses rema
   proxy.emit('error', { code: 'private', message: 'private' }, request())
   assert.deepEqual(lines.map(x => x.errorCode), ['ECONNREFUSED', 'other'])
   assert.ok(!JSON.stringify(lines).includes('private'))
+})
+
+test('diagnostic launch requires all opt-ins, Windows, and exactly one canonical loopback port', () => {
+  const env = { FMCG_APP03_RESUME_PROXY: '1', GITHUB_ACTIONS: 'true', RUNNER_OS: 'Windows' }
+  assert.equal(isResumeProxyEnabled(env, 'win32'), true)
+  assert.equal(isResumeProxyEnabled(env, 'linux'), false)
+  for (const key of Object.keys(env)) assert.equal(isResumeProxyEnabled({ ...env, [key]: '' }, 'win32'), false)
+  assert.equal(resumeProxyPort(['5173']), 5173)
+  for (const args of [[], ['5116'], ['0'], ['65536'], ['5173\n'], ['05173'], ['https://example.com'], ['5173', '--config'], ['5173', '--host', '0.0.0.0']])
+    assert.throws(() => resumeProxyPort(args))
 })
