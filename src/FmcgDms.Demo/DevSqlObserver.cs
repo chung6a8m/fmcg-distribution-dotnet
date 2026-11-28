@@ -130,7 +130,7 @@ internal sealed class DevSqlObserver : IAsyncDisposable
             await process.StandardInput.FlushAsync().WaitAsync(startup.Token);
             var exit = process.WaitForExitAsync(startup.Token);
             if (await Task.WhenAny(observer.ready.Task, exit).WaitAsync(startup.Token) == observer.ready.Task &&
-                !process.HasExited && VerifyStartup(Path.Combine(directory, names.Sample), runId, profile, scope, tenant, process.Id,
+                !process.HasExited && DevSqlObserverProtocol.VerifyStartup(Path.Combine(directory, names.Sample), runId, profile, scope, tenant, process.Id,
                     out string sampleStatus) && sampleStatus == observer.ready.Task.Result)
             {
                 status = sampleStatus;
@@ -198,67 +198,23 @@ internal sealed class DevSqlObserver : IAsyncDisposable
         if (stage is "ready" or "startedWithoutSample") ready.TrySetResult(stage);
     }
 
-    private static bool VerifyStartup(string path, string runId, string profile, string scope, string tenant, int pid, out string status)
-    {
-        status = "unavailable";
-        try
-        {
-            if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint)) return false;
-            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(stream);
-            // The child sends its ready marker only after writing and flushing all three rows.
-            using var first = JsonDocument.Parse(reader.ReadLine() ?? "");
-            using var second = JsonDocument.Parse(reader.ReadLine() ?? "");
-            using var third = JsonDocument.Parse(reader.ReadLine() ?? "");
-            var row = first.RootElement;
-            if (row.GetProperty("event").GetString() != "start" || row.GetProperty("pid").GetInt32() != pid ||
-                row.GetProperty("profile").GetString() != profile || row.GetProperty("scope").GetString() != scope ||
-                row.GetProperty("runId").GetString() != runId || row.GetProperty("tenant").GetString() != tenant ||
-                second.RootElement.GetProperty("event").GetString() != "available") return false;
-            var sample = third.RootElement;
-            status = sample.GetProperty("event").GetString() switch
-            {
-                "sample" when !sample.GetProperty("truncated").GetBoolean() => "ready",
-                "sample" or "sampleUnavailable" => "startedWithoutSample",
-                _ => "unavailable"
-            };
-            return status != "unavailable";
-        }
-        catch { return false; }
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (disposed) return;
         disposed = true;
         try
         {
-            child.StandardInput.Close();
-            try
-            {
-                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(4));
-                cleanup = "exited";
-            }
-            catch (TimeoutException)
-            {
-                job.Dispose();
-                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
-                cleanup = "jobClosed";
-            }
-            exitCode = child.ExitCode;
+            cleanup = await DevSqlObserverProtocol.Reap(
+                () => child.StandardInput.Close(), job.Dispose,
+                () => { if (!child.HasExited) child.Kill(entireProcessTree: true); },
+                () => child.WaitForExitAsync(), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(2));
+            if (cleanup == "unconfirmed") { UnsafeRuns.TryAdd(runId, 0); Notice(); }
+            else exitCode = child.ExitCode;
         }
         catch
         {
             cleanup = "unconfirmed";
-            job.Dispose();
-            try
-            {
-                if (!child.HasExited) child.Kill(entireProcessTree: true);
-                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2));
-                exitCode = child.ExitCode;
-                cleanup = "killed";
-            }
-            catch { UnsafeRuns.TryAdd(runId, 0); }
+            UnsafeRuns.TryAdd(runId, 0);
             Notice();
         }
         finally
