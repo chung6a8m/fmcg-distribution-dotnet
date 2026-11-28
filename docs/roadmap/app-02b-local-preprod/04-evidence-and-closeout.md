@@ -366,7 +366,13 @@ All eight failures occurred before readiness: two create InstanceStartFailed / S
 
 ## REL-75.6A — Durable due-time recovery scheduling (28/11/2026)
 
-**Status:** SOURCE_CANDIDATE / INDEPENDENT_REVIEW_AND_CI_PENDING. Owner authorized an independent source PR on main ccfd7b7df533f08e284e0b73e86a8ba7fc46592c before resuming #180. [Contract](../rel756-durable-due-recovery.md). Fix C technical due-time wake gap, not deadlock root cause. No policy/backoff/deadline/oracle/LocalDB change. Exact PR/main Full and independent real SQL regression evidence required; no LAB-E03/E04 or issue closeout.
+**Status:** SOURCE_MERGED / MAIN_FULL_VERIFIED / DUE_REGRESSION_VERIFIED (scheduling only). Owner authorized an independent source PR on main ccfd7b7df533f08e284e0b73e86a8ba7fc46592c before resuming #180. [Contract](../rel756-durable-due-recovery.md). Fix C technical due-time wake gap, not deadlock root cause. No policy/backoff/deadline/oracle/LocalDB change. Exact PR/main Full and independent real SQL regression evidence required; no LAB-E03/E04 or issue closeout.
+
+[REL-75.6A main acceptance receipt](https://github.com/chung6a8m/fmcg-distribution-dotnet/pull/181#issuecomment-7235566600) at main 458108b75e0e268a41cef3dd3716af06c34fe55a: Full 10/10, 411/411 .NET, 1440/1440 oracle and 48/48 separate due cells.
+
+## REL-75.6B — Unexpected Retry Witness & Contention Diagnosis (28/11/2026)
+
+**Status:** SOURCE_CANDIDATE / INDEPENDENT_REVIEW_AND_CI_PENDING. Owner authorized independent diagnostic PR before #180 continuation. [Integrated #180 recurrence](https://github.com/chung6a8m/fmcg-distribution-dotnet/issues/75#issuecomment-7235779211): recovered A11-09 tenant-b, one unexpected retry and missing scoped worker witness. [Contract](../rel756b-unexpected-retry-witness.md). Preserve original assertions, retry history and exact live PID/DB witness; no runtime repair without actual evidence. REL-75.4 remains blocked, #180 not merged, #75/#68/#176 and all operational gates unchanged.
 
 <a id="lab-e04"></a>
 ## LAB-E04 — Fix HTTP 500 sau OS restart

@@ -11,6 +11,9 @@ internal sealed record Rel756bTechnical(string ErrorKind, int? Number, byte? Sta
 internal sealed record Rel756bProcessProjection(bool ScopeValid, bool Live, bool StreamsUntruncated,
     Rel756bTechnical[] Technical);
 
+internal sealed record Rel756bRetryCandidate(int RetryCount, DateTime LoggedAtUtc,
+    DateTime? NextAttemptAtUtc, Rel756bTechnical[] CandidateErrors);
+
 // Consume only the already-redacted LAB-E02 projection. Do not treat arbitrary
 // SQL errors, another tenant, a sweep-level Guid.Empty or another receipt as
 // the error that caused this C's committed retry.
@@ -242,12 +245,61 @@ public sealed partial class App01e2CrossCommandRaceTests
         var checkpoint = s.Report.Checkpoints.LastOrDefault(x => x.Phase == "os-recovered");
         var mismatches = checkpoint?.Cells.Where(x => !x.Match).ToArray() ?? [];
         int? retries = sql.State?.TechnicalRetryCount;
+        // Temporal association only: an exact-receipt error emitted before a
+        // committed history row is a candidate, not proof of statement/cycle.
+        var candidates = new List<Rel756bRetryCandidate>();
+        long lower = current?.StartedUtc.ToUnixTimeMilliseconds() ?? long.MaxValue;
+        foreach (var retry in history.Rows.Where(x => x.ReasonCode == "TECHNICAL_RETRY")
+                     .GroupBy(x => x.TechnicalRetryCount).Select(g => g.OrderBy(x => x.LoggedAtUtc).First())
+                     .OrderBy(x => x.LoggedAtUtc))
+        {
+            long upper = new DateTimeOffset(DateTime.SpecifyKind(retry.LoggedAtUtc,
+                DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            var errors = projection?.Technical.Where(x => x.UtcMs >= lower && x.UtcMs <= upper)
+                .ToArray() ?? [];
+            candidates.Add(new(retry.TechnicalRetryCount, retry.LoggedAtUtc,
+                retry.NextAttemptAtUtc, errors));
+            lower = Math.Max(lower, upper + 1);
+        }
+
+        // Keep the core retry/history/process receipt even if a large redacted
+        // graph cannot fit its bounded artifact. No silent truncation or
+        // substitution of a count-only graph for structural evidence.
+        string? xeReference = null;
+        Rel75XeObservation? inlineXe = xe;
+        if (xe is not null && JsonSerializer.SerializeToUtf8Bytes(xe).Length > 32 * 1024)
+        {
+            inlineXe = null;
+            try
+            {
+                string graphPath = await FailureDiagnostics.WriteAsync(AppContext.BaseDirectory,
+                    $"rel756b-{mode}-{s.Tenant}-xe", new
+                    {
+                        schema = "REL756B_XE_V1", mode, tenantId = s.Tenant,
+                        sourceHeadSha = FailureDiagnostics.Sha(s.Report.SourceHeadSha) ?? "INVALID",
+                        workflowSha = FailureDiagnostics.Sha(s.Report.WorkflowSha) ?? "INVALID",
+                        testRunId = FailureDiagnostics.Label(s.Report.TestRunId),
+                        fixtureNonce = fixture.Nonce, tripId = s.Scene.Trip, cReceiptId = receipt,
+                        hostPid = current?.Pid, xeStartedUtc = xeStarted, xeFinishedUtc = xeFinished,
+                        observation = xe
+                    }, CancellationToken.None);
+                xeReference = $"LAB-E02/{Path.GetFileName(graphPath)}";
+            }
+            catch (Exception ex)
+            {
+                xeStatus = "ARTIFACT_UNAVAILABLE";
+                xeError ??= FailureDiagnostics.Label(ex.GetType().Name);
+            }
+        }
         bool complete = sql.Status == "CAPTURED" && historyAgrees
-            && current is { WorkerEnabled: true, Exited: false } && previous.Exited
+            && current is { WorkerEnabled: true, Exited: false }
+            && previous is { WorkerEnabled: false, Exited: true }
             && current.Pid != previous.Pid
             && projection is { ScopeValid: true, Live: true, StreamsUntruncated: true }
             && processError is null && xeStatus == "CAPTURED" && cleanupError is null
-            && (retries == 0 || projection is { Technical.Length: > 0 })
+            && (retries == 0 || (projection is { Technical.Length: > 0 }
+                && candidates.Count == Math.Min(retries ?? 0, 5)
+                && candidates.All(x => x.CandidateErrors.Length > 0)))
             && s.Report.UnexpectedRetryWitnessError is null;
         // A numeric worker signature and a scoped structural graph are
         // separate observations, not an automatic causal/lock-order verdict.
@@ -270,8 +322,16 @@ public sealed partial class App01e2CrossCommandRaceTests
                 recoveryDiagnostic = s.Report.RecoveryDiagnostic,
                 oracleChecked = s.Report.CheckedCells, oracleMatched = s.Report.MatchedCells,
                 recoveredCheckpointPresent = checkpoint is not null, mismatches,
-                sql, history, historyAgrees, xeStatus, xeError, xeCleanupError = cleanupError,
-                xeStartedUtc = xeStarted, xeFinishedUtc = xeFinished, xeObservation = xe,
+                sql, history, historyAgrees, retryCandidates = candidates,
+                xeStatus, xeError, xeCleanupError = cleanupError,
+                xeStartedUtc = xeStarted, xeFinishedUtc = xeFinished, xeObservation = inlineXe, xeReference,
+                xeCounts = xe is null ? null : new
+                {
+                    xe.DatabaseId, xe.TotalEventsProcessed, xe.EventCount, xe.TargetDroppedCount,
+                    xe.SessionDroppedEvents, xe.SessionDroppedBuffers, xe.LargestDroppedEventSize,
+                    xe.UnprojectedReports, xe.Truncated, xe.ParsedEventCount,
+                    projectedGraphs = xe.Graphs.Length, xe.Complete
+                },
                 capturedUtc = DateTimeOffset.UtcNow,
                 evidenceStatus = complete ? "CAPTURED" : "PARTIAL",
                 rootCause = "REQUIRES_INDEPENDENT_DISPOSITION"

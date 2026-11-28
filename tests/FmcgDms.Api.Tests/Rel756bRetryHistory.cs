@@ -110,16 +110,27 @@ internal static class Rel756bRetryHistory
                 && x.StatusTo == state.CStatus && x.TechnicalRetryCount == count
                 && x.NextAttemptAtUtc == state.NextAttemptAtUtc && x.ReasonCode == state.CReasonCode))
             return false;
-        for (int i = 1; i < rows.Length; i++)
-            if (rows[i].LoggedAtUtc < rows[i - 1].LoggedAtUtc
-                || (rows[i].LoggedAtUtc > rows[i - 1].LoggedAtUtc
-                    && rows[i].TechnicalRetryCount < rows[i - 1].TechnicalRetryCount))
+        if (rows.Any(x => x.HistoryId == Guid.Empty)
+            || !rows.Select(x => x.LoggedAtUtc).SequenceEqual(rows.Select(x => x.LoggedAtUtc).Order()))
+            return false;
+        int previousMax = 0;
+        foreach (var group in rows.GroupBy(x => x.LoggedAtUtc))
+        {
+            // Timestamp ties cannot establish a strict sequence between two
+            // writes; require monotonic counts across distinct timestamps.
+            if (group.Min(x => x.TechnicalRetryCount) < previousMax)
                 return false;
+            previousMax = group.Max(x => x.TechnicalRetryCount);
+        }
         // Every persisted nonterminal technical retry has an immutable due.
         // Exhaustion CASE (6) has no future due by design.
         int scheduled = Math.Min(count, 5);
-        return Enumerable.Range(1, scheduled).All(n => rows.Any(x =>
-            x.TechnicalRetryCount == n && x.ReasonCode == "TECHNICAL_RETRY"
-            && x.NextAttemptAtUtc.HasValue));
+        return Enumerable.Range(1, scheduled).All(n =>
+        {
+            var retries = rows.Where(x => x.TechnicalRetryCount == n
+                && x.ReasonCode == "TECHNICAL_RETRY").ToArray();
+            return retries.Length > 0 && retries.All(x => x.NextAttemptAtUtc.HasValue)
+                && retries.Select(x => x.NextAttemptAtUtc).Distinct().Count() == 1;
+        });
     }
 }

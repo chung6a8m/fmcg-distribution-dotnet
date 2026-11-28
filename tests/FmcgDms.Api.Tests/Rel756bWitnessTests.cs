@@ -122,6 +122,20 @@ public sealed partial class App01e2CrossCommandRaceTests
         var retry = Assert.Single(root.GetProperty("history").GetProperty("rows").EnumerateArray()
             .Where(x => x.GetProperty("reasonCode").GetString() == "TECHNICAL_RETRY"));
         Assert.Equal(due, retry.GetProperty("nextAttemptAtUtc").GetDateTime());
+        var candidate = Assert.Single(root.GetProperty("retryCandidates").EnumerateArray());
+        Assert.Equal(1, candidate.GetProperty("retryCount").GetInt32());
+        Assert.Equal(due, candidate.GetProperty("nextAttemptAtUtc").GetDateTime());
+        Assert.Contains(candidate.GetProperty("candidateErrors").EnumerateArray(),
+            x => x.GetProperty("number").ValueKind == JsonValueKind.Number
+                && x.GetProperty("number").GetInt32() == 51220);
+        var denied = await Rel756bRetryHistory.CaptureAsync(isolated, "tenant-a",
+            scene.Scene.Trip, receipt, c, ct);
+        Assert.Equal("UNAVAILABLE", denied.Status);
+        Assert.Empty(denied.Rows);
+        var wrong = await Rel756bRetryHistory.CaptureAsync(isolated, tenant,
+            scene.Scene.Trip, Guid.NewGuid(), c, ct);
+        Assert.Equal("UNAVAILABLE", wrong.Status);
+        Assert.Empty(wrong.Rows);
         var projection = root.GetProperty("projection");
         Assert.True(projection.GetProperty("scopeValid").GetBoolean());
         Assert.True(projection.GetProperty("live").GetBoolean());
