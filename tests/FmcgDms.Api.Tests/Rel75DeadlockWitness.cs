@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml.Linq;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -6,7 +7,18 @@ namespace FmcgDms.Api.Tests;
 
 internal sealed record Rel75Edge(int OwnerSpid, int WaiterSpid, string OwnerMode, string WaiterMode);
 internal sealed record Rel75Resource(string Kind, string Table, long? HobtId, Rel75Edge[] Edges);
-internal sealed record Rel75Graph(int HostPid, int DatabaseId, int[] Spids, int[] VictimSpids, Rel75Resource[] Resources, bool Cycle);
+internal sealed record Rel75Graph(int HostPid, int DatabaseId, int[] Spids, int[] VictimSpids, Rel75Resource[] Resources, bool Cycle)
+{
+    public long? EventUtcMs { get; init; }
+}
+internal sealed record Rel75XeObservation(int DatabaseId, long TotalEventsProcessed, long EventCount,
+    long TargetDroppedCount, int SessionDroppedEvents, int SessionDroppedBuffers,
+    int LargestDroppedEventSize, int UnprojectedReports, bool Truncated, Rel75Graph[] Graphs)
+{
+    public bool Complete => !Truncated && TotalEventsProcessed == EventCount && TargetDroppedCount == 0
+        && SessionDroppedEvents == 0 && SessionDroppedBuffers == 0 && LargestDroppedEventSize == 0
+        && UnprojectedReports == 0 && Graphs.LongLength == EventCount;
+}
 
 /// <summary>Project the engine's XML witness in memory; never persist XML, input
 /// buffers, SQL text, host names, resource keys, file paths or arbitrary attributes.</summary>
@@ -31,6 +43,45 @@ internal static class Rel75DeadlockWitness
         return XDocument.Parse(xml).Descendants("deadlock")
             .Select(g => ProjectOne(g, dbId, hostPid))
             .OfType<Rel75Graph>().ToArray();
+    }
+
+    // Read the complete bounded buffer once for all observed child PIDs.
+    // No unprojectable/evicted/dropped report is silently converted into zero events.
+    internal static Rel75XeObservation ProjectBuffer(string xml, int dbId, int[] hostPids,
+        int droppedEvents, int droppedBuffers, int largestDroppedEventSize)
+    {
+        if (xml.Length > 4_000_000) throw new InvalidOperationException("REL75_XE_LIMIT");
+        XElement root = XDocument.Parse(xml).Root
+            ?? throw new InvalidOperationException("REL75_XE_ROOT_MISSING");
+        if (root.Name.LocalName != "RingBufferTarget")
+            throw new InvalidOperationException("REL75_XE_WRONG_TARGET");
+        long Count(string key) => long.TryParse((string?)root.Attribute(key),
+            NumberStyles.None, CultureInfo.InvariantCulture, out long n) && n >= 0
+            ? n : throw new InvalidOperationException("REL75_XE_COUNTER_MISSING");
+        string? truncated = (string?)root.Attribute("truncated");
+        if (truncated is not ("0" or "1"))
+            throw new InvalidOperationException("REL75_XE_TRUNCATION_UNKNOWN");
+        long total = Count("totalEventsProcessed"), count = Count("eventCount"), dropped = Count("droppedCount");
+        var events = root.Elements("event").ToArray();
+        var graphs = new List<Rel75Graph>();
+        int unprojected = 0;
+        foreach (var e in events)
+        {
+            var deadlocks = e.Descendants("deadlock").ToArray();
+            if ((string?)e.Attribute("name") != "xml_deadlock_report" || deadlocks.Length != 1
+                || !DateTimeOffset.TryParse((string?)e.Attribute("timestamp"), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal, out var timestamp))
+            { unprojected++; continue; }
+            var candidates = hostPids.Distinct().Select(pid => ProjectOne(deadlocks[0], dbId, pid))
+                .OfType<Rel75Graph>().ToArray();
+            if (candidates.Length != 1 || !candidates[0].Cycle)
+            { unprojected++; continue; }
+            graphs.Add(candidates[0] with { EventUtcMs = timestamp.ToUnixTimeMilliseconds() });
+        }
+        if (events.LongLength != count)
+            throw new InvalidOperationException("REL75_XE_EVENT_COUNT_MISMATCH");
+        return new(dbId, total, count, dropped, droppedEvents, droppedBuffers,
+            largestDroppedEventSize, unprojected, truncated == "1", graphs.ToArray());
     }
 
     private static int Number(XElement e, string name) =>
@@ -123,22 +174,31 @@ internal sealed class Rel75DeadlockCapture : IAsyncDisposable
         await db.ExecuteAsync(Cmd($"ALTER EVENT SESSION [{name}] ON SERVER STATE=START"));
     }
 
-    internal async Task<Rel75Graph[]> CaptureAsync(int hostPid)
+    private sealed class XeBufferRow
+    {
+        public string? Xml { get; set; }
+        public int DroppedEvents { get; set; }
+        public int DroppedBuffers { get; set; }
+        public int LargestDroppedEventSize { get; set; }
+    }
+
+    internal async Task<Rel75XeObservation> CaptureAsync(int[] hostPids)
     {
         // Give asynchronous XE dispatch its own bounded observation window;
         // this is AFTER the original outcome/deadline, never an extension of it.
         await Task.Delay(TimeSpan.FromMilliseconds(1200));
-        string? raw = await db.ExecuteScalarAsync<string?>(Cmd("""
-            SELECT CAST(t.target_data AS nvarchar(max))
+        var row = await db.QuerySingleOrDefaultAsync<XeBufferRow>(Cmd("""
+            SELECT CAST(t.target_data AS nvarchar(max)) AS Xml,
+                s.dropped_event_count AS DroppedEvents,
+                s.dropped_buffer_count AS DroppedBuffers,
+                s.largest_event_dropped_size AS LargestDroppedEventSize
             FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s
               ON t.event_session_address=s.address
             WHERE s.name=@Name AND t.target_name=N'ring_buffer'
             """, new { Name = name }));
-        if (raw is null) throw new InvalidOperationException("REL75_XE_TARGET_UNAVAILABLE");
-        var root = XDocument.Parse(raw).Root;
-        if (root is null || (string?)root.Attribute("truncated") == "1")
-            throw new InvalidOperationException("REL75_XE_TARGET_TRUNCATED");
-        return Rel75DeadlockWitness.Project(raw, DatabaseId, hostPid);
+        if (row?.Xml is not { } raw) throw new InvalidOperationException("REL75_XE_TARGET_UNAVAILABLE");
+        return Rel75DeadlockWitness.ProjectBuffer(raw, DatabaseId, hostPids,
+            row.DroppedEvents, row.DroppedBuffers, row.LargestDroppedEventSize);
     }
 
     public async ValueTask DisposeAsync()
