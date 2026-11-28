@@ -346,49 +346,46 @@ public sealed partial class App01e2CrossCommandRaceTests
                 }
             }
             RecoveryProcessState previous = before.SnapshotState();
-            await using (var after = await App01e4ApiProcess.StartAsync(
-                fixture, TestContext.Current.CancellationToken,
-                app02WorkerEnabled: true, onReadinessFailure: RecordReadiness))
+            await A4ObserveRestartAsync(s, c, previous, "ordinary", async (after, timeline) =>
             {
-                string stage = "post-restart-P";
-                var elapsed = System.Diagnostics.Stopwatch.StartNew();
-                int polls = 0;
-                try
+                timeline.Stage = "post-restart-P";
+                Assert.NotEqual(previous.Pid, after.Pid);
+                using var sales = after.Client(tenant, SalesActor, "sales");
+                await A4RestartIntake(s, after, sales, s.P, "post-restart-P", previous.Pid);
+                timeline.Stage = "recovery-poll";
+                bool recovered = false;
+                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
+                timeline.RecoveryDeadlineUtc = until;
+                timeline.PAckUtc = until.AddSeconds(-30);
+                while (DateTimeOffset.UtcNow < until)
                 {
-                    Assert.NotEqual(previous.Pid, after.Pid);
-                    using var sales = after.Client(tenant, SalesActor, "sales");
-                    await A4RestartIntake(s, after, sales, s.P, "post-restart-P", previous.Pid);
-                    stage = "recovery-poll";
-                    bool recovered = false;
-                    DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-                    while (DateTimeOffset.UtcNow < until)
+                    timeline.Polls++;
+                    using var db = Open(tenant);
+                    recovered = db.ExecuteScalar<int>("""
+                        SELECT COUNT(*) FROM dbo.App02AcceptanceApplication a
+                        JOIN dbo.App02EventProgress p ON p.TenantId=a.TenantId
+                          AND p.ReceiptId=a.CReceiptId
+                        JOIN dbo.App02OutboxDelivery d ON d.TenantId=a.TenantId
+                          AND d.MessageId=a.MessageId
+                        JOIN dbo.App02SyntheticConsumerInbox i
+                          ON i.TenantId=d.TenantId AND i.MessageId=d.MessageId
+                        WHERE a.TenantId=@Tenant AND a.CReceiptId=@Receipt
+                          AND p.Status=N'APPLIED' AND d.Status=N'ACKED'
+                        """, new { Tenant = tenant, Receipt = c }) == 1;
+                    if (recovered)
                     {
-                        polls++;
-                        using var db = Open(tenant);
-                        recovered = db.ExecuteScalar<int>("""
-                            SELECT COUNT(*) FROM dbo.App02AcceptanceApplication a
-                            JOIN dbo.App02EventProgress p ON p.TenantId=a.TenantId
-                              AND p.ReceiptId=a.CReceiptId
-                            JOIN dbo.App02OutboxDelivery d ON d.TenantId=a.TenantId
-                              AND d.MessageId=a.MessageId
-                            JOIN dbo.App02SyntheticConsumerInbox i
-                              ON i.TenantId=d.TenantId AND i.MessageId=d.MessageId
-                            WHERE a.TenantId=@Tenant AND a.CReceiptId=@Receipt
-                              AND p.Status=N'APPLIED' AND d.Status=N'ACKED'
-                            """, new { Tenant = tenant, Receipt = c }) == 1;
-                        if (recovered) break;
-                        await Task.Delay(150, TestContext.Current.CancellationToken);
+                        timeline.RecoveredObservedUtc = DateTimeOffset.UtcNow;
+                        break;
                     }
-                    stage = "recovery-deadline";
-                    Assert.True(recovered, "New OS PID failed to resume C and ACK outbox");
+                    await Task.Delay(150, TestContext.Current.CancellationToken);
                 }
-                catch (Exception ex)
-                {
-                    await A4CaptureRestartFailure(s, after, stage, ex, previous, elapsed.ElapsedMilliseconds, polls);
-                    throw;
-                }
-            }
-            await A4Capture(s, "os-recovered");
+                timeline.Stage = "recovery-deadline";
+                Assert.True(recovered, "New OS PID failed to resume C and ACK outbox");
+                // Same independent oracle and zero-retry assertion, now within
+                // the live child diagnostic scope. No diagnostic work in poll.
+                timeline.Stage = "os-recovered-oracle";
+                await A4Capture(s, "os-recovered");
+            }, RecordReadiness);
         });
 
     [Theory]

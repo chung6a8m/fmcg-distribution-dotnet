@@ -41,6 +41,10 @@ public sealed partial class App01e2CrossCommandRaceTests
         public string? FailureDiagnosticError { get; set; }
         public string? RecoveryDiagnostic { get; set; }
         public string? RecoveryDiagnosticError { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? UnexpectedRetryWitness { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? UnexpectedRetryWitnessError { get; set; }
         public string Group { get; init; } = "";
         public string TenantId { get; init; } = "";
         public string Database { get; set; } = "";
