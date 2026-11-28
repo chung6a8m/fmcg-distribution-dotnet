@@ -11,7 +11,7 @@ namespace FmcgDms.Api.Persistence;
 internal static class Rel75Probe
 {
     private static readonly string[] Phases =
-        ["SweepBeforeSelect", "CBeforePrerequisite", "PAfterRole", "PBeforeCommit", "OutboxBeforeClaim"];
+        ["SweepBeforeSelect", "CBeforePrerequisite", "PAfterRole", "PBeforeCommit", "OutboxAfterClaimRead"];
 
     internal static bool Enabled(IConfiguration config, IHostEnvironment host) =>
         host.IsEnvironment("IntegrationTest") && config.GetValue<bool>("SyntheticAuth:Enabled")
