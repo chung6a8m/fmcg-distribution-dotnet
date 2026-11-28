@@ -414,7 +414,7 @@ def summarize(samples, root, identity):
             require(nonce not in nonces, "REUSED_NONCE")
             nonces.add(nonce)
             row.update(disposition=disposition, structural_cycles=cycles)
-        except (ValueError, TypeError, KeyError, OSError, AttributeError) as exc:
+        except (ValueError, TypeError, KeyError, OSError, AttributeError, ArithmeticError, IndexError, RecursionError) as exc:
             # Only our fixed uppercase classification is allowed; do not emit
             # exception messages containing raw JSON, filesystem or SQL values.
             label = str(exc)
