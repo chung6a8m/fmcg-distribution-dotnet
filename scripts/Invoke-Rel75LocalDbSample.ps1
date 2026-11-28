@@ -101,6 +101,7 @@ function Invoke-Rel75Stage([hashtable]$Context, [string]$Stage, [string[]]$Argum
     $exe = if ($Stage -eq 'readiness') { 'SQLCMD.EXE' } else { 'SqlLocalDB.exe' }
     $params = @{ Executable = $exe; Arguments = $Arguments; TimeoutMilliseconds = $timeout
         KillEntireProcessTree = $false; DeadlineWatch = $Context.watch; DeadlineMilliseconds = $Context.limit }
+    $stageStartedUtc = [DateTime]::UtcNow.ToString('o')
     $native = Invoke-LocalDbProbe @params
     $native.stdout = $native.stdout -replace '\r+\n', [string][char]10
     $native.stderr = $native.stderr -replace '\r+\n', [string][char]10
@@ -115,7 +116,7 @@ function Invoke-Rel75Stage([hashtable]$Context, [string]$Stage, [string[]]$Argum
         $kind = 'NativeCommandFailed'
     }
     $code = [regex]::Match($message, '(?i)\b0x[0-9a-f]{8}\b').Value
-    $row = [ordered]@{ stage = $Stage; attempt = $Attempt; status = $native.status; exitCode = $native.exitCode
+    $row = [ordered]@{ stage = $Stage; attempt = $Attempt; startedUtc = $stageStartedUtc; status = $native.status; exitCode = $native.exitCode
         error = $kind; nativeDetail = if ($kind -ne 'None') { Get-LocalDbNativeDetail $message } else { $null }
         nativeCode = if ($code) { $code } else { $null }
         truncated = [bool]$native.truncated; timeoutMilliseconds = $timeout; elapsedMilliseconds = $Context.watch.ElapsedMilliseconds }
@@ -241,7 +242,8 @@ function Write-Rel75Receipt([System.Collections.IDictionary]$Report) {
     try { [IO.File]::Move($tmp,$path) } finally { [IO.File]::Delete($tmp) }
 }
 
-function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
+function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample,
+    [scriptblock]$OnCold = $null, [scriptblock]$OnFinished = $null) {
     Assert-Rel75Runner $SelectedArm
     $target = New-Rel75Name $SelectedArm $Sample
     $profilePath = [Environment]::GetFolderPath('LocalApplicationData')
@@ -266,6 +268,10 @@ function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
         $version = Get-Rel75Runtime $pre $SelectedArm $report
         Assert-Rel75Cold $pre $target $dir
         $report.coldVerified = $true
+        # REL-75.5 opt-in observation runs outside the bootstrap deadline.
+        # Only the separate diagnostic runner supplies callbacks; the original
+        # command-line entry point and required-CI helper never do.
+        if ($null -ne $OnCold) { & $OnCold $target $dir | Out-Null }
         $report.status = 'BOOTSTRAP_FAILED'
         $boot.watch.Start()
         if ($target -ceq 'MSSQLLocalDB' -and $version -cmatch '\A15\.0\.') {
@@ -297,6 +303,9 @@ function Invoke-Rel75Sample([string]$SelectedArm, [int]$Sample) {
         }
         if ($report.status -eq 'BOOTSTRAP_FAILED' -and @($report.bootstrap | Where-Object stage -eq 'create').Count -eq 0) {
             $report.status = 'NOT_EXECUTED'
+        }
+        if ($null -ne $OnFinished) {
+            try { & $OnFinished $target $dir | Out-Null } catch { }
         }
         # Collection failure must not replace the actual bootstrap outcome.
         try { $report.diskAfter = Get-Rel75Disk $dir; $report.filesAfter = @(Get-Rel75Files $dir) } catch { }
