@@ -40,8 +40,7 @@ public sealed class App02a3HostedWorker(
             || !config.GetValue<bool>("App02Worker:Enabled"))
             return;
 
-        bool reverse = Rel75Probe.Enabled(config, environment)
-            && config.GetValue<bool>("Rel75Probe:ReverseStartup");
+        bool reverse = Rel75Probe.ReverseStartup(config, environment);
         signal.Wake(reverse ? "tenant-b" : "tenant-a");
         signal.Wake(reverse ? "tenant-a" : "tenant-b");
         Task ticker = SafetyTicksAsync(stoppingToken);
