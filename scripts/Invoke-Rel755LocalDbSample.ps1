@@ -1,14 +1,13 @@
 [CmdletBinding()]
-param([ValidateSet('win22-auto','win22-named','win25-auto')][string]$Arm='win22-auto',
-    [ValidateRange(1,20)][int]$Iteration=1)
+param([Alias('Arm')][ValidateSet('win22-auto','win22-named','win25-auto')][string]$RequestedArm='win22-auto',
+    [Alias('Iteration')][ValidateRange(1,20)][int]$RequestedIteration=1)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Invoke-Rel75LocalDbSample.ps1')
 . (Join-Path $PSScriptRoot 'Rel755-ReadOnlyEvidence.ps1')
-Assert-Rel75Runner $Arm
-$script:rel755=[ordered]@{ schema='REL755_NATIVE_EVIDENCE_V1'; arm=$Arm; iteration=$Iteration
+$script:rel755=[ordered]@{ schema='REL755_NATIVE_EVIDENCE_V1'; arm=$RequestedArm; iteration=$RequestedIteration
     sourceHeadSha=$env:REL75_SOURCE_SHA; workflowSha=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT
-    instance=$null; originalReceiptSha256=$null; sectorBefore=$null; sectorAfter=$null; sectorErrors=@()
+    instance=$null; guardFailure=$null; originalReceiptSha256=$null; sectorBefore=$null; sectorAfter=$null; sectorErrors=@()
     bootstrapStartUtc=$null; bootstrapEndUtc=$null
     monitor=@{status='NOT_STARTED'; cadenceMs=500; snapshots=@()}; startedUtc=[DateTime]::UtcNow.ToString('o'); completedUtc=$null }
 $script:observerJob=$null
@@ -64,8 +63,17 @@ $onFinished={
     $script:rel755.sectorErrors=@(Get-Rel755SectorErrors $directory)
 }
 $ok=$false
-try { $ok=Invoke-Rel75Sample $Arm $Iteration -OnCold $onCold -OnFinished $onFinished }
-finally {
+try {
+    Assert-Rel75Runner $RequestedArm
+    $ok=Invoke-Rel75Sample $RequestedArm $RequestedIteration -OnCold $onCold -OnFinished $onFinished
+} catch {
+    # A preflight rejection is not a cold observation. Retain a safe receipt
+    # even when the legacy report is absent; never promote it in aggregation.
+    $script:rel755.guardFailure=if ($_.Exception.Data.Contains('Rel75Code')) {
+        $_.Exception.Data['Rel75Code']
+    } else { 'UnexpectedWrapperFailure' }
+    Write-Host "REL-75.5 wrapper stopped: $($script:rel755.guardFailure)"
+} finally {
     Stop-Rel755Observer
     $original=Join-Path $PSScriptRoot '../TestResults/REL75-Matrix/sample.json'
     if ((Get-Rel75PathState $original) -eq 'PRESENT') { $script:rel755.originalReceiptSha256=(Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant() }

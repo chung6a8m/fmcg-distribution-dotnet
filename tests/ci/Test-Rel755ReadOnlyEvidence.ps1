@@ -48,4 +48,20 @@ try {
     Check ($raw.status -eq 'OK' -and $raw.tailOnly -and $raw.bytesRead -le 65536 -and (ConvertFrom-Rel755SectorErrors $raw.text $dir).pairs.Count -eq 1) 'bounded tail'
     Check ((Get-Rel755LogText (Join-Path $dir 'absent.log')).status -eq 'MISSING') 'missing log'
 } finally { [IO.Directory]::Delete($dir,$true) }
+# Dot-sourcing the legacy parameterized script assigns $Arm and $Iteration
+# in the caller scope. Check the wrapper's actual AST uses disjoint names,
+# and calls both runner guard and sampler with those preserved parameters.
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PSScriptRoot '../../scripts/Invoke-Rel755LocalDbSample.ps1'),[ref]$tokens,[ref]$errors)
+Check ($errors.Count -eq 0) 'wrapper parses'
+$names=@($ast.ParamBlock.Parameters | ForEach-Object {$_.Name.VariablePath.UserPath})
+Check ($names.Count -eq 2 -and $names -contains 'RequestedArm' -and $names -contains 'RequestedIteration' -and
+    $names -notcontains 'Arm' -and $names -notcontains 'Iteration') 'parameter isolation'
+$commands=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true))
+$guard=@($commands | Where-Object {$_.GetCommandName() -eq 'Assert-Rel75Runner'})
+$sampler=@($commands | Where-Object {$_.GetCommandName() -eq 'Invoke-Rel75Sample'})
+Check ($guard.Count -eq 1 -and $guard[0].CommandElements[1].Extent.Text -ceq '$RequestedArm' -and
+    $sampler.Count -eq 1 -and $sampler[0].CommandElements[1].Extent.Text -ceq '$RequestedArm' -and
+    $sampler[0].CommandElements[2].Extent.Text -ceq '$RequestedIteration') 'preserved request forwarded'
 Write-Host "REL-75.5 read-only projection regressions: $script:passed passed."

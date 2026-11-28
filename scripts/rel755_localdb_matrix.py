@@ -223,16 +223,24 @@ def sector_pairs(original, native, after):
 
 
 def inspect_cell(path, arm, iteration, identity):
-    require(path.is_dir() and not path.is_symlink() and {p.name for p in path.iterdir()} ==
-            {"sample.json","native.json"}, "ARTIFACT_LAYOUT")
+    require(path.is_dir() and not path.is_symlink(), "ARTIFACT_LAYOUT")
+    names = {p.name for p in path.iterdir()}
+    require(names in ({"sample.json","native.json"},{"native.json"}), "ARTIFACT_LAYOUT")
     source, workflow, run, attempt = identity
-    original_path = path / "sample.json"
-    original = legacy.read_receipt(original_path)
-    row = legacy.validate(original, arm, iteration, source, workflow, run, attempt)
     native = read_native(path / "native.json")
     require((native["schema"],native["arm"],native["iteration"],native["sourceHeadSha"],
              native["workflowSha"],native["runId"],native["runAttempt"]) ==
             (SCHEMA,arm,iteration,source,workflow,run,attempt), "NATIVE_IDENTITY")
+    if names == {"native.json"}:
+        guard=native.get("guardFailure")
+        require(isinstance(guard,str) and legacy.LABEL.fullmatch(guard)
+                and native["originalReceiptSha256"] is None, "MISSING_ORIGINAL_RECEIPT")
+        return {"arm":arm,"iteration":iteration,"status":"INCOMPLETE",
+                "nativeEvidenceComplete":False,"reason":guard}
+    require(native.get("guardFailure") is None, "WRAPPER_FAILURE")
+    original_path = path / "sample.json"
+    original = legacy.read_receipt(original_path)
+    row = legacy.validate(original, arm, iteration, source, workflow, run, attempt)
     require(native["originalReceiptSha256"] == hashlib.sha256(original_path.read_bytes()).hexdigest(),
             "ORIGINAL_RECEIPT_DIGEST")
     require(native["instance"] == original["instance"] or

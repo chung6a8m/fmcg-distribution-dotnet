@@ -184,6 +184,17 @@ class NativeMatrixTests(unittest.TestCase):
         (self.root/"rel755-foreign").mkdir()
         self.assertEqual("INCOMPLETE",self.summary()["status"])
 
+    def test_guard_only_receipt_is_incomplete(self):
+        orig,n=fixture("win25-auto")
+        path=self.put("win25-auto",orig,n)
+        (path/"sample.json").unlink()
+        n.update(guardFailure="OsBuildMismatch",originalReceiptSha256=None)
+        (path/"native.json").write_text(json.dumps(n),encoding="utf-8")
+        row=self.summary()["rows"][2]
+        self.assertEqual("INCOMPLETE",row["status"])
+        self.assertEqual("OsBuildMismatch",row["reason"])
+        self.assertFalse(row["nativeEvidenceComplete"])
+
     def test_malformed_pair_path_rejected(self):
         orig,n,log=self.pair_fixture()
         log["pairs"][0]["file"]="../master.mdf"
