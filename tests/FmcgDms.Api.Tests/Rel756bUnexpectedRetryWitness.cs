@@ -247,7 +247,7 @@ public sealed partial class App01e2CrossCommandRaceTests
             && current.Pid != previous.Pid
             && projection is { ScopeValid: true, Live: true, StreamsUntruncated: true }
             && processError is null && xeStatus == "CAPTURED" && cleanupError is null
-            && (retries == 0 || projection.Technical.Length > 0)
+            && (retries == 0 || projection is { Technical.Length: > 0 })
             && s.Report.UnexpectedRetryWitnessError is null;
         // A numeric worker signature and a scoped structural graph are
         // separate observations, not an automatic causal/lock-order verdict.

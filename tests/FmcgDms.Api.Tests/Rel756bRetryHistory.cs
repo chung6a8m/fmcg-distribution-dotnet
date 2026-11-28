@@ -97,7 +97,7 @@ internal static class Rel756bRetryHistory
     // their agreement corroborated when all observed retry counts are present.
     internal static bool Agrees(Rel756bHistoryCapture history, RecoverySqlState? state, Guid receipt)
     {
-        if (history.Status != "CAPTURED" || state?.CReceiptId != receipt
+        if (history.Status != "CAPTURED" || state is null || state.CReceiptId != receipt
             || state.TechnicalRetryCount is not int count || count is < 0 or > 6
             || history.Rows.Length is < 1 or > MaxRows)
             return false;
@@ -106,14 +106,14 @@ internal static class Rel756bRetryHistory
                 || x.StatusTo == "[redacted]" || x.StatusFrom == "[redacted]"
                 || x.ReasonCode == "[redacted]")
             || rows.Select(x => x.HistoryId).Distinct().Count() != rows.Length
-            || rows[^1].StatusTo != state.CStatus
-            || rows[^1].TechnicalRetryCount != count
-            || rows[^1].NextAttemptAtUtc != state.NextAttemptAtUtc
-            || rows[^1].ReasonCode != state.CReasonCode)
+            || !rows.Any(x => x.LoggedAtUtc == rows[^1].LoggedAtUtc
+                && x.StatusTo == state.CStatus && x.TechnicalRetryCount == count
+                && x.NextAttemptAtUtc == state.NextAttemptAtUtc && x.ReasonCode == state.CReasonCode))
             return false;
         for (int i = 1; i < rows.Length; i++)
             if (rows[i].LoggedAtUtc < rows[i - 1].LoggedAtUtc
-                || rows[i].TechnicalRetryCount < rows[i - 1].TechnicalRetryCount)
+                || (rows[i].LoggedAtUtc > rows[i - 1].LoggedAtUtc
+                    && rows[i].TechnicalRetryCount < rows[i - 1].TechnicalRetryCount))
                 return false;
         // Every persisted nonterminal technical retry has an immutable due.
         // Exhaustion CASE (6) has no future due by design.
