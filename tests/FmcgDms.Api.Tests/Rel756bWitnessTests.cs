@@ -102,6 +102,8 @@ public sealed partial class App01e2CrossCommandRaceTests
         Assert.Equal("FAIL", root.GetProperty("originalOutcome").GetString());
         Assert.Equal("os-recovered-oracle", root.GetProperty("stage").GetString());
         Assert.Equal("CAPTURED", root.GetProperty("evidenceStatus").GetString());
+        Assert.Equal(report.RecoveryDiagnostic, root.GetProperty("recoveryDiagnostic").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("recoveryDiagnosticError").ValueKind);
         Assert.Equal(isolated.Nonce, root.GetProperty("fixtureNonce").GetString());
         Assert.Equal(receipt, root.GetProperty("cReceiptId").GetGuid());
         Assert.Equal(scene.Scene.Trip, root.GetProperty("tripId").GetGuid());
@@ -182,6 +184,19 @@ public sealed class Rel756bWitnessContractTests
         Assert.DoesNotContain("private-reason", JsonSerializer.Serialize(history));
     }
 
+    [Theory]
+    [InlineData(false, null, null, true)]
+    [InlineData(true, "LAB-E02/recovery.json", null, true)]
+    [InlineData(true, null, null, false)]
+    [InlineData(true, null, "IOException", false)]
+    [InlineData(true, "LAB-E02/recovery.json", "IOException", false)]
+    [InlineData(false, null, "IOException", false)]
+    public void Required_recovery_reference_fails_closed(bool failed, string? reference,
+        string? error, bool expected)
+    {
+        Assert.Equal(expected, Rel756bProcessEvidence.RequiredRecoveryReferencePresent(failed, reference, error));
+    }
+
     [Fact]
     public void Technical_projection_excludes_foreign_receipt_tenant_pid_phase_and_time()
     {
@@ -200,11 +215,11 @@ public sealed class Rel756bWitnessContractTests
             discardedChars = truncated ? 1 : 0, recoveryObservationsTruncated = truncated,
             captureError = (string?)null, recoveryObservations = rows
         };
-        object Artifact(bool truncated) => new
+        object Artifact(bool truncated, string source = "LOCAL", string workflow = "LOCAL") => new
         {
             stage = "rel756b-live", capturedUtc = now.AddSeconds(5),
             context = new { tenantId = tenant, group = "A11-09", fixtureNonce = nonce,
-                testRunId = run, sourceHeadSha = "LOCAL", workflowSha = "LOCAL" },
+                testRunId = run, sourceHeadSha = source, workflowSha = workflow },
             process = new { pid = 123, workerEnabled = true, exited = false, startedUtc = now },
             stdout = Stream(truncated, [
                 Row(tenant, receipt, "processing", 51220, now.AddSeconds(1)),
@@ -227,6 +242,16 @@ public sealed class Rel756bWitnessContractTests
             nonce, run, "LOCAL", "LOCAL", now, now.AddSeconds(3));
         Assert.False(foreign.ScopeValid);
         Assert.Empty(foreign.Technical);
+        using var invalid = JsonSerializer.SerializeToDocument(Artifact(false, "INVALID"));
+        var invalidSource = Rel756bProcessEvidence.Project(invalid.RootElement, tenant, receipt, 123,
+            nonce, run, "INVALID", "LOCAL", now, now.AddSeconds(3));
+        Assert.False(invalidSource.ScopeValid);
+        Assert.Empty(invalidSource.Technical);
+        using var invalidWorkflow = JsonSerializer.SerializeToDocument(Artifact(false, workflow: "INVALID"));
+        var wrongWorkflow = Rel756bProcessEvidence.Project(invalidWorkflow.RootElement, tenant, receipt, 123,
+            nonce, run, "LOCAL", "INVALID", now, now.AddSeconds(3));
+        Assert.False(wrongWorkflow.ScopeValid);
+        Assert.Empty(wrongWorkflow.Technical);
         using var truncated = JsonSerializer.SerializeToDocument(Artifact(true));
         Assert.False(Rel756bProcessEvidence.Project(truncated.RootElement, tenant, receipt, 123,
             nonce, run, "LOCAL", "LOCAL", now, now.AddSeconds(3)).StreamsUntruncated);
