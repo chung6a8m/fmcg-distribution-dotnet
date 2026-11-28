@@ -950,6 +950,8 @@ jobs:
         run: ./scripts/Run-App02C1.ps1 -Increment DevF05 -Verify
       - name: DEV-F06 AC-06 forward-only cost corrections through Chromium and SQL
         shell: pwsh
+        env:
+          FMCG_D2_PEER_WITNESS: '1'
         run: ./scripts/Run-App02C1.ps1 -Increment DevF06 -Verify
       - name: DEV-F07 AC-07 returned gifts and waivers through Chromium and SQL
         shell: pwsh
@@ -1197,6 +1199,8 @@ jobs:
         run: ./scripts/Run-App02D1.ps1
       - name: APP-02D.2 atomic B sale and receipt synthetic matrix
         shell: pwsh
+        env:
+          FMCG_D2_PEER_WITNESS: '1'
         run: ./scripts/Run-App02D2.ps1
       - name: APP-02D.3 Mixed custody and all-manifest return synthetic matrix
         shell: pwsh
