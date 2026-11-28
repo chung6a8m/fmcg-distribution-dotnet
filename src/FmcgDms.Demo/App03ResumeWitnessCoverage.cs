@@ -111,13 +111,20 @@ internal static class App03ResumeWitnessCoverage
                     {
                         if (status is null || status < 100 || status > 599 || assertion is not ("PASSED" or "EXPECTED_FORBIDDEN" or "HTTP_STATUS_REJECTED" or "ASSERTION_FAILED"))
                             throw new InvalidDataException();
-                        if (assertion == "EXPECTED_FORBIDDEN" && status != 403 || assertion == "PASSED" && (status < 200 || status > 299))
+                        if ((assertion == "EXPECTED_FORBIDDEN" && status != 403)
+                            || (assertion == "PASSED" && (status < 200 || status > 299))
+                            || (assertion == "HTTP_STATUS_REJECTED" && status >= 200 && status <= 299))
                             throw new InvalidDataException();
                         var received = end.Row.GetProperty("responseReceivedUtc").GetDateTimeOffset();
                         if (received < from || received > to || end.Row.GetProperty("responseElapsedMs").GetDouble() < 0)
                             throw new InvalidDataException();
                     }
-                    else if (assertion != "NOT_RUN" || status is not null && outcome != "HTTP_STATUS_FAILURE")
+                    else if (outcome is not ("HTTP_TIMEOUT" or "CALLER_CANCELLED" or "CANCELLED_UNKNOWN"
+                            or "HTTP_TRANSPORT_FAILURE" or "HTTP_STATUS_FAILURE" or "UNEXPECTED_FAILURE")
+                        || assertion != "NOT_RUN"
+                        || (outcome == "HTTP_STATUS_FAILURE" ? status is null || status < 100 || status > 599 : status is not null)
+                        || end.Row.GetProperty("responseReceivedUtc").ValueKind != JsonValueKind.Null
+                        || end.Row.GetProperty("responseElapsedMs").ValueKind != JsonValueKind.Null)
                         throw new InvalidDataException();
                     if (samples is not null)
                     {

@@ -20,7 +20,8 @@ const server = await createServer({
     host: '127.0.0.1',
     port,
     strictPort: true,
-    proxy: { '/api': { target: 'http://localhost:5116', configure: witness.configure } }
+    // Match Vite's string shorthand (changeOrigin:true) exactly.
+    proxy: { '/api': { target: 'http://localhost:5116', changeOrigin: true, configure: witness.configure } }
   }
 })
 try {
@@ -30,6 +31,7 @@ try {
       || Object.keys(proxy ?? {}).sort().join(',') !== '/api,/health'
       || proxy['/health'] !== 'http://localhost:5116'
       || proxy['/api']?.target !== 'http://localhost:5116'
+      || proxy['/api']?.changeOrigin !== true
       || proxy['/api']?.configure !== witness.configure)
     throw new Error('APP-03 diagnostic Vite configuration is outside the fixed boundary')
   await server.listen()

@@ -35,9 +35,10 @@ test('real Vite DEV proxy correlates response, client abort and upstream failure
     assert.equal(process.platform, 'win32')
     assert.equal(process.env.GITHUB_ACTIONS, 'true')
     assert.equal(process.env.RUNNER_OS, 'Windows')
-    const upstreamIds = []
+    const upstreamIds = [], upstreamHosts = []
     const upstream = createServer((req, res) => {
       upstreamIds.push(req.headers[header])
+      upstreamHosts.push(req.headers.host)
       if (req.headers[header] === ids[1]) {
         res.writeHead(200, { 'content-type': 'text/plain' })
         res.write('partial')
@@ -91,6 +92,7 @@ test('real Vite DEV proxy correlates response, client abort and upstream failure
       const deadline = performance.now() + budget
       while (!predicate() && performance.now() < deadline) {
         assert.equal(child.exitCode, null, 'Vite exited before ' + description)
+        assert.equal(child.signalCode, null, 'Vite terminated before ' + description)
         await delay(25)
       }
       assert.ok(predicate(), 'Missing ' + description)
@@ -124,6 +126,7 @@ test('real Vite DEV proxy correlates response, client abort and upstream failure
     await until(() => rows.some(r => r.id === ids[2] && r.phase === 'proxy-error'), 'upstream error witness')
     assert.deepEqual(await send('/api/unrelated', ids[3]), { status: 200, body: 'ok' })
     assert.deepEqual(upstreamIds, ids)
+    assert.deepEqual(upstreamHosts, ids.map(() => 'localhost:5116'))
     assert.ok(rows.every(r => r.vitePid === child.pid && r.id !== ids[3]))
     for (const phase of ['ingress','upstream-request','upstream-headers','upstream-end','client-finish'])
       assert.ok(rows.some(r => r.id === ids[0] && r.phase === phase), phase)

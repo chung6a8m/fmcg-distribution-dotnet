@@ -224,6 +224,23 @@ public sealed class App03CatalogWitnessTests : IDisposable
     }
 
     [Fact]
+    public async Task Session_timeout_preserves_original_exception_and_does_not_run_assertion_or_retry()
+    {
+        using var handler = new NeverRespond();
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(50) };
+        var witness = new App03SettlementHttpWitness.Context(output, "source", "run");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            App03SettlementHttpWitness.ObserveSession(witness, "nextday-1", "tenant-a", "run", true,
+                1, 2, client.Timeout, CancellationToken.None,
+                _ => client.GetAsync("http://localhost" + App03SettlementHttpWitness.SessionRoute)));
+        Assert.Equal(1, handler.Calls);
+        using var json = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(output, "resume-session-http-*-end.json").Single()));
+        Assert.Equal("HTTP_TIMEOUT", json.RootElement.GetProperty("outcome").GetString());
+        Assert.Equal("NOT_RUN", json.RootElement.GetProperty("assertion").GetString());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("status").ValueKind);
+    }
+
+    [Fact]
     public async Task Api_trace_accepts_session_but_not_unrelated_paths()
     {
         var context = new DefaultHttpContext();
