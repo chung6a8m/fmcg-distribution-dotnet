@@ -127,8 +127,12 @@ jobs:
           $trxDir = Join-Path $env:GITHUB_WORKSPACE 'TestResults/REL75-A11-TRX'
           $receiptDir = Join-Path $env:GITHUB_WORKSPACE 'TestResults/REL75-A11-Execution'
           New-Item -ItemType Directory -Path $trxDir,$receiptDir -Force | Out-Null
-          dotnet test --project tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 1 -- --filter-method FmcgDms.Api.Tests.App01e2CrossCommandRaceTests.Rel75_Probe_contract_and_opt_in_sample --report-trx --results-directory "$trxDir"
+          # Raw test stdout/TRX can contain arbitrary SQL exception text.
+          # Do not publish it as diagnostic evidence; project only counts below.
+          $privateLog = Join-Path $env:RUNNER_TEMP 'rel75-a11-test-output.txt'
+          dotnet test --project tests/FmcgDms.Api.Tests/FmcgDms.Api.Tests.csproj -c Release --no-build --minimum-expected-tests 1 -- --filter-method FmcgDms.Api.Tests.App01e2CrossCommandRaceTests.Rel75_Probe_contract_and_opt_in_sample --report-trx --results-directory "$trxDir" *> $privateLog
           $exitCode = $LASTEXITCODE
+          Remove-Item -LiteralPath $privateLog -ErrorAction Stop
           $trx = @(Get-ChildItem $trxDir -File -Filter '*.trx' -Recurse)
           $count = 0
           $correct = $false
