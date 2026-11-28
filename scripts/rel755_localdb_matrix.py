@@ -12,7 +12,7 @@ from pathlib import Path
 
 import rel75_localdb_matrix as legacy
 
-SCHEMA = "REL755_NATIVE_EVIDENCE_V1"
+SCHEMA = "REL755_NATIVE_EVIDENCE_V2"
 LOGS = {"error.log", "error1.log", "error2.log"}
 SECTOR_KEYS = ("logicalBytes", "physicalAtomicityBytes",
                "physicalPerformanceBytes", "effectiveAtomicityBytes")
@@ -84,6 +84,7 @@ def monitor(receipt, native):
     first, last = None, None
     cpu = {}
     previous_utc, previous_elapsed = None, -1
+    first_elapsed = None
     largest_gap = 0
     for x in samples:
         utc = time_ms(x["utc"])
@@ -93,6 +94,8 @@ def monitor(receipt, native):
             require(utc >= previous_utc, "MONITOR_UTC_ORDER")
             largest_gap = max(largest_gap, utc - previous_utc)
         first = utc if first is None else first
+        first_elapsed = elapsed if first_elapsed is None else first_elapsed
+        require(abs((utc-first)-(elapsed-first_elapsed)) <= 500, "MONITOR_CLOCK_DRIFT")
         last, previous_utc, previous_elapsed = utc, utc, elapsed
         require(x["processStatus"] in ("OK","PARTIAL") and positive_int(x["vanishedCount"],0,32), "PROCESS_CAPTURE_STATUS")
         rows = x["processes"]
@@ -116,9 +119,13 @@ def monitor(receipt, native):
         return {"complete": False, "status": status, "count": len(samples), "largestGapMs": largest_gap,
                 "timeoutStages": []}
     begin, end = time_ms(native["bootstrapStartUtc"]), time_ms(native["bootstrapEndUtc"])
-    require(begin <= end and 0 <= end-begin <= 70000, "OBSERVATION_WINDOW")
+    sample_start, sample_end = time_ms(receipt["startedUtc"]), time_ms(receipt["completedUtc"])
+    outer_start, outer_end = time_ms(native["startedUtc"]), time_ms(native["completedUtc"])
+    require(outer_start <= sample_start <= begin <= end <= sample_end <= outer_end
+            and 0 <= end-begin <= 70000, "OBSERVATION_WINDOW")
     complete = (status == "COMPLETE" and len(samples) >= 2 and first <= begin <= end <= last
-                and largest_gap <= 3000 and end-begin >= receipt["elapsedMilliseconds"]-1000
+                and sample_start <= first <= last <= sample_end
+                and largest_gap <= 3000 and abs((end-begin)-receipt["elapsedMilliseconds"]) <= 1000
                 and samples[0]["log"]["status"] == "MISSING"
                 and all(x["log"]["status"] in ("PRESENT","MISSING") and x["processStatus"] == "OK" for x in samples))
     # Correlate session observations with receipt stages, never attribute an
@@ -127,14 +134,24 @@ def monitor(receipt, native):
     stages = receipt["bootstrap"]
     ctl = receipt.get("controlReceipt")
     anchor = time_ms(ctl["startedUtc"]) if ctl else begin
+    if ctl:
+        require(begin <= anchor <= end and 0 <= anchor-begin <= 1000
+                and anchor <= time_ms(ctl["completedUtc"]) <= end
+                and abs((time_ms(ctl["completedUtc"])-anchor)-receipt["elapsedMilliseconds"]) <= 1000,
+                "CONTROL_CLOCK_ANCHOR")
     timeouts = []
     prev = 0
     for stage in stages:
         elapsed = stage["elapsedMilliseconds"]
         require(positive_int(elapsed, 0, 65000) and elapsed >= prev, "STAGE_ELAPSED_ORDER")
         stop = anchor + elapsed
-        start = time_ms(stage["startedUtc"]) if "startedUtc" in stage else anchor + prev
-        require(start <= stop+250, "STAGE_TIME_WINDOW")
+        start = time_ms(stage["startedUtc"])
+        duration = stop-start
+        cap = {"create":45000,"start":15000,"readiness":12000,"info":3000,"versions":3000}[stage["stage"]]
+        require(positive_int(stage["timeoutMilliseconds"],1,cap)
+                and begin <= start <= end and anchor+prev-250 <= start
+                and -250 <= duration <= stage["timeoutMilliseconds"]+1000
+                and stop <= end+250, "STAGE_TIME_WINDOW")
         if stage["stage"] in ("create", "start") and (stage["status"] == "TIMEOUT" or stage["error"] == "NativeProcessTimeout"):
             require(stage["status"] == "TIMEOUT" and stage["error"] == "NativeProcessTimeout",
                     "TIMEOUT_STAGE_MISMATCH")
@@ -168,7 +185,7 @@ def monitor(receipt, native):
                              "sessionLauncherSeen": launcher, "sessionEngineSeen": engine,
                              "logSeen": bool(log_values), "logChangeSeen": len(set(log_values)) > 1,
                              "samplesInWindow": len(inside), "windowBasis": "CONTROL_STARTED_UTC" if ctl
-                             else "ALTERNATIVE_ELAPSED_APPROXIMATION",
+                             else "ALTERNATIVE_STARTED_UTC",
                              "scope": "SESSION_CORRELATION_NOT_CAUSAL_PROOF"})
         prev = elapsed
     return {"complete": bool(complete), "status": status, "count": len(samples), "largestGapMs": largest_gap,
@@ -182,20 +199,45 @@ def sector_pairs(original, native, after):
     findings = []
     partial = len(logs) != 3
     original_logs = {x["file"]: x["observation"] for x in original["logs"]}
-    present_files = {x["file"] for x in original["filesAfter"] if x["status"] == "PRESENT"}
+    files = {x["file"]:x for x in original["filesAfter"]}
+    present_files = {name for name,x in files.items() if x["status"] == "PRESENT"}
+    begin = time_ms(native["bootstrapStartUtc"]) if native["bootstrapStartUtc"] else None
+    end = time_ms(native["bootstrapEndUtc"]) if native["bootstrapEndUtc"] else None
     for log in logs:
         filename = log["file"]
         require(filename in LOGS and filename not in seen and positive_int(log["bytesRead"], 0, 65536)
                 and type(log["tailOnly"]) is bool, "SECTOR_LOG_SCOPE")
         seen.add(filename)
         require(log["status"] in ("OK", "MISSING", "TRUNCATED", "UNAVAILABLE", "ACCESS_DENIED",
-                                  "REPARSE_POINT", "MALFORMED_CONTENT", "READ_FAILED"), "SECTOR_LOG_STATUS")
-        partial |= log["status"] not in ("OK", "MISSING")
+                                  "REPARSE_POINT", "MALFORMED_CONTENT", "READ_FAILED",
+                                  "CHANGED_DURING_READ", "UNEXPECTED_FILE_TYPE"), "SECTOR_LOG_STATUS")
+        observed = original_logs.get(filename,{})
+        meta = files.get(filename,{})
+        stable = log["stable"] is True
+        if log["status"] == "OK":
+            require(stable and positive_int(log["fileLength"],0)
+                    and time_ms(log["createdUtc"]) <= time_ms(log["modifiedUtc"]), "LOG_SNAPSHOT")
+            require(log["bytesRead"] <= log["fileLength"]
+                    and (log["tailOnly"] == (log["fileLength"] > 65536))
+                    and (log["tailOnly"] or log["bytesRead"] == log["fileLength"]), "LOG_BYTE_ACCOUNTING")
+        same_log = (log["status"] == "OK" and stable and meta.get("status") == "PRESENT"
+                    and log["fileLength"] == meta["sizeBytes"]
+                    and time_ms(log["createdUtc"]) == time_ms(meta["createdUtc"])
+                    and time_ms(log["modifiedUtc"]) == time_ms(meta["modifiedUtc"])
+                    and observed.get("status") == "OK" and log["tailOnly"] == observed.get("truncated")
+                    and log["bytesRead"] == observed.get("bytesRead"))
+        same_missing = (log["status"] == "MISSING" and meta.get("status") == "MISSING"
+                        and observed.get("status") == "MISSING" and log["bytesRead"] == 0
+                        and not stable and log["fileLength"] is None)
+        partial |= not (same_log or same_missing)
         pairs = log["pairs"]
         require(isinstance(pairs, list) and len(pairs) <= 16, "PAIR_COUNT")
         count = collections.Counter((e["error"],e["severity"],e["state"])
                                     for e in original_logs.get(filename, {}).get("sqlErrors", []))
+        require(not pairs or log["status"] in ("OK","TRUNCATED"), "PAIR_LOG_STATUS")
         for p in pairs:
+            header, message = time_ms(p["headerUtc"]), time_ms(p["messageUtc"])
+            require(0 <= message-header <= 2000, "PAIR_TIME_ADJACENCY")
             signature = (p["error"],p["severity"],p["state"])
             require(signature[0] == 5178 and count[signature] > 0
                     and sector_bytes(p["originalBytes"]) and sector_bytes(p["actualBytes"]), "PAIR_SIGNATURE")
@@ -215,10 +257,16 @@ def sector_pairs(original, native, after):
                                                          file_volume["physicalPerformanceBytes"],
                                                          file_volume["effectiveAtomicityBytes"])
                                 and p["file"] in present_files and p["actualBytes"] > p["originalBytes"]
-                                and log["status"] == "OK" and not log["tailOnly"])
+                                and same_log and not log["tailOnly"]
+                                and begin is not None and end is not None
+                                and begin <= header <= message <= end
+                                and begin <= time_ms(log["createdUtc"]) <= header
+                                and message <= time_ms(log["modifiedUtc"])+1000
+                                and begin <= time_ms(files[p["file"]]["createdUtc"]) <= message)
             findings.append({"error": 5178, "file": p["file"], "scope": p["scope"],
                              "originalBytes": p["originalBytes"], "actualBytes": p["actualBytes"],
-                             "volume": file_volume, "corroborated": corroborated})
+                             "headerUtc":p["headerUtc"],"messageUtc":p["messageUtc"],
+                             "snapshotMatched":same_log,"volume": file_volume, "corroborated": corroborated})
     return findings, not partial
 
 
@@ -256,6 +304,9 @@ def inspect_cell(path, arm, iteration, identity):
                 and progress["complete"] and logs_complete)
     row.update(sectorBefore=before, sectorAfter=after, progress=progress,
                sectorPairs=pairs, nativeEvidenceComplete=bool(complete))
+    if not complete:
+        for p in pairs:
+            p["corroborated"] = False
     if any(p["corroborated"] for p in pairs):
         row["sectorDisposition"] = "5178_EXACT_FILE_SECTOR_MISMATCH_CORROBORATED"
     elif any(s[0] == 5178 for s in row["sqlSignatures"]):
@@ -288,7 +339,7 @@ def summarize(root, samples, identity):
     partial=sum(not x["nativeEvidenceComplete"] for x in rows)
     status=("INCOMPLETE" if unexpected or partial or counts["READY"]+counts["BOOTSTRAP_FAILED"]!=len(expected)
             else "COMPLETE_WITH_BOOTSTRAP_FAILURES" if counts["BOOTSTRAP_FAILED"] else "COMPLETE_ALL_READY")
-    return {"schema":"REL755_NATIVE_SUMMARY_V1","scope":"INVESTIGATION_ONLY",
+    return {"schema":"REL755_NATIVE_SUMMARY_V2","scope":"INVESTIGATION_ONLY",
             "sourceHeadSha":source,"workflowSha":workflow,"runId":run,"runAttempt":attempt,
             "samplesPerArm":samples,"expected":len(expected),"status":status,"counts":dict(counts),
             "partial":partial,"unexpectedArtifacts":unexpected,

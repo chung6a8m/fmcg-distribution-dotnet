@@ -101,6 +101,7 @@ function Invoke-Rel75Stage([hashtable]$Context, [string]$Stage, [string[]]$Argum
     $exe = if ($Stage -eq 'readiness') { 'SQLCMD.EXE' } else { 'SqlLocalDB.exe' }
     $params = @{ Executable = $exe; Arguments = $Arguments; TimeoutMilliseconds = $timeout
         KillEntireProcessTree = $false; DeadlineWatch = $Context.watch; DeadlineMilliseconds = $Context.limit }
+    $stageStartedUtc = [DateTime]::UtcNow.ToString('o')
     $native = Invoke-LocalDbProbe @params
     $native.stdout = $native.stdout -replace '\r+\n', [string][char]10
     $native.stderr = $native.stderr -replace '\r+\n', [string][char]10
@@ -115,7 +116,7 @@ function Invoke-Rel75Stage([hashtable]$Context, [string]$Stage, [string[]]$Argum
         $kind = 'NativeCommandFailed'
     }
     $code = [regex]::Match($message, '(?i)\b0x[0-9a-f]{8}\b').Value
-    $row = [ordered]@{ stage = $Stage; attempt = $Attempt; status = $native.status; exitCode = $native.exitCode
+    $row = [ordered]@{ stage = $Stage; attempt = $Attempt; startedUtc = $stageStartedUtc; status = $native.status; exitCode = $native.exitCode
         error = $kind; nativeDetail = if ($kind -ne 'None') { Get-LocalDbNativeDetail $message } else { $null }
         nativeCode = if ($code) { $code } else { $null }
         truncated = [bool]$native.truncated; timeoutMilliseconds = $timeout; elapsedMilliseconds = $Context.watch.ElapsedMilliseconds }

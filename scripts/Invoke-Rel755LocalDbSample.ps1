@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Invoke-Rel75LocalDbSample.ps1')
 . (Join-Path $PSScriptRoot 'Rel755-ReadOnlyEvidence.ps1')
-$script:rel755=[ordered]@{ schema='REL755_NATIVE_EVIDENCE_V1'; arm=$RequestedArm; iteration=$RequestedIteration
+$script:rel755=[ordered]@{ schema='REL755_NATIVE_EVIDENCE_V2'; arm=$RequestedArm; iteration=$RequestedIteration
     sourceHeadSha=$env:REL75_SOURCE_SHA; workflowSha=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT
     instance=$null; guardFailure=$null; originalReceiptSha256=$null; sectorBefore=$null; sectorAfter=$null; sectorErrors=@()
     bootstrapStartUtc=$null; bootstrapEndUtc=$null

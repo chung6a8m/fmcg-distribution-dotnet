@@ -102,15 +102,24 @@ function Get-Rel755Volume([string]$Path) {
 }
 
 function Get-Rel755LogText([string]$Path) {
-    # Read only a bounded tail of the known error.log, never publish contents.
-    $row=[ordered]@{ status='UNAVAILABLE'; bytesRead=0; tailOnly=$false; text=$null }
+    # Read only a bounded tail of the known error log, never publish contents.
+    $row=[ordered]@{ status='UNAVAILABLE'; bytesRead=0; tailOnly=$false; text=$null
+        fileLength=$null; createdUtc=$null; modifiedUtc=$null; stable=$false }
     $state=Get-Rel75PathState $Path
     if ($state -ne 'PRESENT') { $row.status=$state; return $row }
     $stream=$null
     try {
-        if ([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::Directory) { return $row }
+        $before=[IO.FileInfo]::new($Path)
+        if (($before.Attributes -band [IO.FileAttributes]::Directory) -or
+            ($before.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $row.status='UNEXPECTED_FILE_TYPE'; return $row
+        }
+        $row.fileLength=$before.Length
+        $row.createdUtc=$before.CreationTimeUtc.ToString('o')
+        $row.modifiedUtc=$before.LastWriteTimeUtc.ToString('o')
         $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
         $length=$stream.Length
+        if ($length -ne $row.fileLength) { $row.status='CHANGED_DURING_READ'; return $row }
         $header=[byte[]]::new([Math]::Min(3,$length))
         $stream.ReadExactly($header,0,$header.Length)
         $row.bytesRead=$header.Length
@@ -118,13 +127,20 @@ function Get-Rel755LogText([string]$Path) {
         if (($utf16 -and ($length%2 -ne 0)) -or ($header.Length -ge 2 -and $header[0] -eq 254 -and $header[1] -eq 255)) {
             $row.status='MALFORMED_CONTENT'; return $row
         }
-        $offset=if ($length -gt 65536-$header.Length) { $length-(65536-$header.Length) } else { 0 }
-        if ($utf16 -and ($offset%2 -ne 0)) { $offset++ }
-        $row.tailOnly=$offset -gt 0
-        $stream.Position=$offset
-        $buffer=[byte[]]::new([int]($length-$offset))
-        $stream.ReadExactly($buffer,0,$buffer.Length)
-        $row.bytesRead+=$buffer.Length
+        if ($length -le 65536) {
+            $buffer=[byte[]]::new([int]$length)
+            [Array]::Copy($header,$buffer,$header.Length)
+            $stream.ReadExactly($buffer,$header.Length,$buffer.Length-$header.Length)
+            $row.bytesRead=$buffer.Length
+        } else {
+            $offset=$length-(65536-$header.Length)
+            if ($utf16 -and ($offset%2 -ne 0)) { $offset++ }
+            $row.tailOnly=$true
+            $stream.Position=$offset
+            $buffer=[byte[]]::new([int]($length-$offset))
+            $stream.ReadExactly($buffer,0,$buffer.Length)
+            $row.bytesRead+=$buffer.Length
+        }
         $from=0
         if ($row.tailOnly) {
             $from=$buffer.Length
@@ -135,7 +151,16 @@ function Get-Rel755LogText([string]$Path) {
         } elseif ($utf16) { $from=2 }
         elseif ($header.Length -eq 3 -and $header[0] -eq 239 -and $header[1] -eq 187 -and $header[2] -eq 191) { $from=3 }
         $encoding=if ($utf16) { [Text.UnicodeEncoding]::new($false,$false,$true) } else { [Text.UTF8Encoding]::new($false,$true) }
-        $row.text=$encoding.GetString($buffer,$from,$buffer.Length-$from)
+        $text=$encoding.GetString($buffer,$from,$buffer.Length-$from)
+        if ((Get-Rel75PathState $Path) -ne 'PRESENT') { $row.status='CHANGED_DURING_READ'; return $row }
+        $after=[IO.FileInfo]::new($Path)
+        if ($stream.Length -ne $length -or $after.Length -ne $length -or
+            $after.CreationTimeUtc.ToString('o') -cne $row.createdUtc -or
+            $after.LastWriteTimeUtc.ToString('o') -cne $row.modifiedUtc) {
+            $row.status='CHANGED_DURING_READ'; return $row
+        }
+        $row.stable=$true
+        $row.text=$text
         $row.status='OK'
         return $row
     } catch { $row.status='READ_FAILED'; return $row }
@@ -160,6 +185,13 @@ function ConvertFrom-Rel755SectorErrors([string]$Text,[string]$Directory) {
         if (![DateTime]::TryParseExact($h.Groups['stamp'].Value,$formats,$culture,[Globalization.DateTimeStyles]::None,[ref]$first) -or
             ![DateTime]::TryParseExact($m.Groups['stamp'].Value,$formats,$culture,[Globalization.DateTimeStyles]::None,[ref]$second) -or
             ($second-$first).TotalMilliseconds -lt 0 -or ($second-$first).TotalMilliseconds -gt 2000) { continue }
+        # SQL error-log timestamps are local runner time. Convert only
+        # unambiguous values using the runner's actual timezone, never assume UTC.
+        $zone=[TimeZoneInfo]::Local
+        if ($zone.IsInvalidTime($first) -or $zone.IsInvalidTime($second) -or
+            $zone.IsAmbiguousTime($first) -or $zone.IsAmbiguousTime($second)) { continue }
+        $headerUtc=[TimeZoneInfo]::ConvertTimeToUtc($first,$zone)
+        $messageUtc=[TimeZoneInfo]::ConvertTimeToUtc($second,$zone)
         if ($rows.Count -ge 16) { return @{ status='TRUNCATED'; pairs=@($rows.ToArray()) } }
         $a=[long]$m.Groups['original'].Value; $b=[long]$m.Groups['actual'].Value
         if ($a -lt 512 -or $b -lt 512 -or $a -gt 1048576 -or $b -gt 1048576 -or
@@ -177,7 +209,7 @@ function ConvertFrom-Rel755SectorErrors([string]$Text,[string]$Directory) {
         # Outside-owned-path messages are counted but cannot support remediation.
         $rows.Add([ordered]@{ error=5178; severity=[int]$h.Groups['severity'].Value; state=[int]$h.Groups['state'].Value
             scope=if ($null -ne $file) {'OWNED_FILE'} else {'OUTSIDE_OR_UNKNOWN'}
-            file=$file; originalBytes=$a; actualBytes=$b })
+            file=$file; originalBytes=$a; actualBytes=$b; headerUtc=$headerUtc.ToString('o'); messageUtc=$messageUtc.ToString('o') })
     }
     return @{ status='OK'; pairs=@($rows.ToArray()) }
 }
@@ -197,6 +229,7 @@ function Get-Rel755SectorErrors([string]$Directory) {
             }
             $pair
         })
-        @{ file=$name; status=$parsed.status; bytesRead=$log.bytesRead; tailOnly=$log.tailOnly; pairs=$pairs }
+        @{ file=$name; status=$parsed.status; bytesRead=$log.bytesRead; tailOnly=$log.tailOnly; pairs=$pairs
+            fileLength=$log.fileLength; createdUtc=$log.createdUtc; modifiedUtc=$log.modifiedUtc; stable=$log.stable }
     })
 }
