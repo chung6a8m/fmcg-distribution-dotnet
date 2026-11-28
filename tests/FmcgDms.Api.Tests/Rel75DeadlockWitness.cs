@@ -49,9 +49,9 @@ internal static class Rel75DeadlockWitness
                 || Number(p, "hostpid") != hostPid || Number(p, "spid") <= 0
                 || string.IsNullOrEmpty((string?)p.Attribute("id"))))
             return null;
-        var ids = processes.Select(p => (string)p.Attribute("id")!).ToArray();
+        var ids = processes.Select(p => p.Attribute("id")!.Value).ToArray();
         if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Length) return null;
-        var spids = processes.ToDictionary(p => (string)p.Attribute("id")!, p => Number(p, "spid"));
+        var spids = processes.ToDictionary(p => p.Attribute("id")!.Value, p => Number(p, "spid"));
         int Resolve(XElement node) => spids.GetValueOrDefault((string?)node.Attribute("id") ?? "", -1);
         var victims = graph.Element("victim-list")?.Elements("victimProcess").Select(Resolve).ToArray() ?? [];
         if (victims.Length == 0 || victims.Any(x => x < 0)) return null;
