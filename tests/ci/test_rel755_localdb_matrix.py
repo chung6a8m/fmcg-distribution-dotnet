@@ -17,7 +17,7 @@ def utc(ms):
 
 
 def vol(resolution="EXISTING_PATH", physical=4096):
-    return {"status":"OK","rootDrive":"C:","resolution":resolution,
+    return {"status":"OK","rootDrive":"C:","volumeIdentitySha256":"f"*64,"resolution":resolution,
             "sector":{"status":"OK","logicalBytes":512,"physicalAtomicityBytes":physical,
                       "physicalPerformanceBytes":physical,"effectiveAtomicityBytes":4096,
                       "maxPhysicalBytes":physical}}
@@ -46,7 +46,7 @@ def fixture(arm, failed=False):
                                  {"kind":"ENGINE","pid":13,"startedUtc":utc(1300),"cpuMs":i*2}]
         log={"status":"MISSING","sizeBytes":None,"modifiedUtc":None} if t<1500 else {
             "status":"PRESENT","sizeBytes":i*100,"modifiedUtc":utc(t)}
-        native["monitor"]["snapshots"].append({"utc":utc(t),"elapsedMs":t-500,"processes":procs,"log":log})
+        native["monitor"]["snapshots"].append({"utc":utc(t),"elapsedMs":t-500,"processes":procs,"processStatus":"OK","vanishedCount":0,"log":log})
     return orig,native
 
 
@@ -162,6 +162,8 @@ class NativeMatrixTests(unittest.TestCase):
             lambda n:n["monitor"].update(snapshots=n["monitor"]["snapshots"][:-2]),
             lambda n:n.update(sectorAfter={"status":"SECTOR_QUERY_FAILED"}),
             lambda n:n["sectorAfter"].update(rootDrive="D:"),
+            lambda n:n["sectorAfter"].update(volumeIdentitySha256="e"*64),
+            lambda n:n["monitor"]["snapshots"][2].update(processStatus="PARTIAL"),
             lambda n:n["sectorAfter"]["sector"].update(maxPhysicalBytes=512),
         ):
             orig,n=fixture("win22-auto")

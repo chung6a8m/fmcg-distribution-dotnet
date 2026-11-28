@@ -18,7 +18,7 @@ SECTOR_KEYS = ("logicalBytes", "physicalAtomicityBytes",
                "physicalPerformanceBytes", "effectiveAtomicityBytes")
 MISSING_VOLUME = {"UNAVAILABLE", "UNSUPPORTED_PATH", "UNSUPPORTED_VOLUME",
                   "REPARSE_POINT", "ACCESS_DENIED", "SECTOR_QUERY_FAILED",
-                  "MALFORMED_OR_UNSUPPORTED", "MISSING"}
+                  "MALFORMED_OR_UNSUPPORTED", "MISSING", "VOLUME_RESOLUTION_FAILED"}
 
 
 def require(test, code):
@@ -60,6 +60,8 @@ def volume(v, *, before=False):
         return None
     require(isinstance(v["rootDrive"], str) and re.fullmatch(r"[A-Z]:", v["rootDrive"]),
             "VOLUME_DRIVE")
+    require(isinstance(v["volumeIdentitySha256"], str) and re.fullmatch(r"[0-9a-f]{64}",v["volumeIdentitySha256"]),
+            "VOLUME_IDENTITY")
     require(v["resolution"] in ("EXISTING_PATH", "NEAREST_EXISTING_ANCESTOR")
             and (not before or v["resolution"] == "NEAREST_EXISTING_ANCESTOR"), "VOLUME_RESOLUTION")
     s = v["sector"]
@@ -67,7 +69,7 @@ def volume(v, *, before=False):
     logical, atomic, performance, effective = (s[k] for k in SECTOR_KEYS)
     require(logical <= atomic and logical <= performance and logical <= effective <= atomic
             and s["maxPhysicalBytes"] == max(atomic, performance), "SECTOR_INCONSISTENT")
-    return {"rootDrive": v["rootDrive"], "resolution": v["resolution"],
+    return {"rootDrive": v["rootDrive"], "volumeIdentitySha256":v["volumeIdentitySha256"], "resolution": v["resolution"],
             **{k: s[k] for k in (*SECTOR_KEYS, "maxPhysicalBytes")}}
 
 
@@ -92,6 +94,7 @@ def monitor(receipt, native):
             largest_gap = max(largest_gap, utc - previous_utc)
         first = utc if first is None else first
         last, previous_utc, previous_elapsed = utc, utc, elapsed
+        require(x["processStatus"] in ("OK","PARTIAL") and positive_int(x["vanishedCount"],0,32), "PROCESS_CAPTURE_STATUS")
         rows = x["processes"]
         require(isinstance(rows, list) and len(rows) <= 16, "MONITOR_PROCESS_COUNT")
         ids = set()
@@ -117,7 +120,7 @@ def monitor(receipt, native):
     complete = (status == "COMPLETE" and len(samples) >= 2 and first <= begin <= end <= last
                 and largest_gap <= 3000 and end-begin >= receipt["elapsedMilliseconds"]-1000
                 and samples[0]["log"]["status"] == "MISSING"
-                and all(x["log"]["status"] in ("PRESENT","MISSING") for x in samples))
+                and all(x["log"]["status"] in ("PRESENT","MISSING") and x["processStatus"] == "OK" for x in samples))
     # Correlate session observations with receipt stages, never attribute an
     # unrelated process to a specific launcher or infer a pipe-handle cause.
     baseline = {(p["kind"], p["pid"], p["startedUtc"]) for p in samples[0]["processes"]} if samples else set()
@@ -147,7 +150,19 @@ def monitor(receipt, native):
             launcher = any(p[0] == "LAUNCHER" for p in new)
             exit_code = stage["exitCode"]
             require(exit_code is None or positive_int(exit_code, -2**31, 2**31-1), "TIMEOUT_EXIT")
+            cpu_windows = collections.defaultdict(list)
+            for kind,pid,started,cpu_ms in new:
+                cpu_windows[(kind,pid,started)].append(cpu_ms)
+            cpu_delta = {kind:max((max(v)-min(v) for k,v in cpu_windows.items() if k[0]==kind),default=0)
+                         for kind in ("ENGINE","LAUNCHER")}
+            progress_class = ("LAUNCHER_EXIT_RETAINED" if exit_code is not None
+                              else "ENGINE_OR_LOG_PROGRESS_OBSERVED" if engine and (len(set(log_values))>1 or cpu_delta["ENGINE"]>0)
+                              else "ENGINE_SEEN_NO_PROGRESS_PROVEN" if engine
+                              else "LAUNCHER_SEEN_NO_ENGINE_OBSERVED" if launcher
+                              else "NO_NEW_PROCESS_OBSERVED")
             timeouts.append({"stage": stage["stage"], "nativeExitCode": exit_code,
+                             "progressClass":progress_class,
+                             "engineCpuDeltaMs":cpu_delta["ENGINE"],"launcherCpuDeltaMs":cpu_delta["LAUNCHER"],
                              "launcherExitObservation": "EXIT_CODE_RETAINED_AT_TIMEOUT" if exit_code is not None
                              else "EXIT_CODE_NOT_OBSERVED",
                              "sessionLauncherSeen": launcher, "sessionEngineSeen": engine,
@@ -194,6 +209,7 @@ def sector_pairs(original, native, after):
             corroborated = bool(file_volume and after and p["scope"] == "OWNED_FILE"
                                 and file_volume["resolution"] == "EXISTING_PATH"
                                 and file_volume["rootDrive"] == after["rootDrive"]
+                                and file_volume["volumeIdentitySha256"] == after["volumeIdentitySha256"]
                                 and all(file_volume[k] == after[k] for k in SECTOR_KEYS)
                                 and p["actualBytes"] in (file_volume["physicalAtomicityBytes"],
                                                          file_volume["physicalPerformanceBytes"],
@@ -226,7 +242,9 @@ def inspect_cell(path, arm, iteration, identity):
     progress = monitor(original, native)
     pairs, logs_complete = sector_pairs(original, native, after)
     complete = (row["diagnosticsComplete"] and before is not None and after is not None
-                and before["rootDrive"] == after["rootDrive"] and all(before[k] == after[k] for k in SECTOR_KEYS)
+                and before["rootDrive"] == after["rootDrive"]
+                and before["volumeIdentitySha256"] == after["volumeIdentitySha256"]
+                and all(before[k] == after[k] for k in SECTOR_KEYS)
                 and progress["complete"] and logs_complete)
     row.update(sectorBefore=before, sectorAfter=after, progress=progress,
                sectorPairs=pairs, nativeEvidenceComplete=bool(complete))

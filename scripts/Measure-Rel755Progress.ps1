@@ -24,13 +24,22 @@ try {
         # Check stop before sampling so the final timestamp is necessarily
         # after the controller recorded bootstrapEndUtc.
         $stopSeen=[IO.File]::Exists((Join-Path $control.FullName 'stop'))
-        $processes=@(foreach ($p in @(Get-Process -Name SqlLocalDB,sqlservr -ErrorAction SilentlyContinue)) {
-            try {
-                if ($p.SessionId -ne $session) { continue }
-                @{ kind=if ($p.ProcessName -ieq 'sqlservr') {'ENGINE'} else {'LAUNCHER'}; pid=$p.Id
-                    startedUtc=$p.StartTime.ToUniversalTime().ToString('o'); cpuMs=[long]$p.TotalProcessorTime.TotalMilliseconds }
-            } catch { } finally { $p.Dispose() }
-        })
+        $processStatus='OK'; $vanished=0
+        $processes=[Collections.Generic.List[object]]::new()
+        foreach ($name in 'SqlLocalDB','sqlservr') {
+            try { $candidates=[Diagnostics.Process]::GetProcessesByName($name) }
+            catch { $processStatus='PARTIAL'; continue }
+            foreach ($p in $candidates) {
+                try {
+                    if ($p.SessionId -ne $session) { continue }
+                    $processes.Add(@{ kind=if ($name -ceq 'sqlservr') {'ENGINE'} else {'LAUNCHER'}; pid=$p.Id
+                        startedUtc=$p.StartTime.ToUniversalTime().ToString('o'); cpuMs=[long]$p.TotalProcessorTime.TotalMilliseconds })
+                } catch {
+                    try { if ($p.HasExited) { $vanished++ } else { $processStatus='PARTIAL' } }
+                    catch { $processStatus='PARTIAL' }
+                } finally { $p.Dispose() }
+            }
+        }
         $logPath=Join-Path $dir 'error.log'
         $log=[ordered]@{ status=Get-Rel75PathState $logPath; sizeBytes=$null; modifiedUtc=$null }
         if ($log.status -eq 'PRESENT') {
@@ -41,7 +50,7 @@ try {
                 } else { $log.sizeBytes=$f.Length; $log.modifiedUtc=$f.LastWriteTimeUtc.ToString('o') }
             } catch { $log.status='UNAVAILABLE' }
         }
-        $rows.Add(@{ utc=[DateTime]::UtcNow.ToString('o'); elapsedMs=$watch.ElapsedMilliseconds; processes=$processes; log=$log })
+        $rows.Add(@{ utc=[DateTime]::UtcNow.ToString('o'); elapsedMs=$watch.ElapsedMilliseconds; processes=@($processes.ToArray()); processStatus=$processStatus; vanishedCount=$vanished; log=$log })
         if ($rows.Count -eq 1) {
             $ready=[IO.File]::Open((Join-Path $control.FullName 'ready'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
             $ready.Dispose()

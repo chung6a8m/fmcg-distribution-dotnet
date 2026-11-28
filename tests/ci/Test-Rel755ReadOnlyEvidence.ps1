@@ -38,6 +38,7 @@ try {
     Check ((ConvertFrom-Rel755SectorErrors ($text.Replace('Error: 5178','Error: 5173')) $dir).pairs.Count -eq 0) '5173 not sector evidence'
     Check ((ConvertFrom-Rel755SectorErrors ($header+$nl+$message.Replace('spid14s','spid15s')) $dir).pairs.Count -eq 0) 'wrong spid'
     Check ((ConvertFrom-Rel755SectorErrors ($header+$nl+'OTHER'+$nl+$message) $dir).pairs.Count -eq 0) 'not adjacent'
+    Check ((ConvertFrom-Rel755SectorErrors ($header+$nl+$message.Replace('00:00:00.11','00:00:05.11')) $dir).pairs.Count -eq 0) 'stale adjacent message'
     $log=Join-Path $dir 'error.log'
     [IO.File]::WriteAllText($log,$text,[Text.UnicodeEncoding]::new($false,$true))
     $raw=Get-Rel755LogText $log

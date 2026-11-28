@@ -27,10 +27,46 @@ function ConvertFrom-Rel755SectorInfo([string]$Text) {
     return $row
 }
 
+function Get-Rel755VolumeIdentity([string]$ExistingPath,[string]$ExpectedRoot) {
+    if (!$IsWindows) { throw 'REL755_WINDOWS_VOLUME_REQUIRED' }
+    if ($null -eq ('Rel755Native.VolumeIdentity' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+namespace Rel755Native {
+    public static class VolumeIdentity {
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetVolumePathNameW(string path, StringBuilder volume, uint length);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetVolumeNameForVolumeMountPointW(string root, StringBuilder volume, uint length);
+        public static string Resolve(string path, string expectedRoot) {
+            var root = new StringBuilder(1024);
+            if (!GetVolumePathNameW(path, root, (uint)root.Capacity))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!String.Equals(root.ToString(), expectedRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("REL755_VOLUME_ROOT_MISMATCH");
+            var name = new StringBuilder(1024);
+            if (!GetVolumeNameForVolumeMountPointW(root.ToString(), name, (uint)name.Capacity))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return name.ToString();
+        }
+    }
+}
+'@
+    }
+    $name=[Rel755Native.VolumeIdentity]::Resolve($ExistingPath,$ExpectedRoot)
+    if ($name -notmatch '\A\\\\\?\\Volume\{[a-f0-9-]{36}\}\\\z') { throw 'REL755_VOLUME_ID_INVALID' }
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($name.ToUpperInvariant()))).ToLowerInvariant()
+}
+
 function Get-Rel755Volume([string]$Path) {
     # Existing path/ancestor guard rejects junctions, mount points, symlinks
     # and access errors. No fallback to C:, workspace or system drive.
-    $row=[ordered]@{ status='UNAVAILABLE'; rootDrive=$null; resolution=$null; sector=$null }
+    $row=[ordered]@{ status='UNAVAILABLE'; rootDrive=$null; volumeIdentitySha256=$null; resolution=$null; sector=$null }
     try {
         $full=[IO.Path]::GetFullPath($Path)
         $root=[IO.Path]::GetPathRoot($full)
@@ -48,6 +84,10 @@ function Get-Rel755Volume([string]$Path) {
         if (!$drive.IsReady -or $drive.DriveType -ne [IO.DriveType]::Fixed) {
             $row.status='UNSUPPORTED_VOLUME'; return $row
         }
+        # Resolve the actual Win32 volume of the existing path/ancestor, not
+        # merely its drive letter. Retain only a digest of its volume GUID.
+        try { $row.volumeIdentitySha256=Get-Rel755VolumeIdentity $ancestor $root }
+        catch { $row.status='VOLUME_RESOLUTION_FAILED'; return $row }
         $row.rootDrive=$root.Substring(0,2).ToUpperInvariant()
         $row.resolution=if ($state -eq 'PRESENT') { 'EXISTING_PATH' } else { 'NEAREST_EXISTING_ANCESTOR' }
         $exe=Join-Path ([Environment]::GetFolderPath('System')) 'fsutil.exe'
@@ -107,13 +147,19 @@ function ConvertFrom-Rel755SectorErrors([string]$Text,[string]$Directory) {
     # required. Never infer a pair from a 5173, a filename suffix, or another line.
     $lines=$Text -split '\r?\n'
     $rows=[Collections.Generic.List[object]]::new()
-    $header='^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{2,3}\s+(?<spid>spid\d+[a-z]?)\s+Error: 5178, Severity: (?<severity>\d+), State: (?<state>\d+)\.\s*$'
-    $message="^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{2,3}\s+(?<spid>spid\d+[a-z]?)\s+Cannot use file '(?<path>[^'\r\n]{1,1024})' because it was originally formatted with sector size (?<original>\d{1,7}) and is now on a volume with sector size (?<actual>\d{1,7})\. Move the file to a volume with a sector size that is the same as or smaller than the original sector size\.\s*$"
+    $header='^(?<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{2,3})\s+(?<spid>spid\d+[a-z]?)\s+Error: 5178, Severity: (?<severity>\d+), State: (?<state>\d+)\.\s*$'
+    $message="^(?<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{2,3})\s+(?<spid>spid\d+[a-z]?)\s+Cannot use file '(?<path>[^'\r\n]{1,1024})' because it was originally formatted with sector size (?<original>\d{1,7}) and is now on a volume with sector size (?<actual>\d{1,7})\. Move the file to a volume with a sector size that is the same as or smaller than the original sector size\.\s*$"
     for ($i=0;$i+1 -lt $lines.Length;$i++) {
         $h=[regex]::Match($lines[$i],$header,[Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if (!$h.Success) { continue }
         $m=[regex]::Match($lines[$i+1],$message,[Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if (!$m.Success -or $m.Groups['spid'].Value -ine $h.Groups['spid'].Value) { continue }
+        $first=[DateTime]::MinValue; $second=[DateTime]::MinValue
+        $formats=[string[]]@('yyyy-MM-dd HH:mm:ss.ff','yyyy-MM-dd HH:mm:ss.fff')
+        $culture=[Globalization.CultureInfo]::InvariantCulture
+        if (![DateTime]::TryParseExact($h.Groups['stamp'].Value,$formats,$culture,[Globalization.DateTimeStyles]::None,[ref]$first) -or
+            ![DateTime]::TryParseExact($m.Groups['stamp'].Value,$formats,$culture,[Globalization.DateTimeStyles]::None,[ref]$second) -or
+            ($second-$first).TotalMilliseconds -lt 0 -or ($second-$first).TotalMilliseconds -gt 2000) { continue }
         if ($rows.Count -ge 16) { return @{ status='TRUNCATED'; pairs=@($rows.ToArray()) } }
         $a=[long]$m.Groups['original'].Value; $b=[long]$m.Groups['actual'].Value
         if ($a -lt 512 -or $b -lt 512 -or $a -gt 1048576 -or $b -gt 1048576 -or
